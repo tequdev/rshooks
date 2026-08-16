@@ -122,55 +122,77 @@ pub enum HookError {
 
 impl From<i64> for HookError {
     fn from(code: i64) -> Self {
-        match code {
-            rshooks_core::OUT_OF_BOUNDS => HookError::OutOfBounds,
-            rshooks_core::INTERNAL_ERROR => HookError::InternalError,
-            rshooks_core::TOO_BIG => HookError::TooBig,
-            rshooks_core::TOO_SMALL => HookError::TooSmall,
-            rshooks_core::DOESNT_EXIST => HookError::DoesntExist,
-            rshooks_core::NO_FREE_SLOTS => HookError::NoFreeSlots,
-            rshooks_core::INVALID_ARGUMENT => HookError::InvalidArgument,
-            rshooks_core::ALREADY_SET => HookError::AlreadySet,
-            rshooks_core::PREREQUISITE_NOT_MET => HookError::PrerequisiteNotMet,
-            rshooks_core::FEE_TOO_LARGE => HookError::FeeTooLarge,
-            rshooks_core::EMISSION_FAILURE => HookError::EmissionFailure,
-            rshooks_core::TOO_MANY_NONCES => HookError::TooManyNonces,
-            rshooks_core::TOO_MANY_EMITTED_TXN => HookError::TooManyEmittedTxn,
-            rshooks_core::NOT_IMPLEMENTED => HookError::NotImplemented,
-            rshooks_core::INVALID_ACCOUNT => HookError::InvalidAccount,
-            rshooks_core::GUARD_VIOLATION => HookError::GuardViolation,
-            rshooks_core::INVALID_FIELD => HookError::InvalidField,
-            rshooks_core::PARSE_ERROR => HookError::ParseError,
-            rshooks_core::RC_ROLLBACK => HookError::RcRollback,
-            rshooks_core::RC_ACCEPT => HookError::RcAccept,
-            rshooks_core::NO_SUCH_KEYLET => HookError::NoSuchKeylet,
-            rshooks_core::NOT_AN_ARRAY => HookError::NotAnArray,
-            rshooks_core::NOT_AN_OBJECT => HookError::NotAnObject,
-            rshooks_core::INVALID_FLOAT => HookError::InvalidFloat,
-            rshooks_core::DIVISION_BY_ZERO => HookError::DivisionByZero,
-            rshooks_core::MANTISSA_OVERSIZED => HookError::MantissaOversized,
-            rshooks_core::MANTISSA_UNDERSIZED => HookError::MantissaUndersized,
-            rshooks_core::EXPONENT_OVERSIZED => HookError::ExponentOversized,
-            rshooks_core::EXPONENT_UNDERSIZED => HookError::ExponentUndersized,
-            rshooks_core::XFL_OVERFLOW => HookError::XflOverflow,
-            rshooks_core::NOT_IOU_AMOUNT => HookError::NotIouAmount,
-            rshooks_core::NOT_AN_AMOUNT => HookError::NotAnAmount,
-            rshooks_core::CANT_RETURN_NEGATIVE => HookError::CantReturnNegative,
-            rshooks_core::NOT_AUTHORIZED => HookError::NotAuthorized,
-            rshooks_core::PREVIOUS_FAILURE_PREVENTS_RETRY => {
-                HookError::PreviousFailurePreventsRetry
-            }
-            rshooks_core::TOO_MANY_PARAMS => HookError::TooManyParams,
-            rshooks_core::INVALID_TXN => HookError::InvalidTxn,
-            rshooks_core::RESERVE_INSUFFICIENT => HookError::ReserveInsufficient,
-            rshooks_core::COMPLEX_NOT_SUPPORTED => HookError::ComplexNotSupported,
-            rshooks_core::DOES_NOT_MATCH => HookError::DoesNotMatch,
-            rshooks_core::INVALID_KEY => HookError::InvalidKey,
-            rshooks_core::NOT_A_STRING => HookError::NotAString,
-            rshooks_core::MEM_OVERLAP => HookError::MemOverlap,
-            rshooks_core::TOO_MANY_STATE_MODIFICATIONS => HookError::TooManyStateModifications,
-            rshooks_core::TOO_MANY_NAMESPACES => HookError::TooManyNamespaces,
-            other => HookError::Unknown(other),
+        // Indexed table instead of a 46-arm match: LLVM lowers the match into a
+        // ~45-deep nested-block decision tree (the Unknown(i64) payload prevents an
+        // identity mapping), which alone blows the Guard-type nesting limit once
+        // inlined into hook/cbak. A table lookup is nesting-depth ~1.
+        //
+        // `INVALID_FLOAT` is handled *before* the table, not inside it: its value is
+        // `-10024`, not the `-24` its declaration-order position would suggest (see
+        // `rshooks_core::INVALID_FLOAT`'s own doc comment — "kept verbatim; this is
+        // not a typo in this translation"). Folding it into the table naively (by
+        // declaration-order position, matching the original match arms' order) would
+        // both mis-map a real `-24` return to `InvalidFloat` and, far worse, silently
+        // stop recognizing genuine `-10024` returns as `InvalidFloat` (they'd fall
+        // through to `Unknown`, breaking any caller that specifically matches on
+        // `HookError::InvalidFloat`) -- caught by cross-checking this table against
+        // `rshooks_core::error`'s constants sorted by value, not by source order.
+        // `-24` itself is not assigned to anything and is left a genuine gap (`None`)
+        // below, matching `error.h` upstream.
+        if code == rshooks_core::INVALID_FLOAT {
+            return HookError::InvalidFloat;
+        }
+        const TABLE: [Option<HookError>; 45] = [
+            Some(HookError::OutOfBounds),
+            Some(HookError::InternalError),
+            Some(HookError::TooBig),
+            Some(HookError::TooSmall),
+            Some(HookError::DoesntExist),
+            Some(HookError::NoFreeSlots),
+            Some(HookError::InvalidArgument),
+            Some(HookError::AlreadySet),
+            Some(HookError::PrerequisiteNotMet),
+            Some(HookError::FeeTooLarge),
+            Some(HookError::EmissionFailure),
+            Some(HookError::TooManyNonces),
+            Some(HookError::TooManyEmittedTxn),
+            Some(HookError::NotImplemented),
+            Some(HookError::InvalidAccount),
+            Some(HookError::GuardViolation),
+            Some(HookError::InvalidField),
+            Some(HookError::ParseError),
+            Some(HookError::RcRollback),
+            Some(HookError::RcAccept),
+            Some(HookError::NoSuchKeylet),
+            Some(HookError::NotAnArray),
+            Some(HookError::NotAnObject),
+            None, // -24: unassigned upstream (INVALID_FLOAT is -10024, handled above)
+            Some(HookError::DivisionByZero),
+            Some(HookError::MantissaOversized),
+            Some(HookError::MantissaUndersized),
+            Some(HookError::ExponentOversized),
+            Some(HookError::ExponentUndersized),
+            Some(HookError::XflOverflow),
+            Some(HookError::NotIouAmount),
+            Some(HookError::NotAnAmount),
+            Some(HookError::CantReturnNegative),
+            Some(HookError::NotAuthorized),
+            Some(HookError::PreviousFailurePreventsRetry),
+            Some(HookError::TooManyParams),
+            Some(HookError::InvalidTxn),
+            Some(HookError::ReserveInsufficient),
+            Some(HookError::ComplexNotSupported),
+            Some(HookError::DoesNotMatch),
+            Some(HookError::InvalidKey),
+            Some(HookError::NotAString),
+            Some(HookError::MemOverlap),
+            Some(HookError::TooManyStateModifications),
+            Some(HookError::TooManyNamespaces),
+        ];
+        let idx = code.wrapping_neg().wrapping_sub(1);
+        match usize::try_from(idx).ok().and_then(|i| TABLE.get(i)).copied().flatten() {
+            Some(e) => e,
+            None => HookError::Unknown(code),
         }
     }
 }
