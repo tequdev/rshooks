@@ -842,7 +842,16 @@ fn marker_name(struct_name: &str, field_name: &str) -> String {
 fn field_marker_and_impls(struct_name: &str, f: &ParsedField) -> String {
     let marker = marker_name(struct_name, &f.name.to_string());
     let value_ty = tokens_to_string(&f.value_ty);
-    let mut out = format!("#[doc(hidden)]\npub struct {marker};\n");
+    // The marker's visibility follows the *field's own* declared visibility
+    // (private by default), not the struct's. A marker unconditionally
+    // `pub` would leak a private `#[state]`/`#[hook_param]`/`#[otxn_param]`
+    // value/key/name type through its `StateSpec`/`ParamSpec` associated
+    // types (`E0446`) the moment that type isn't itself `pub` — the common
+    // case for a hook's internal key/value structs. Matching the field's
+    // own visibility keeps the marker exactly as reachable as the field it
+    // backs, so it never exposes more than the field already does.
+    let field_vis = tokens_to_string(&f.vis);
+    let mut out = format!("#[doc(hidden)]\n{field_vis} struct {marker};\n");
 
     match &f.decl {
         FieldDecl::State { key } => {

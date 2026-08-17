@@ -9,11 +9,6 @@
 use rshooks::prelude::*;
 use rshooks::*;
 
-metadata! {
-    name: "typed-data",
-    HookOn: [Invoke],
-}
-
 /// Discriminant for deposit records.
 const DEPOSIT_TAG: u8 = 1;
 
@@ -27,14 +22,36 @@ const DEFAULT_MIN_AMOUNT: u64 = 1_000_000;
 /// Lock window (in ledgers) used when `CFG` isn't configured.
 const DEFAULT_LOCK_LEDGERS: u32 = 10;
 
-// Per-account deposit record.
-hook_state!(DepositState, DepositKey {tag: u8, owner: AccountId} => DepositValue {amount: u64, deadline: u32, flags: u8});
+/// Per-account deposit record key: a fixed discriminant tag plus the
+/// account it belongs to.
+#[derive(HookKey, Clone, Copy)]
+struct DepositKey {
+    tag: u8,
+    owner: AccountId,
+}
 
-// Install-time configuration.
-hook_parameter!(Cfg, CfgName = b"CFG" => Config {min_amount: u64, lock_ledgers: u32});
+/// Per-account deposit record value.
+#[derive(HookData, Clone, Copy)]
+struct DepositValue {
+    amount: u64,
+    deadline: u32,
+    flags: u8,
+}
 
-// Per-invocation instruction.
-otxn_parameter!(Ins, InsName = b"INS" => Instruction {action: u8, amount: u64});
+/// Install-time configuration, read from the `CFG` Hook parameter.
+#[derive(ParamValue)]
+struct Config {
+    min_amount: u64,
+    lock_ledgers: u32,
+}
+
+/// Per-invocation instruction, read from the `INS` originating-transaction
+/// parameter.
+#[derive(ParamValue)]
+struct Instruction {
+    action: u8,
+    amount: u64,
+}
 
 /// Composite name for administrative parameters.
 #[derive(ParamName, Clone, Copy)]
@@ -43,14 +60,20 @@ struct AdminName {
     field: u8,
 }
 
-// Administrative pause switch.
-hook_parameter!(AdminPause, AdminName => PauseSwitch {paused: u8});
+/// Hook-wide deposit pause switch, read from the [`AdminName`]-addressed
+/// administrative parameter.
+#[derive(ParamValue)]
+struct PauseSwitch {
+    paused: u8,
+}
 
-/// Hook-wide deposit pause switch.
-const ADMIN_PAUSE: AdminPause = AdminPause(AdminName {
+/// This chain's fixed [`AdminName`] instance — the pause switch lives at a
+/// single, hard-coded administrative address (`section = 0, field = 0`),
+/// never per-call-site.
+const ADMIN_PAUSE_NAME: AdminName = AdminName {
     section: 0,
     field: 0,
-});
+};
 
 hook_errors! {
     /// `typed-data` rollback codes.
@@ -84,18 +107,56 @@ hook_errors! {
     }
 }
 
-/// Returns configured values or defaults.
-fn config() -> Config {
-    Cfg.get_value().unwrap_or(Config {
-        min_amount: DEFAULT_MIN_AMOUNT,
-        lock_ledgers: DEFAULT_LOCK_LEDGERS,
-    })
+/// This chain's shared state/parameter schema — see the module doc comment
+/// for the overall behavior each field participates in.
+#[hooks]
+pub struct TypedData {
+    /// Per-account deposit record, keyed by [`DepositKey`].
+    #[state(key_by = DepositKey)]
+    deposits: State<DepositValue>,
+
+    /// Install-time configuration (`CFG`). Falls back to
+    /// [`DEFAULT_MIN_AMOUNT`]/[`DEFAULT_LOCK_LEDGERS`] when absent.
+    #[hook_param(name = b"CFG", default = Config { min_amount: DEFAULT_MIN_AMOUNT, lock_ledgers: DEFAULT_LOCK_LEDGERS })]
+    config: HookParam<Config>,
+
+    /// Per-invocation instruction (`INS`). Missing or malformed is a
+    /// rollback, never a silent default.
+    #[otxn_param(name = b"INS", required)]
+    instruction: OtxnParam<Instruction>,
+
+    /// Administrative deposit pause switch, addressed by [`AdminName`].
+    /// Falls back to "not paused" when absent.
+    #[hook_param(name_by = AdminName, default = PauseSwitch { paused: 0 })]
+    admin_pause: HookParam<PauseSwitch>,
 }
 
-/// Returns whether new deposits are paused.
+/// Returns configured values or defaults.
+///
+/// Deliberately masks a decode failure too (`.unwrap_or(..)` wrapping
+/// [`HookParam::get_or_default`]'s `Result`), matching this example's
+/// original `hook_parameter!`-based behavior of falling back to the default
+/// on *any* read failure — not just absence. See the module `decl` doc
+/// comment for why `get_or_default` alone treats a present-but-malformed
+/// `CFG` as `Err` rather than substituting the default.
+fn config() -> Config {
+    TypedData
+        .config
+        .get_or_default()
+        .unwrap_or(Config {
+            min_amount: DEFAULT_MIN_AMOUNT,
+            lock_ledgers: DEFAULT_LOCK_LEDGERS,
+        })
+}
+
+/// Returns whether new deposits are paused. Masks any read failure to
+/// "not paused", exactly like [`config`] masks `CFG` read failures to its
+/// default.
 fn deposits_paused() -> bool {
-    ADMIN_PAUSE
-        .get_value()
+    TypedData
+        .admin_pause
+        .at(ADMIN_PAUSE_NAME)
+        .get_or_default()
         .map(|s| s.paused != 0)
         .unwrap_or(false)
 }
@@ -107,92 +168,95 @@ const EMPTY_DEPOSIT: DepositValue = DepositValue {
     flags: 0,
 };
 
-/// Hook entry point. See the module doc comment for the full behavior.
-#[hook]
-fn my_hook() -> i64 {
-    let Ok(owner) = otxn_field_typed(sfAccount) else {
-        rollback!(
-            b"typed-data: sfAccount missing from the originating transaction",
-            TypedDataError::AccountFieldMissing
-        )
-    };
+#[hooks]
+impl TypedData {
+    /// Hook entry point. See the module doc comment for the full behavior.
+    #[hook(0, on = [Invoke])]
+    fn main() -> i64 {
+        let Ok(owner) = otxn_field_typed(sfAccount) else {
+            rollback!(
+                b"typed-data: sfAccount missing from the originating transaction",
+                TypedDataError::AccountFieldMissing
+            )
+        };
 
-    let Ok(instruction) = Ins.get_value() else {
-        rollback!(
-            b"typed-data: INS parameter missing or malformed",
-            TypedDataError::InstructionMissing
-        )
-    };
+        let Ok(instruction) = TypedData.instruction.get_required() else {
+            rollback!(
+                b"typed-data: INS parameter missing or malformed",
+                TypedDataError::InstructionMissing
+            )
+        };
 
-    let deposit = DepositState {
-        tag: DEPOSIT_TAG,
-        owner,
-    };
+        let deposit = TypedData.deposits.at(DepositKey {
+            tag: DEPOSIT_TAG,
+            owner,
+        });
 
-    let current = match deposit.get_state() {
-        Ok(existing) => existing.unwrap_or(EMPTY_DEPOSIT),
-        Err(_) => rollback!(
-            b"typed-data: state read failed",
-            TypedDataError::StateReadFailed
-        ),
-    };
+        let current = match deposit.get() {
+            Ok(existing) => existing.unwrap_or(EMPTY_DEPOSIT),
+            Err(_) => rollback!(
+                b"typed-data: state read failed",
+                TypedDataError::StateReadFailed
+            ),
+        };
 
-    let cfg = config();
+        let cfg = config();
 
-    let next = match instruction.action {
-        ACTION_DEPOSIT => {
-            if deposits_paused() {
-                rollback!(
-                    b"typed-data: deposits are currently paused",
-                    TypedDataError::DepositsPaused
-                );
+        let next = match instruction.action {
+            ACTION_DEPOSIT => {
+                if deposits_paused() {
+                    rollback!(
+                        b"typed-data: deposits are currently paused",
+                        TypedDataError::DepositsPaused
+                    );
+                }
+                if instruction.amount < cfg.min_amount {
+                    rollback!(
+                        b"typed-data: deposit below configured minimum",
+                        TypedDataError::BelowMinimum
+                    );
+                }
+                DepositValue {
+                    amount: current.amount.wrapping_add(instruction.amount),
+                    deadline: ledger_seq().wrapping_add(cfg.lock_ledgers),
+                    flags: 1,
+                }
             }
-            if instruction.amount < cfg.min_amount {
-                rollback!(
-                    b"typed-data: deposit below configured minimum",
-                    TypedDataError::BelowMinimum
-                );
+            ACTION_WITHDRAW => {
+                if current.flags == 0 {
+                    rollback!(
+                        b"typed-data: nothing to withdraw",
+                        TypedDataError::NothingToWithdraw
+                    );
+                }
+                if ledger_seq() < current.deadline {
+                    rollback!(
+                        b"typed-data: deposit still locked",
+                        TypedDataError::StillLocked
+                    );
+                }
+                // Delete the state entry to release its owner reserve.
+                if deposit.delete().is_err() {
+                    rollback!(
+                        b"typed-data: state_set failed",
+                        TypedDataError::StateSetFailed
+                    );
+                }
+                accept!(b"typed-data: ok", 0)
             }
-            DepositValue {
-                amount: current.amount.wrapping_add(instruction.amount),
-                deadline: ledger_seq().wrapping_add(cfg.lock_ledgers),
-                flags: 1,
-            }
+            _ => rollback!(
+                b"typed-data: unknown INS action",
+                TypedDataError::UnknownAction
+            ),
+        };
+
+        if deposit.set(&next).is_err() {
+            rollback!(
+                b"typed-data: state_set failed",
+                TypedDataError::StateSetFailed
+            );
         }
-        ACTION_WITHDRAW => {
-            if current.flags == 0 {
-                rollback!(
-                    b"typed-data: nothing to withdraw",
-                    TypedDataError::NothingToWithdraw
-                );
-            }
-            if ledger_seq() < current.deadline {
-                rollback!(
-                    b"typed-data: deposit still locked",
-                    TypedDataError::StillLocked
-                );
-            }
-            // Delete the state entry to release its owner reserve.
-            if deposit.delete_state().is_err() {
-                rollback!(
-                    b"typed-data: state_set failed",
-                    TypedDataError::StateSetFailed
-                );
-            }
-            accept!(b"typed-data: ok", 0)
-        }
-        _ => rollback!(
-            b"typed-data: unknown INS action",
-            TypedDataError::UnknownAction
-        ),
-    };
 
-    if deposit.set_state(&next).is_err() {
-        rollback!(
-            b"typed-data: state_set failed",
-            TypedDataError::StateSetFailed
-        );
+        accept!(b"typed-data: ok", next.amount as i64)
     }
-
-    accept!(b"typed-data: ok", next.amount as i64)
 }

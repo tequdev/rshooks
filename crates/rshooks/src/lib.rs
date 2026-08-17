@@ -70,6 +70,20 @@ pub use rshooks_macros::hook;
 /// settles.
 pub use rshooks_macros::cbak;
 
+/// Declares a multi-hook chain: a `#[hooks]`-annotated struct declares the
+/// chain's shared `State`/`HookParam`/`OtxnParam` schema (see [`decl`]),
+/// and a `#[hooks]`-annotated inherent `impl` block on that same struct
+/// declares its `#[hook(<index>, ..)]`/`#[cbak(<index>)]` entries — the v0.2
+/// replacement for the top-level [`hook`]/[`cbak`]/`metadata!`/
+/// `hook_state!`/`hook_parameter!`/`otxn_parameter!` combination (which stay
+/// available for single-hook crates; see `docs/MULTI_HOOK_STRUCT_DESIGN.md`
+/// for the full grammar, semantics, and migration guidance).
+///
+/// This is a declaration macro, not a value or type most hook code names
+/// directly, so — like [`hook`]/[`cbak`]/`metadata!` — it is deliberately
+/// left out of [`prelude`]; import it explicitly (`use rshooks::hooks;`).
+pub use rshooks_macros::hooks;
+
 /// Declares descriptive and SetHook-facing metadata for a Hook binary.
 ///
 /// `rshooks build` extracts this declaration from cargo's raw wasm,
