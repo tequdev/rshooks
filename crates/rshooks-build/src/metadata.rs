@@ -19,7 +19,7 @@ pub const METADATA_EXPORT_PREFIX: &str = "__rshooks_metadata_v1_";
 
 /// Canonical Xahau JSON spellings emitted by the current `metadata!` macro
 /// for every known `TxType` variant (excluding the data-carrying `Unknown`).
-const TRANSACTION_TYPES: &[&str] = &[
+pub(crate) const TRANSACTION_TYPES: &[&str] = &[
     "Payment",
     "EscrowCreate",
     "EscrowFinish",
@@ -97,7 +97,7 @@ const TRANSACTION_TYPES: &[&str] = &[
 ];
 
 /// `tt*` codes corresponding position-for-position to [`TRANSACTION_TYPES`].
-const TRANSACTION_TYPE_CODES: &[u8] = &[
+pub(crate) const TRANSACTION_TYPE_CODES: &[u8] = &[
     0, 1, 2, 3, 4, 5, 7, 8, 10, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 25, 26, 27, 28, 29, 30,
     31, 35, 36, 37, 38, 39, 40, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61,
     62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103,
@@ -187,7 +187,7 @@ impl HookMetadata {
     }
 }
 
-fn validate_transaction_types(field: &str, values: Option<&[String]>) -> Result<()> {
+pub(crate) fn validate_transaction_types(field: &str, values: Option<&[String]>) -> Result<()> {
     let Some(values) = values else {
         return Ok(());
     };
@@ -335,7 +335,7 @@ impl<'a> From<&'a HookMetadata> for HumanMetadata<'a> {
 /// Encodes Xahau's inverted transaction-type bitmask used by HookOn and
 /// HookCanEmit. An omitted declaration is the all-zero protocol value and is
 /// represented as `null` in the sidecar.
-fn hook_mask(values: Option<&[String]>) -> Result<Option<String>> {
+pub(crate) fn hook_mask(values: Option<&[String]>) -> Result<Option<String>> {
     let Some(values) = values else {
         return Ok(None);
     };
@@ -365,7 +365,7 @@ fn hook_mask(values: Option<&[String]>) -> Result<Option<String>> {
     ))
 }
 
-fn utf8_hex(value: &str) -> String {
+pub(crate) fn utf8_hex(value: &str) -> String {
     value
         .as_bytes()
         .iter()
@@ -486,12 +486,12 @@ pub fn hook_hash(wasm: &[u8]) -> String {
     out
 }
 
-fn uses_reachable_emit(wasm: &[u8]) -> Result<bool> {
+pub(crate) fn uses_reachable_emit(wasm: &[u8]) -> Result<bool> {
     let module = crate::ir::parse(wasm).context("parsing final wasm for `emit` usage")?;
     Ok(module.find_func_import("env", "emit").is_some())
 }
 
-fn decode_upper_hex(encoded: &str) -> Result<Vec<u8>> {
+pub(crate) fn decode_upper_hex(encoded: &str) -> Result<Vec<u8>> {
     if encoded.is_empty() {
         bail!("metadata carrier payload is empty");
     }

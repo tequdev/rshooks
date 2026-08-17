@@ -1,16 +1,15 @@
 //! The `rshooks` CLI (package `rshooks-build`): drives `cargo build --target
 //! wasm32v1-none`, then post-processes and validates the resulting wasm into
-//! a SetHook-legal Hook binary. See `docs/DESIGN.md` §6.1 for the full
-//! command reference.
+//! SetHook-legal Hook binaries. `build` orchestrates a full `#[hooks]` chain
+//! (see `rshooks_build::chain_build`); `clean`/`check` operate on a single
+//! already-built wasm file. See `docs/MULTI_HOOK_STRUCT_DESIGN.md` §7, §9.
 
-use std::io::{BufRead, Read as _, Write as _};
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use rshooks_build::metadata::{HookMetadata, build_metadata, extract_metadata};
+use rshooks_build::chain_build::{ChainBuildArgs, run as run_chain_build};
 use rshooks_build::{ApiVersion, Options, ValidationReport};
 
 /// A CLI toolchain for building and validating Xahau Hook wasm binaries.
@@ -23,16 +22,19 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Builds a Rust crate for `wasm32v1-none`, then cleans and validates
-    /// the result into a SetHook-legal binary.
+    /// Builds a Rust crate's `#[hooks]` chain for `wasm32v1-none`: one
+    /// discovery build plus one selected build per chain entry, each
+    /// cleaned and validated into a SetHook-legal binary, plus a generated
+    /// `SetHook` transaction template.
     Build {
-        /// Path to the crate's `Cargo.toml` (forwarded to `cargo build`).
+        /// Path to the crate's `Cargo.toml` (forwarded to `cargo`).
         #[arg(long)]
         manifest_path: Option<PathBuf>,
-        /// Build only the named package (forwarded to `cargo build -p`).
+        /// Build only the named package (forwarded to `cargo -p`).
         #[arg(short = 'p', long)]
         package: Option<String>,
-        /// The Hook API version this module targets.
+        /// The Hook API version this module targets. Only `0` is currently
+        /// supported for chain builds.
         #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(u8).range(0..=1))]
         api_version: u8,
         /// Insert missing loop guards instead of treating them as an error.
@@ -41,14 +43,29 @@ enum Cmd {
         /// `maxiter` used for auto-inserted guards.
         #[arg(long, default_value_t = 16)]
         default_maxiter: u32,
-        /// Directory to write the output binary to (default: `out/` next to
-        /// the manifest).
+        /// Output ROOT directory (default: `<target>/rshooks/<crate-name>`).
+        /// Generations are published under `<root>/gen-<n>`, with `<root>/current`
+        /// pointing at the latest.
         #[arg(long)]
         out: Option<PathBuf>,
-        /// Write the output even if it exceeds the 65,535-byte SetHook
-        /// limit (clearly marked invalid).
+        /// Write per-entry output even if it exceeds the 65,535-byte
+        /// SetHook limit (clearly marked invalid).
         #[arg(long)]
         allow_oversize: bool,
+        /// SetHook `Account` placeholder value for the generated template
+        /// (default: the literal placeholder `<ACCOUNT>`).
+        #[arg(long)]
+        account: Option<String>,
+        /// `HookNamespace` placeholder value (64 hex chars) for the
+        /// generated template (default: the literal placeholder
+        /// `<NAMESPACE>`).
+        #[arg(long)]
+        namespace: Option<String>,
+        /// Set `hsfOVERRIDE` on declared (non-gap) template entries,
+        /// permitting replacement of an existing installed Hook at that
+        /// position.
+        #[arg(long = "override")]
+        override_flag: bool,
     },
     /// Cleans and validates an already-built wasm file, without invoking
     /// cargo.
@@ -103,14 +120,23 @@ fn main() -> Result<()> {
             default_maxiter,
             out,
             allow_oversize,
+            account,
+            namespace,
+            override_flag,
         } => {
-            let opts = Options {
-                api_version: api_version_from(api_version),
+            let args = ChainBuildArgs {
+                manifest_path,
+                package,
+                api_version,
                 auto_guard,
                 default_maxiter,
+                out,
                 allow_oversize,
+                account,
+                namespace,
+                override_flag,
             };
-            cmd_build(manifest_path, package, out, &opts)
+            run_chain_build(&args)
         }
         Cmd::Clean {
             input,
@@ -161,137 +187,6 @@ fn print_size_and_fee(bytes: &[u8]) {
     );
 }
 
-struct PreparedSidecar {
-    bytes: Vec<u8>,
-    warnings: Vec<String>,
-}
-
-fn prepare_sidecar(
-    metadata: Option<HookMetadata>,
-    final_wasm: &[u8],
-    report: &ValidationReport,
-    rustc: Option<String>,
-) -> Result<Option<PreparedSidecar>> {
-    let Some(metadata) = metadata else {
-        return Ok(None);
-    };
-
-    let built = build_metadata(metadata, final_wasm, report, rustc)?;
-    let mut bytes =
-        serde_json::to_vec_pretty(&built.document).context("serializing Hook metadata sidecar")?;
-    bytes.push(b'\n');
-    Ok(Some(PreparedSidecar {
-        bytes,
-        warnings: built.warnings,
-    }))
-}
-
-fn cmd_build(
-    manifest_path: Option<PathBuf>,
-    package: Option<String>,
-    out: Option<PathBuf>,
-    opts: &Options,
-) -> Result<()> {
-    let cargo = find_cargo()?;
-
-    let mut cmd = Command::new(&cargo);
-    cmd.args([
-        "build",
-        "--release",
-        "--target",
-        "wasm32v1-none",
-        "--message-format=json-render-diagnostics",
-    ]);
-    if let Some(mp) = &manifest_path {
-        cmd.arg("--manifest-path").arg(mp);
-    }
-    if let Some(p) = &package {
-        cmd.args(["-p", p]);
-    }
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::inherit());
-
-    let mut child = cmd
-        .spawn()
-        .with_context(|| format!("failed to spawn `{}`", cargo.display()))?;
-    let stdout = child
-        .stdout
-        .take()
-        .context("internal error: cargo's stdout was not piped")?;
-    let reader = std::io::BufReader::new(stdout);
-
-    let mut artifact: Option<PathBuf> = None;
-    for line in reader.lines() {
-        let line = line.context("reading cargo output")?;
-        if line.trim().is_empty() {
-            continue;
-        }
-        let msg: serde_json::Value = match serde_json::from_str(&line) {
-            Ok(v) => v,
-            Err(_) => continue, // cargo can emit non-JSON lines on some setups; ignore
-        };
-        if msg.get("reason").and_then(|r| r.as_str()) == Some("compiler-artifact")
-            && let Some(filenames) = msg.get("filenames").and_then(|f| f.as_array())
-        {
-            for f in filenames {
-                if let Some(s) = f.as_str()
-                    && s.ends_with(".wasm")
-                {
-                    artifact = Some(PathBuf::from(s));
-                }
-            }
-        }
-    }
-
-    let status = child.wait().context("waiting for cargo build")?;
-    if !status.success() {
-        bail!("cargo build failed ({status})");
-    }
-    let artifact = artifact.context(
-        "cargo build did not produce a .wasm artifact; is this a `cdylib` crate for wasm32v1-none?",
-    )?;
-
-    let wasm = std::fs::read(&artifact)
-        .with_context(|| format!("reading build artifact {}", artifact.display()))?;
-    let metadata = extract_metadata(&wasm)?;
-    let rustc = metadata
-        .is_some()
-        .then(|| detect_rustc_version(&cargo))
-        .flatten();
-
-    let out_dir = out.unwrap_or_else(|| default_out_dir(manifest_path.as_deref()));
-    std::fs::create_dir_all(&out_dir)
-        .with_context(|| format!("creating output directory {}", out_dir.display()))?;
-    let file_name = artifact
-        .file_name()
-        .context("build artifact has no file name")?;
-    let out_path = out_dir.join(file_name);
-
-    let (output, report) = run_pipeline_and_report(&wasm, opts)?;
-    let sidecar = prepare_sidecar(metadata, &output, &report, rustc)?;
-
-    let metadata_path = out_path.with_extension("json");
-    if sidecar.is_none() && remove_stale_sidecar(&metadata_path)? {
-        println!("removed stale {}", metadata_path.display());
-    }
-
-    write_wasm(&output, &out_path, &report)?;
-
-    if let Some(sidecar) = sidecar {
-        for warning in &sidecar.warnings {
-            eprintln!("warning: {warning}");
-        }
-
-        let mut file = std::fs::File::create(&metadata_path)
-            .with_context(|| format!("creating {}", metadata_path.display()))?;
-        file.write_all(&sidecar.bytes)
-            .with_context(|| format!("writing {}", metadata_path.display()))?;
-        println!("wrote {}", metadata_path.display());
-    }
-
-    Ok(())
-}
-
 fn cmd_clean(input: &Path, out: Option<PathBuf>, opts: &Options) -> Result<()> {
     let wasm = std::fs::read(input).with_context(|| format!("reading {}", input.display()))?;
     let out_path = out.unwrap_or_else(|| {
@@ -327,16 +222,6 @@ fn write_wasm(output: &[u8], out_path: &Path, report: &ValidationReport) -> Resu
     Ok(())
 }
 
-fn remove_stale_sidecar(metadata_path: &Path) -> Result<bool> {
-    match std::fs::remove_file(metadata_path) {
-        Ok(()) => Ok(true),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => {
-            Err(error).with_context(|| format!("removing stale {}", metadata_path.display()))
-        }
-    }
-}
-
 fn cmd_check(file: &Path, opts: &Options) -> Result<()> {
     let wasm = std::fs::read(file).with_context(|| format!("reading {}", file.display()))?;
     match rshooks_build::verify(&wasm, opts) {
@@ -353,116 +238,5 @@ fn cmd_check(file: &Path, opts: &Options) -> Result<()> {
             }
             std::process::exit(1);
         }
-    }
-}
-
-fn default_out_dir(manifest_path: Option<&Path>) -> PathBuf {
-    let manifest_dir = manifest_path
-        .and_then(Path::parent)
-        .filter(|p| !p.as_os_str().is_empty())
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
-    manifest_dir.join("out")
-}
-
-/// Locates the `cargo` executable to invoke for `build`. The user's shell
-/// PATH is inherited verbatim (the process environment is never cleared),
-/// so this just needs to find *a* `cargo` on it — the same one the user's
-/// shell would run.
-fn find_cargo() -> Result<PathBuf> {
-    if let Ok(cargo) = std::env::var("CARGO") {
-        return Ok(PathBuf::from(cargo));
-    }
-    if let Ok(path) = std::env::var("PATH") {
-        for dir in std::env::split_paths(&path) {
-            let candidate = dir.join("cargo");
-            if candidate.is_file() {
-                return Ok(candidate);
-            }
-        }
-    }
-    bail!(
-        "could not find `cargo` on PATH; run `rshooks build` from a shell where \
-         `cargo build` already works"
-    )
-}
-
-/// Detects the `rustc` toolchain that performed this build, for the
-/// sidecar's `builder` provenance record. Prefers the `rustc` that sits
-/// next to the resolved `cargo` (with rustup, both are shims in
-/// `~/.cargo/bin` that resolve the same active toolchain), then falls back
-/// to whatever `rustc` is on `PATH`. Never fails the build: any spawn or
-/// parse problem returns `None`.
-fn detect_rustc_version(cargo: &Path) -> Option<String> {
-    let sibling = cargo.parent().map(|dir| dir.join("rustc"));
-    sibling
-        .into_iter()
-        .chain(std::iter::once(PathBuf::from("rustc")))
-        .find_map(|candidate| run_rustc_version(&candidate))
-}
-
-/// Maximum time to wait for a `rustc -V` probe before giving up. Guards
-/// against a broken/blocking shim (e.g. a rustup proxy that hangs or tries
-/// to download a toolchain) hanging the whole build.
-const RUSTC_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
-const RUSTC_PROBE_POLL_INTERVAL: Duration = Duration::from_millis(50);
-
-fn run_rustc_version(rustc: &Path) -> Option<String> {
-    let mut child = Command::new(rustc)
-        .arg("-V")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .ok()?;
-
-    // `checked_add` cannot realistically overflow with a 5-second timeout,
-    // but the workspace denies unchecked arithmetic; an overflow (which
-    // would never happen in practice) just times out immediately instead.
-    let deadline = Instant::now()
-        .checked_add(RUSTC_PROBE_TIMEOUT)
-        .unwrap_or_else(Instant::now);
-    let status = loop {
-        match child.try_wait().ok()? {
-            Some(status) => break status,
-            None if Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-            None => std::thread::sleep(RUSTC_PROBE_POLL_INTERVAL),
-        }
-    };
-
-    if !status.success() {
-        return None;
-    }
-
-    let mut stdout = String::new();
-    child.stdout.take()?.read_to_string(&mut stdout).ok()?;
-    let first_line = stdout.lines().next()?.trim();
-    (!first_line.is_empty()).then(|| first_line.to_string())
-}
-
-#[cfg(test)]
-#[allow(clippy::expect_used)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn removes_stale_sidecar_and_ignores_absence() {
-        let directory = std::env::temp_dir().join(format!(
-            "rrshooks-build-stale-sidecar-test-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&directory).expect("create isolated test directory");
-        let sidecar = directory.join("hook.json");
-        std::fs::write(&sidecar, b"stale").expect("write stale sidecar fixture");
-
-        assert!(remove_stale_sidecar(&sidecar).expect("remove stale sidecar"));
-        assert!(!sidecar.exists());
-        assert!(!remove_stale_sidecar(&sidecar).expect("ignore absent sidecar"));
-
-        std::fs::remove_dir_all(&directory).expect("remove isolated test directory");
     }
 }
