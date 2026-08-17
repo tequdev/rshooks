@@ -1,0 +1,7 @@
+error: #[hooks] must be applied to a struct or an inherent impl
+ --> tests/ui/fail/hooks_on_enum.rs:6:1
+  |
+6 | #[hooks]
+  | ^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)

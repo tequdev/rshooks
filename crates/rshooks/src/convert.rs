@@ -328,9 +328,7 @@ pub const PARAM_NAME_MAX_LEN: usize = 32;
 /// Pairs a Hook API parameter **name** type with the one **value** type
 /// it's read as — this module's counterpart to
 /// [`crate::state::TypedStateKey`], deliberately shaped the same way:
-/// implement it for a name type (directly, or with
-/// [`hook_parameter!`](crate::hook_parameter)/
-/// [`otxn_parameter!`](crate::otxn_parameter)), then call
+/// implement it for a name type, then call
 /// [`crate::api::hook_ctx::hook_param_typed`]/[`crate::api::otxn::otxn_param_typed`]
 /// with **a reference to a name value** — the accessor resolves
 /// [`Value`](Self::Value) from the name argument itself, exactly like
@@ -349,9 +347,7 @@ pub const PARAM_NAME_MAX_LEN: usize = 32;
 /// name struct its [`ToBytes`] impl (this trait's supertrait). Keeping the
 /// two apart avoids the misleading suggestion that `#[derive(ParamName)]`
 /// implements this trait itself — it doesn't; the derive only provides the
-/// `ToBytes` encoding a `TypedParamName` impl (added by
-/// [`hook_parameter!`](crate::hook_parameter)/
-/// [`otxn_parameter!`](crate::otxn_parameter)) then builds on. See
+/// `ToBytes` encoding a hand-written `TypedParamName` impl then builds on. See
 /// [`crate::ParamName`]'s and [`crate::ParamValue`]'s doc comments for the
 /// two derives backing the "name" (`Self`) and "value" (`Self::Value`)
 /// sides of this trait, respectively.
@@ -371,34 +367,23 @@ pub const PARAM_NAME_MAX_LEN: usize = 32;
 /// default body runs `self.write(..)` once per call (Rust has no stable
 /// way to run a trait method at compile time yet). But a **plain
 /// byte-string name** has nothing to compute: its wire encoding *is* its
-/// in-memory representation. Both of
-/// [`hook_parameter!`](crate::hook_parameter)/
-/// [`otxn_parameter!`](crate::otxn_parameter)'s fixed-byte-string forms —
-/// Form 1, `hook_parameter!(Cfg, CfgName = b"CFG" => Config)`, which
-/// declares `CfgName` itself, and the `existing` keyword form,
-/// `hook_parameter!(Cfg, existing CfgName = b"CFG" => Config)`, which
-/// attaches the name-side impls to a marker type the caller declared —
-/// override `with_name_bytes` to hand the literal straight to the closure:
-/// no copy, no buffer, nothing to encode, skipping the default body
-/// entirely. Both give the *entity* the identical impl, so the lookup costs
-/// the same whether it goes through `Cfg` or `CfgName`; and both expose the
-/// bytes as `Cfg.get_name() -> &'static [u8]`, a `const fn` reading out of
-/// the same literal.
+/// in-memory representation. A hand-written `TypedParamName` impl for a
+/// plain byte-string name overrides `with_name_bytes` to hand the literal
+/// straight to the closure: no copy, no buffer, nothing to encode, skipping
+/// the default body entirely.
 /// Plain byte-string names use the same direct host-call path as
 /// `hook_param_exact` and `otxn_param_exact`.
 ///
 /// # Near-zero-cost for the composite (struct-shaped) case too
 ///
-/// A **composite** name (any [`hook_parameter!`](crate::hook_parameter)/
-/// [`otxn_parameter!`](crate::otxn_parameter) Form 2–4/pairing
-/// declaration — a struct with more than one field, or a newtype whose
-/// inner type isn't itself a plain byte string) can't skip encoding
-/// entirely: something has to lay its fields out into contiguous bytes.
-/// But it doesn't need [`PARAM_NAME_MAX_LEN`] (32) bytes of stack scratch
-/// to do it, zero-initialized fresh on every call, only to use the first
-/// handful — every [`hook_parameter!`](crate::hook_parameter)/
-/// [`otxn_parameter!`](crate::otxn_parameter)-declared composite name
-/// overrides `with_name_bytes` to allocate exactly
+/// A **composite** name (a [`crate::ParamName`]-derived struct with more
+/// than one field, or a newtype whose inner type isn't itself a plain byte
+/// string) can't skip encoding entirely: something has to lay its fields
+/// out into contiguous bytes. But it doesn't need [`PARAM_NAME_MAX_LEN`]
+/// (32) bytes of stack scratch to do it, zero-initialized fresh on every
+/// call, only to use the first handful — a hand-written `TypedParamName`
+/// impl for a composite name can override `with_name_bytes` to allocate
+/// exactly
 /// [`Self::MAX_LEN`](ToBytes::MAX_LEN) bytes instead: a compile-time
 /// literal at that impl's own (concrete, non-generic) definition site, so
 /// `[0u8; Self::MAX_LEN]` is ordinary stable Rust there, even though the
@@ -413,11 +398,11 @@ pub const PARAM_NAME_MAX_LEN: usize = 32;
 /// # Relationship to the hook-state typed layer
 ///
 /// `TypedParamName` deliberately mirrors [`crate::state::TypedStateKey`]
-/// (see its doc comment for the full comparison table): declare the
-/// pairing once ([`hook_parameter!`](crate::hook_parameter)/
-/// [`otxn_parameter!`](crate::otxn_parameter) here, [`crate::hook_state!`]
-/// there), then call an accessor that takes **a reference to a name/key
-/// value** and resolves the paired type from it (`hook_param_typed`/
+/// (see its doc comment for the full comparison table): implement the
+/// pairing once (a hand-written `TypedParamName` impl here, a hand-written
+/// `TypedStateKey` impl there), then call an accessor that takes **a
+/// reference to a name/key value** and resolves the paired type from it
+/// (`hook_param_typed`/
 /// `otxn_param_typed` here, `state_get_typed`/`state_set_typed`/`state_update_typed`
 /// there) — no turbofish, no chance of a mismatch. The one difference: a
 /// parameter is read-only from the reading hook's own perspective, so
@@ -445,28 +430,21 @@ pub trait TypedParamName: ToBytes {
     /// length isn't legal in a *generic* default trait method on stable
     /// Rust, only inside a concrete, non-generic `impl` — see
     /// [`FixedRead::read_exact`]'s doc comment for the identical
-    /// restriction). [`hook_parameter!`](crate::hook_parameter)/
-    /// [`otxn_parameter!`](crate::otxn_parameter) override this default
-    /// for every form they declare: the plain-byte-string forms hand `f`
-    /// the `'static` literal directly (no buffer at all); every composite
-    /// form allocates a `[u8; Self::MAX_LEN]` buffer sized exactly to
-    /// itself, in its own concrete `impl` — see this trait's doc comment.
+    /// restriction). A hand-written `TypedParamName` impl is free to
+    /// override this default: a plain-byte-string name can hand `f` the
+    /// `'static` literal directly (no buffer at all); a composite name can
+    /// allocate a `[u8; Self::MAX_LEN]` buffer sized exactly to itself, in
+    /// its own concrete `impl` — see this trait's doc comment.
     ///
     /// A compile-time check (monomorphized per `Self`) rejects a `Self`
     /// whose [`ToBytes::MAX_LEN`] falls outside `1..=`[`PARAM_NAME_MAX_LEN`]
     /// — the Hook API's own bound on a parameter name's length.
     ///
-    /// An override **replaces** that check along with the body, so every
-    /// override the declaration macros generate carries its own
-    /// monomorphized copy of the same assertion. This matters most for the
-    /// pairing form (`hook_parameter!(MyThing, MyName => MyValue)`), whose
-    /// `MyName` is a caller-authored [`ToBytes`] type the macro never
-    /// declared and never length-checked: without the copy, a name encoding
-    /// to 0 bytes (rejected by the host at runtime) or to a multi-kilobyte
-    /// scratch buffer would compile with no complaint at all. The entity a
-    /// pairing declares does not re-derive that override — it forwards
-    /// `with_name_bytes` to `MyName`'s, so the exact-size buffer this
-    /// invocation just generated for `MyName` is what both of them use.
+    /// An override **replaces** that check along with the body, so any
+    /// override must carry its own copy of the same assertion if it wants
+    /// the same guarantee — without it, a name encoding to 0 bytes
+    /// (rejected by the host at runtime) or to a multi-kilobyte scratch
+    /// buffer would compile with no complaint at all.
     #[inline(always)]
     fn with_name_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
         const {
@@ -486,13 +464,6 @@ pub trait TypedParamName: ToBytes {
         f(buf.get(..n).unwrap_or(&[]))
     }
 }
-
-// `hook_parameter!`/`otxn_parameter!`'s doc comments and re-exports live in
-// `lib.rs`, not here — see `hook_state!`'s identical note in `state.rs` for
-// why a plain `pub use` of a proc-macro must live at the crate root
-// directly, unlike the `#[macro_export]` `macro_rules!` these two used to
-// be (which hoisted to the crate root regardless of where they were
-// textually defined).
 
 #[cfg(test)]
 mod tests {

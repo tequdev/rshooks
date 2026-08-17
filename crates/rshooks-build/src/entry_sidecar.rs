@@ -1,8 +1,8 @@
 //! Builds the per-entry Hook metadata sidecar
 //! (`<index>.<hook_fn>.metadata.json`) for the v2 chain build.
 //!
-//! Mirrors `metadata::MetadataDocument`'s wire shape where the v1 and v2
-//! schemas overlap (contract §C item 5), extended with entry identity
+//! Reuses `metadata`'s shared fields (`WorstCaseExecution`, `BuilderInfo`,
+//! `hook_hash`, `hook_mask`, `utf8_hex`), extended with entry identity
 //! (`index`/`hook_fn`/`cbak_fn`) and a transcribed `chain` summary.
 
 use anyhow::{Context, Result};

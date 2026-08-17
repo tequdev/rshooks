@@ -166,8 +166,7 @@ pub(crate) fn parse_balanced_angle(
 }
 
 /// Parses a single string-literal token run — as captured by
-/// [`AttrEntry::value`] — via `syn`, matching the existing `metadata!`
-/// convention ([`crate::metadata`]). `tokens: None` means the key had no
+/// [`AttrEntry::value`] — via `syn`. `tokens: None` means the key had no
 /// `= value` at all (a bare flag where a value was required).
 pub(crate) fn parse_string_value(
     tokens: Option<&[TokenTree]>,

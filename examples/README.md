@@ -7,10 +7,13 @@ workspace, because these crates are `no_std` `cdylib`s with a Hook-specific
 release profile that must not leak into `rshooks-core`/`rshooks`/
 `rshooks-build`, and they don't build for host targets.
 
-Every example declares `metadata!` in `src/lib.rs`. A build therefore writes
-both `out/<crate>.wasm` and `out/<crate>.json`; the JSON contains raw SetHook
-HookOn/HookCanEmit values, readable declarations under `human`, and the
-cleaned binary's HookHash and WCE.
+Every example declares a `#[hooks]` chain in `src/lib.rs` — a struct holding
+its shared `State`/`HookParam`/`OtxnParam` schema, and an inherent `impl`
+block declaring its `#[hook(<index>, ..)]`/`#[cbak(<index>)]` entries. A
+build publishes each entry's wasm plus a sidecar JSON to
+`out/current/<index>.<entry-fn>.wasm`/`.metadata.json` (see "Building"
+below); the JSON contains raw SetHook HookOn/HookCanEmit values, readable
+declarations under `human`, and the cleaned binary's HookHash and WCE.
 
 Directories are numbered in **suggested reading order** — start at
 `01_accept-all` and work down; each one builds on ideas from the examples
@@ -40,43 +43,53 @@ directory is prefixed) and matches what its own README, `Cargo.toml`, and
 
 ## 80+: Production hooks in Rust
 
-Unlike `01`-`10` (one concept each, in suggested reading order), the
+Unlike `01`-`15` (one concept each, in suggested reading order), the
 `80`+ series are behavior-equivalent Rust ports of real, deployed xahaud
-C hooks — read them after `01`-`10`, not instead of them. Each has its
-own README with a full behavior-equivalence table against its C source,
-a differences table for any intentional deviation, and a "Toolchain
-limitation" section documenting a real Guard-type nesting-depth/
-floating-point constraint discovered while porting them (see
-`80_reward`'s README for the first, fullest writeup; `81_govern`'s adds
-three more findings).
+C hooks — read them after `01`-`15`, not instead of them. `80_governance`
+is the flagship example of the `#[hooks]` **multi-hook chain** model: one
+crate declaring both hooks (`govern` at chain position 0, `reward` at
+position 1) against one shared `#[hooks]` struct, so the state layout the
+two genuinely share (the reward rate/delay, the seat/member mapping) is
+declared once instead of duplicated across two crates. See its own README
+for a full behavior-equivalence table against each C source, a differences
+table for any intentional deviation, and its "Toolchain limitation"
+sections documenting the real Guard-type nesting-depth/floating-point
+constraints discovered while porting them.
 
 | # | example | ports |
 |---|---|---|
-| 80 | [`reward`](80_reward) | [`hook/genesis/reward.c`](https://raw.githubusercontent.com/Xahau/xahaud/dev/hook/genesis/reward.c) — the `RewardHook`: computes and emits a `GenesisMint` crediting `ClaimReward` claimants and active-validator L1 seats |
-| 81 | [`govern`](81_govern) | [`hook/genesis/govern.c`](https://raw.githubusercontent.com/Xahau/xahaud/dev/hook/genesis/govern.c) — the `GovernanceHook`: the 20-seat L1/L2 round-table governance state machine |
+| 80 | [`governance`](80_governance) | [`hook/genesis/govern.c`](https://raw.githubusercontent.com/Xahau/xahaud/dev/hook/genesis/govern.c) + [`hook/genesis/reward.c`](https://raw.githubusercontent.com/Xahau/xahaud/dev/hook/genesis/reward.c) — the 20-seat L1/L2 governance state machine (`govern`, chain position 0) and the `GenesisMint`-emitting `ClaimReward` payout hook (`reward`, chain position 1) |
 
-## Entry points: `#[hook]` / `#[cbak]`
+## Entry points: `#[hooks]`
 
-Every example declares its entry point as a plain, safe function annotated
-with `rshooks::hook` (or `rshooks::cbak` for the optional settlement
-callback), not a hand-written `extern "C"` export:
+Every example declares its chain with `#[hooks]`: a struct declaring the
+chain's shared `State`/`HookParam`/`OtxnParam` schema, and an inherent
+`impl` block on that struct declaring its `#[hook(<index>, ..)]`/
+`#[cbak(<index>)]` entries as plain, safe associated functions — not
+hand-written `extern "C"` exports:
 
 ```rust
-use rshooks::hook;
+use rshooks::hooks;
 
-#[hook]
-fn my_hook() -> i64 {
-    // ...
+#[hooks]
+struct MyHook;
+
+#[hooks]
+impl MyHook {
+    #[hook(0, on = [Invoke])]
+    fn main() -> i64 {
+        // ...
+    }
 }
 ```
 
-`#[hook]` expands to the wasm export shape the Hook host requires
-(`#[unsafe(no_mangle)] pub extern "C" fn hook(_reserved: u32) -> i64`,
-calling the annotated function) — see `rshooks-macros`'s crate doc comment
-for the exact signature it enforces (no arguments, `-> i64`, no
-`async`/`unsafe`/`const`/`extern`/generics). The annotated function's own
-name is arbitrary (`my_hook` here is just a convention); what matters is
-the export it produces.
+`#[hooks]` on the `impl` block generates the wasm export shape the Hook
+host requires for each declared entry (`#[unsafe(no_mangle)] pub extern
+"C" fn hook(_reserved: u32) -> i64`, calling the annotated function) — see
+`docs/MULTI_HOOK_STRUCT_DESIGN.md` for the exact grammar and generated
+shape. The annotated function's own name is arbitrary (`main` here is just
+a convention every single-hook example in this directory follows); what
+matters is the chain position (`0`) and the trigger set (`on = [..]`).
 
 ## Building
 
@@ -85,13 +98,15 @@ mise run build-examples   # builds every example through rshooks-build and check
 ```
 
 This is also the toolchain's end-to-end test: each example is built via
-`cargo run -p rshooks-build -- build ...` from the root workspace, and the
-resulting `out/<name>.wasm` is re-validated with `rshooks check`.
+`cargo run -p rshooks-build -- build --manifest-path <crate>/Cargo.toml
+--out <crate>/out`, and every declared entry's resulting
+`out/current/<index>.<entry-fn>.wasm` is re-validated with `rshooks check`.
 
 Each example can also be built individually, e.g.:
 
 ```sh
-cargo run -p rshooks-build -- build --manifest-path examples/02_state-counter/Cargo.toml
+cargo run -p rshooks-build -- build --manifest-path examples/02_state-counter/Cargo.toml --out examples/02_state-counter/out
+cargo run -p rshooks-build -- check examples/02_state-counter/out/current/0.main.wasm
 ```
 
 See each example's own README for its exact command — none currently need

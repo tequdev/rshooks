@@ -144,8 +144,7 @@
 //! `key`/`WrongValue` combination that was never meant to go together, as
 //! long as `WrongValue: FromBytes` (true of nearly every fixed-size type
 //! this crate provides — including, say, a *different* key's value type).
-//! [`TypedStateKey`] closes that gap: implement it for a key type (directly,
-//! or with the one-line [`hook_state!`](crate::hook_state) macro)
+//! [`TypedStateKey`] closes that gap: implement it for a key type directly
 //! to declare its one paired value type once, then use
 //! [`state_get_typed`]/[`state_set_typed`]/[`state_update_typed`] (+
 //! `_foreign` twins) — these read `K::Value` off the key's own type, so a
@@ -156,14 +155,9 @@
 //! value to type-check), and is the one operation the typed write path
 //! cannot express — see its own doc comment.
 //!
-//! A [`hook_state!`](crate::hook_state) declaration additionally gives its
-//! **entity** all four operations as inherent methods —
-//! `entity.get_state()`/`set_state(&v)`/`update_state(f)`/`delete_state()` —
-//! each one an `#[inline(always)]` forward to the free function of the same
-//! name below, so the two spellings compile identically and the choice is
-//! purely about which reads better at the call site. The entity also
-//! implements [`TypedStateKey`] itself, so it is accepted by every function
-//! here, `_foreign` twins included.
+//! A `#[hooks]`-declared [`crate::State`] field gets the same typed pairing
+//! for free, plus `.get()`/`.set()`/`.update()`/`.delete()` accessors
+//! generated for that field — see [`crate::decl`]'s module doc comment.
 //!
 //! # Relationship to the `hook_param`/`otxn_param` typed layer
 //!
@@ -173,9 +167,8 @@
 //!
 //! | | this module (hook state) | [`crate::convert::TypedParamName`] (params) |
 //! |---|---|---|
-//! | declare the pairing | [`hook_state!`](crate::hook_state)`(Entity, Key => Value)` | [`hook_parameter!`](crate::hook_parameter)/[`otxn_parameter!`](crate::otxn_parameter)`(Entity, Name => Ty)` |
+//! | declare the pairing | a hand-written `impl TypedStateKey for Key { type Value = Ty; }` | a hand-written `impl TypedParamName for Name { type Value = Ty; }` |
 //! | safe accessor(s) | `state_get_typed(&key)`/`state_set_typed`/`state_update_typed`/`state_delete` | `hook_param_typed(&name)`/`otxn_param_typed(&name)` |
-//! | method form (on a declared entity) | `entity.get_state()`/`.set_state(&v)`/`.update_state(f)`/`.delete_state()` | `entity.get_value()` (+ `entity.get_name()` for a fixed-byte-string name) |
 //! | loose escape hatch | [`state_get`]/[`state_set_loose`]/[`state_update_loose`] (independent `T`) | `hook_param_exact`/`otxn_param_exact` (independent `T`) |
 //! | shared foundation | both built on [`crate::convert::ToBytes`]/[`crate::convert::FromBytes`] — see [`crate::HookKey`]/[`crate::HookData`] (state key/value) and [`crate::ParamName`]/[`crate::ParamValue`] (param name/value) for the analogous but separate derives each side uses |
 //!
@@ -387,9 +380,8 @@ impl<const N: usize> StateKeyEncode for [u8; N] {
 /// generic parameters — nothing stops calling `state_get::<WrongValue>(&key)`
 /// for a `key`/`WrongValue` pairing that was never intended, as long as
 /// `WrongValue: FromBytes` (true of nearly every fixed-size type this crate
-/// provides). Implementing `TypedStateKey` for a key type — directly, or via
-/// [`hook_state!`](crate::hook_state) — ties it to exactly one
-/// value type; [`state_get_typed`]/[`state_set_typed`]/
+/// provides). Implementing `TypedStateKey` for a key type ties it to exactly
+/// one value type; [`state_get_typed`]/[`state_set_typed`]/
 /// [`state_update_typed`] (+ `_foreign` twins) then read `K::Value` off
 /// the key's own type, so there is no second, independently-chosen value
 /// type left for a mismatch to hide in. Prefer these over the loose
@@ -677,17 +669,15 @@ where
 /// stable Rust) — declaration order is significant, and inserting or
 /// reordering a variant changes every later variant's encoded key.
 ///
-/// # Pairing with `hook_state!`
+/// # Pairing with a value type
 ///
 /// A `state_keys!` enum implements [`StateKeyEncode`] but not
-/// [`TypedStateKey`] — pair it with a value type via
-/// [`hook_state!`](crate::hook_state)'s pairing form
-/// (both sides already declared) exactly like a `#[derive(HookKey)]`
-/// struct:
+/// [`TypedStateKey`] — pair it with a value type via a hand-written
+/// [`TypedStateKey`] impl, exactly like a `#[derive(HookKey)]` struct:
 ///
 /// ```
 /// use rshooks::prelude::*;
-/// use rshooks::{hook_state, state_keys};
+/// use rshooks::state_keys;
 ///
 /// state_keys! {
 ///     /// This hook's persistent data.
@@ -699,20 +689,13 @@ where
 ///     }
 /// }
 ///
-/// hook_state!(CounterState, DataKey => u32);
-///
-/// // The entity wraps the key it was paired with, and forwards
-/// // `StateKeyEncode::encode` straight through to it — so a `state_keys!`
-/// // enum pairs exactly as well as a `#[derive(HookKey)]` struct, without
-/// // needing `ToBytes` at all.
-/// assert_eq!(
-///     CounterState(DataKey::Counter).get_state(),
-///     Err(HookError::NotImplemented)
-/// );
+/// impl TypedStateKey for DataKey {
+///     type Value = u32;
+/// }
 ///
 /// // `NotImplemented` here is the host stub every Hook API call returns on
-/// // a host build — this only proves the generated `TypedStateKey`/
-/// // `state_get_typed` call chain compiles and runs.
+/// // a host build — this only proves the `TypedStateKey`/`state_get_typed`
+/// // call chain compiles and runs.
 /// assert_eq!(
 ///     state_get_typed(&DataKey::Counter),
 ///     Err(HookError::NotImplemented)
@@ -935,14 +918,6 @@ macro_rules! __state_keys_step {
     };
 }
 
-// `hook_state!`'s doc comment and re-export live in `lib.rs`, not here:
-// `#[macro_export]`-style hoisting to the crate root (what the old
-// `macro_rules!` version of this macro relied on) doesn't apply to a plain
-// `pub use` of a proc-macro — it re-exports at wherever the `pub use`
-// itself is written, so it has to be at the crate root directly (matching
-// where every other proc-macro re-export — `HookKey`, `HookData`, `hook`,
-// `cbak`, ... — already lives).
-
 #[cfg(test)]
 mod tests {
     // Tests are exempt from the panic-freedom lints (see docs/DESIGN.md
@@ -1107,21 +1082,39 @@ mod tests {
         );
     }
 
-    // `TypedStateKey`/`hook_state!`: a key type paired with exactly one
-    // value type, via the paired `_typed`-suffixed functions (see their
-    // doc comments).
-    //
-    // `hook_state!` is a proc-macro (see `rshooks::hook_state!`'s doc
-    // comment) whose expansion hardcodes `::rshooks::...` paths — correct
-    // when invoked from an external hook crate (where `rshooks` is a
-    // real, named dependency), but not resolvable from *inside* this crate's
-    // own `#[cfg(test)]` module (the same reason `#[derive(HookKey)]`/
-    // `#[derive(HookData)]`/etc. are only ever exercised via doctests here,
-    // never in-crate — see e.g. `lib.rs`'s `HookData`/`HookKey` doc
-    // comments). So this pairing is exercised as a doctest instead — see
-    // `state_keys!`'s doc comment's "Pairing with `hook_state!`" section,
-    // which pairs a `state_keys!` enum (the same shape as `TestKey` above)
-    // with `hook_state!`'s pairing form and asserts
-    // the identical `NotImplemented`-on-host smoke behavior this test used
-    // to check directly.
+    // `TypedStateKey`: a key type paired with exactly one value type, via
+    // the `_typed`-suffixed functions (see their doc comments) — a plain
+    // trait impl, unlike the old `hook_state!` proc-macro pairing form, so
+    // it can be exercised directly here rather than only via a doctest.
+    impl TypedStateKey for TestKey {
+        type Value = u32;
+    }
+
+    #[test]
+    fn typed_state_key_pairing_not_implemented_on_host() {
+        assert_eq!(
+            state_get_typed(&TestKey::Counter),
+            Err(HookError::NotImplemented)
+        );
+        assert_eq!(
+            state_set_typed(&TestKey::Counter, &1u32),
+            Err(HookError::NotImplemented)
+        );
+        assert_eq!(
+            state_update_typed(&TestKey::Counter, |_| 1u32),
+            Err(HookError::NotImplemented)
+        );
+        assert_eq!(
+            state_foreign_get_typed(&TestKey::Counter, None, None),
+            Err(HookError::NotImplemented)
+        );
+        assert_eq!(
+            state_foreign_set_typed(&TestKey::Counter, &1u32, None, None),
+            Err(HookError::NotImplemented)
+        );
+        assert_eq!(
+            state_foreign_update_typed(&TestKey::Counter, None, None, |_| 1u32),
+            Err(HookError::NotImplemented)
+        );
+    }
 }

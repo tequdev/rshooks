@@ -1,0 +1,7 @@
+error: #[hooks]: tuple structs are not accepted — use a named-field struct (or a unit struct `struct X;` if it declares nothing)
+ --> tests/ui/fail/hooks_tuple_struct.rs:5:1
+  |
+5 | #[hooks]
+  | ^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)

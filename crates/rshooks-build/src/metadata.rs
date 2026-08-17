@@ -1,20 +1,19 @@
-//! Build-time Hook metadata extraction and sidecar generation.
-//!
-//! Hook crates carry source metadata in the name of a deliberately dead wasm
-//! export. The cleaner removes that carrier from the deployable module; this
-//! module reads it from cargo's raw artifact first, then combines it with facts
-//! derived from the final cleaned bytes.
+//! Shared metadata facts reused by the v2 `#[hooks]` build path, plus the
+//! legacy `metadata!` (v1) carrier export-name prefix — kept only so
+//! [`crate::carriers`] can detect a stale v1-only crate and report a
+//! migration hint (see `docs/MULTI_HOOK_STRUCT_DESIGN.md` §7).
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
 use anyhow::{Context, Result, bail};
-use serde::{Deserialize, Serialize, Serializer, ser::SerializeMap};
+use serde::Serialize;
 use sha2::{Digest, Sha512};
 
-use crate::ValidationReport;
-
-/// Prefix used by `metadata!` carrier exports in raw Hook wasm artifacts.
+/// Prefix used by the (now removed) `metadata!` carrier exports in raw Hook
+/// wasm artifacts. Still detected — never parsed — so a crate that has not
+/// migrated to `#[hooks]` gets a migration hint instead of a generic "no
+/// chain found" error.
 pub const METADATA_EXPORT_PREFIX: &str = "__rshooks_metadata_v1_";
 
 /// Canonical Xahau JSON spellings emitted by the current `metadata!` macro
@@ -104,89 +103,6 @@ pub(crate) const TRANSACTION_TYPE_CODES: &[u8] = &[
     104,
 ];
 
-/// Source-authored metadata recovered from a `metadata!` carrier export.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct HookMetadata {
-    /// Human-readable Hook name.
-    pub name: String,
-    /// Optional longer description.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    /// Transaction types which trigger the Hook in both directions.
-    #[serde(default, rename = "HookOn", skip_serializing_if = "Option::is_none")]
-    pub hook_on: Option<Vec<String>>,
-    /// Transaction types which trigger the Hook for incoming transactions.
-    #[serde(
-        default,
-        rename = "IncomingHookOn",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub incoming_hook_on: Option<Vec<String>>,
-    /// Transaction types which trigger the Hook for outgoing transactions.
-    #[serde(
-        default,
-        rename = "OutgoingHookOn",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub outgoing_hook_on: Option<Vec<String>>,
-    /// Optional transaction types the Hook declares it may emit.
-    #[serde(
-        default,
-        rename = "HookCanEmit",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub hook_can_emit: Option<Vec<String>>,
-    /// Optional UTF-8 name placed in SetHook's `HookName` field.
-    #[serde(default, rename = "HookName", skip_serializing_if = "Option::is_none")]
-    pub hook_name: Option<String>,
-}
-
-impl HookMetadata {
-    fn validate(&self) -> Result<()> {
-        if self.name.is_empty() {
-            bail!("metadata field `name` must not be empty");
-        }
-
-        match (
-            self.hook_on.is_some(),
-            self.incoming_hook_on.is_some(),
-            self.outgoing_hook_on.is_some(),
-        ) {
-            (true, false, false) | (false, true, true) | (false, false, false) => {}
-            _ => bail!(
-                "metadata must contain either `HookOn` or both `IncomingHookOn` and \
-                 `OutgoingHookOn`, but never both forms"
-            ),
-        }
-
-        validate_transaction_types("HookOn", self.hook_on.as_deref())?;
-        validate_transaction_types("IncomingHookOn", self.incoming_hook_on.as_deref())?;
-        validate_transaction_types("OutgoingHookOn", self.outgoing_hook_on.as_deref())?;
-        validate_transaction_types("HookCanEmit", self.hook_can_emit.as_deref())?;
-
-        if let (Some(incoming), Some(outgoing)) = (&self.incoming_hook_on, &self.outgoing_hook_on) {
-            let incoming: BTreeSet<&str> = incoming.iter().map(String::as_str).collect();
-            let outgoing: BTreeSet<&str> = outgoing.iter().map(String::as_str).collect();
-            if incoming == outgoing {
-                bail!(
-                    "metadata fields `IncomingHookOn` and `OutgoingHookOn` must not contain the \
-                     same transaction-type set; use `HookOn` instead"
-                );
-            }
-        }
-
-        if let Some(name) = &self.hook_name {
-            let char_count = name.chars().count();
-            if !(2..=8).contains(&char_count) {
-                bail!("metadata field `HookName` must contain 2 to 8 UTF-8 characters");
-            }
-        }
-
-        Ok(())
-    }
-}
-
 pub(crate) fn validate_transaction_types(field: &str, values: Option<&[String]>) -> Result<()> {
     let Some(values) = values else {
         return Ok(());
@@ -245,93 +161,6 @@ impl BuilderInfo {
     }
 }
 
-/// Complete JSON sidecar document written next to a built Hook wasm.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MetadataDocument {
-    /// Metadata authored in the Hook crate.
-    pub metadata: HookMetadata,
-    /// SHA512-Half of the exact final cleaned wasm bytes.
-    pub hook_hash: String,
-    /// Worst-case instruction counts, when statically available.
-    pub wce: WorstCaseExecution,
-    /// Toolchain provenance for reproducing this exact build.
-    pub builder: BuilderInfo,
-}
-
-impl Serialize for MetadataDocument {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut map = serializer.serialize_map(None)?;
-        map.serialize_entry("name", &self.metadata.name)?;
-        if let Some(description) = &self.metadata.description {
-            map.serialize_entry("description", description)?;
-        }
-        match (
-            self.metadata.hook_on.as_deref(),
-            self.metadata.incoming_hook_on.as_deref(),
-            self.metadata.outgoing_hook_on.as_deref(),
-        ) {
-            (Some(hook_on), None, None) => {
-                let mask = hook_mask(Some(hook_on)).map_err(serde::ser::Error::custom)?;
-                map.serialize_entry("HookOn", &mask)?;
-            }
-            (None, Some(incoming), Some(outgoing)) => {
-                let incoming_mask = hook_mask(Some(incoming)).map_err(serde::ser::Error::custom)?;
-                let outgoing_mask = hook_mask(Some(outgoing)).map_err(serde::ser::Error::custom)?;
-                map.serialize_entry("HookOnIncoming", &incoming_mask)?;
-                map.serialize_entry("HookOnOutgoing", &outgoing_mask)?;
-            }
-            (None, None, None) => map.serialize_entry("HookOn", &Option::<String>::None)?,
-            // `HookMetadata::validate` rejects every other combination before a
-            // document is constructed.
-            _ => unreachable!("invalid HookOn metadata passed to sidecar serializer"),
-        }
-        map.serialize_entry(
-            "HookCanEmit",
-            &hook_mask(self.metadata.hook_can_emit.as_deref())
-                .map_err(serde::ser::Error::custom)?,
-        )?;
-        map.serialize_entry(
-            "HookName",
-            &self.metadata.hook_name.as_deref().map(utf8_hex),
-        )?;
-        map.serialize_entry("HookHash", &self.hook_hash)?;
-        map.serialize_entry("WCE", &self.wce)?;
-        map.serialize_entry("builder", &self.builder)?;
-        map.serialize_entry("human", &HumanMetadata::from(&self.metadata))?;
-        map.end()
-    }
-}
-
-/// Readable source values corresponding to the raw SetHook fields above.
-#[derive(Serialize)]
-struct HumanMetadata<'a> {
-    #[serde(rename = "HookOn", skip_serializing_if = "Option::is_none")]
-    hook_on: Option<&'a [String]>,
-    #[serde(rename = "HookOnIncoming", skip_serializing_if = "Option::is_none")]
-    incoming_hook_on: Option<&'a [String]>,
-    #[serde(rename = "HookOnOutgoing", skip_serializing_if = "Option::is_none")]
-    outgoing_hook_on: Option<&'a [String]>,
-    #[serde(rename = "HookCanEmit")]
-    hook_can_emit: Option<&'a [String]>,
-    #[serde(rename = "HookName")]
-    hook_name: Option<&'a str>,
-}
-
-impl<'a> From<&'a HookMetadata> for HumanMetadata<'a> {
-    fn from(metadata: &'a HookMetadata) -> Self {
-        Self {
-            hook_on: metadata.hook_on.as_deref(),
-            incoming_hook_on: metadata.incoming_hook_on.as_deref(),
-            outgoing_hook_on: metadata.outgoing_hook_on.as_deref(),
-            hook_can_emit: metadata.hook_can_emit.as_deref(),
-            hook_name: metadata.hook_name.as_deref(),
-        }
-    }
-}
-
 /// Encodes Xahau's inverted transaction-type bitmask used by HookOn and
 /// HookCanEmit. An omitted declaration is the all-zero protocol value and is
 /// represented as `null` in the sidecar.
@@ -371,107 +200,6 @@ pub(crate) fn utf8_hex(value: &str) -> String {
         .iter()
         .map(|byte| format!("{byte:02X}"))
         .collect()
-}
-
-/// Generated metadata document and non-fatal source/binary consistency warnings.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MetadataBuild {
-    /// The serializable sidecar document.
-    pub document: MetadataDocument,
-    /// Warnings comparing `HookCanEmit` to final reachable `env::emit` use.
-    pub warnings: Vec<String>,
-}
-
-/// Extracts a single metadata carrier from a raw cargo-produced wasm artifact.
-///
-/// Returns `Ok(None)` for Hooks that do not use `metadata!`. Multiple carriers,
-/// non-function carriers, malformed uppercase hex, invalid JSON, and invalid
-/// metadata field combinations are hard errors.
-pub fn extract_metadata(wasm: &[u8]) -> Result<Option<HookMetadata>> {
-    let mut metadata = None;
-
-    for payload in wasmparser::Parser::new(0).parse_all(wasm) {
-        let payload = payload.context("parsing raw wasm while looking for Hook metadata")?;
-        let wasmparser::Payload::ExportSection(reader) = payload else {
-            continue;
-        };
-        for export in reader {
-            let export = export.context("reading raw wasm export while looking for metadata")?;
-            let Some(encoded) = export.name.strip_prefix(METADATA_EXPORT_PREFIX) else {
-                continue;
-            };
-            if metadata.is_some() {
-                bail!("raw wasm contains multiple Hook metadata carrier exports");
-            }
-            if export.kind != wasmparser::ExternalKind::Func {
-                bail!("Hook metadata carrier export must refer to a function");
-            }
-
-            let json = decode_upper_hex(encoded).context("decoding Hook metadata carrier")?;
-            let parsed: HookMetadata =
-                serde_json::from_slice(&json).context("parsing JSON from Hook metadata carrier")?;
-            parsed.validate().context("validating Hook metadata")?;
-            metadata = Some(parsed);
-        }
-    }
-
-    Ok(metadata)
-}
-
-/// Creates the final sidecar document from source metadata and final wasm
-/// facts. `rustc` is the already-detected `rustc -V` first line for the
-/// [`BuilderInfo`] provenance record (`None` if detection failed or wasn't
-/// attempted).
-pub fn build_metadata(
-    metadata: HookMetadata,
-    final_wasm: &[u8],
-    report: &ValidationReport,
-    rustc: Option<String>,
-) -> Result<MetadataBuild> {
-    let uses_emit = uses_reachable_emit(final_wasm)?;
-    let mut warnings = Vec::new();
-    match (metadata.hook_can_emit.is_some(), uses_emit) {
-        (true, false) => warnings.push(
-            "metadata specifies `HookCanEmit`, but the final wasm does not use the `emit` API"
-                .to_string(),
-        ),
-        (false, true) => warnings.push(
-            "the final wasm uses the `emit` API, but metadata does not specify `HookCanEmit`"
-                .to_string(),
-        ),
-        _ => {}
-    }
-
-    if let Some(name) = &metadata.hook_name {
-        let byte_count = name.len();
-        if !(4..=16).contains(&byte_count) {
-            warnings.push(format!(
-                "metadata `HookName` is {byte_count} UTF-8 bytes, but the current Xahau protocol \
-                 requires 4 to 16 bytes"
-            ));
-        }
-    }
-
-    let wce = report.guard_verdict.map_or(
-        WorstCaseExecution {
-            hook: None,
-            cbak: None,
-        },
-        |verdict| WorstCaseExecution {
-            hook: Some(verdict.hook_cost),
-            cbak: Some(verdict.cbak_cost),
-        },
-    );
-
-    Ok(MetadataBuild {
-        document: MetadataDocument {
-            metadata,
-            hook_hash: hook_hash(final_wasm),
-            wce,
-            builder: BuilderInfo::current(rustc),
-        },
-        warnings,
-    })
 }
 
 /// Computes Xahau's HookHash: the uppercase first 32 bytes of SHA-512.

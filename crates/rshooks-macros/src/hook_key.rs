@@ -142,11 +142,8 @@ impl ::rshooks::convert::ToBytes for {name} {{
 /// its real length (never locally zero-padded — see `rshooks::state`'s
 /// module doc comment, "Key length and padding").
 ///
-/// Factored out so [`crate::decl_pair`]'s `hook_state!` declaration-macro
-/// grammar (whose Form 1 — a fixed-byte-string ZST key — has no struct
-/// fields for this module's normal per-field codegen to walk) can reuse the
-/// exact same encode-from-`ToBytes` logic this derive uses for a
-/// field-based struct, rather than a second, potentially-drifting copy.
+/// Factored out of [`derive`] so the generated `StateKeyEncode` impl body
+/// stays in one place.
 pub(crate) fn state_key_encode_impl(name: &str) -> String {
     format!(
         "

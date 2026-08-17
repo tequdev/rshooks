@@ -328,7 +328,7 @@ dependencies = [
 
 [[package]]
 name = "rshooks"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "rshooks-core",
  "rshooks-macros",
@@ -337,7 +337,7 @@ dependencies = [
 
 [[package]]
 name = "rshooks-build"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "cc",
@@ -353,14 +353,14 @@ dependencies = [
 
 [[package]]
 name = "rshooks-core"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "sha2",
 ]
 
 [[package]]
 name = "rshooks-macros"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "serde_json",
  "syn",

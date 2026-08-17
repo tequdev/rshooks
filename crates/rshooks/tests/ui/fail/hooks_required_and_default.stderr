@@ -1,0 +1,7 @@
+error: #[hook_param]: `required` and `default` are mutually exclusive
+ --> tests/ui/fail/hooks_required_and_default.rs:6:1
+  |
+6 | #[hooks]
+  | ^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -101,8 +101,8 @@ JSON records that schema for tooling. **But the hot, call-site-dense code
 paths in this crate (`setup`, `action_seat`, `push_l1_seat_entries`, and
 `govern`'s own top-level reads) do not call those fields' `.get()`/
 `.set()`/`.at()` accessors** — they read/write the identical key/name
-bytes through the raw `state`/`state_set`/`otxn_param` API (and, for the
-setup-only hook parameters, the older `hook_parameter!` macro) instead.
+bytes through the raw `state`/`state_set`/`otxn_param`/`hook_param_exact`
+API instead.
 `reward_rate`/`reward_delay` are the exception: those *do* use the typed
 `Governance.reward_rate`/`Governance.reward_delay` accessors, at their 4
 total call sites (2 writes in governance's setup, 2 reads in reward).
@@ -155,8 +155,8 @@ well-formed table).
 
 ## Testing
 
-`e2e/` and `mise.toml` still reference the old `80_reward`/`81_govern`
-crate and artifact paths — rewiring those to `governance`'s
-`0.govern.wasm`/`1.reward.wasm` is tracked separately (this example's
-consolidation only covers `examples/80_governance`, `examples/80_reward`,
-`examples/81_govern`, and `examples/Cargo.toml`).
+`mise.toml`'s `build-examples` task and `e2e/scripts/copy-wasm.mjs` build
+this crate and stage its two artifacts as `govern.wasm`/`reward.wasm`
+under `e2e/build/`, from `out/current/0.govern.wasm`/`1.reward.wasm` — the
+same basenames `e2e/test/govern.test.ts`/`reward.test.ts` already expect,
+so those e2e tests run unchanged against the consolidated crate.

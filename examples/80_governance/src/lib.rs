@@ -669,19 +669,15 @@ fn read_layer_required() -> core::result::Result<[u8; 1], ()> {
     }
 }
 
-// Old-style declarations for the setup-only hook parameters, used below
-// instead of `Governance`'s own typed accessors — see [`keys`]'s module
-// doc comment. These are the same declarations `examples/81_govern`
-// (this crate's predecessor) used; they still stay ABI-identical to
-// `Governance::initial_member`/`initial_member_count`/
-// `initial_reward_rate`/`initial_reward_delay` (same names, same value
-// shapes) — the `#[hooks]` struct is the ABI's single declaration for
-// documentation/schema purposes, and both forms read the exact same
-// on-ledger parameter.
-hook_parameter!(MemberParam, MemberParamName [u8; 3] => AccountId);
-hook_parameter!(InitialMemberCount, InitialMemberCountParamName = b"IMC" => [u8; 1]);
-hook_parameter!(InitialRewardRate, InitialRewardRateParamName = b"IRR" => XFL);
-hook_parameter!(InitialRewardDelay, InitialRewardDelayParamName = b"IRD" => XFL);
+// The setup-only hook parameters below are read through the raw
+// `hook_param_exact` API — the same bytes `Governance`'s own declared
+// fields (`initial_member`/`initial_member_count`/`initial_reward_rate`/
+// `initial_reward_delay`) use — instead of those fields' typed accessors:
+// see [`keys`]'s module doc comment. Going through the typed accessors here
+// was measured to push `setup`'s compiled nesting from 22 to 63 of the Hook
+// API's 32-level guard-checker limit (see `examples/81_govern`'s original
+// README, "build-budget finding"), so this stays on the raw API exactly
+// like the rest of the setup path.
 
 /// Reads `IRR`/`IRD` (L1-table-only setup) and writes `"RR"`/`"RD"` state.
 /// Kept in its own `#[inline(never)]` function: reading both inline inside
@@ -693,10 +689,10 @@ hook_parameter!(InitialRewardDelay, InitialRewardDelayParamName = b"IRD" => XFL)
 /// doc comment.
 #[inline(never)]
 fn setup_initial_reward_rate_and_delay() {
-    let Ok(irr) = InitialRewardRate.get_value() else {
+    let Ok(irr) = hook_param_exact::<XFL>(b"IRR") else {
         GovernError::BadParameter.nope(b"Governance: Initial Reward Rate Parameter missing (IRR).")
     };
-    let Ok(ird) = InitialRewardDelay.get_value() else {
+    let Ok(ird) = hook_param_exact::<XFL>(b"IRD") else {
         GovernError::BadParameter.nope(b"Governance: Initial Reward Delay Parameter miss (IRD).")
     };
     if ird.raw_bits() == 0 {
@@ -716,7 +712,7 @@ fn setup_initial_reward_rate_and_delay() {
 /// falls through to normal voting.
 #[inline(never)]
 fn setup(is_l1_table: bool) -> ! {
-    let Ok(imc) = InitialMemberCount.get_value() else {
+    let Ok(imc) = hook_param_exact::<[u8; 1]>(b"IMC") else {
         GovernError::BadParameter.nope(b"Governance: Initial Member Count Parameter missing (IMC).")
     };
     if state_set(&imc, &keys::MEMBER_COUNT).is_err() {
@@ -740,8 +736,8 @@ fn setup(is_l1_table: bool) -> ! {
         guard!(u32::from(SEAT_COUNT));
         let this_seat = i;
         i = i.wrapping_add(1);
-        let member_pkey = MemberParam([b'I', b'S', this_seat]);
-        let Ok(member_acc) = member_pkey.get_value() else {
+        let member_name = [b'I', b'S', this_seat];
+        let Ok(member_acc) = hook_param_exact::<AccountId>(&member_name) else {
             GovernError::BadParameter
                 .nope(b"Governance: One or more initial member account ID's is missing")
         };

@@ -25,7 +25,7 @@ exactly that — see "Zero-cost, verified" below).
 
 `rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh` is the Xahau/XRPL standalone-network
 genesis/master account (seed `"masterpassphrase"`) — the same constant
-`examples/80_reward`/`examples/81_govern` hand-hardcode as `GENESIS_ACCOUNT`.
+`examples/80_governance` hand-hardcode as `GENESIS_ACCOUNT`.
 `account_id!` replaces that hand-computation with the address string
 directly.
 

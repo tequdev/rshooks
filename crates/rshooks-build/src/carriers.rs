@@ -2,10 +2,10 @@
 //!
 //! `#[hooks] struct` and `#[hooks] impl` each embed a JSON declaration in the
 //! name of a deliberately dead wasm export, using the same
-//! prefix-plus-uppercase-hex mechanism as the legacy `metadata!` carrier (see
-//! `metadata::extract_metadata`). This module extracts and validates both
-//! carriers and exposes the shared trigger/mask logic the sidecar and
-//! SetHook template generators both need.
+//! prefix-plus-uppercase-hex mechanism the legacy (now removed) `metadata!`
+//! carrier used. This module extracts and validates both carriers and
+//! exposes the shared trigger/mask logic the sidecar and SetHook template
+//! generators both need.
 //!
 //! See the rshooks v0.2 implementation contract §B (carrier JSON shapes) and
 //! §C (orchestrator behavior).

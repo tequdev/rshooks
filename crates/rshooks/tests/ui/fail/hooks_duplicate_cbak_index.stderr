@@ -1,0 +1,20 @@
+error: #[cbak]: duplicate index 0 (already declared by another #[cbak] in this impl)
+ --> tests/ui/fail/hooks_duplicate_cbak_index.rs:8:1
+  |
+8 | #[hooks]
+  | ^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `Vault: HookChainImpl` is not satisfied
+ --> tests/ui/fail/hooks_duplicate_cbak_index.rs:5:1
+  |
+5 | #[hooks]
+  | ^^^^^^^^ the trait `HookChainImpl` is not implemented for `Vault`
+  |
+note: required by a bound in `assert`
+ --> tests/ui/fail/hooks_duplicate_cbak_index.rs:5:1
+  |
+5 | #[hooks]
+  | ^^^^^^^^ required by this bound in `assert`
+  = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -93,8 +93,9 @@ pub fn hook_param_exact<T: FixedRead>(name: &[u8]) -> Result<T> {
 /// return type) is inferred from `name`'s own type — no turbofish.
 ///
 /// Costs nothing beyond [`hook_param_exact`] for the common
-/// plain-byte-string-name case (e.g. via
-/// [`hook_parameter!`](crate::hook_parameter)'s fixed-bytes forms) — see
+/// plain-byte-string-name case (e.g. a hand-written
+/// [`crate::convert::TypedParamName`] impl overriding `with_name_bytes` to
+/// hand back a `'static` literal) — see
 /// [`crate::convert::TypedParamName`]'s "Zero-cost" section. A
 /// **composite, struct-shaped** name costs a small, genuine runtime encode
 /// instead (unavoidable for an arbitrary type) — see the same doc comment.
