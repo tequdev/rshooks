@@ -299,6 +299,20 @@ impl AsRef<[u8]> for EncodedStateKey {
     }
 }
 
+/// Identity impl: an already-[`StateKeyEncode::encode`]d key passes through
+/// unchanged. Lets [`crate::decl`]'s `StateEntry`/`State::at`-bound
+/// accessors — which store a pre-encoded `EncodedStateKey` rather than a
+/// [`StateKeyEncode`] value — forward straight into this module's existing
+/// free functions (`state_get`, `state_set_loose`, `state_update_loose`,
+/// `state_delete`, `state_foreign_get`, `state_foreign_set_loose`, ...),
+/// which all take `&impl StateKeyEncode`.
+impl StateKeyEncode for EncodedStateKey {
+    #[inline(always)]
+    fn encode(&self) -> EncodedStateKey {
+        *self
+    }
+}
+
 /// Identity impl: a raw, already-32-byte [`crate::types::StateKey`] passes
 /// through unchanged — there is nothing to shorten.
 impl StateKeyEncode for StateKey {
