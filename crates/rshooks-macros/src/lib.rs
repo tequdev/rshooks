@@ -15,6 +15,9 @@ use proc_macro::{Delimiter, Group, Ident, Literal, Punct, Spacing, Span, TokenSt
 mod decl_pair;
 mod hook_data;
 mod hook_key;
+mod hooks_impl;
+mod hooks_shared;
+mod hooks_struct;
 mod param_name;
 mod param_value;
 mod shape;
@@ -66,6 +69,70 @@ pub fn hook(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn cbak(attr: TokenStream, item: TokenStream) -> TokenStream {
     entry_point("cbak", attr, item)
+}
+
+/// Declares a multi-hook chain — the v0.2 replacement for the top-level
+/// [`macro@hook`]/[`macro@cbak`]/`metadata!`/`hook_state!`/`hook_parameter!`/
+/// `otxn_parameter!` combination (which stay available for now; see
+/// `docs/MULTI_HOOK_STRUCT_DESIGN.md` for the full rationale and the v0.2
+/// implementation contract for the normative grammar).
+///
+/// Applied to a struct, it declares the chain's shared state/parameter
+/// schema (see [`hooks_struct`]); applied to that struct's inherent `impl`
+/// block, it declares the chain's hook/cbak entries (see [`hooks_impl`]).
+/// Anything else is rejected.
+///
+/// Hook authors use the re-exported `rshooks::hooks` rather than depending
+/// on this proc-macro crate directly.
+#[proc_macro_attribute]
+pub fn hooks(attr: TokenStream, item: TokenStream) -> TokenStream {
+    match dispatch_hooks_target(&item) {
+        HooksTarget::Struct => hooks_struct::expand(attr, item),
+        HooksTarget::Impl => hooks_impl::expand(attr, item),
+        HooksTarget::Other => err(
+            Span::call_site(),
+            "#[hooks] must be applied to a struct or an inherent impl",
+        ),
+    }
+}
+
+enum HooksTarget {
+    Struct,
+    Impl,
+    Other,
+}
+
+/// Peeks far enough into `item`'s tokens (past leading attributes and an
+/// optional `pub`/`pub(..)` visibility — visibility never precedes `impl`)
+/// to tell whether [`hooks`] should dispatch to [`hooks_struct::expand`] or
+/// [`hooks_impl::expand`]. Full shape validation happens inside whichever
+/// module is dispatched to; this only needs to disambiguate the two.
+fn dispatch_hooks_target(item: &TokenStream) -> HooksTarget {
+    let mut iter = item.clone().into_iter().peekable();
+    loop {
+        match iter.peek() {
+            Some(TokenTree::Punct(p)) if p.as_char() == '#' => {
+                iter.next();
+                iter.next();
+            }
+            _ => break,
+        }
+    }
+    if let Some(TokenTree::Ident(id)) = iter.peek() {
+        if id.to_string() == "pub" {
+            iter.next();
+            if let Some(TokenTree::Group(g)) = iter.peek() {
+                if g.delimiter() == Delimiter::Parenthesis {
+                    iter.next();
+                }
+            }
+        }
+    }
+    match iter.peek() {
+        Some(TokenTree::Ident(id)) if id.to_string() == "struct" => HooksTarget::Struct,
+        Some(TokenTree::Ident(id)) if id.to_string() == "impl" => HooksTarget::Impl,
+        _ => HooksTarget::Other,
+    }
 }
 
 /// Embeds build-only Hook metadata in a dead WebAssembly export.
