@@ -8,6 +8,7 @@
 pub mod api;
 pub mod buf_eq;
 pub mod convert;
+pub mod decl;
 pub mod error;
 mod errors;
 mod macros;
@@ -35,6 +36,28 @@ pub use macros::padded_bytes_left;
 /// C-verbatim constant. See the crate doc comment for why this is a plain
 /// alias rather than a re-exporting wrapper module.
 pub use rshooks_core as raw;
+
+/// Convenience re-export of [`decl`]'s ZST chain-declaration handle types —
+/// the field types a `#[hooks]`-annotated struct declares against. See
+/// [`decl`]'s module doc comment for the full story; the rest of that
+/// module (`StateEntry`, `HookParamAt`, `OtxnParamAt`, the `*Spec` traits)
+/// stays reachable at `decl::` rather than being re-exported here, since
+/// those are the macro-generated side of the handshake, not something a
+/// hook author names directly.
+pub use decl::{HookParam, OtxnParam, State};
+
+/// Implementation-detail handshake between the (forthcoming) `#[hooks]`
+/// struct macro and `#[hooks]` impl macro.
+#[doc(hidden)]
+pub mod __internal {
+    /// Implemented (by generated code) on a chain-struct type by the
+    /// `#[hooks]` attribute on its inherent `impl` block; asserted (by
+    /// generated code) by the `#[hooks]` attribute on the struct itself, so
+    /// a struct annotated with `#[hooks]` that never gets a matching
+    /// `#[hooks]` impl block fails to compile instead of silently
+    /// generating a hook chain with no entrypoints.
+    pub trait HookChainImpl {}
+}
 
 /// Turns a plain, argument-less `fn name() -> i64` into the Hook host's
 /// required `hook` export (`#[unsafe(no_mangle)] pub extern "C" fn hook(
@@ -1542,6 +1565,7 @@ pub mod prelude {
     pub use crate::api::util::*;
     pub use crate::buf_eq::*;
     pub use crate::convert::{FixedRead, FromBytes, ToBytes, TypedParamName};
+    pub use crate::decl::{HookParam, OtxnParam, State};
     pub use crate::error::{HookError, Result};
     pub use crate::sfield::*;
     pub use crate::slot_obj::{AmountBytes, CastTarget, IssueData, SlotKey, SlotObject};
