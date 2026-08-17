@@ -16,8 +16,9 @@ use sha2::{Digest, Sha512};
 /// chain found" error.
 pub const METADATA_EXPORT_PREFIX: &str = "__rshooks_metadata_v1_";
 
-/// Canonical Xahau JSON spellings emitted by the current `metadata!` macro
-/// for every known `TxType` variant (excluding the data-carrying `Unknown`).
+/// Canonical Xahau JSON spellings for every known `TxType` variant
+/// (excluding the data-carrying `Unknown`), used to validate `#[hooks]`
+/// entries' `on`/`can_emit` transaction-type lists.
 pub(crate) const TRANSACTION_TYPES: &[&str] = &[
     "Payment",
     "EscrowCreate",
