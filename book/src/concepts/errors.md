@@ -131,29 +131,32 @@ call site. The hook body then runs a short chain of checks, calling
 `RejectReason::rollback()` the moment one fails:
 
 ```rust,ignore
-#[hook]
-fn my_hook() -> i64 {
-    if otxn_field_typed(sfAccount).is_err() {
-        RejectReason::BadAccountField.rollback();
-    }
-
-    match otxn_field_u64(sfSourceTag) {
-        Ok(tag) if tag == u64::from(BLOCKED_SOURCE_TAG) => {
-            RejectReason::BlockedSourceTag.rollback()
+#[hooks]
+impl Errors {
+    #[hook(0, on = [Payment])]
+    fn main() -> i64 {
+        if otxn_field_typed(sfAccount).is_err() {
+            RejectReason::BadAccountField.rollback();
         }
-        _ => {}
+
+        match otxn_field_u64(sfSourceTag) {
+            Ok(tag) if tag == u64::from(BLOCKED_SOURCE_TAG) => {
+                RejectReason::BlockedSourceTag.rollback()
+            }
+            _ => {}
+        }
+
+        let drops = match otxn_field_typed(sfAmount) {
+            Ok(AmountBytes::Native(n)) => u64::from_be_bytes(n.0) & !NATIVE_AMOUNT_FLAG_BITS,
+            Ok(AmountBytes::Iou(_)) | Err(_) => RejectReason::NotNativeAmount.rollback(),
+        };
+
+        if drops > MAX_DROPS {
+            RejectReason::AmountTooLarge.rollback();
+        }
+
+        accept!()
     }
-
-    let drops = match otxn_field_typed(sfAmount) {
-        Ok(AmountBytes::Native(n)) => u64::from_be_bytes(n.0) & !NATIVE_AMOUNT_FLAG_BITS,
-        Ok(AmountBytes::Iou(_)) | Err(_) => RejectReason::NotNativeAmount.rollback(),
-    };
-
-    if drops > MAX_DROPS {
-        RejectReason::AmountTooLarge.rollback();
-    }
-
-    accept!()
 }
 ```
 

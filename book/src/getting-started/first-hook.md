@@ -6,6 +6,19 @@ triggered it. No loops, no state, no emitted transactions — a good template
 to copy for a new Hook and a good way to see every required piece in one
 small file.
 
+Before the code, two concepts this whole book builds on:
+
+- **The struct is a declaration vessel, not a runtime instance.** A
+  `#[hooks]` struct never gets constructed and never holds real data at
+  runtime — it exists so a name, its fields, and the Hook entries that use
+  them can all be declared in one place. There is no `self`, and no object
+  to build.
+- **Every Hook entry has an explicit index.** The index is this crate's
+  Hook's position in the account's `Hooks` array (the one a `SetHook`
+  transaction installs into) — position `0`, `1`, and so on, up to `9`.
+  Even a crate with exactly one Hook must say which position it occupies;
+  there's no implicit "the only one."
+
 ## The source
 
 Create `src/lib.rs` in the crate you set up in [Installation](installation.md):
@@ -15,17 +28,17 @@ Create `src/lib.rs` in the crate you set up in [Installation](installation.md):
 
 use rshooks::*;
 
-metadata! {
-    name: "accept-all",
-    description: "Accepts every transaction selected by HookOn.",
-    HookOn: [Invoke],
-    HookName: "accept",
-}
+#[hooks(description = "Accepts every transaction selected by HookOn.")]
+pub struct AcceptAll;
 
-#[hook]
-fn my_hook() -> i64 {
-    trace!(b"accept-all: accepting transaction");
-    accept!()
+#[hooks]
+impl AcceptAll {
+    /// Accepts every triggering transaction.
+    #[hook(0, name = "accept", on = [Invoke])]
+    fn main() -> i64 {
+        trace!(b"accept-all: accepting transaction");
+        accept!()
+    }
 }
 ```
 
@@ -45,43 +58,59 @@ Hook host, and `rshooks` itself is `no_std` so it can be linked into one.
 ### `use rshooks::*;`
 
 This glob import brings in everything declared at `rshooks`'s crate root:
-the `#[hook]`/`#[cbak]` attribute macros, the `metadata!`/`XFL!`/
-`account_id!` macros, the `accept!`/`rollback!`/`trace!`/`guard!` macro
-family, and every top-level module (`api`, `types`, `xfl`, ...) by name.
-It does **not** bring the functions inside those modules into scope — a
-Hook that calls typed API functions like `otxn_field` or `state` also
-needs `use rshooks::prelude::*;`, which this minimal example doesn't, since
-it never reads the transaction or touches state. Later chapters that do
-add that import.
+the `#[hooks]` attribute macro, the `XFL!`/`account_id!` macros, the
+`accept!`/`rollback!`/`trace!`/`guard!` macro family, and every top-level
+module (`api`, `types`, `xfl`, ...) by name. It does **not** bring the
+functions inside those modules into scope — a Hook that calls typed API
+functions like `otxn_field` or `state` also needs `use rshooks::prelude::*;`,
+which this minimal example doesn't, since it never reads the transaction or
+touches state. Later chapters that do add that import.
 
-### `metadata!`
+### `#[hooks(description = "...")]` on the struct
 
-The `metadata!` block declares build-only information about the Hook: a
-display name, an optional description, which transaction types trigger it
-(`HookOn`), and (optionally) its on-ledger `HookName`. It's not required —
-a Hook without it still builds and runs — but `rshooks` uses it to
-generate a JSON sidecar describing the binary. See [Hook
-Metadata](../build/metadata.md) for the full grammar.
+`#[hooks]` on `struct AcceptAll;` declares this crate's Hook chain: a
+container for shared state/parameter fields (none here — `AcceptAll` is a
+[unit struct](https://doc.rust-lang.org/reference/items/structs.html), so
+there's nothing to declare) plus the optional `description`, free-form text
+carried into the build's generated sidecar. The struct name (`AcceptAll`)
+is yours to choose; it plays no on-ledger role.
 
-### `#[hook]`
+### `#[hooks]` on the `impl` block, and `#[hook(0, ...)]`
 
-`#[hook]` turns a plain, argument-less `fn my_hook() -> i64` into the wasm
-export the Hook host requires. It expands to:
+The second `#[hooks]` attribute, on `impl AcceptAll`, marks this as the
+chain's entry-point block — exactly one such `impl` is required per
+`#[hooks]` struct. Inside it, `#[hook(0, name = "accept", on = [Invoke])]`
+declares one Hook entry:
 
-```rust
+- **`0`** — the required, positional first argument: this Hook occupies
+  position `0` in the `Hooks` array. Explained further in [Hook
+  Chains](../concepts/chains.md).
+- **`name = "accept"`** — the on-ledger `HookName` this Hook installs
+  with (optional; omit it for an unnamed Hook).
+- **`on = [Invoke]`** — this Hook fires only for `Invoke` transactions.
+  Omitting `on` entirely is also legal — see [Per-Hook
+  Attributes](../build/metadata.md) for what that means.
+
+The annotated function itself is a plain, argument-less associated function
+returning `i64` — not a method (there's no `self` to take; see the
+declaration-vessel note above). `#[hooks]` expands it into the wasm export
+the Hook host requires:
+
+```rust,ignore
 #[unsafe(no_mangle)]
 pub extern "C" fn hook(_reserved: u32) -> i64 {
-    my_hook()
+    AcceptAll::main()
 }
 ```
 
-The annotated function must take no arguments and return `i64`, with no
-`async`/`unsafe`/`const`/`extern` modifiers and no generics — `#[hook]`
-rejects anything else at compile time with a pointed error rather than
-producing a malformed export. The function's own name (`my_hook` here) is
-just a convention; what matters is the `hook` export it produces. Use
-`#[cbak]` the same way to export the optional settlement callback,
-`cbak`, invoked when a transaction this Hook previously emitted settles.
+The function's own name (`main` here) is just a convention; what matters is
+the `hook` export it produces for this entry's build. A hook entry taking
+`self`, arguments, or returning anything but `i64` is rejected at compile
+time with a pointed error rather than a malformed export — including a
+dedicated diagnostic ("Hook entrypoints are stateless associated
+functions") if you accidentally write `&self`. Use `#[cbak(0)]` the same
+way, on the same index, to declare the optional settlement callback for
+this entry.
 
 ### `accept!()`
 
@@ -106,35 +135,44 @@ or from elsewhere, pointing at its manifest:
 rshooks build --manifest-path my-hook/Cargo.toml
 ```
 
-This runs `cargo build --release --target wasm32v1-none`, then
-post-processes the resulting `.wasm` — see [Building a
-Hook](building.md) for exactly what that post-processing does. A
-successful build prints something like:
+This compiles your crate once to discover its declared Hook(s), then once
+more per declared index, and post-processes each result — see [Building a
+Hook](building.md) for exactly what that pipeline does. A successful build
+prints something like:
 
 ```text
-worst-case instructions: hook=15 cbak=0
-max nesting depth: 0
-wrote out/my_hook.wasm
-size: 174 bytes
-estimated SetHook fee: 870000 drops (0.870000 XAH)
-wrote out/my_hook.json
+[0] main: worst-case instructions: hook=15 cbak=0
+[0] main: max nesting depth: 0
+[0] main: wrote out/current/0.main.wasm
+[0] main: size: 174 bytes
+[0] main: estimated SetHook fee: 870000 drops (0.870000 XAH)
+[0] main: wrote out/current/0.main.metadata.json
+wrote out/current/sethook.template.json
+wrote out/current/sethook.template.meta.json
 ```
 
 ## What lands in `out/`
 
-Two files appear next to your crate's `Cargo.toml`:
+`rshooks build` writes into a generation directory under `out/`, with
+`out/current` symlinked to the latest one (see [Hook
+Chains](../concepts/chains.md) for why generations exist). For `AcceptAll`,
+`out/current/` contains:
 
-- **`out/my_hook.wasm`** — the cleaned, SetHook-valid binary: cargo's raw
-  `cdylib` output with the `memory` export stripped and every Hook API
-  rule (§ single `hook`/`cbak` export, guarded loops, MVP-only
-  instructions) validated.
-- **`out/my_hook.json`** — the metadata sidecar, generated because this
-  crate declared `metadata!`. For `accept-all` specifically, it looks like:
+- **`0.main.wasm`** — the cleaned, SetHook-valid binary for index `0`:
+  cargo's raw `cdylib` output with the `memory` export stripped and every
+  Hook API rule (§ single `hook`/`cbak` export, guarded loops, MVP-only
+  instructions) validated. The file name is `<index>.<fn>.wasm` — one file
+  per declared entry, so a multi-Hook chain gets one independent binary per
+  index.
+- **`0.main.metadata.json`** — this entry's metadata sidecar:
 
 ```json
 {
-  "name": "accept-all",
-  "description": "Accepts every transaction selected by HookOn.",
+  "index": 0,
+  "hook_fn": "main",
+  "cbak_fn": null,
+  "name": "main",
+  "description": null,
   "HookOn": "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF7FFFFFFFFFFFFFFFFFFBFFFFF",
   "HookCanEmit": null,
   "HookName": "616363657074",
@@ -144,24 +182,36 @@ Two files appear next to your crate's `Cargo.toml`:
     "cbak": 0
   },
   "human": {
-    "HookOn": [
-      "Invoke"
-    ],
+    "HookOn": ["Invoke"],
     "HookCanEmit": null,
     "HookName": "accept"
+  },
+  "chain": {
+    "struct": "AcceptAll",
+    "description": "Accepts every transaction selected by HookOn.",
+    "decls": { "state": [], "hook_params": [], "otxn_params": [] }
   }
 }
 ```
 
+- **`sethook.template.json`** / **`sethook.template.meta.json`** — a
+  ready-to-edit `SetHook` transaction template covering every index this
+  crate declares, plus a sidecar recording how it was generated. Covered in
+  full in [Hook Chains](../concepts/chains.md) and [Per-Hook
+  Attributes](../build/metadata.md).
+
 The **`WCE`** (worst-case execution) numbers are the static, guard-derived
-upper bound on instructions the host will ever execute for `hook`/`cbak` —
-the same figures the pipeline printed to the terminal. The **`HookHash`**
-is Xahau's hash of the deployed binary: the uppercase hex of the first 32
-bytes of the wasm's SHA-512 digest — this is what identifies the exact
-Hook code on-ledger, independent of which account installed it. Both are
-computed from the final, cleaned `.wasm` bytes, so they only exist once a
-build has run.
+upper bound on instructions the host will ever execute for this entry's
+`hook`/`cbak` — the same figures the pipeline printed to the terminal. The
+**`HookHash`** is Xahau's hash of the deployed binary: the uppercase hex of
+the first 32 bytes of the wasm's SHA-512 digest — this is what identifies
+the exact Hook code on-ledger, independent of which account installed it.
+The **`chain`** object transcribes this crate's shared struct-level schema
+(empty here, since `AcceptAll` declares no fields) — every entry's sidecar
+carries the same `chain` object, since the schema is shared across the
+whole crate, not owned by any one entry.
 
 From here, [Building a Hook](building.md) explains what each pipeline
-stage actually does, and [The `rshooks` CLI](../build/cli.md) is the
-complete flag reference for every subcommand.
+stage actually does, [Hook Chains](../concepts/chains.md) covers the
+multi-Hook model this build pipeline exists for, and [The `rshooks`
+CLI](../build/cli.md) is the complete flag reference for every subcommand.

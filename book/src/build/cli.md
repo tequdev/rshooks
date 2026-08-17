@@ -12,9 +12,11 @@ Every subcommand also accepts the standard clap-generated `-h`/`--help`;
 
 ## `rshooks build`
 
-Builds a Rust crate for `wasm32v1-none` (`cargo build --release --target
-wasm32v1-none`), then cleans and validates the result into a SetHook-legal
-binary. This is the pipeline described in [Building a Hook](../getting-started/building.md).
+Builds a `#[hooks]` crate for `wasm32v1-none`: one discovery build to read
+its declarations, then one `cargo rustc` build per declared index, each
+cleaned and validated into its own SetHook-legal binary. This is the
+pipeline described in [Building a Hook](../getting-started/building.md) and
+[Hook Chains](../concepts/chains.md).
 
 ```sh
 rshooks build --manifest-path path/to/Cargo.toml
@@ -22,26 +24,29 @@ rshooks build --manifest-path path/to/Cargo.toml
 
 | flag | default | description |
 |---|---|---|
-| `--manifest-path <PATH>` | cargo's default (current directory) | Path to the crate's `Cargo.toml`, forwarded to `cargo build`. |
-| `-p, --package <NAME>` | none | Build only the named package, forwarded to `cargo build -p`. Useful when `--manifest-path` points at a workspace. |
-| `--api-version <0\|1>` | `0` | The Hook API version this module targets. `0` is Guard-type (loop guards required); `1` is Gas-type (guard handling skipped). |
-| `--auto-guard` | off | Insert missing loop guards instead of treating an unguarded loop as a build error. |
+| `--manifest-path <PATH>` | cargo's default (current directory) | Path to the crate's `Cargo.toml`, forwarded to every cargo invocation. |
+| `-p, --package <NAME>` | none | Build only the named package, forwarded to cargo's `-p`. Useful when `--manifest-path` points at a workspace. |
+| `--api-version <0\|1>` | `0` | The Hook API version this module targets. `0` is Guard-type (loop guards required, and the only version `#[hooks]` chains currently support); `1` is Gas-type (guard handling skipped) and is rejected for a chain build. |
+| `--auto-guard` | off | Insert missing loop guards instead of treating an unguarded loop as a build error. Applies per index. |
 | `--default-maxiter <N>` | `16` | The `maxiter` value used for auto-inserted guards, when `--auto-guard` is set. |
-| `--out <DIR>` | `out/` next to the manifest | Directory to write the output binary (and metadata sidecar, if any) to. |
-| `--allow-oversize` | off | Write the output even if it exceeds the 65,535-byte SetHook size limit. The result is still clearly marked invalid in the printed report. |
+| `--out <DIR>` | `target/rshooks/<crate-name>` under the workspace's target directory | Output **root**: generation directories (`gen-<N>/`) are written under it, with `current` symlinked to the latest complete, validated one. |
+| `--allow-oversize` | off | Write each index's output even if it exceeds the 65,535-byte SetHook size limit. The result is still clearly marked invalid in the printed report. |
+| `--account <r...>` | none | Fill the generated template's `Account` placeholder with this address. |
+| `--namespace <64hex>` | none | Fill the generated template's `HookNamespace` placeholder(s) with this value. |
+| `--override` | off | Add `hsfOVERRIDE` (`Flags: 1`) to every declared (non-gap) entry in the generated template, permitting replacement of an already-installed Hook at that position. Never applied to gap (`{"Hook": {}}`) entries. |
 
-On success, `build` writes `out/<crate>.wasm` (matching cargo's own
-artifact file name) and, if the crate declares `metadata!`, a matching
-`out/<crate>.json` sidecar — see [Hook Metadata](metadata.md). A stale
-sidecar from a previous build that no longer declares `metadata!` is
-removed automatically.
+On success, `build` writes, under `<out-root>/current/`: one
+`<index>.<fn>.wasm` and one `<index>.<fn>.metadata.json` per declared entry,
+plus `sethook.template.json` and `sethook.template.meta.json` covering the
+whole chain — see [Per-Hook Attributes](metadata.md) for the sidecar and
+template's exact shape.
 
 ## `rshooks clean`
 
 Cleans and validates an already-built wasm file directly, without invoking
-cargo. Useful for post-processing an artifact you already have on disk —
-for example one built by a different pipeline, or one you want to
-reprocess with different flags without rebuilding.
+cargo. Useful for post-processing a single artifact you already have on
+disk — for example one index's raw build output from a different pipeline,
+or one you want to reprocess with different flags without rebuilding.
 
 ```sh
 rshooks clean path/to/artifact.wasm
@@ -56,9 +61,11 @@ rshooks clean path/to/artifact.wasm
 | `--default-maxiter <N>` | `16` | `maxiter` used for auto-inserted guards. |
 | `--allow-oversize` | off | Write the output even if it exceeds the 65,535-byte SetHook limit. |
 
-`clean` does not generate a metadata sidecar — that step is specific to
-`build`, since it needs the original crate's `metadata!` carrier from
-cargo's raw artifact.
+`clean` does not generate a metadata sidecar or a `SetHook` template — those
+steps are specific to `build`, since they need the original crate's
+`#[hooks]` carriers from cargo's raw discovery artifact, and `clean`
+operates on a single already-processed wasm file with no such carrier left
+in it.
 
 ## `rshooks check`
 

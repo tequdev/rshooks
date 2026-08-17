@@ -39,15 +39,17 @@ gaps where an example was retired.
 Unlike `01`–`15` (one concept each, in suggested reading order), the `80`+
 series are behavior-equivalent Rust ports of real, deployed xahaud C hooks —
 read them after `01`–`15`, not instead of them. Each has its own README with
-a full behavior-equivalence table against its C source, a differences table
-for any intentional deviation, and a "Toolchain limitation" section
-documenting a real Guard-type nesting-depth/floating-point constraint
-discovered while porting them.
+a full behavior-equivalence table against its C source and a differences
+table for any intentional deviation.
 
-| # | example | ports |
-|---|---|---|
-| 80 | `reward` | [`hook/genesis/reward.c`](https://raw.githubusercontent.com/Xahau/xahaud/dev/hook/genesis/reward.c) — the `RewardHook`: computes and emits a `GenesisMint` crediting `ClaimReward` claimants and active-validator L1 seats |
-| 81 | `govern` | [`hook/genesis/govern.c`](https://raw.githubusercontent.com/Xahau/xahaud/dev/hook/genesis/govern.c) — the `GovernanceHook`: the 20-seat L1/L2 round-table governance state machine |
+| # | example | ports | book chapter |
+|---|---|---|---|
+| 80 | `governance` | **One crate, two chain positions** — [`hook/genesis/govern.c`](https://raw.githubusercontent.com/Xahau/xahaud/dev/hook/genesis/govern.c) at `Hooks[0]` (the 20-seat L1/L2 round-table governance state machine) and [`hook/genesis/reward.c`](https://raw.githubusercontent.com/Xahau/xahaud/dev/hook/genesis/reward.c) at `Hooks[1]` (computes and emits a `GenesisMint` crediting `ClaimReward` claimants and active-validator L1 seats), sharing one `#[hooks]` struct's state schema | [Hook Chains](../concepts/chains.md) |
+
+`80_governance` is also this book's worked example for the multi-Hook
+chain model's real nesting-budget limit and its raw-API escape hatch — see
+[Hook Chains](../concepts/chains.md#a-real-limit-typed-accessor-density-inside-one-entry)
+and the example's own `README.md`.
 
 ## Building
 

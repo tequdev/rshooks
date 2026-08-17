@@ -35,7 +35,8 @@ Every known transaction type (`ttPAYMENT`, `ttESCROW_CREATE`,
 `ttTRUST_SET`, `ttHOOK_SET`, ...) has its own variant; `TxType::Unknown(u16)`
 is the catch-all for a code this crate doesn't model yet. `TxType` also
 gives back its raw code via `.code()` when you need it. Most hooks gate
-their logic on `metadata!`'s declared `HookOn` list already, so `otxn_type`
+their logic on their entry's declared `on`/`on_incoming`+`on_outgoing` list
+already (see [Per-Hook Attributes](../build/metadata.md)), so `otxn_type`
 is typically used for a final sanity check or to branch between a handful of
 expected types within one hook.
 
@@ -171,26 +172,29 @@ directly-submitted transaction they read back `1` and `0` respectively.
 end to end — read the sender as an `AccountId`, compare it against a
 configured blocklist, and roll back on a match:
 
-```rust
-#[hook]
-fn my_hook() -> i64 {
-    let Ok(sender) = otxn_field_typed(sfAccount) else {
-        rollback!(
-            b"firewall: could not read otxn sender",
-            FirewallError::CouldNotReadSender
-        )
-    };
+```rust,ignore
+#[hooks]
+impl Firewall {
+    #[hook(0, on = [Payment])]
+    fn main() -> i64 {
+        let Ok(sender) = otxn_field_typed(sfAccount) else {
+            rollback!(
+                b"firewall: could not read otxn sender",
+                FirewallError::CouldNotReadSender
+            )
+        };
 
-    let Ok(blocked) = BlockedParam.get_value() else {
+        let Some(blocked) = blocked_account() else {
+            accept!()
+        };
+
+        // Avoid `==`, which can compile to an unguarded loop.
+        if buf_eq_20(&sender, &blocked) {
+            rollback!(b"firewall: blocked account", FirewallError::BlockedAccount);
+        }
+
         accept!()
-    };
-
-    // Avoid `==`, which can compile to an unguarded loop.
-    if buf_eq_20(&sender, &blocked) {
-        rollback!(b"firewall: blocked account", FirewallError::BlockedAccount);
     }
-
-    accept!()
 }
 ```
 
@@ -199,9 +203,9 @@ turbofish, no manual length check. Note the comparison: `sender ==
 blocked` would compile to a byte-compare loop the Hook API's guard checker
 would need a `guard!` for (see [Guards and Loops](../concepts/guards.md));
 `buf_eq_20` is loop-free by construction (every byte index is a
-source-level literal) and sidesteps the issue entirely. `blocked` itself
-comes from a Hook parameter — see [Hook and Transaction
-Parameters](parameters.md) for `hook_parameter!`.
+source-level literal) and sidesteps the issue entirely. `blocked_account()`
+reads a Hook parameter declared on the `Firewall` struct — see [Hook and
+Transaction Parameters](parameters.md).
 
 ## Nested fields: slots
 

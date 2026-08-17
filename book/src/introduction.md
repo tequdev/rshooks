@@ -35,9 +35,9 @@ exports or floating-point-free arithmetic by hand.
 | crate | description |
 |---|---|
 | `rshooks-core` | `no_std`, zero-logic FFI layer: raw Hook API declarations and every constant from the xahaud `hook/` headers, translated 1:1 into Rust. |
-| `rshooks-macros` | Procedural macros for `rshooks` (`#[hook]`/`#[cbak]`, `metadata!`, XFL literals, and more). |
+| `rshooks-macros` | Procedural macros for `rshooks` (the `#[hooks]` struct/impl attribute, XFL literals, and more). |
 | `rshooks` | `no_std`, ergonomic wrapper over `rshooks-core` — `Result`-based APIs, typed buffers, the `XFL` decimal-float type, guard/trace macros, and a panic handler. |
-| `rshooks-build` | The CLI that turns a Rust crate into a SetHook-valid WASM binary: `cargo build` for `wasm32v1-none`, then a hook-cleaner and guard-checker, natively in Rust. |
+| `rshooks-build` | The CLI that turns a Rust crate into one or more SetHook-valid WASM binaries: a discovery build plus one build per declared Hook, each post-processed by a hook-cleaner and guard-checker, natively in Rust. |
 
 **This book focuses on the ergonomic layer** — the `rshooks` crate and its
 macros — since that's what Hook authors write against day to day. The raw
@@ -50,15 +50,16 @@ call, but every worked example in this book uses `rshooks`'s typed,
 
 - **Getting Started** walks through installing the toolchain and building
   your first Hook, the minimal `accept-all` example, end to end.
-- **Core Concepts** covers the shape every Hook shares: entry points,
-  accept/rollback and the error model, the loop-guard system, and tracing.
+- **Core Concepts** covers the shape every Hook shares: the `#[hooks]`
+  struct/impl declaration, entry points, accept/rollback and the error
+  model, the loop-guard system, tracing, and the multi-Hook chain model.
 - **Working with Data** covers reading the originating transaction, Hook
   state, parameters, typed derives, the `XFL` decimal-float type, and the
   typed slot/keylet layers for reading ledger objects.
 - **Emitting Transactions** covers building and submitting a new
   transaction from inside a Hook.
-- **Build Toolchain** documents the `rshooks` CLI itself and the
-  `metadata!` declaration it consumes.
+- **Build Toolchain** documents the `rshooks` CLI itself and the per-hook
+  attributes it reads to generate a SetHook template.
 - **Reference** is a lookup appendix: the full macro list, the prelude's
   contents, the raw FFI layer, and an index of the runnable examples in the
   repository.

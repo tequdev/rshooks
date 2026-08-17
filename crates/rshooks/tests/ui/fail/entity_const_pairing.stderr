@@ -1,7 +1,0 @@
-error[E0573]: expected type, found constant `CFG_NAME`
-  --> tests/ui/fail/entity_const_pairing.rs:19:1
-   |
-19 | hook_parameter!(Cfg, CFG_NAME => Config);
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not a type
-   |
-   = note: this error originates in the macro `hook_parameter` (in Nightly builds, run with -Z macro-backtrace for more info)

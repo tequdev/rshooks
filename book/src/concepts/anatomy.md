@@ -2,11 +2,13 @@
 
 A Xahau Hook is a small WebAssembly module with one required export and one
 optional export. This page walks through what an `rshooks` hook crate looks
-like from top to bottom: the crate shape, the `#[hook]`/`#[cbak]` entry
-points, how a hook's execution model shapes the way you write code, and the
-statics idiom used for templates and large buffers. Understanding this shape
-first makes the rest of the book — data access, errors, guards — much easier
-to place.
+like from top to bottom: the crate shape, the `#[hooks]` struct/impl
+declaration, how a hook's execution model shapes the way you write code,
+and the statics idiom used for templates and large buffers. Understanding
+this shape first makes the rest of the book — data access, errors, guards —
+much easier to place. This page covers a single-entry crate; [Hook
+Chains](chains.md) extends the same shape to a crate declaring more than
+one Hook.
 
 ## The crate shape
 
@@ -18,17 +20,16 @@ Every hook crate is a `no_std` `cdylib`:
 use rshooks::prelude::*;
 use rshooks::*;
 
-metadata! {
-    name: "accept-all",
-    description: "Accepts every transaction selected by HookOn.",
-    HookOn: [Invoke],
-    HookName: "accept",
-}
+#[hooks(description = "Accepts every transaction selected by HookOn.")]
+pub struct AcceptAll;
 
-#[hook]
-fn my_hook() -> i64 {
-    trace!(b"accept-all: accepting transaction");
-    accept!()
+#[hooks]
+impl AcceptAll {
+    #[hook(0, name = "accept", on = [Invoke])]
+    fn main() -> i64 {
+        trace!(b"accept-all: accepting transaction");
+        accept!()
+    }
 }
 ```
 
@@ -37,35 +38,78 @@ fn my_hook() -> i64 {
 - `#![no_std]` — there is no heap, no OS, no `std::` anything. `rshooks`'s
   `prelude` module gives you the ergonomic surface (typed accessors, macros,
   common types) without depending on `std`.
-- `metadata!` declares descriptive and SetHook-facing metadata (name,
-  `HookOn`, `HookCanEmit`, and so on) — covered in
-  [Hook Metadata](../build/metadata.md). It compiles to a dead wasm export
-  that the build tool reads and then strips; it adds nothing to the final
-  binary.
-- The actual logic lives in a plain function annotated with `#[hook]`.
+- The **struct** (`AcceptAll`) is this crate's chain-declaration vessel — a
+  place to name shared state/parameter fields (none here) and carry a
+  build-only `description`. It's never constructed and holds no runtime
+  data; see "The struct has no runtime instance" below.
+- The **impl block**, also annotated `#[hooks]`, is where the actual entry
+  functions live, each marked with `#[hook(<index>, ...)]` or
+  `#[cbak(<index>)]`. `name`/`on`/`can_emit`/`description` are per-entry
+  attributes now, rather than a separate top-level declaration — covered in
+  full in [Per-Hook Attributes](../build/metadata.md).
 
-## `#[hook]` and `#[cbak]`
+## `#[hooks]`: struct and impl, always as a pair
+
+Every chain needs **exactly one** `#[hooks]` struct and **exactly one**
+`#[hooks]` impl block for it, in the same module — the two halves are
+linked by name (`impl AcceptAll` refers back to `struct AcceptAll`), and
+the macros generate a compile-time handshake between them, so an `impl`
+with no matching annotated `struct` (or vice versa) fails to compile with a
+dedicated error rather than silently doing nothing.
+
+The struct itself can be a plain [unit
+struct](https://doc.rust-lang.org/reference/items/structs.html) (`struct
+AcceptAll;`, as above, when there's no state or parameters to declare) or a
+named-field struct whose fields carry `#[state]`/`#[hook_param]`/
+`#[otxn_param]` attributes — covered in [Hook State](../data/state.md) and
+[Hook and Transaction Parameters](../data/parameters.md). Moving from one
+to the other is exactly "replace the trailing `;` with a field block";
+nothing else about the declaration changes.
+
+### The struct has no runtime instance
+
+This is worth stating plainly, because Rust's struct/`impl` syntax normally
+implies an object with methods that take `self`. Here it doesn't: a
+`#[hooks]` struct is never constructed at runtime, and its entry functions
+never take `self` — they're **stateless associated functions**, called the
+same way `String::new()` is. Writing `&self` on an entry is a compile
+error with a dedicated message ("Hook entrypoints are stateless associated
+functions") rather than a type mismatch, since the honest complaint isn't
+about types — it's that there's no instance to borrow.
+
+What the struct's fields *do* give you, when it has any, is a single
+`static` value (named the same as the struct) whose fields you call
+accessor methods on — `AcceptAll.some_field.get()`, for instance. Those
+accessors read and write real on-ledger state or parameters; the struct
+value itself is a zero-sized handle with nothing to initialize, not a
+cache or a session object.
+
+## Entry functions: `#[hook(<index>, ...)]` and `#[cbak(<index>)]`
 
 The Hook host requires a wasm export shaped like
 `extern "C" fn hook(_reserved: u32) -> i64`. Writing that by hand means an
-`unsafe extern "C"` function signature in every hook crate. `#[hook]` avoids
-that: it takes a plain, safe function and generates the export for you.
+`unsafe extern "C"` function signature in every hook crate. `#[hooks]`
+avoids that: it takes a plain associated function and generates the export
+for you, per selected build (see [Building a Hook](../getting-started/building.md)
+for what "per selected build" means).
 
-```rust
-use rshooks::hook;
-
-#[hook]
-fn my_hook() -> i64 {
-    0
+```rust,ignore
+#[hooks]
+impl AcceptAll {
+    #[hook(0)]
+    fn main() -> i64 {
+        0
+    }
 }
 ```
 
-expands to the original function unchanged, plus:
+expands, for index `0`'s own build, to the original function unchanged,
+plus:
 
 ```rust,ignore
-#[unsafe(no_mangle)]
-pub extern "C" fn hook(_reserved: u32) -> i64 {
-    my_hook()
+#[unsafe(export_name = "hook")]
+pub extern "C" fn __rshooks_hook_sel_0(_reserved: u32) -> i64 {
+    AcceptAll::main()
 }
 ```
 
@@ -73,20 +117,21 @@ The macro enforces the annotated item's shape exactly, and reports any
 violation as a `compile_error!` at the offending token rather than a panic:
 
 - no arguments, and a return type of exactly `-> i64`;
-- no `async`, `unsafe`, `const`, or `extern` modifiers;
+- no `self` (see above), no `async`/`unsafe`/`const`/`extern` modifiers;
 - no generics, no `where` clause.
 
-The annotated function's own name is arbitrary — `my_hook` is just a
+The annotated function's own name is arbitrary — `main` is just a
 convention carried through every example in this book. What matters is the
-`hook` export it produces.
+`hook` export it produces for its declared index.
 
-`#[cbak]` is the same macro, generating a `cbak` export instead of `hook`. A
-Hook module can optionally export `cbak`: the host invokes it when a
-transaction the hook previously emitted (via `emit`) later settles on
-ledger, so the hook can react to its own emission's outcome. See
-[Emitting Transactions](../emit/emitting.md) for a worked `#[cbak]` example.
-Both attributes take no arguments of their own — `#[hook]`, not
-`#[hook(...)]`.
+`#[cbak(<index>)]` is the counterpart for the same index: a Hook entry can
+optionally have one, generating a `cbak` export instead of `hook`. The host
+invokes it when a transaction the hook previously emitted (via `emit`)
+later settles on ledger, so the hook can react to its own emission's
+outcome. See [Emitting Transactions](../emit/emitting.md) for a worked
+`#[cbak]` example. Both attributes take **one required argument** — the
+index — plus, for `#[hook]`, the optional named metadata arguments covered
+in [Per-Hook Attributes](../build/metadata.md).
 
 ## Execution model
 
@@ -194,6 +239,9 @@ avoiding rather than just guarding after the fact.
 
 ## Where to go next
 
+- [Hook Chains](chains.md) extends this shape to a crate declaring more
+  than one Hook — a shared struct, several indexed entries, and what
+  changes about the build.
 - [Accept, Rollback, and Errors](errors.md) covers how a hook actually
   terminates, and how to give it a meaningful error-code system.
 - [Guards and Loops](guards.md) covers the guard system that every loop —
