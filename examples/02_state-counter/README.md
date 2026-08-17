@@ -5,65 +5,53 @@ count (defaulting to zero if absent or of unexpected size), increments it,
 writes it back, and accepts with the new count as the return-code
 payload.
 
-This is the minimal tutorial for `rshooks`'s **typed storage layer**
-(`crate::state`'s typed accessors, declared via `hook_state!`'s **Form 2** —
-a struct key with a fixed instance) — no hand-rolled `[0u8; 8]` buffer, no
-manual `from_le_bytes`/`to_le_bytes`, no length check, and (unlike the
-equivalent hand-written `#[derive(HookKey)]` + `hook_state!(Entity, Key =>
-Value)` pairing + a separate `const`) no repetition of the key's name three
-times over:
+This is the minimal tutorial for `rshooks`'s **typed storage layer**, now
+declared as a `#[state]`-attributed field on the hook's `#[hooks]` struct —
+no hand-rolled `[0u8; 8]` buffer, no manual `from_le_bytes`/`to_le_bytes`,
+no length check:
 
 ```rust
-hook_state!(Counter, CounterKey {name: [u8; 7]} = {name: *b"counter"} => u64);
+#[hooks]
+pub struct StateCounter {
+    #[state(key = b"counter")]
+    counter: State<u64>,
+}
 
-let count = Counter.get_state().unwrap_or(None).unwrap_or(0);
+let count = StateCounter.counter.get().unwrap_or(Some(0)).unwrap_or(0);
 let next = count.wrapping_add(1);
-Counter.set_state(&next);
+StateCounter.counter.set(&next);
 ```
 
-`hook_state!`'s Form 2 declares, from that single line:
+`#[state(key = <expr>)]` is the **constant-key** form: `<expr>` is any
+const expression whose type implements `StateKeyEncode` — a byte-string
+literal like `b"counter"` works directly, because `StateKeyEncode` is
+implemented for `[u8; N]`. The struct macro expands this into:
 
-- **`Counter`** — the *entity*, the thing this hook operates on. A struct
-  mirroring the key's fields, with the `HookKey`-equivalent
-  `ToBytes`/`StateKeyEncode` codegen, the `TypedStateKey` pairing with
-  `u64`, and the four accessors (`get_state`/`set_state`/`update_state`/
-  `delete_state`).
-- **`const Counter: Counter = Counter { .. };`** — the one fixed instance,
-  named after the entity. Legal because a type name and a value name live in
-  separate namespaces, which is why `Counter.get_state()` above reads as if
-  `Counter` were a value: it is one.
-- **`CounterKey`** — the *key component* that addresses the entry, with the
-  same `ToBytes`/`StateKeyEncode` codegen and the same `TypedStateKey`
-  pairing.
+- a hidden per-field marker type carrying the key spec as a `StateSpec`
+  trait impl (so distinct `State<V>` fields, even ones sharing a value
+  type, each get their own key encoding — see
+  `docs/MULTI_HOOK_STRUCT_DESIGN.md` §5.4 for why a marker type is needed
+  at all),
+- the field's type rewritten to `State<u64, __marker>` behind the scenes
+  (the `State<u64>` you write is sugar over that),
+- a `static StateCounter: StateCounter` value binding (the struct's field
+  values are all zero-sized, so this is free), which is why
+  `StateCounter.counter.get()` above reads as a value access even though
+  `StateCounter` is also the struct's type name — type and value names live
+  in separate namespaces.
 
-Both types carry the role traits, so either can be handed to the free
-functions (`state_get_typed(&CounterKey { name: *b"counter" })` reaches the
-identical entry). Only the **entity** carries the accessors — the key is the
-address of the thing, not the thing. See `rshooks::hook_state!`'s doc
-comment for the full grammar staircase this is one step of.
-
-## Why a struct key, not a bare `[u8; 7]` key
-
-`CounterKey { name: *b"counter" }` encodes to exactly the same 7 bytes a
-bare `*b"counter"` array key would — see "Same slot as before" below — so
-this isn't about the bytes on the wire. It's required by Rust's **orphan
-rule**: `hook_state!`'s expansion includes `impl TypedStateKey for Counter`
-(and one for `CounterKey`), and implementing a `rshooks` trait for a bare
-`[u8; 7]` (a
-`core` type, foreign to this hook crate) from outside `rshooks` itself is
-not allowed — only implementing it for a type *this crate defines* is. See
-`rshooks::hook_state!`'s doc comment for the full explanation and a
-`compile_fail` example of the bare-array case.
+Because this field's `KeyArgs` is `()` (a constant key, not a per-instance
+one), `.get()`/`.set()`/`.update()`/`.delete()` are available directly on
+`StateCounter.counter` — no `.at(key)` call needed. See
+`examples/12_typed-data` for the keyed form (`#[state(key_by = SomeKey)]`),
+which does need `.at(key)`.
 
 ## Same slot as before: real-length encoding, host left-pads
 
-`CounterKey`'s only field is a plain `[u8; 7]`, and `hook_state!`'s Form 2
-sends a struct at its own real encoded length (7 bytes here — see
-`rshooks::state`'s module doc comment, "Key length and padding," and
-`docs/DESIGN.md` §5.7) — never locally zero-padded up to the fixed 32-byte
-key space. That is exactly the same 7 bytes a bare `*b"counter"` array key
-sends, so `CounterKey { name: *b"counter" }` lands on the identical,
-host-left-padded on-ledger slot — the same idiom as the C hook
+The key sent is exactly `counter`'s own 7 bytes (see `rshooks::state`'s
+module doc comment, "Key length and padding," and `docs/DESIGN.md` §5.7) —
+never locally zero-padded up to the fixed 32-byte key space. That lands on
+the same host-left-padded on-ledger slot as the C hook
 `state(&v, 8, "counter", 7)`.
 
 ## Build
@@ -90,9 +78,10 @@ byte-order code) isn't free: `state_get_typed`/`state_set_typed` go
 through `crate::state`'s generic, 32-byte-scratch-buffer machinery
 (`MAX_TYPED_STATE_LEN`), rather than this hook reading/writing a plain
 8-byte buffer via the raw `state`/`state_set` calls directly. Measured
-(`rshooks build`/`check`): 254 worst-case instructions / 740 bytes,
-versus 58 / 349 for the previous, hand-rolled-buffer version of this same
-hook. Still guard-clean at the source level — no `--auto-guard`/
+(`rshooks build`/`check`): 257 worst-case instructions / 749 bytes,
+versus 58 / 349 for a hand-rolled-buffer version of this same hook (this
+comparison predates the v0.2 `#[hooks]` per-index build pipeline; the
+qualitative cost tradeoff described here is unaffected). Still guard-clean at the source level — no `--auto-guard`/
 `--default-maxiter` needed. For a hook this simple (one `u64` counter,
 one key), the raw layer is the cheaper choice; this example uses the
 typed layer anyway because its purpose is to be the smallest possible

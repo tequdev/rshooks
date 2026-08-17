@@ -48,7 +48,7 @@ const ARRAY_END: u8 = 0xF1;
 const HSF_OVERRIDE: u32 = 1;
 
 /// A linear cursor-based transaction-bytes writer, shared by both
-/// encoders in this module. See `examples/80_reward/src/mint_txn.rs`'s
+/// encoders in this module. See `examples/80_governance/src/mint_txn.rs`'s
 /// `MintTxn` for the identical idiom and rationale.
 struct TxnBuf {
     buf: [u8; 1024],
@@ -236,10 +236,10 @@ impl TxnBuf {
 }
 
 /// Shared scratch space for whichever one of [`emit_l1_vote_forward`]/
-/// [`emit_hookset`] this hook invocation calls (never both — `my_hook`
+/// [`emit_hookset`] this hook invocation calls (never both — `govern`
 /// takes exactly one action per `Invoke`) — a `HookStatic` rather than a
-/// stack local for the same reason `examples/80_reward`'s `MINT_TXN` is:
-/// a 1024-byte stack buffer is exactly the kind of thing
+/// stack local for the same reason `examples/80_governance`'s `MINT_TXN`
+/// is: a 1024-byte stack buffer is exactly the kind of thing
 /// `wasm32v1-none`'s codegen lowers to unguarded `memset`/`memcpy`-style
 /// loops (see `examples/README.md`'s "Statics for templates and large
 /// buffers").
@@ -257,7 +257,7 @@ fn take_txn_buf() -> &'static mut TxnBuf {
 }
 
 /// Encodes `drops` as an 8-byte native (XAH) amount — see
-/// `examples/80_reward/src/mint_txn.rs::write_native_amount`'s doc
+/// `examples/80_governance/src/mint_txn.rs::write_native_amount`'s doc
 /// comment for why this is hand-written instead of calling
 /// `codec::encode_native_amount` directly (that function's own
 /// `copy_from_slice` keeps an unreachable-in-practice panic path linked

@@ -70,7 +70,7 @@ guard-clean with no extra `rshooks` flags.
 
 ```sh
 cargo run -p rshooks-build -- build --manifest-path examples/15_slot-objects/Cargo.toml
-cargo run -p rshooks-build -- check examples/15_slot-objects/out/slot_objects.wasm
+cargo run -p rshooks-build -- check examples/15_slot-objects/out/current/0.main.wasm
 ```
 
 ## Error codes

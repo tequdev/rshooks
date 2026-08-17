@@ -15,8 +15,7 @@ members = [
     "13_keylets",
     "14_account-id-macro",
     "15_slot-objects",
-    "80_reward",
-    "81_govern",
+    "80_governance",
 ]
 
 [workspace.package]

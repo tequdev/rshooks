@@ -10,58 +10,56 @@ by a separate "registry"/"oracle" account.
 ## Code walkthrough
 
 ```rust
-match state_foreign(&mut flag, &ENABLED_KEY, None, &target) {
-    Ok(n) if n == flag.len() => {}
-    Err(HookError::DoesntExist) => rollback!(b"...", StateForeignError::NotConfiguredOnTarget),
-    _ => rollback!(b"...", StateForeignError::ReadFailed),
+match StateForeign.enabled.get_foreign(None, Some(target.as_ref())) {
+    Ok(Some(v)) => v,
+    Ok(None) => rollback!(b"...", StateForeignError::NotConfiguredOnTarget),
+    Err(_) => rollback!(b"...", StateForeignError::ReadFailed),
 }
 ```
 
-`state_foreign(out, key, namespace, account)` takes two optional
-parameters beyond the plain `state` call: `namespace` and `account`, both
-defaulting to "this hook's own" when `None` (see
-`rshooks::api::state::state_foreign`'s doc comment). `key` accepts
-`&ENABLED_KEY` directly, no `.as_ref()` needed (`state_foreign`'s `key`
-parameter is generic over `AsRef<[u8]>`); `namespace`/`account` accept
-either `None` (absent) or a bare reference like `&target` (present, any
-`AsRef<[u8]>` type — no `.as_ref()` needed there either), via the
-`rshooks::api::state::ForeignRef` trait — see its doc comment for why
-that's a bare reference and not `Some(&target)` (a generic `Option<...>`
-parameter can't also accept a bare `None` literal without becoming
-ambiguous). Passing
-`namespace = None` and `account = &target` reads the entry keyed
-`ENABLED_KEY` **in this hook's own namespace, but on `target`'s account** —
-the natural shape for "the same hook code, installed on account A and
-account B, where A wants to read a flag B's copy of the hook maintains
-about itself." Reading a genuinely different hook's namespace on a foreign
-account would need an actual `namespace` value too (out of scope for this
-minimal example).
+`enabled` is declared as a struct field (`#[state(key = &ENABLED_KEY)]
+enabled: State<[u8; 1]>`), so its `.get_foreign(namespace, account)`
+accessor is generated rather than hand-written. `namespace`/`account` are
+`Option<&[u8]>`, both defaulting to "this hook's own" when `None` — same
+convention as the underlying `rshooks::api::state::state_foreign`. Passing
+`namespace = None` and `account = Some(target.as_ref())` reads the entry
+keyed by [`ENABLED_KEY`] **in this hook's own namespace, but on `target`'s
+account** — the natural shape for "the same hook code, installed on
+account A and account B, where A wants to read a flag B's copy of the hook
+maintains about itself." Reading a genuinely different hook's namespace on
+a foreign account would need an actual `namespace` value too (out of
+scope for this minimal example).
 
-`target` itself comes from a Hook parameter (`ACCT`), declared via
-`hook_parameter!(AcctParam, AcctParamName = b"ACCT" => AccountId)` and read
-with `AcctParam.get_value()` — the same "config via `hook_param`"
-idiom as `examples/03_hook-params`, just requiring the result to be
-exactly `AccountId`'s length (20 bytes, enforced by `AccountId`'s
-`FixedRead` impl, no turbofish) instead of manually checking a buffer's
-written length. See that example's README for the hex-encoding/`SetHook`
-details, which apply here unchanged (just a different parameter name and
-a 20-byte `AccountId` payload instead of an 8-byte integer).
+`target` itself comes from a required Hook parameter (`ACCT`), declared as
+`#[hook_param(name = b"ACCT", required)] acct: HookParam<AccountId>` and
+read with `StateForeign.acct.get_required()` — the same "config via
+`hook_param`" idiom as `examples/03_hook-params`, just requiring the
+result to be exactly `AccountId`'s length (20 bytes, enforced by
+`AccountId`'s `FixedRead` impl, no turbofish) instead of manually checking
+a buffer's written length. `get_required()` folds "absent" and "present
+but malformed" into the same `Err`, matching this hook's single
+`AcctNotConfigured` rollback code. See that example's README for the
+hex-encoding/`SetHook` details, which apply here unchanged (just a
+different parameter name and a 20-byte `AccountId` payload instead of an
+8-byte integer).
 
-The `state_foreign` read just below, unlike `ACCT`, is **not** migrated
-to `hook_state!`/`state_foreign_get_typed` — see `my_hook`'s doc comment
-in `src/lib.rs` for the full argument (in short: state's typed layer
-decodes a lenient *prefix*, not an exact length, so it would silently
-tolerate an oversized `enabled` value this raw code correctly rejects;
-separately, `ENABLED_KEY`'s `pad!`-based right-padding is byte-
-incompatible with the short-key form's host-left-padding, so migrating
-the key would silently change which 32-byte state slot gets read).
+`enabled`'s `.get_foreign()`, unlike the raw `state_foreign` call it
+replaces, decodes through `[u8; 1]`'s `FromBytes` impl — a lenient
+*prefix* decode (it reads only the entry's first byte, silently ignoring
+any bytes beyond it), not the byte-count-exact check the original raw
+code performed (`Ok(n) if n == flag.len()`). An oversized `enabled` entry
+on the target account is therefore no longer rejected as `ReadFailed`; it
+is read as if it were exactly 1 byte. `ENABLED_KEY` itself is unaffected —
+declaring it via `#[state(key = &ENABLED_KEY)]` re-uses the exact same
+`pad!`-based right-padded const, so the 32-byte key computed is
+byte-identical to before.
 
-`state_foreign`'s `Err(HookError::DoesntExist)` (no entry at all — the
-common, expected "not configured" case) is deliberately distinguished from
-every other `Err` (e.g. a malformed `target` or an unexpected host
-failure), each rolling back with its own [`rshooks::hook_errors!`] code
-and message — see `examples/04_errors` for the same "give each failure a
-distinct outcome" idea, and the code table below.
+`get_foreign`'s `Ok(None)` (no entry at all — the common, expected "not
+configured" case) is deliberately distinguished from every other `Err`
+(e.g. an unexpected host failure), each rolling back with its own
+[`rshooks::hook_errors!`] code and message — see `examples/04_errors` for
+the same "give each failure a distinct outcome" idea, and the code table
+below.
 
 ## Build
 

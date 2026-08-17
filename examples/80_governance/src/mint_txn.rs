@@ -4,11 +4,7 @@ use rshooks::prelude::*;
 use rshooks::rollback;
 use rshooks::txn::codec;
 
-/// Network genesis account.
-pub const GENESIS_ACCOUNT: AccountId = AccountId([
-    0xB5, 0xF7, 0x62, 0x79, 0x8A, 0x53, 0xD5, 0x43, 0xA0, 0x14, 0xCA, 0xF8, 0xB2, 0x97, 0xCF, 0xF8,
-    0xF2, 0xF9, 0x37, 0xE8,
-]);
+use crate::GENESIS_ACCOUNT;
 
 /// Number of L1 governance seats.
 pub const L1_SEATS: usize = 20;

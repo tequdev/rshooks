@@ -9,11 +9,6 @@ use rshooks::prelude::*;
 use rshooks::slot_path;
 use rshooks::*;
 
-metadata! {
-    name: "slot-objects",
-    HookOn: [Invoke],
-}
-
 hook_errors! {
     /// `slot-objects` rollback codes.
     pub enum SlotObjectsError {
@@ -260,12 +255,16 @@ fn check_cast_cleanup_loop(keylet: &Keylet) -> bool {
 /// `RippleState` object's balance is signed relative to whichever of the two
 /// accounts sorts low, which is an ordering this hook has no business
 /// depending on; the magnitude is the fact being checked.
+///
+/// `SlotObjects.iss.get()` distinguishes absence from decode failure, but
+/// this check treats them alike — like the original `otxn_param_exact`-based
+/// read, either case just means "this check group's precondition isn't
+/// met," so both fall through the same `else { return false }`.
 #[inline(never)]
 fn check_iou_amount(holder: &AccountId) -> bool {
-    let Ok(issuer) = otxn_param_exact::<[u8; 20]>(b"ISS") else {
+    let Ok(Some(issuer)) = SlotObjects.iss.get() else {
         return false;
     };
-    let issuer = AccountId(issuer);
     let mut currency = [0u8; 20];
     // Standard currency code: ASCII at offsets 12..15.
     if let Some(dst) = currency.get_mut(12..15) {
@@ -346,77 +345,104 @@ const CHK_MIDHOP: u8 = 4;
 /// the e2e only attaches to this invocation).
 const CHK_IOU: u8 = 5;
 
-/// Hook entry point. See the module doc comment for what each bit means.
-///
-/// Runs the check group named by the `CHK` parameter (absent = group 0) and
-/// accepts with the bits it earned.
-#[hook]
-fn my_hook() -> i64 {
-    let Ok(sender) = otxn_field_typed(sfAccount) else {
-        rollback!(b"slot-objects: no sfAccount", SlotObjectsError::NoSender)
-    };
-    let Ok(keylet) = keylet_account(&sender) else {
-        rollback!(
-            b"slot-objects: keylet_account failed",
-            SlotObjectsError::KeyletFailed
-        )
-    };
-    let group: u8 = otxn_param_exact::<[u8; 1]>(b"CHK")
+/// Returns the requested check group, masking *any* read failure — absence
+/// or an undecodable value — to [`CHK_CHEAP`]. This mirrors the original
+/// `otxn_param_exact::<[u8; 1]>(b"CHK").map(|v| v[0]).unwrap_or(CHK_CHEAP)`
+/// behavior: `.get_or_default()` alone only substitutes the default for
+/// absence (a malformed `CHK` would stay `Err`), so the outer
+/// `.unwrap_or(..)` re-applies the same masking to a decode failure too.
+fn selected_group() -> u8 {
+    SlotObjects
+        .chk
+        .get_or_default()
         .map(|v| v[0])
-        .unwrap_or(CHK_CHEAP);
+        .unwrap_or(CHK_CHEAP)
+}
 
-    let mut result: i64 = 0;
-    match group {
-        CHK_DEEP => {
-            // Earns both success-path bits: see `check_deep_loop`.
-            let signers = keylet_signers(&sender).unwrap_or(Keylet::zeroed());
-            if check_deep_loop(&signers) {
-                result |= BIT_TAKE_LOOP | BIT_DEEP_LOOP;
+#[hooks]
+pub struct SlotObjects {
+    /// Selects which check group this invocation runs (absent = group 0).
+    #[otxn_param(name = b"CHK", default = [CHK_CHEAP])]
+    chk: OtxnParam<[u8; 1]>,
+
+    /// The trust-line issuer for the [`CHK_IOU`] group, attached only to
+    /// that invocation.
+    #[otxn_param(name = b"ISS")]
+    iss: OtxnParam<AccountId>,
+}
+
+#[hooks]
+impl SlotObjects {
+    /// Hook entry point. See the module doc comment for what each bit means.
+    ///
+    /// Runs the check group named by the `CHK` parameter (absent = group 0)
+    /// and accepts with the bits it earned.
+    #[hook(0, on = [Invoke])]
+    fn main() -> i64 {
+        let Ok(sender) = otxn_field_typed(sfAccount) else {
+            rollback!(b"slot-objects: no sfAccount", SlotObjectsError::NoSender)
+        };
+        let Ok(keylet) = keylet_account(&sender) else {
+            rollback!(
+                b"slot-objects: keylet_account failed",
+                SlotObjectsError::KeyletFailed
+            )
+        };
+        let group = selected_group();
+
+        let mut result: i64 = 0;
+        match group {
+            CHK_DEEP => {
+                // Earns both success-path bits: see `check_deep_loop`.
+                let signers = keylet_signers(&sender).unwrap_or(Keylet::zeroed());
+                if check_deep_loop(&signers) {
+                    result |= BIT_TAKE_LOOP | BIT_DEEP_LOOP;
+                }
+            }
+            CHK_TAKE_FAILURE => {
+                if check_take_failure_loop(&keylet) {
+                    result |= BIT_TAKE_FAILURE;
+                }
+            }
+            CHK_CAST => {
+                if check_cast_cleanup_loop(&keylet) {
+                    result |= BIT_CAST_CLEANUP;
+                }
+            }
+            CHK_MIDHOP => {
+                let signers = keylet_signers(&sender).unwrap_or(Keylet::zeroed());
+                if check_midhop_loop(&signers) {
+                    result |= BIT_MIDHOP_LOOP;
+                }
+            }
+            CHK_IOU => {
+                if check_iou_amount(&sender) {
+                    result |= BIT_IOU_XFL;
+                }
+            }
+            // CHK_CHEAP and anything unrecognized: the checks that need no loop.
+            _ => {
+                let account = match SlotObject::from_keylet(&keylet) {
+                    Ok(a) => a,
+                    Err(_) => rollback!(
+                        b"slot-objects: could not slot the account root",
+                        SlotObjectsError::AccountRootFailed
+                    ),
+                };
+                if check_account_walk(&account, &sender) {
+                    result |= BIT_ACCOUNT_WALK;
+                }
+                result |= check_balance_reads(&account);
+                if check_parent_clear(&keylet) {
+                    result |= BIT_PARENT_CLEAR;
+                }
+                if check_root_cast() {
+                    result |= BIT_ROOT_CAST;
+                }
+                let _ = account.clear();
             }
         }
-        CHK_TAKE_FAILURE => {
-            if check_take_failure_loop(&keylet) {
-                result |= BIT_TAKE_FAILURE;
-            }
-        }
-        CHK_CAST => {
-            if check_cast_cleanup_loop(&keylet) {
-                result |= BIT_CAST_CLEANUP;
-            }
-        }
-        CHK_MIDHOP => {
-            let signers = keylet_signers(&sender).unwrap_or(Keylet::zeroed());
-            if check_midhop_loop(&signers) {
-                result |= BIT_MIDHOP_LOOP;
-            }
-        }
-        CHK_IOU => {
-            if check_iou_amount(&sender) {
-                result |= BIT_IOU_XFL;
-            }
-        }
-        // CHK_CHEAP and anything unrecognized: the checks that need no loop.
-        _ => {
-            let account = match SlotObject::from_keylet(&keylet) {
-                Ok(a) => a,
-                Err(_) => rollback!(
-                    b"slot-objects: could not slot the account root",
-                    SlotObjectsError::AccountRootFailed
-                ),
-            };
-            if check_account_walk(&account, &sender) {
-                result |= BIT_ACCOUNT_WALK;
-            }
-            result |= check_balance_reads(&account);
-            if check_parent_clear(&keylet) {
-                result |= BIT_PARENT_CLEAR;
-            }
-            if check_root_cast() {
-                result |= BIT_ROOT_CAST;
-            }
-            let _ = account.clear();
-        }
+
+        accept!(b"slot-objects: typed slot layer checks", result)
     }
-
-    accept!(b"slot-objects: typed slot layer checks", result)
 }
