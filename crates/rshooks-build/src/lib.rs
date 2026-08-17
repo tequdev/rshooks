@@ -5,13 +5,17 @@
 //! This host-side crate permits ordinary index-space arithmetic.
 #![allow(clippy::arithmetic_side_effects)]
 
+pub mod carriers;
+pub mod chain_build;
 mod cleaner;
+pub mod entry_sidecar;
 mod fee;
 mod flatten;
 mod guard;
 mod guard_native;
 mod ir;
 pub mod metadata;
+pub mod sethook_template;
 mod unnest;
 mod validator;
 pub mod whitelist;
