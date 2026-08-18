@@ -18,6 +18,8 @@ Last updated: 2026-08-18
   欠落判定の正規規則(§5.6)、BuildPlan の cargo metadata 解決・専用 target
   ディレクトリ(§7.1)、素の cargo/rustdoc 契約(§7.6)、Phase 再配分
   (§12–§13)、hex 大文字の正規化(§9)、他
+- r5: エントリ関数の `&self` レシーバを受理するよう改訂(§5.7)。詳細は
+  [HOOKS_SELF_RECEIVER_DESIGN.md](./HOOKS_SELF_RECEIVER_DESIGN.md) を参照。
 
 ## 0. 提案の原型(歴史的記録)
 
@@ -469,6 +471,10 @@ span 保持契約の**唯一の例外**として §4.4 に明記した。
 impl 内のエントリは **`self` を取らない関連関数**とし、シグネチャは現行と同じ
 `fn() -> i64`(cbak も同様)。誤って `self` を書いた場合は
 「Hook entrypoints are stateless associated functions」と専用診断を出す(§4.4)。
+
+> **r5 改訂**: 上記は初版(r4)時点の記述。r5 で `&self` レシーバ
+> (`fn(&self) -> i64`)も受理するよう改訂された — 詳細・意味論・診断文言は
+> [HOOKS_SELF_RECEIVER_DESIGN.md](./HOOKS_SELF_RECEIVER_DESIGN.md) を参照。
 
 ## 6. 実装上の技術的検討
 

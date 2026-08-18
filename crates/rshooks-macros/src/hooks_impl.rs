@@ -40,6 +40,19 @@ const ENTRIES_EXPORT_PREFIX: &str = "__rshooks_hooks_v2_";
 /// particular crate declares.
 const MAX_INDEX: u8 = 9;
 
+/// HOOKS_SELF_RECEIVER_DESIGN.md §6.2 diagnostic for every rejected
+/// self-receiver shape other than `&mut self`/`&'a mut self` — `self`,
+/// `mut self`, `self: T`, `&'a self`. Shared by entry functions and
+/// non-attributed helpers (§3.3): both accept only no-receiver or bare
+/// `&self`.
+const SELF_RECEIVER_MSG: &str = "use `&self` — hook entrypoints receive the chain declaration \
+                                  by shared reference (it is zero-sized)";
+/// HOOKS_SELF_RECEIVER_DESIGN.md §6.2 diagnostic for `&mut self` /
+/// `&'a mut self`. Shared by entry functions and non-attributed helpers.
+const MUT_SELF_RECEIVER_MSG: &str = "chain handles are zero-sized and immutable; ledger state \
+                                      is accessed through the handles, not by mutating the \
+                                      struct — use `&self`";
+
 /// Entry point for `#[hooks]` applied to an `impl` item, dispatched from
 /// [`crate::hooks`].
 pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -202,6 +215,9 @@ struct HookEntry {
     index: u8,
     index_span: Span,
     fn_name: String,
+    /// Whether this entry's signature is `fn(&self) -> i64` rather than the
+    /// no-receiver `fn() -> i64` — see [`ReceiverClass::SharedSelf`].
+    has_self: bool,
     attr: HookAttrData,
 }
 
@@ -209,6 +225,8 @@ struct CbakEntry {
     index: u8,
     index_span: Span,
     fn_name: String,
+    /// See [`HookEntry::has_self`].
+    has_self: bool,
 }
 
 struct HookAttrData {
@@ -347,11 +365,14 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
             i = scanned.next;
 
             if is_entry {
-                if let Some(self_span) = scanned.self_span {
-                    return Err(err(
-                        self_span,
-                        "Hook entrypoints are stateless associated functions",
-                    ));
+                match scanned.receiver {
+                    None | Some((ReceiverClass::SharedSelf, _)) => {}
+                    Some((ReceiverClass::MutSelf, span)) => {
+                        return Err(err(span, MUT_SELF_RECEIVER_MSG));
+                    }
+                    Some((ReceiverClass::Rejected, span)) => {
+                        return Err(err(span, SELF_RECEIVER_MSG));
+                    }
                 }
                 if scanned.has_generics {
                     return Err(err(
@@ -359,10 +380,14 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
                         "#[hooks]: an entry function cannot be generic",
                     ));
                 }
-                if !scanned.args_group.stream().is_empty() {
+                if !scanned.extra_args.is_empty() {
+                    let bad_span = scanned
+                        .extra_args
+                        .first()
+                        .map_or_else(|| scanned.args_group.span(), TokenTree::span);
                     return Err(err(
-                        scanned.args_group.span(),
-                        "#[hooks]: entry functions must take no arguments",
+                        bad_span,
+                        "#[hooks]: entry functions must take no arguments other than `&self`",
                     ));
                 }
                 let ret_ok = matches!(
@@ -375,14 +400,29 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
                         "#[hooks]: entry functions must return `i64` (expected `-> i64`)",
                     ));
                 }
+            } else {
+                // Non-attributed helper (§3.3): `&self` passes through
+                // untouched, `&mut self`/other self shapes are rejected with
+                // the same diagnostics as entries.
+                match scanned.receiver {
+                    None | Some((ReceiverClass::SharedSelf, _)) => {}
+                    Some((ReceiverClass::MutSelf, span)) => {
+                        return Err(err(span, MUT_SELF_RECEIVER_MSG));
+                    }
+                    Some((ReceiverClass::Rejected, span)) => {
+                        return Err(err(span, SELF_RECEIVER_MSG));
+                    }
+                }
             }
 
+            let has_self = matches!(scanned.receiver, Some((ReceiverClass::SharedSelf, _)));
             let fn_name = scanned.name.to_string();
             if let Some((data, index, index_span)) = hook_attr {
                 hooks.push(HookEntry {
                     index,
                     index_span,
                     fn_name,
+                    has_self,
                     attr: data,
                 });
             } else if let Some((index, index_span)) = cbak_attr {
@@ -390,6 +430,7 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
                     index,
                     index_span,
                     fn_name,
+                    has_self,
                 });
             }
 
@@ -560,7 +601,16 @@ struct ScannedFn {
     tokens: Vec<TokenTree>,
     name: Ident,
     has_generics: bool,
-    self_span: Option<Span>,
+    /// The leading receiver, if any: its class plus the `self` token's span.
+    /// `None` means no receiver at all (the current no-self entry form, or
+    /// an ordinary helper's first parameter).
+    receiver: Option<(ReceiverClass, Span)>,
+    /// Argument-list tokens following the receiver (or the whole argument
+    /// list, when there is none), minus a single optional trailing
+    /// top-level `,` — used by the entry-fn shape check to reject any
+    /// parameter beyond an optional `&self`. Unused for helpers, which may
+    /// take any further parameters.
+    extra_args: Vec<TokenTree>,
     args_group: Group,
     return_tokens: Vec<TokenTree>,
     return_span: Span,
@@ -619,7 +669,18 @@ fn scan_fn_item(tokens: &[TokenTree], start: usize) -> Result<ScannedFn, TokenSt
     i = i.wrapping_add(1);
 
     let args_tokens: Vec<TokenTree> = args_group.stream().into_iter().collect();
-    let self_span = detect_self(&args_tokens);
+    let detected_receiver = detect_receiver(&args_tokens);
+    let receiver = detected_receiver.map(|(class, span, _)| (class, span));
+    let receiver_consumed = detected_receiver.map_or(0, |(_, _, consumed)| consumed);
+    let mut extra_args: Vec<TokenTree> = args_tokens
+        .get(receiver_consumed..)
+        .unwrap_or_default()
+        .to_vec();
+    if let [tt] = extra_args.as_slice() {
+        if is_punct(tt, ',') {
+            extra_args.clear();
+        }
+    }
 
     let mut return_tokens: Vec<TokenTree> = Vec::new();
     let mut return_span = name.span();
@@ -668,7 +729,8 @@ fn scan_fn_item(tokens: &[TokenTree], start: usize) -> Result<ScannedFn, TokenSt
         tokens: collected,
         name,
         has_generics,
-        self_span,
+        receiver,
+        extra_args,
         args_group,
         return_tokens,
         return_span,
@@ -676,32 +738,103 @@ fn scan_fn_item(tokens: &[TokenTree], start: usize) -> Result<ScannedFn, TokenSt
     })
 }
 
-/// Whether an argument-list token run starts with `self`, `&self`,
-/// `&mut self`, `&'a self` or `&'a mut self` — the receiver shapes rustc
-/// itself accepts. Returns the receiver's span when found.
-fn detect_self(tokens: &[TokenTree]) -> Option<Span> {
-    match tokens.first() {
-        Some(TokenTree::Ident(id)) if id.to_string() == "self" => Some(id.span()),
-        Some(tt) if is_punct(tt, '&') => {
-            let mut idx = 1usize;
-            if matches!(tokens.get(idx), Some(t) if is_punct(t, '\'')) {
-                idx = idx.wrapping_add(1);
-                if matches!(tokens.get(idx), Some(TokenTree::Ident(_))) {
-                    idx = idx.wrapping_add(1);
+/// The receiver shapes an argument list's leading `self` parameter can take,
+/// classified per HOOKS_SELF_RECEIVER_DESIGN.md §3.1/§6.2. Only
+/// [`SharedSelf`](Self::SharedSelf) is accepted; the other two select which
+/// of the two §6.2 diagnostics a rejected shape gets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReceiverClass {
+    /// Bare `&self` — no lifetime, not `mut`. The only accepted receiver.
+    SharedSelf,
+    /// `&mut self` or `&'a mut self` — gets [`MUT_SELF_RECEIVER_MSG`].
+    MutSelf,
+    /// Every other self-receiver shape: `self`, `mut self`, `self: T`,
+    /// `&'a self` — gets [`SELF_RECEIVER_MSG`].
+    Rejected,
+}
+
+/// Classifies one token relevant to receiver-shape detection, for
+/// [`classify_receiver_kinds`]'s `TokenTree`-free pure core — see
+/// [`qualifier_token_kind`]'s doc comment for the rationale (this crate's
+/// standard "kind tag" boundary pattern for unit-testability without a live
+/// `proc_macro` context).
+fn receiver_token_kind(tt: &TokenTree) -> &'static str {
+    match tt {
+        TokenTree::Ident(id) => match id.to_string().as_str() {
+            "self" => "self",
+            "mut" => "mut",
+            _ => "<ident>",
+        },
+        _ if is_punct(tt, '&') => "&",
+        _ if is_punct(tt, '\'') => "'",
+        _ => "<other>",
+    }
+}
+
+/// Pure decision logic behind [`detect_receiver`]: given the leading token
+/// "kinds" of an argument list (as produced by [`receiver_token_kind`]),
+/// decides whether it opens with a self-receiver shape and, if so, its
+/// class plus the offset of the `self` token within `kinds` (so the caller
+/// can recover its span). Returns `None` when the argument list does not
+/// open with a self receiver at all — no receiver, or an ordinary first
+/// parameter such as `mut x: i64` whose leading `mut` isn't followed by
+/// `self`. The optional `: T` type ascription on `self: T` isn't inspected
+/// beyond confirming `self` leads — the ascribed type doesn't change which
+/// diagnostic applies.
+fn classify_receiver_kinds(kinds: &[&str]) -> Option<(usize, ReceiverClass)> {
+    match kinds.first() {
+        Some(&"mut") => (kinds.get(1) == Some(&"self")).then_some((1, ReceiverClass::Rejected)),
+        Some(&"self") => Some((0, ReceiverClass::Rejected)),
+        Some(&"&") => {
+            let mut i = 1usize;
+            let mut has_lifetime = false;
+            if kinds.get(i) == Some(&"'") {
+                i = i.wrapping_add(1);
+                has_lifetime = true;
+                if kinds.get(i) == Some(&"<ident>") {
+                    i = i.wrapping_add(1);
                 }
             }
-            if let Some(TokenTree::Ident(id)) = tokens.get(idx) {
-                if id.to_string() == "mut" {
-                    idx = idx.wrapping_add(1);
-                }
+            let mut has_mut = false;
+            if kinds.get(i) == Some(&"mut") {
+                has_mut = true;
+                i = i.wrapping_add(1);
             }
-            match tokens.get(idx) {
-                Some(TokenTree::Ident(id)) if id.to_string() == "self" => Some(id.span()),
-                _ => None,
+            if kinds.get(i) != Some(&"self") {
+                return None;
             }
+            let class = if has_mut {
+                ReceiverClass::MutSelf
+            } else if has_lifetime {
+                ReceiverClass::Rejected
+            } else {
+                ReceiverClass::SharedSelf
+            };
+            Some((i, class))
         }
         _ => None,
     }
+}
+
+/// Looks ahead from the start of an argument-list token run for a self
+/// receiver (`self`, `mut self`, `&self`, `&mut self`, `&'a self`,
+/// `&'a mut self`, or `self: T`) — the receiver shapes rustc itself
+/// accepts, classified per [`ReceiverClass`]. Returns the receiver's class,
+/// its `self` token's span, and the number of leading tokens it consumes
+/// (so the caller can locate any further parameters). `None` means no
+/// receiver was found (an ordinary first parameter, or an empty argument
+/// list).
+fn detect_receiver(tokens: &[TokenTree]) -> Option<(ReceiverClass, Span, usize)> {
+    // At most 5 tokens are ever consulted: `&`, `'`, a lifetime ident,
+    // `mut`, `self`.
+    let kinds: Vec<&'static str> = (0..5)
+        .map_while(|off| tokens.get(off).map(receiver_token_kind))
+        .collect();
+    let (offset, class) = classify_receiver_kinds(&kinds)?;
+    let span = tokens
+        .get(offset)
+        .map_or_else(Span::call_site, TokenTree::span);
+    Some((class, span, offset.wrapping_add(1)))
 }
 
 /// Consumes an associated `const` item (`const NAME: Ty = expr;`) starting
@@ -1099,14 +1232,13 @@ fn generate(
     let entries: Vec<EntrySource<'_>> = hooks
         .iter()
         .map(|h| {
-            let cbak_fn = cbaks
-                .iter()
-                .find(|c| c.index == h.index)
-                .map(|c| c.fn_name.as_str());
+            let cbak = cbaks.iter().find(|c| c.index == h.index);
             EntrySource {
                 index: h.index,
                 hook_fn: h.fn_name.as_str(),
-                cbak_fn,
+                hook_self: h.has_self,
+                cbak_fn: cbak.map(|c| c.fn_name.as_str()),
+                cbak_self: cbak.is_some_and(|c| c.has_self),
                 hook: &h.attr,
             }
         })
@@ -1144,7 +1276,13 @@ fn generate(
 struct EntrySource<'a> {
     index: u8,
     hook_fn: &'a str,
+    /// Whether the wrapper must call `hook_fn(&Struct)` instead of
+    /// `hook_fn()` — see [`HookEntry::has_self`].
+    hook_self: bool,
     cbak_fn: Option<&'a str>,
+    /// See [`hook_self`](Self::hook_self); meaningless when `cbak_fn` is
+    /// `None`.
+    cbak_self: bool,
     hook: &'a HookAttrData,
 }
 
@@ -1238,26 +1376,40 @@ fn render_entries_module(
     for e in entries {
         let i = e.index;
         let hook_fn = e.hook_fn;
+        // `&{struct_name}` works identically for both struct forms
+        // (HOOKS_SELF_RECEIVER_DESIGN.md §3.2): a named-field struct's
+        // generated same-named static, or a unit struct's constructor
+        // value — no extra static is ever needed.
+        let hook_call = if e.hook_self {
+            format!("{struct_name}::{hook_fn}(&{struct_name})")
+        } else {
+            format!("{struct_name}::{hook_fn}()")
+        };
         mod_body.push_str(&format!(
             "#[cfg(rshooks_entry = \"{i}\")]\n\
              #[unsafe(export_name = \"hook\")]\n\
              pub extern \"C\" fn __rshooks_hook_sel_{i}(_reserved: u32) -> i64 {{ \
-                 {struct_name}::{hook_fn}() }}\n\
+                 {hook_call} }}\n\
              #[cfg(not(any({not_any_list})))]\n\
              #[unsafe(export_name = \"__rshooks_hook_{i}\")]\n\
              pub extern \"C\" fn __rshooks_hook_disc_{i}(_reserved: u32) -> i64 {{ \
-                 {struct_name}::{hook_fn}() }}\n"
+                 {hook_call} }}\n"
         ));
         if let Some(cbak_fn) = e.cbak_fn {
+            let cbak_call = if e.cbak_self {
+                format!("{struct_name}::{cbak_fn}(&{struct_name})")
+            } else {
+                format!("{struct_name}::{cbak_fn}()")
+            };
             mod_body.push_str(&format!(
                 "#[cfg(rshooks_entry = \"{i}\")]\n\
                  #[unsafe(export_name = \"cbak\")]\n\
                  pub extern \"C\" fn __rshooks_cbak_sel_{i}(_reserved: u32) -> i64 {{ \
-                     {struct_name}::{cbak_fn}() }}\n\
+                     {cbak_call} }}\n\
                  #[cfg(not(any({not_any_list})))]\n\
                  #[unsafe(export_name = \"__rshooks_cbak_{i}\")]\n\
                  pub extern \"C\" fn __rshooks_cbak_disc_{i}(_reserved: u32) -> i64 {{ \
-                     {struct_name}::{cbak_fn}() }}\n"
+                     {cbak_call} }}\n"
             ));
         }
     }
@@ -1493,6 +1645,95 @@ mod tests {
     #[test]
     fn fn_qualifiers_non_fn_item_is_not_classified() {
         assert_eq!(classify_fn_qualifiers(&["type"]), None);
+    }
+
+    // --- `classify_receiver_kinds` (HOOKS_SELF_RECEIVER_DESIGN.md §3.1/§6.2) ---
+
+    #[test]
+    fn receiver_no_receiver_ordinary_param() {
+        // `fn f(x: i64)`
+        assert_eq!(classify_receiver_kinds(&["<ident>", "<other>"]), None);
+    }
+
+    #[test]
+    fn receiver_no_receiver_empty_args() {
+        assert_eq!(classify_receiver_kinds(&[]), None);
+    }
+
+    #[test]
+    fn receiver_mut_binding_that_is_not_self() {
+        // `fn f(mut x: i64)` — `mut` not followed by `self`.
+        assert_eq!(classify_receiver_kinds(&["mut", "<ident>"]), None);
+    }
+
+    #[test]
+    fn receiver_bare_self_is_rejected() {
+        // `fn f(self)`
+        assert_eq!(
+            classify_receiver_kinds(&["self"]),
+            Some((0, ReceiverClass::Rejected))
+        );
+    }
+
+    #[test]
+    fn receiver_self_with_type_ascription_is_rejected() {
+        // `fn f(self: Box<Self>)` — the ascribed type isn't inspected.
+        assert_eq!(
+            classify_receiver_kinds(&["self", "<other>"]),
+            Some((0, ReceiverClass::Rejected))
+        );
+    }
+
+    #[test]
+    fn receiver_mut_self_is_rejected() {
+        // `fn f(mut self)`
+        assert_eq!(
+            classify_receiver_kinds(&["mut", "self"]),
+            Some((1, ReceiverClass::Rejected))
+        );
+    }
+
+    #[test]
+    fn receiver_shared_self_is_accepted() {
+        // `fn f(&self)`
+        assert_eq!(
+            classify_receiver_kinds(&["&", "self"]),
+            Some((1, ReceiverClass::SharedSelf))
+        );
+    }
+
+    #[test]
+    fn receiver_mut_ref_self_is_rejected_as_mut() {
+        // `fn f(&mut self)`
+        assert_eq!(
+            classify_receiver_kinds(&["&", "mut", "self"]),
+            Some((2, ReceiverClass::MutSelf))
+        );
+    }
+
+    #[test]
+    fn receiver_lifetime_self_is_rejected_as_general() {
+        // `fn f(&'a self)` — only bare `&self` is accepted.
+        assert_eq!(
+            classify_receiver_kinds(&["&", "'", "<ident>", "self"]),
+            Some((3, ReceiverClass::Rejected))
+        );
+    }
+
+    #[test]
+    fn receiver_lifetime_mut_self_is_rejected_as_mut() {
+        // `fn f(&'a mut self)`
+        assert_eq!(
+            classify_receiver_kinds(&["&", "'", "<ident>", "mut", "self"]),
+            Some((4, ReceiverClass::MutSelf))
+        );
+    }
+
+    #[test]
+    fn receiver_ref_to_non_self_is_not_a_receiver() {
+        // A leading `&` not followed by a self shape (not valid as a real
+        // first parameter, but the classifier must not misclassify it).
+        assert_eq!(classify_receiver_kinds(&["&", "<ident>"]), None);
     }
 
     fn sample() -> EntryJson {
