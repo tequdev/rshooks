@@ -62,10 +62,11 @@ silently drifting out of sync.
 
 `examples/80_governance` is the worked example — a Rust port of xahaud's
 genesis `govern`/`reward` pair, which on the real network are installed
-side by side, `Hooks[0] = govern` and `Hooks[1] = reward`. Before this
-model existed, the two lived in separate crates, each with its own copy of
-the state layout they both need (the reward rate/delay, and the seat
-table) — nothing but code review kept the two copies in sync. As one
+side by side, `Hooks[0] = govern` and `Hooks[1] = reward`. The two entries
+share a state layout (the reward rate/delay, and the seat table) that
+neither one exclusively owns — declaring them as one chain gives that
+shared layout a single Rust-level declaration, instead of leaving it to be
+duplicated (and potentially drift) across two independent crates. As one
 chain:
 
 ```rust,ignore

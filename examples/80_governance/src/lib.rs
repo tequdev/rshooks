@@ -266,9 +266,8 @@ impl Governance {
         // [`Governance::topic`]/[`Governance::layer`]'s own declared key/
         // name bytes, rather than those fields' typed accessors — see
         // [`keys`]'s module doc comment for why (`action_seat`/`setup`/
-        // `push_l1_seat_entries`'s combined call-site density measurably
-        // pushed this entry's nesting from 22 to 63 of the 32-level
-        // limit before this reversion).
+        // `push_l1_seat_entries`'s combined call-site density would push
+        // this entry's nesting from 22 to 63, over the 32-level limit).
         let member_count = member_count_or_setup(is_l1_table);
         let member_id = member_seat_of(&sender);
         if member_id < 0 {

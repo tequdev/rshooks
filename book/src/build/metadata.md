@@ -61,8 +61,7 @@ valid name against the actual protocol transaction set.
 
 ## Trigger forms
 
-The same three-and-a-half forms the pre-0.2 `metadata!` macro offered, now
-per entry, plus one new explicit catch-all:
+Each entry chooses one of four trigger forms:
 
 | form | wire output | meaning |
 |---|---|---|

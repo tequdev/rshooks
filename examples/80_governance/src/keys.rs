@@ -16,10 +16,10 @@
 //! Measured on this crate: extracting `govern`'s four top-level typed
 //! reads into their own `#[inline(never)]` helpers left nesting
 //! unchanged (a single function's own call-site count is what compounds,
-//! not cross-function fusion), and `action_seat`/`setup`/
-//! `push_l1_seat_entries`'s combined ~15 typed-accessor call sites alone
-//! pushed the `govern` entry from 22 to 63 (limit: 32) before this
-//! crate's own raw-call reversion for those paths. The *declaration*
+//! not cross-function fusion), and using typed accessors at
+//! `action_seat`/`setup`/`push_l1_seat_entries`'s combined ~15 call sites
+//! would push the `govern` entry's nesting from 22 to 63, over the
+//! 32-level limit; the raw calls above keep it at 22. The *declaration*
 //! (single key/value schema, one shared ABI, reused by both hooks) is the
 //! consolidation's real payoff either way — see [`crate::Governance`]'s
 //! doc comment; using raw calls at these call sites costs nothing there,

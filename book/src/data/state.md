@@ -107,9 +107,8 @@ second, independently-chosen value type left for a mismatch to hide in —
 passing the wrong value where this field's `V` is expected is a compile
 error.
 
-The attribute has exactly two forms — narrower than the pre-0.2
-`hook_state!` macro's six-form grammar, because the key's *shape* is now
-carried by an ordinary Rust type (`S::KeyArgs`, resolved through the field
+The attribute has exactly two forms, because the key's *shape* is carried
+by an ordinary Rust type (`S::KeyArgs`, resolved through the field
 generated for it) rather than needing its own bespoke struct declaration:
 
 | form | key shape | example |

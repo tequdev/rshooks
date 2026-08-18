@@ -111,7 +111,7 @@ State](../data/state.md).
 
 ## Build metadata
 
-There's no separate metadata macro in v0.2 — a chain's descriptive and
+There's no separate metadata macro — a chain's descriptive and
 SetHook-facing metadata is the `#[hooks(description = ...)]` struct
 attribute plus each entry's `#[hook(<index>, name = ..., on = ...,
 can_emit = ..., description = ...)]` arguments, listed under "Chain
