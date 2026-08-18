@@ -105,10 +105,7 @@ impl Serialize for EntrySidecarDocument {
             "HookCanEmit",
             &hook_mask(self.entry.hook_can_emit.as_deref()).map_err(serde::ser::Error::custom)?,
         )?;
-        map.serialize_entry(
-            "HookName",
-            &self.entry.hook_name.as_deref().map(utf8_hex),
-        )?;
+        map.serialize_entry("HookName", &self.entry.hook_name.as_deref().map(utf8_hex))?;
         map.serialize_entry("HookHash", &self.hook_hash)?;
         map.serialize_entry("WCE", &self.wce)?;
         map.serialize_entry("builder", &self.builder)?;
@@ -203,16 +200,20 @@ mod tests {
         assert_eq!(value["description"], "records a deposit");
         assert!(value["HookOn"].is_null());
         assert!(value.get("HookOnIncoming").is_none());
-        assert_eq!(value["HookCanEmit"], "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFBFFFFE");
-        assert_eq!(value["HookName"], "646570");
-        assert!(
-            value["HookHash"]
-                .as_str()
-                .is_some_and(|s| s.len() == 64)
+        assert_eq!(
+            value["HookCanEmit"],
+            "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFBFFFFE"
         );
+        assert_eq!(value["HookName"], "646570");
+        assert!(value["HookHash"].as_str().is_some_and(|s| s.len() == 64));
         assert_eq!(value["chain"]["struct"], "Vault");
         assert_eq!(value["chain"]["description"], "test chain");
-        assert!(value["chain"]["decls"]["state"].as_array().expect("state array").is_empty());
+        assert!(
+            value["chain"]["decls"]["state"]
+                .as_array()
+                .expect("state array")
+                .is_empty()
+        );
         assert_eq!(value["human"]["HookCanEmit"][0], "Payment");
         assert_eq!(value["human"]["HookName"], "dep");
     }

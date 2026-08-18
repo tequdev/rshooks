@@ -43,10 +43,7 @@ impl StateForeign {
             )
         };
 
-        let flag = match self
-            .enabled
-            .get_foreign(None, Some(target.as_ref()))
-        {
+        let flag = match self.enabled.get_foreign(None, Some(target.as_ref())) {
             Ok(Some(v)) => v,
             Ok(None) => rollback!(
                 b"state-foreign: not configured on target account",

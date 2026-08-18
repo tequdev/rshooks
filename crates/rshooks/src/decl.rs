@@ -313,12 +313,7 @@ where
     /// [`crate::api::state::state_foreign`]'s `Option` convention. Returns
     /// the number of bytes written.
     #[inline(always)]
-    pub fn set_foreign(
-        &self,
-        value: &V,
-        ns: Option<&[u8]>,
-        acct: Option<&[u8]>,
-    ) -> Result<usize> {
+    pub fn set_foreign(&self, value: &V, ns: Option<&[u8]>, acct: Option<&[u8]>) -> Result<usize> {
         crate::state::state_foreign_set_loose::<V>(&S::encode_key(&()), value, ns, acct)
     }
 }
@@ -404,12 +399,7 @@ impl<V: ToBytes + FromBytes> StateEntry<V> {
     /// [`crate::api::state::state_foreign`]'s `Option` convention. Returns
     /// the number of bytes written.
     #[inline(always)]
-    pub fn set_foreign(
-        &self,
-        value: &V,
-        ns: Option<&[u8]>,
-        acct: Option<&[u8]>,
-    ) -> Result<usize> {
+    pub fn set_foreign(&self, value: &V, ns: Option<&[u8]>, acct: Option<&[u8]>) -> Result<usize> {
         crate::state::state_foreign_set_loose::<V>(&self.key, value, ns, acct)
     }
 }

@@ -58,13 +58,18 @@ pub fn run(args: &ChainBuildArgs) -> Result<()> {
     };
 
     let cargo = find_cargo()?;
-    let plan = BuildPlan::resolve(&cargo, args.manifest_path.as_deref(), args.package.as_deref())?;
+    let plan = BuildPlan::resolve(
+        &cargo,
+        args.manifest_path.as_deref(),
+        args.package.as_deref(),
+    )?;
     let rustc = detect_rustc_version(&cargo);
 
-    let root = args
-        .out
-        .clone()
-        .unwrap_or_else(|| plan.target_directory.join("rshooks").join(&plan.package_name));
+    let root = args.out.clone().unwrap_or_else(|| {
+        plan.target_directory
+            .join("rshooks")
+            .join(&plan.package_name)
+    });
     std::fs::create_dir_all(&root)
         .with_context(|| format!("creating output root {}", root.display()))?;
     // Held for the *entire* chain build (discovery through publish), not
@@ -77,7 +82,8 @@ pub fn run(args: &ChainBuildArgs) -> Result<()> {
 
     println!("discovery build ({})", plan.package_name);
     let discovery_bytes = plan.run_discovery()?;
-    let discovery_carriers = carriers::extract_chain_carriers(&discovery_bytes, &plan.package_name)?;
+    let discovery_carriers =
+        carriers::extract_chain_carriers(&discovery_bytes, &plan.package_name)?;
 
     let mut entries_sorted = discovery_carriers.hooks.entries.clone();
     entries_sorted.sort_by_key(|e| e.index);
@@ -469,8 +475,12 @@ impl BuildPlan {
             "cfg(rshooks_entry,values(\"0\",\"1\",\"2\",\"3\",\"4\",\"5\",\"6\",\"7\",\"8\",\"9\"))",
         );
         let artifact = self.run_cargo_and_capture_artifact(cmd)?;
-        std::fs::read(&artifact)
-            .with_context(|| format!("reading entry {index} build artifact {}", artifact.display()))
+        std::fs::read(&artifact).with_context(|| {
+            format!(
+                "reading entry {index} build artifact {}",
+                artifact.display()
+            )
+        })
     }
 
     fn run_cargo_and_capture_artifact(&self, mut cmd: Command) -> Result<PathBuf> {
@@ -797,10 +807,7 @@ fn publish(
         write_staged_file(&staging_path.join(name), bytes)?;
     }
     write_staged_file(&staging_path.join("sethook.template.json"), template_bytes)?;
-    write_staged_file(
-        &staging_path.join("sethook.template.meta.json"),
-        meta_bytes,
-    )?;
+    write_staged_file(&staging_path.join("sethook.template.meta.json"), meta_bytes)?;
 
     let next_n = next_generation_number(root)?;
     let gen_name = format!("gen-{next_n}");
@@ -1106,12 +1113,18 @@ mod tests {
         #[cfg(unix)]
         {
             let resolved = std::fs::read_link(root.join("current")).expect("current is a symlink");
-            assert_eq!(resolved, PathBuf::from(gen2.file_name().expect("gen2 name")));
+            assert_eq!(
+                resolved,
+                PathBuf::from(gen2.file_name().expect("gen2 name"))
+            );
         }
         #[cfg(not(unix))]
         {
             let pointer = std::fs::read_to_string(root.join("current")).expect("current marker");
-            assert_eq!(pointer, gen2.file_name().expect("gen2 name").to_string_lossy());
+            assert_eq!(
+                pointer,
+                gen2.file_name().expect("gen2 name").to_string_lossy()
+            );
         }
 
         assert!(
@@ -1126,7 +1139,12 @@ mod tests {
         std::fs::remove_dir_all(&root).expect("cleanup");
     }
 
-    fn artifact_message(package_id: &str, target_name: &str, kind: &str, filenames: &[&str]) -> Value {
+    fn artifact_message(
+        package_id: &str,
+        target_name: &str,
+        kind: &str,
+        filenames: &[&str],
+    ) -> Value {
         serde_json::json!({
             "reason": "compiler-artifact",
             "package_id": package_id,
@@ -1138,17 +1156,35 @@ mod tests {
     #[test]
     fn select_wasm_artifact_picks_the_single_matching_candidate() {
         let messages = vec![
-            artifact_message("pkg", "vault", "lib", &["target/wasm32v1-none/release/vault.rlib"]),
-            artifact_message("pkg", "vault", "cdylib", &["target/wasm32v1-none/release/vault.wasm"]),
+            artifact_message(
+                "pkg",
+                "vault",
+                "lib",
+                &["target/wasm32v1-none/release/vault.rlib"],
+            ),
+            artifact_message(
+                "pkg",
+                "vault",
+                "cdylib",
+                &["target/wasm32v1-none/release/vault.wasm"],
+            ),
         ];
         let path =
             select_wasm_artifact("pkg", "vault", &messages).expect("selects the one candidate");
-        assert_eq!(path, PathBuf::from("target/wasm32v1-none/release/vault.wasm"));
+        assert_eq!(
+            path,
+            PathBuf::from("target/wasm32v1-none/release/vault.wasm")
+        );
     }
 
     #[test]
     fn select_wasm_artifact_rejects_no_candidates() {
-        let messages = vec![artifact_message("other-pkg", "vault", "cdylib", &["x.wasm"])];
+        let messages = vec![artifact_message(
+            "other-pkg",
+            "vault",
+            "cdylib",
+            &["x.wasm"],
+        )];
         let err = select_wasm_artifact("pkg", "vault", &messages).expect_err("must fail");
         assert!(format!("{err:#}").contains("did not produce a .wasm artifact"));
     }
@@ -1196,7 +1232,10 @@ mod tests {
             let _guard = StagingGuard::new(staging_path.clone()).expect("create staging");
             assert!(staging_path.exists());
         }
-        assert!(!staging_path.exists(), "uncommitted staging is removed on drop");
+        assert!(
+            !staging_path.exists(),
+            "uncommitted staging is removed on drop"
+        );
 
         let guard = StagingGuard::new(staging_path.clone()).expect("create staging");
         guard.commit();

@@ -139,9 +139,12 @@ pub fn build_template_json(
     for i in 0..=max_index {
         let found = declared.iter().find(|(index, _, _)| *index == i);
         let slot = match found {
-            Some((_, entry, wasm)) => {
-                HookSlot::Entry(Box::new(build_entry_template(entry, wasm, namespace, override_flag)?))
-            }
+            Some((_, entry, wasm)) => HookSlot::Entry(Box::new(build_entry_template(
+                entry,
+                wasm,
+                namespace,
+                override_flag,
+            )?)),
             None => HookSlot::Gap(GapMarker {}),
         };
         hooks.push(HooksArrayItem { hook: slot });
@@ -153,8 +156,7 @@ pub fn build_template_json(
         hooks,
     };
 
-    let mut bytes =
-        serde_json::to_vec_pretty(&doc).context("serializing sethook.template.json")?;
+    let mut bytes = serde_json::to_vec_pretty(&doc).context("serializing sethook.template.json")?;
     bytes.push(b'\n');
     Ok(bytes)
 }
@@ -408,15 +410,26 @@ mod tests {
         let wasm1 = b"BB".as_slice();
         let declared_with_gap: Vec<TemplateInput<'_>> = vec![(1, &e1, wasm1)];
 
-        let bytes = build_template_json(&declared, Some("rACCOUNT"), Some("00".repeat(32).as_str()), true)
-            .expect("template builds");
+        let bytes = build_template_json(
+            &declared,
+            Some("rACCOUNT"),
+            Some("00".repeat(32).as_str()),
+            true,
+        )
+        .expect("template builds");
         let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
         assert_eq!(value["Hooks"][0]["Hook"]["Flags"], 1);
         assert_eq!(value["Account"], "rACCOUNT");
 
-        let bytes = build_template_json(&declared_with_gap, None, None, true).expect("template builds");
+        let bytes =
+            build_template_json(&declared_with_gap, None, None, true).expect("template builds");
         let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
-        assert!(value["Hooks"][0]["Hook"].as_object().expect("gap object").is_empty());
+        assert!(
+            value["Hooks"][0]["Hook"]
+                .as_object()
+                .expect("gap object")
+                .is_empty()
+        );
         assert_eq!(value["Hooks"][1]["Hook"]["Flags"], 1);
     }
 
@@ -460,9 +473,11 @@ mod tests {
             hook_on_outgoing: Some(Vec::new()),
         };
 
-        for (on, expect_hook_on, expect_directional) in
-            [(omitted_on(), false, false), (all_on, true, false), (directional_on, false, true)]
-        {
+        for (on, expect_hook_on, expect_directional) in [
+            (omitted_on(), false, false),
+            (all_on, true, false),
+            (directional_on, false, true),
+        ] {
             let e = entry(0, "a", on, None);
             let wasm = b"AA".as_slice();
             let declared: Vec<TemplateInput<'_>> = vec![(0, &e, wasm)];
@@ -488,7 +503,10 @@ mod tests {
     #[test]
     fn required_amendments_covers_hooks_always_and_derived_fields_conditionally() {
         let plain = entry(0, "a", omitted_on(), None);
-        assert_eq!(required_amendments(std::slice::from_ref(&plain)), vec!["Hooks"]);
+        assert_eq!(
+            required_amendments(std::slice::from_ref(&plain)),
+            vec!["Hooks"]
+        );
 
         let mut named = plain.clone();
         named.hook_name = Some("dep".to_string());
@@ -505,11 +523,17 @@ mod tests {
             },
             None,
         );
-        assert_eq!(required_amendments(&[directional]), vec!["Hooks", "HookOnV2"]);
+        assert_eq!(
+            required_amendments(&[directional]),
+            vec!["Hooks", "HookOnV2"]
+        );
 
         let mut can_emit = plain;
         can_emit.hook_can_emit = Some(vec!["Payment".to_string()]);
-        assert_eq!(required_amendments(&[can_emit]), vec!["Hooks", "HookCanEmit"]);
+        assert_eq!(
+            required_amendments(&[can_emit]),
+            vec!["Hooks", "HookCanEmit"]
+        );
     }
 
     #[test]

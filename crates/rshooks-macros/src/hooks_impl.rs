@@ -166,7 +166,9 @@ fn parse_impl_item(item: TokenStream) -> Result<ParsedImpl, TokenStream> {
     i = i.wrapping_add(1);
 
     match tokens.get(i) {
-        Some(tt) if is_punct(tt, ':') && matches!(tokens.get(i.wrapping_add(1)), Some(t) if is_punct(t, ':')) =>
+        Some(tt)
+            if is_punct(tt, ':')
+                && matches!(tokens.get(i.wrapping_add(1)), Some(t) if is_punct(t, ':')) =>
         {
             return Err(err(
                 tt.span(),
@@ -506,11 +508,15 @@ fn inert_attr_args(
         }
         Some(other) => Err(err(
             other.span(),
-            &format!("#[{mac_name}]: expected parenthesized arguments, e.g. `#[{mac_name}(0, ..)]`"),
+            &format!(
+                "#[{mac_name}]: expected parenthesized arguments, e.g. `#[{mac_name}(0, ..)]`"
+            ),
         )),
         None => Err(err(
             attr_ident.span(),
-            &format!("#[{mac_name}]: expected parenthesized arguments, e.g. `#[{mac_name}(0, ..)]`"),
+            &format!(
+                "#[{mac_name}]: expected parenthesized arguments, e.g. `#[{mac_name}(0, ..)]`"
+            ),
         )),
     }
 }
@@ -563,7 +569,11 @@ fn scan_fn_qualifiers(tokens: &[TokenTree], start: usize) -> Option<FnQualifiers
     // At most 5 tokens are ever consulted: `const`/`async`, `unsafe`,
     // `extern`, its optional ABI literal, `fn`.
     let kinds: Vec<&'static str> = (0..5)
-        .map_while(|off| tokens.get(start.wrapping_add(off)).map(qualifier_token_kind))
+        .map_while(|off| {
+            tokens
+                .get(start.wrapping_add(off))
+                .map(qualifier_token_kind)
+        })
         .collect();
     let (offset, has_qualifiers) = classify_fn_qualifiers(&kinds)?;
     Some(FnQualifiers {
@@ -840,7 +850,10 @@ fn classify_receiver_kinds(kinds: &[&str]) -> Option<(usize, ReceiverClass)> {
 fn classify_receiver_prefix(kinds: &[&str]) -> (usize, bool, Option<(usize, ReceiverClass)>) {
     let mut attrs = 0usize;
     let mut has_cfg_attr = false;
-    while let Some(&kind) = kinds.get(attrs).filter(|&&k| k == "attr" || k == "cfg_attr") {
+    while let Some(&kind) = kinds
+        .get(attrs)
+        .filter(|&&k| k == "attr" || k == "cfg_attr")
+    {
         has_cfg_attr |= kind == "cfg_attr";
         attrs = attrs.wrapping_add(1);
     }
@@ -892,14 +905,17 @@ fn detect_receiver(
         if cfg_span.is_none() {
             cfg_span = cfg_ident;
         }
-        kinds.push(if cfg_ident.is_some() { "cfg_attr" } else { "attr" });
+        kinds.push(if cfg_ident.is_some() {
+            "cfg_attr"
+        } else {
+            "attr"
+        });
         raw = raw.wrapping_add(2);
     }
     // At most 5 more tokens are ever consulted for the self-shape itself:
     // `&`, `'`, a lifetime ident, `mut`, `self`.
-    kinds.extend(
-        (0..5).map_while(|off| tokens.get(raw.wrapping_add(off)).map(receiver_token_kind)),
-    );
+    kinds
+        .extend((0..5).map_while(|off| tokens.get(raw.wrapping_add(off)).map(receiver_token_kind)));
 
     let (_, has_cfg_attr, receiver) = classify_receiver_prefix(&kinds);
     let Some((self_offset, class)) = receiver else {
@@ -1547,7 +1563,9 @@ fn encode_entries_json(struct_name: &str, entries: &[EntryJson]) -> Result<Vec<u
         obj.insert("hook_fn".into(), e.hook_fn.clone().into());
         obj.insert(
             "cbak_fn".into(),
-            e.cbak_fn.clone().map_or(serde_json::Value::Null, Into::into),
+            e.cbak_fn
+                .clone()
+                .map_or(serde_json::Value::Null, Into::into),
         );
         obj.insert(
             "HookName".into(),
@@ -1637,10 +1655,7 @@ mod tests {
     #[test]
     fn empty_tx_entry_rejects_consecutive_commas_mid_list() {
         // `[Payment,,Invoke]`
-        assert_eq!(
-            first_empty_tx_entry(&[false, true, true, false]),
-            Some(2)
-        );
+        assert_eq!(first_empty_tx_entry(&[false, true, true, false]), Some(2));
     }
 
     #[test]

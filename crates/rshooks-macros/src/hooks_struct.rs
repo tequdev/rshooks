@@ -69,7 +69,12 @@ fn parse_struct_attr(attr: TokenStream) -> Result<Option<String>, TokenStream> {
                 if description.is_some() {
                     return Err(err(key_span, "#[hooks]: duplicate `description`"));
                 }
-                description = Some(parse_string_value(value.as_deref(), key_span, mac, "description")?);
+                description = Some(parse_string_value(
+                    value.as_deref(),
+                    key_span,
+                    mac,
+                    "description",
+                )?);
             }
             other => {
                 return Err(err(
@@ -115,8 +120,13 @@ struct ParsedField {
 }
 
 enum FieldDecl {
-    State { key: KeySpec },
-    Param { param_kind: ParamKind, spec: ParamSpecDecl },
+    State {
+        key: KeySpec,
+    },
+    Param {
+        param_kind: ParamKind,
+        spec: ParamSpecDecl,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -176,7 +186,12 @@ fn parse_struct_item(item: TokenStream) -> Result<ParsedStruct, TokenStream> {
             Some(g @ TokenTree::Group(group)) if group.delimiter() == Delimiter::Bracket => {
                 leading_attrs.push(g.clone());
             }
-            _ => return Err(err(Span::call_site(), "malformed attribute before `struct`")),
+            _ => {
+                return Err(err(
+                    Span::call_site(),
+                    "malformed attribute before `struct`",
+                ));
+            }
         }
         i = i.wrapping_add(2);
     }
@@ -321,7 +336,10 @@ fn parse_named_fields(stream: TokenStream) -> Result<Vec<ParsedField>, TokenStre
                     ));
                 }
                 Some(TokenTree::Ident(id))
-                    if matches!(id.to_string().as_str(), "state" | "hook_param" | "otxn_param") =>
+                    if matches!(
+                        id.to_string().as_str(),
+                        "state" | "hook_param" | "otxn_param"
+                    ) =>
                 {
                     if decl_attr.is_some() {
                         return Err(err(
@@ -386,7 +404,10 @@ fn parse_named_fields(stream: TokenStream) -> Result<Vec<ParsedField>, TokenStre
         match tokens.get(i) {
             Some(tt) if is_punct(tt, ':') => {}
             Some(other) => {
-                return Err(err(other.span(), "#[hooks]: expected `:` after the field name"));
+                return Err(err(
+                    other.span(),
+                    "#[hooks]: expected `:` after the field name",
+                ));
             }
             None => {
                 return Err(err(
@@ -450,8 +471,10 @@ fn parse_field_type<'a>(
     };
 
     let mut i = 0usize;
-    if is_punct(tokens.first().ok_or_else(|| bad_field_type(field_name))?, ':')
-        && matches!(tokens.get(1), Some(tt) if is_punct(tt, ':'))
+    if is_punct(
+        tokens.first().ok_or_else(|| bad_field_type(field_name))?,
+        ':',
+    ) && matches!(tokens.get(1), Some(tt) if is_punct(tt, ':'))
     {
         i = 2;
     }
@@ -559,7 +582,10 @@ fn parse_field_decl(
                         ));
                     }
                     let Some(expr) = value else {
-                        return Err(err(key_span, "#[state]: `key` requires a value: `key = <expr>`"));
+                        return Err(err(
+                            key_span,
+                            "#[state]: `key` requires a value: `key = <expr>`",
+                        ));
                     };
                     key = Some(KeySpec::Const { expr });
                 }
@@ -941,11 +967,9 @@ fn field_marker_and_impls(
         }
         FieldDecl::Param { spec, .. } => {
             let (name_args, with_name_body, extra) = match &spec.name {
-                NameSpec::Literal { literal } => (
-                    "()".to_string(),
-                    format!("f({})", literal),
-                    String::new(),
-                ),
+                NameSpec::Literal { literal } => {
+                    ("()".to_string(), format!("f({})", literal), String::new())
+                }
                 NameSpec::Family { ty } => {
                     let ty_text = tokens_to_string(ty);
                     let body = format!(
@@ -1209,7 +1233,10 @@ mod tests {
             encode_chain_json("Vault", Some("a \"quoted\" desc"), &[sample_entry()]).expect("json");
         let bytes2 =
             encode_chain_json("Vault", Some("a \"quoted\" desc"), &[sample_entry()]).expect("json");
-        assert_eq!(bytes1, bytes2, "chain JSON generation must be deterministic");
+        assert_eq!(
+            bytes1, bytes2,
+            "chain JSON generation must be deterministic"
+        );
     }
 
     #[test]
@@ -1233,8 +1260,7 @@ mod tests {
     fn chain_json_three_state_can_emit_style_presence() {
         // Omitted description -> JSON null, not absent and not "".
         let bytes = encode_chain_json("Vault", None, &[]).expect("json");
-        let value: serde_json::Value =
-            serde_json::from_slice(&bytes).expect("valid json");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
         assert!(value["description"].is_null());
         assert_eq!(value["decls"]["state"], serde_json::json!([]));
     }

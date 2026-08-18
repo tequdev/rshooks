@@ -421,8 +421,14 @@ impl Governance {
             let Some(value) = topic_data.get(padding..) else {
                 GovernError::AssertionFailed.nope(b"govern: bad topic padding");
             };
-            if txn::emit_l1_vote_forward(&hook_accid, &GENESIS_ACCOUNT, t, n, topic_size as u8, value)
-            {
+            if txn::emit_l1_vote_forward(
+                &hook_accid,
+                &GENESIS_ACCOUNT,
+                t,
+                n,
+                topic_size as u8,
+                value,
+            ) {
                 done(b"Governance: Successfully emitted L1 vote.");
             }
             GovernError::EmitFailed.nope(b"Governance: L1 vote emission failed.");

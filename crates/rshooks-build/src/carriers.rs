@@ -187,7 +187,8 @@ pub fn extract_chain_carriers(wasm: &[u8], crate_label: &str) -> Result<ChainCar
                     bail!("#[hooks] struct carrier export must refer to a function");
                 }
                 chain_raw = Some(
-                    metadata::decode_upper_hex(encoded).context("decoding #[hooks] struct carrier")?,
+                    metadata::decode_upper_hex(encoded)
+                        .context("decoding #[hooks] struct carrier")?,
                 );
                 continue;
             }
@@ -198,7 +199,8 @@ pub fn extract_chain_carriers(wasm: &[u8], crate_label: &str) -> Result<ChainCar
                     bail!("#[hooks] impl carrier export must refer to a function");
                 }
                 hooks_raw = Some(
-                    metadata::decode_upper_hex(encoded).context("decoding #[hooks] impl carrier")?,
+                    metadata::decode_upper_hex(encoded)
+                        .context("decoding #[hooks] impl carrier")?,
                 );
             }
         }
@@ -240,7 +242,8 @@ pub fn extract_chain_carriers(wasm: &[u8], crate_label: &str) -> Result<ChainCar
 
     validate_carrier_identity(&chain, &hooks)
         .with_context(|| format!("validating #[hooks] carrier identity in {crate_label}"))?;
-    validate_entries(&hooks).with_context(|| format!("validating #[hooks] chain in {crate_label}"))?;
+    validate_entries(&hooks)
+        .with_context(|| format!("validating #[hooks] chain in {crate_label}"))?;
 
     Ok(ChainCarriers {
         chain,
@@ -336,10 +339,12 @@ fn validate_on(entry: &EntryDecl) -> Result<()> {
     match on.form.as_str() {
         "omitted" | "all" => Ok(()),
         "list" => {
-            let list = on
-                .hook_on
-                .as_deref()
-                .with_context(|| format!("{}: `on` form \"list\" must carry `HookOn`", context_label()))?;
+            let list = on.hook_on.as_deref().with_context(|| {
+                format!(
+                    "{}: `on` form \"list\" must carry `HookOn`",
+                    context_label()
+                )
+            })?;
             metadata::validate_transaction_types("HookOn", Some(list)).with_context(context_label)
         }
         "directional" => {
@@ -494,7 +499,8 @@ mod tests {
 
     #[test]
     fn extracts_both_v2_carriers_from_synthetic_wasm() {
-        let on = r#"{"form":"list","HookOn":["Payment"],"HookOnIncoming":null,"HookOnOutgoing":null}"#;
+        let on =
+            r#"{"form":"list","HookOn":["Payment"],"HookOnIncoming":null,"HookOnOutgoing":null}"#;
         let wasm = wasm_with_carriers(CHAIN_JSON, &entries_json(on, "null"));
 
         let carriers = extract_chain_carriers(&wasm, "vault").expect("extraction succeeds");
@@ -634,7 +640,10 @@ mod tests {
             hook_on_outgoing: None,
         };
         let resolved = resolve_trigger_masks(&all).expect("all resolves");
-        assert_eq!(resolved.hook_on.as_deref(), Some(hook_on_all_mask().as_str()));
+        assert_eq!(
+            resolved.hook_on.as_deref(),
+            Some(hook_on_all_mask().as_str())
+        );
 
         let list = OnDecl {
             form: "list".to_string(),

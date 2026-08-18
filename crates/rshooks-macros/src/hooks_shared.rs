@@ -417,7 +417,10 @@ mod tests {
         // must NOT stop at the inner `,` (index 3): depth is 1 there.
         use AngleTok::{Gt, Lt, Other};
         let depths = run(&[Other, Lt, Other, Other, Other, Gt]);
-        assert_eq!(depths[3], 1, "comma nested inside `<..>` must not read as depth 0");
+        assert_eq!(
+            depths[3], 1,
+            "comma nested inside `<..>` must not read as depth 0"
+        );
         assert_eq!(
             *depths.last().expect("non-empty depths"),
             0,
@@ -469,7 +472,10 @@ mod tests {
         // `Vec<Vec<T>>` — two real opens, then a `>>` run closing both.
         use AngleTok::{Gt, Lt, Other};
         let depths = run(&[Lt, Other, Lt, Other, Gt, Gt]);
-        assert_eq!(depths[3], 2, "still inside both open levels before any close");
+        assert_eq!(
+            depths[3], 2,
+            "still inside both open levels before any close"
+        );
         assert_eq!(depths[4], 1);
         assert_eq!(depths[5], 0);
     }
