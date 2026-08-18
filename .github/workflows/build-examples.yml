@@ -13,12 +13,14 @@ name: Build examples (reusable)
 # is the only case that still touches this file — see the `discover` job).
 #
 # Jobs (all independent except `build`, which needs the other two):
-#   discover    - lists examples/*/Cargo.toml and emits the build matrix
-#   build-tool  - builds `rshooks-build` once (release) and shares the
-#                 binary via artifact, so it isn't rebuilt per example
-#   clippy      - lints the whole examples workspace once (not per-example)
-#   build       - matrix job, one leg per example, fail-fast: false so one
-#                 example failing never blocks the others from completing
+#   discover           - lists examples/*/Cargo.toml and emits the build matrix
+#   build-tool         - builds `rshooks-build` once (release) and shares the
+#                        binary via artifact, so it isn't rebuilt per example
+#   clippy             - lints the whole examples workspace once (not per-example)
+#   testenv-parity     - continuous zero-wasm-impact probe (design doc §7)
+#   unit-tests-examples - off-chain unit tests (rshooks-testenv harness)
+#   build              - matrix job, one leg per example, fail-fast: false so one
+#                        example failing never blocks the others from completing
 #
 # mise.toml's `build-examples` task (the local equivalent) is intentionally
 # NOT generated from this same discovery logic — it's plain shell so it
@@ -114,6 +116,50 @@ jobs:
         # so the implicit test-profile target can never build for it.
         working-directory: examples
         run: cargo clippy --workspace --lib --target wasm32v1-none -- -D warnings
+
+  # Continuous zero-wasm-impact check (design doc
+  # .claude/design/TESTENV_DESIGN.md §7): builds every example twice at
+  # this same commit — as-committed vs. with all off-chain-unit-test wiring
+  # mechanically stripped — and diffs every produced wasm plus its WCE/
+  # size/nesting numbers. Catches any future leak of test machinery into a
+  # shipped artifact; independent of the `build`/`discover` matrix above
+  # (it drives `rshooks build` itself via scripts/probe-testenv-parity.sh,
+  # not the shared binary those jobs upload).
+  testenv-parity:
+    name: Testenv parity probe (as-committed == test-wiring-stripped)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain (per rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build examples twice and diff wasm + WCE/size/nesting
+        run: bash scripts/probe-testenv-parity.sh
+
+  # Off-chain unit tests (rshooks-testenv harness): plain `cargo test`, no
+  # wasm build, no node. Exercises both documented test layouts (see the
+  # book's "Testing hooks" chapter) — 02_state-counter's tests/ integration
+  # test and 10_emit-txn's in-crate #[cfg(test)] module — plus the harness
+  # crate's own test suite.
+  unit-tests-examples:
+    name: Off-chain unit tests (rshooks-testenv)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain (per rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo test -p rshooks-testenv (root workspace)
+        run: cargo test -p rshooks-testenv
+
+      - name: cargo test (examples workspace, testenv-wired examples)
+        run: cargo test --manifest-path examples/Cargo.toml -p state-counter -p emit-txn
 
   build:
     name: ${{ matrix.name }}
