@@ -80,7 +80,8 @@ r4 §5.7 が self を却下した理由と、その再評価:
 |---|---|
 | なし(現行) | 引き続き合法 |
 | `&self` | 合法(新規) |
-| `self` / `mut self` / `&mut self` / `&'a self` / `self: T` 型注釈付き | **エラー**(専用診断。§6.2) |
+| `self` / `mut self` / `&'a self` / `self: T` 型注釈付き | **エラー**(一般診断: "use `&self`"。§6.2) |
+| `&mut self` / `&'a mut self` | **エラー**(専用診断: 可変性。§6.2) |
 
 `self`(値渡し)は ZST なので技術的には等価だが、**教えることを 1 つに絞る**ため
 `&self` のみとする。
@@ -110,12 +111,12 @@ pub extern "C" fn __rshooks_hook_sel_0(_reserved: u32) -> i64 { super::Vault::de
 ### 3.3 cbak・ヘルパー
 
 - `#[cbak(i)]` も同じ規則(receiver なし / `&self` の二択)。
-- **annotated impl 内のヘルパー関数(属性なし)にも `&self` を許可する**。
-  現状は self なしヘルパーのみ通過し、`&self` ヘルパーは拒否される
-  (実測プローブで確認。エントリ用 receiver 検査がヘルパーにも及んでいる)。
-  採用時にヘルパーの receiver 検査を緩和する(ヘルパーは `&self` /
-  receiver なしの両方可。`&mut self` はヘルパーでも拒否 — ZST に対して
-  無意味であり、可変性の誤解を招くだけのため)。
+- **annotated impl 内のヘルパー関数(属性なし)は `&self` を受理する(実装済み)**。
+  ヘルパーは receiver なし / `&self` の両方が合法。`&mut self`(および
+  `self` / `mut self` / `&'a self` / `self: T` 型注釈付き)はヘルパーでも
+  拒否する — ZST に対して無意味であり、可変性の誤解を招くだけのため。
+  エントリ用の receiver 分類(§3.1/§6.2)とヘルパーの分類は同じ判定ロジック
+  (`hooks_impl.rs` の `classify_receiver_kinds`/`detect_receiver`)を共有する。
 - impl 外の自由関数・別モジュールからのアクセスは従来どおり static
   (`Vault.deposits`)を使う。static は今後も公開インターフェースの一部である。
 
@@ -205,10 +206,12 @@ discovery + 選択ビルド + clean/flatten/unnest/guard/validate)で、
 
 ### 6.2 診断(案)
 
-- `self` / `mut self` / 型注釈付き: 「use `&self` — hook entrypoints receive
-  the chain declaration by shared reference (it is zero-sized)」
-- `&mut self`: 「chain handles are zero-sized and immutable; ledger state is
-  accessed through the handles, not by mutating the struct — use `&self`」
+- `self` / `mut self` / `&'a self` / 型注釈付き: 「use `&self` — hook
+  entrypoints receive the chain declaration by shared reference (it is
+  zero-sized)」
+- `&mut self` / `&'a mut self`: 「chain handles are zero-sized and immutable;
+  ledger state is accessed through the handles, not by mutating the struct
+  — use `&self`」
 - 文言確定時に既存の「stateless associated functions」文言を置換。
 
 ### 6.3 trybuild

@@ -103,12 +103,14 @@ paths in this crate (`setup`, `action_seat`, `push_l1_seat_entries`, and
 `.set()`/`.at()` accessors** — they read/write the identical key/name
 bytes through the raw `state`/`state_set`/`otxn_param`/`hook_param_exact`
 API instead.
-`reward_rate`/`reward_delay` are the exception: those *do* use the typed
-`.reward_rate`/`.reward_delay` accessors, at their 4 total call sites (2
-writes in governance's setup, 2 reads in `reward`). `reward` declares a
-`&self` receiver and reads them as `self.reward_rate`/`self.reward_delay`
-— `govern`'s dense paths have no field accesses of their own (see above)
-and stay receiver-less.
+`reward_rate`/`reward_delay` are a partial exception: `reward` *does* use
+the typed `.reward_rate`/`.reward_delay` accessors, at their only 2 call
+sites — both reads, `self.reward_rate`/`self.reward_delay` under
+`reward`'s `&self` receiver. Governance's own setup still writes the same
+`"RR"`/`"RD"` keys through raw `state_set` (`setup_initial_reward_rate_and_delay`
+in `src/lib.rs`), for the same call-site-density reason as `setup`'s other
+raw calls above — `govern`'s dense paths have no field accesses of their
+own (see above) and stay receiver-less.
 
 This is a real, measured build constraint, not a style preference. Every
 layer of the typed accessor chain (`State::at` -> `StateEntry::get` ->

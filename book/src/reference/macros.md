@@ -24,7 +24,7 @@ An entry function, and a non-attributed helper declared inside the same
 |---|---|
 | none (`fn main() -> i64`) | yes — the pre-existing, still-canonical form for a chain with nothing declared to read |
 | `&self` (`fn main(&self) -> i64`) | yes — receives the chain's single zero-sized static by shared reference; reach its fields as `self.<field>` |
-| `self` / `mut self` / `self: T` | **no** — diagnostic: "use `&self` — hook entrypoints receive the chain declaration by shared reference (it is zero-sized)" |
+| `self` / `mut self` / `&'a self` / `self: T` | **no** — diagnostic: "use `&self` — hook entrypoints receive the chain declaration by shared reference (it is zero-sized)" |
 | `&mut self` / `&'a mut self` | **no** — diagnostic: "chain handles are zero-sized and immutable; ledger state is accessed through the handles, not by mutating the struct — use `&self`" |
 
 Both accepted forms measure byte-identical wasm; the choice is style, not

@@ -70,13 +70,14 @@ nothing else about the declaration changes.
 
 This is worth stating plainly, because Rust's struct/`impl` syntax normally
 implies an object with methods that take `self`. Here, *you* never
-construct one: a `#[hooks]` struct is never built by your own code. Instead
-the macro generates its own single, zero-sized instance for you — a
-`static` named the same as the struct (`static AcceptAll: AcceptAll`),
-existing purely so its fields' declared state/parameters have something to
-hang accessor methods off. `AcceptAll` declares no fields, so there's
-nothing on it worth reaching, which is why its entry above takes no
-receiver at all.
+construct one. For a struct with declared fields, the macro generates its
+own single, zero-sized instance for you — a `static` named the same as the
+struct (`static Vault: Vault`) — existing purely so its fields' declared
+state/parameters have something to hang accessor methods off. `AcceptAll`
+is a unit struct (`struct AcceptAll;`) with no fields to hang anything off,
+so no `static` is generated for it at all; `AcceptAll` the identifier
+already names its own unit value (Rust gives every unit struct exactly one,
+for free), which is why its entry above takes no receiver at all.
 
 Once a chain *does* declare fields (see [Hook State](../data/state.md)), an
 entry can declare `&self` to receive that one static by shared reference,

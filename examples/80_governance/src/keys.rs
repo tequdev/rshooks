@@ -24,11 +24,14 @@
 //! consolidation's real payoff either way — see [`crate::Governance`]'s
 //! doc comment; using raw calls at these call sites costs nothing there,
 //! since they still use the field's own declared key bytes.
-//! `RR`/`RD` (governance's setup writes, reward's reads — 4 call sites
-//! total) stay on the typed [`crate::Governance::reward_rate`]/
+//! `RR`/`RD` reads in `reward` (2 call sites total — `reward` is the only
+//! caller) stay on the typed [`crate::Governance::reward_rate`]/
 //! [`crate::Governance::reward_delay`] accessors: low enough call-site
 //! density to fit comfortably, and the clearest demonstration of the
-//! "governance writes, reward reads, one declaration" story.
+//! "one declaration, shared by both hooks" story. Governance's own setup
+//! writes to the same keys still go through raw `state_set` (see
+//! `setup_initial_reward_rate_and_delay` in `src/lib.rs`), for the same
+//! call-site-density reason as the raw calls above.
 //!
 //! Vote/vote-count keys were never candidates for the typed field form at
 //! all, regardless of budget: a vote-count key embeds the topic's own

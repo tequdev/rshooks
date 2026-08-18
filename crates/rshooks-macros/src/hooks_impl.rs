@@ -52,6 +52,14 @@ const SELF_RECEIVER_MSG: &str = "use `&self` — hook entrypoints receive the ch
 const MUT_SELF_RECEIVER_MSG: &str = "chain handles are zero-sized and immutable; ledger state \
                                       is accessed through the handles, not by mutating the \
                                       struct — use `&self`";
+/// HOOKS_SELF_RECEIVER_DESIGN.md §3.3 diagnostic for `#[cfg]`/`#[cfg_attr]`
+/// on a `self` receiver — same rationale as the entry-level cfg ban in
+/// [`parse_impl_body`] (a conditional shape would diverge from what
+/// actually compiles), applied here because the receiver's class (and, for
+/// an entry, the has_self-driven discovery/selected wrapper it feeds) is
+/// decided once at macro-expansion time, before `cfg` resolves.
+const RECEIVER_CFG_MSG: &str =
+    "#[hooks]: `#[cfg]`/`#[cfg_attr]` are not allowed on a `self` receiver";
 
 /// Entry point for `#[hooks]` applied to an `impl` item, dispatched from
 /// [`crate::hooks`].
@@ -669,7 +677,7 @@ fn scan_fn_item(tokens: &[TokenTree], start: usize) -> Result<ScannedFn, TokenSt
     i = i.wrapping_add(1);
 
     let args_tokens: Vec<TokenTree> = args_group.stream().into_iter().collect();
-    let detected_receiver = detect_receiver(&args_tokens);
+    let detected_receiver = detect_receiver(&args_tokens)?;
     let receiver = detected_receiver.map(|(class, span, _)| (class, span));
     let receiver_consumed = detected_receiver.map_or(0, |(_, _, consumed)| consumed);
     let mut extra_args: Vec<TokenTree> = args_tokens
@@ -816,25 +824,98 @@ fn classify_receiver_kinds(kinds: &[&str]) -> Option<(usize, ReceiverClass)> {
     }
 }
 
+/// Extends [`classify_receiver_kinds`] to look past zero or more leading
+/// attribute "kinds" — one `"attr"` or `"cfg_attr"` tag per `#[...]` pair,
+/// as built by [`detect_receiver`] — before classifying the self-shape
+/// that follows. HOOKS_SELF_RECEIVER_DESIGN.md §3.3: `#[allow(unused)]
+/// &self` must classify exactly like bare `&self` (R1 of the self-receiver
+/// review — the old code classified from token 0 unconditionally, so an
+/// attributed receiver on an entry read as "no receiver" at all, and on a
+/// helper it silently bypassed the `&mut self` rejection). Returns the
+/// number of leading attribute kinds skipped, whether any of them was
+/// `"cfg_attr"`, and the self-shape classification of what followed —
+/// `None` in the third slot means no receiver shape follows the attributes
+/// (including the no-attributes case, which behaves exactly like
+/// [`classify_receiver_kinds`] alone).
+fn classify_receiver_prefix(kinds: &[&str]) -> (usize, bool, Option<(usize, ReceiverClass)>) {
+    let mut attrs = 0usize;
+    let mut has_cfg_attr = false;
+    while let Some(&kind) = kinds.get(attrs).filter(|&&k| k == "attr" || k == "cfg_attr") {
+        has_cfg_attr |= kind == "cfg_attr";
+        attrs = attrs.wrapping_add(1);
+    }
+    let receiver = classify_receiver_kinds(kinds.get(attrs..).unwrap_or_default());
+    (attrs, has_cfg_attr, receiver)
+}
+
 /// Looks ahead from the start of an argument-list token run for a self
 /// receiver (`self`, `mut self`, `&self`, `&mut self`, `&'a self`,
 /// `&'a mut self`, or `self: T`) — the receiver shapes rustc itself
-/// accepts, classified per [`ReceiverClass`]. Returns the receiver's class,
-/// its `self` token's span, and the number of leading tokens it consumes
-/// (so the caller can locate any further parameters). `None` means no
-/// receiver was found (an ordinary first parameter, or an empty argument
-/// list).
-fn detect_receiver(tokens: &[TokenTree]) -> Option<(ReceiverClass, Span, usize)> {
-    // At most 5 tokens are ever consulted: `&`, `'`, a lifetime ident,
-    // `mut`, `self`.
-    let kinds: Vec<&'static str> = (0..5)
-        .map_while(|off| tokens.get(off).map(receiver_token_kind))
-        .collect();
-    let (offset, class) = classify_receiver_kinds(&kinds)?;
+/// accepts, classified per [`ReceiverClass`]. Leading outer attributes
+/// (`#[...]` pairs, e.g. `#[allow(unused)]`) are skipped before
+/// classification — see [`classify_receiver_prefix`] for the
+/// `TokenTree`-free decision core this follows. A `#[cfg]`/`#[cfg_attr]`
+/// attribute found on an actual receiver is rejected outright
+/// ([`RECEIVER_CFG_MSG`]): other attributes pass through untouched.
+///
+/// Returns the receiver's class, its `self` token's span, and the number
+/// of leading tokens it consumes — any skipped attributes included — so
+/// the caller can locate any further parameters. `Ok(None)` means no
+/// receiver was found at all: an ordinary first parameter (possibly itself
+/// attributed — those attributes are left for the caller to re-emit
+/// untouched, since they weren't on a receiver), or an empty argument
+/// list.
+fn detect_receiver(
+    tokens: &[TokenTree],
+) -> Result<Option<(ReceiverClass, Span, usize)>, TokenStream> {
+    let mut raw = 0usize;
+    let mut kinds: Vec<&'static str> = Vec::new();
+    let mut cfg_span: Option<Span> = None;
+    while let Some(tt) = tokens.get(raw) {
+        if !is_punct(tt, '#') {
+            break;
+        }
+        let group = match tokens.get(raw.wrapping_add(1)) {
+            Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Bracket => g,
+            // Not a well-formed `#[...]` attribute — leave it for the
+            // ordinary parameter/receiver classification below to report,
+            // exactly as before this attribute-skipping lookahead existed.
+            _ => break,
+        };
+        let inner: Vec<TokenTree> = group.stream().into_iter().collect();
+        let cfg_ident = match inner.first() {
+            Some(TokenTree::Ident(id)) if matches!(id.to_string().as_str(), "cfg" | "cfg_attr") => {
+                Some(id.span())
+            }
+            _ => None,
+        };
+        if cfg_span.is_none() {
+            cfg_span = cfg_ident;
+        }
+        kinds.push(if cfg_ident.is_some() { "cfg_attr" } else { "attr" });
+        raw = raw.wrapping_add(2);
+    }
+    // At most 5 more tokens are ever consulted for the self-shape itself:
+    // `&`, `'`, a lifetime ident, `mut`, `self`.
+    kinds.extend(
+        (0..5).map_while(|off| tokens.get(raw.wrapping_add(off)).map(receiver_token_kind)),
+    );
+
+    let (_, has_cfg_attr, receiver) = classify_receiver_prefix(&kinds);
+    let Some((self_offset, class)) = receiver else {
+        return Ok(None);
+    };
+    if has_cfg_attr {
+        return Err(err(
+            cfg_span.unwrap_or_else(Span::call_site),
+            RECEIVER_CFG_MSG,
+        ));
+    }
+    let offset = raw.wrapping_add(self_offset);
     let span = tokens
         .get(offset)
         .map_or_else(Span::call_site, TokenTree::span);
-    Some((class, span, offset.wrapping_add(1)))
+    Ok(Some((class, span, offset.wrapping_add(1))))
 }
 
 /// Consumes an associated `const` item (`const NAME: Ty = expr;`) starting
@@ -1734,6 +1815,73 @@ mod tests {
         // A leading `&` not followed by a self shape (not valid as a real
         // first parameter, but the classifier must not misclassify it).
         assert_eq!(classify_receiver_kinds(&["&", "<ident>"]), None);
+    }
+
+    // --- `classify_receiver_prefix` (HOOKS_SELF_RECEIVER_DESIGN.md §3.3, R1) ---
+
+    #[test]
+    fn receiver_prefix_plain_forms_unchanged() {
+        // `fn f(&self)` — no leading attribute at all.
+        assert_eq!(
+            classify_receiver_prefix(&["&", "self"]),
+            (0, false, Some((1, ReceiverClass::SharedSelf)))
+        );
+    }
+
+    #[test]
+    fn receiver_prefix_attributed_shared_self() {
+        // `fn f(#[allow(unused)] &self)`
+        assert_eq!(
+            classify_receiver_prefix(&["attr", "&", "self"]),
+            (1, false, Some((1, ReceiverClass::SharedSelf)))
+        );
+    }
+
+    #[test]
+    fn receiver_prefix_attributed_mut_self() {
+        // `fn f(#[allow(unused)] &mut self)` — must still hit the MutSelf
+        // rejection, not silently classify as "no receiver".
+        assert_eq!(
+            classify_receiver_prefix(&["attr", "&", "mut", "self"]),
+            (1, false, Some((2, ReceiverClass::MutSelf)))
+        );
+    }
+
+    #[test]
+    fn receiver_prefix_multiple_attributes_are_all_skipped() {
+        // `fn f(#[allow(unused)] #[doc = "x"] &self)`
+        assert_eq!(
+            classify_receiver_prefix(&["attr", "attr", "&", "self"]),
+            (2, false, Some((1, ReceiverClass::SharedSelf)))
+        );
+    }
+
+    #[test]
+    fn receiver_prefix_cfg_attr_on_receiver_is_flagged() {
+        // `fn f(#[cfg(feature = "x")] &self)` — the caller rejects this;
+        // the classifier just surfaces the fact for it.
+        assert_eq!(
+            classify_receiver_prefix(&["cfg_attr", "&", "self"]),
+            (1, true, Some((1, ReceiverClass::SharedSelf)))
+        );
+    }
+
+    #[test]
+    fn receiver_prefix_cfg_attr_among_others_is_still_flagged() {
+        assert_eq!(
+            classify_receiver_prefix(&["attr", "cfg_attr", "&", "mut", "self"]),
+            (2, true, Some((2, ReceiverClass::MutSelf)))
+        );
+    }
+
+    #[test]
+    fn receiver_prefix_attributed_ordinary_param_is_not_a_receiver() {
+        // `fn f(#[allow(unused)] x: i64)` — attributes precede a param
+        // that isn't `self` at all; not a receiver, cfg-ness irrelevant.
+        assert_eq!(
+            classify_receiver_prefix(&["attr", "<ident>", "<other>"]),
+            (1, false, None)
+        );
     }
 
     fn sample() -> EntryJson {
