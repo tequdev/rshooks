@@ -27,7 +27,7 @@ the same chain can be named differently, the same, or not at all.
 
 ```rust,ignore
 #[hook(0, name = "govern", on = [Invoke], can_emit = [Invoke, SetHook], description = "Governance state machine")]
-fn govern() -> i64 { /* ... */ }
+fn govern(&self) -> i64 { /* ... */ }
 ```
 
 - **Leading positional argument, `0..=9`** — required, no default. This

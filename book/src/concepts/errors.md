@@ -134,7 +134,7 @@ call site. The hook body then runs a short chain of checks, calling
 #[hooks]
 impl Errors {
     #[hook(0, on = [Payment])]
-    fn main() -> i64 {
+    fn main(&self) -> i64 {
         if otxn_field_typed(sfAccount).is_err() {
             RejectReason::BadAccountField.rollback();
         }

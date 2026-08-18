@@ -11,10 +11,10 @@ Before the code, two concepts this whole book builds on:
 - **The struct is a declaration vessel, not a runtime instance.** A
   `#[hooks]` struct never gets constructed and never holds real data at
   runtime — it exists so a name, its fields, and the Hook entries that use
-  them can all be declared in one place. `AcceptAll` declares no fields, so
-  its entry has nothing to receive and takes no receiver at all — later
-  chapters, once a chain has declared fields worth reading, show the `&self`
-  form an entry uses to reach them.
+  them can all be declared in one place. Every entry receives this chain
+  declaration by shared reference (`&self`), even `AcceptAll`, which
+  declares no fields — later chapters, once a chain has declared fields
+  worth reading, show how an entry reaches them as `self.<field>`.
 - **Every Hook entry has an explicit index.** The index is this crate's
   Hook's position in the account's `Hooks` array (the one a `SetHook`
   transaction installs into) — position `0`, `1`, and so on, up to `9`.
@@ -37,7 +37,7 @@ pub struct AcceptAll;
 impl AcceptAll {
     /// Accepts every triggering transaction.
     #[hook(0, name = "accept", on = [Invoke])]
-    fn main() -> i64 {
+    fn main(&self) -> i64 {
         trace!(b"accept-all: accepting transaction");
         accept!()
     }
@@ -93,25 +93,25 @@ declares one Hook entry:
   Omitting `on` entirely is also legal — see [Per-Hook
   Attributes](../build/metadata.md) for what that means.
 
-The annotated function itself is a plain, argument-less associated function
-returning `i64`. `AcceptAll` declares no fields, so there's nothing for a
-receiver to reach — omitting it entirely is the natural, minimal form for a
-Hook like this one. `#[hooks]` expands it into the wasm export the Hook
-host requires:
+The annotated function itself is an associated function taking `&self` and
+returning `i64`. `AcceptAll` declares no fields, so `main` never reaches
+through `self` here, but the receiver is still required — `#[hooks]`
+expands it into the wasm export the Hook host requires:
 
 ```rust,ignore
 #[unsafe(no_mangle)]
 pub extern "C" fn hook(_reserved: u32) -> i64 {
-    AcceptAll::main()
+    AcceptAll::main(&AcceptAll)
 }
 ```
 
 The function's own name (`main` here) is just a convention; what matters is
-the `hook` export it produces for this entry's build. A hook entry may
-optionally take `&self` — the one receiver form `#[hooks]` accepts, covered
-once a chain has fields worth reaching in [Hook State](../data/state.md) —
-but any other receiver shape (`self`, `mut self`, `&mut self`, `self: T`)
-or a non-`i64` return type is rejected at compile time with a pointed error
+the `hook` export it produces for this entry's build. `&self` is the one
+receiver form `#[hooks]` accepts on an entry — no lifetime, not `mut` — and
+it's how an entry reaches a chain's declared fields once there are any to
+reach, covered in [Hook State](../data/state.md). Any other receiver shape
+(`self`, `mut self`, `&mut self`, `self: T`), a missing receiver, or a
+non-`i64` return type is rejected at compile time with a pointed error
 rather than a malformed export. Use `#[cbak(0)]` the same way, on the same
 index, to declare the optional settlement callback for this entry.
 

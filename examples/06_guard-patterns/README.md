@@ -114,12 +114,10 @@ even though nothing here will stop you if you don't.
 
 Numbers from this repo's own `rshooks build` output (they'll drift a
 little across compiler and `rshooks-build` pipeline versions — these are
-current-toolchain measurements, not a guarantee — the v0.2 `#[hooks]`
-per-index build pipeline in particular compiles each entry in isolation
-via a dedicated `--cfg`-selected build, which changed these absolute
-numbers from earlier measurements taken under the v0.0.x single-wasm
-pipeline; the qualitative story below is unaffected), at this workspace's
-`opt-level = 3` default (`examples/Cargo.toml`, see `docs/DESIGN.md` §2 C6):
+current-toolchain measurements, not a guarantee). The `#[hooks]` per-index
+build pipeline compiles each entry in isolation via a dedicated
+`--cfg`-selected build, at this workspace's `opt-level = 3` default
+(`examples/Cargo.toml`, see `docs/DESIGN.md` §2 C6):
 
 | Build | worst-case instructions (`hook=`) | size |
 |---|---:|---:|

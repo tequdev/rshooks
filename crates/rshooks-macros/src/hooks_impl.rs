@@ -42,9 +42,9 @@ const MAX_INDEX: u8 = 9;
 
 /// HOOKS_SELF_RECEIVER_DESIGN.md §6.2 diagnostic for every rejected
 /// self-receiver shape other than `&mut self`/`&'a mut self` — `self`,
-/// `mut self`, `self: T`, `&'a self`. Shared by entry functions and
-/// non-attributed helpers (§3.3): both accept only no-receiver or bare
-/// `&self`.
+/// `mut self`, `self: T`, `&'a self`. Shared by entry functions (which
+/// require exactly `&self`) and non-attributed helpers (§3.3), which accept
+/// either no receiver or bare `&self`.
 const SELF_RECEIVER_MSG: &str = "use `&self` — hook entrypoints receive the chain declaration \
                                   by shared reference (it is zero-sized)";
 /// HOOKS_SELF_RECEIVER_DESIGN.md §6.2 diagnostic for `&mut self` /
@@ -52,6 +52,11 @@ const SELF_RECEIVER_MSG: &str = "use `&self` — hook entrypoints receive the ch
 const MUT_SELF_RECEIVER_MSG: &str = "chain handles are zero-sized and immutable; ledger state \
                                       is accessed through the handles, not by mutating the \
                                       struct — use `&self`";
+/// Diagnostic for an entry function (`#[hook]`/`#[cbak]`) with no receiver
+/// at all — entries require exactly `&self`.
+const ENTRY_MISSING_SELF_MSG: &str = "hook entry functions take `&self` — the chain \
+                                       declaration is passed by shared reference (it is \
+                                       zero-sized)";
 /// HOOKS_SELF_RECEIVER_DESIGN.md §3.3 diagnostic for `#[cfg]`/`#[cfg_attr]`
 /// on a `self` receiver — same rationale as the entry-level cfg ban in
 /// [`parse_impl_body`] (a conditional shape would diverge from what
@@ -223,9 +228,6 @@ struct HookEntry {
     index: u8,
     index_span: Span,
     fn_name: String,
-    /// Whether this entry's signature is `fn(&self) -> i64` rather than the
-    /// no-receiver `fn() -> i64` — see [`ReceiverClass::SharedSelf`].
-    has_self: bool,
     attr: HookAttrData,
 }
 
@@ -233,8 +235,6 @@ struct CbakEntry {
     index: u8,
     index_span: Span,
     fn_name: String,
-    /// See [`HookEntry::has_self`].
-    has_self: bool,
 }
 
 struct HookAttrData {
@@ -374,7 +374,10 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
 
             if is_entry {
                 match scanned.receiver {
-                    None | Some((ReceiverClass::SharedSelf, _)) => {}
+                    Some((ReceiverClass::SharedSelf, _)) => {}
+                    None => {
+                        return Err(err(scanned.args_group.span(), ENTRY_MISSING_SELF_MSG));
+                    }
                     Some((ReceiverClass::MutSelf, span)) => {
                         return Err(err(span, MUT_SELF_RECEIVER_MSG));
                     }
@@ -423,14 +426,12 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
                 }
             }
 
-            let has_self = matches!(scanned.receiver, Some((ReceiverClass::SharedSelf, _)));
             let fn_name = scanned.name.to_string();
             if let Some((data, index, index_span)) = hook_attr {
                 hooks.push(HookEntry {
                     index,
                     index_span,
                     fn_name,
-                    has_self,
                     attr: data,
                 });
             } else if let Some((index, index_span)) = cbak_attr {
@@ -438,7 +439,6 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
                     index,
                     index_span,
                     fn_name,
-                    has_self,
                 });
             }
 
@@ -610,14 +610,14 @@ struct ScannedFn {
     name: Ident,
     has_generics: bool,
     /// The leading receiver, if any: its class plus the `self` token's span.
-    /// `None` means no receiver at all (the current no-self entry form, or
-    /// an ordinary helper's first parameter).
+    /// `None` means no receiver at all — rejected for an entry function
+    /// (which requires exactly `&self`), legal for an ordinary helper's
+    /// first parameter.
     receiver: Option<(ReceiverClass, Span)>,
-    /// Argument-list tokens following the receiver (or the whole argument
-    /// list, when there is none), minus a single optional trailing
-    /// top-level `,` — used by the entry-fn shape check to reject any
-    /// parameter beyond an optional `&self`. Unused for helpers, which may
-    /// take any further parameters.
+    /// Argument-list tokens following the receiver, minus a single optional
+    /// trailing top-level `,` — used by the entry-fn shape check to reject
+    /// any parameter beyond the mandatory `&self`. Unused for helpers,
+    /// which may take any further parameters.
     extra_args: Vec<TokenTree>,
     args_group: Group,
     return_tokens: Vec<TokenTree>,
@@ -1317,9 +1317,7 @@ fn generate(
             EntrySource {
                 index: h.index,
                 hook_fn: h.fn_name.as_str(),
-                hook_self: h.has_self,
                 cbak_fn: cbak.map(|c| c.fn_name.as_str()),
-                cbak_self: cbak.is_some_and(|c| c.has_self),
                 hook: &h.attr,
             }
         })
@@ -1357,13 +1355,7 @@ fn generate(
 struct EntrySource<'a> {
     index: u8,
     hook_fn: &'a str,
-    /// Whether the wrapper must call `hook_fn(&Struct)` instead of
-    /// `hook_fn()` — see [`HookEntry::has_self`].
-    hook_self: bool,
     cbak_fn: Option<&'a str>,
-    /// See [`hook_self`](Self::hook_self); meaningless when `cbak_fn` is
-    /// `None`.
-    cbak_self: bool,
     hook: &'a HookAttrData,
 }
 
@@ -1461,11 +1453,7 @@ fn render_entries_module(
         // (HOOKS_SELF_RECEIVER_DESIGN.md §3.2): a named-field struct's
         // generated same-named static, or a unit struct's constructor
         // value — no extra static is ever needed.
-        let hook_call = if e.hook_self {
-            format!("{struct_name}::{hook_fn}(&{struct_name})")
-        } else {
-            format!("{struct_name}::{hook_fn}()")
-        };
+        let hook_call = format!("{struct_name}::{hook_fn}(&{struct_name})");
         mod_body.push_str(&format!(
             "#[cfg(rshooks_entry = \"{i}\")]\n\
              #[unsafe(export_name = \"hook\")]\n\
@@ -1477,11 +1465,7 @@ fn render_entries_module(
                  {hook_call} }}\n"
         ));
         if let Some(cbak_fn) = e.cbak_fn {
-            let cbak_call = if e.cbak_self {
-                format!("{struct_name}::{cbak_fn}(&{struct_name})")
-            } else {
-                format!("{struct_name}::{cbak_fn}()")
-            };
+            let cbak_call = format!("{struct_name}::{cbak_fn}(&{struct_name})");
             mod_body.push_str(&format!(
                 "#[cfg(rshooks_entry = \"{i}\")]\n\
                  #[unsafe(export_name = \"cbak\")]\n\

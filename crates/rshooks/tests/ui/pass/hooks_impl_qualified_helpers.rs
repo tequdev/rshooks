@@ -12,7 +12,7 @@ struct Vault;
 #[hooks]
 impl Vault {
     #[hook(0, on = [Invoke])]
-    fn main() -> i64 {
+    fn main(&self) -> i64 {
         let a = Self::helper_const();
         let b = unsafe { Self::helper_unsafe() };
         let c = Self::helper_extern();

@@ -46,9 +46,9 @@ implemented for `[u8; N]`. The struct macro expands this into:
   an entry declares a `&self` receiver and that same static is passed in,
   so `self.counter` and `StateCounter.counter` name the identical value —
   `self.` is just the ordinary Rust spelling for "the receiver a method was
-  called on." `&self` measures byte-identical wasm to the no-receiver form
-  (it's a reference to a zero-sized value, so it optimizes away entirely).
-  Code *outside* the `impl` — a free function, another module — has no
+  called on." Because it's a reference to a zero-sized value, `&self`
+  optimizes away entirely, compiling to the same wasm as reading the static
+  directly. Code *outside* the `impl` — a free function, another module — has no
   `self` to borrow, and reaches the same static by its struct name instead:
   `StateCounter.counter`.
 
@@ -91,9 +91,8 @@ through `crate::state`'s generic, 32-byte-scratch-buffer machinery
 (`MAX_TYPED_STATE_LEN`), rather than this hook reading/writing a plain
 8-byte buffer via the raw `state`/`state_set` calls directly. Measured
 (`rshooks build`/`check`): 257 worst-case instructions / 749 bytes,
-versus 58 / 349 for a hand-rolled-buffer version of this same hook (this
-comparison predates the v0.2 `#[hooks]` per-index build pipeline; the
-qualitative cost tradeoff described here is unaffected). Still guard-clean at the source level — no `--auto-guard`/
+versus 58 / 349 for a hand-rolled-buffer version of this same hook. Still
+guard-clean at the source level — no `--auto-guard`/
 `--default-maxiter` needed. For a hook this simple (one `u64` counter,
 one key), the raw layer is the cheaper choice; this example uses the
 typed layer anyway because its purpose is to be the smallest possible

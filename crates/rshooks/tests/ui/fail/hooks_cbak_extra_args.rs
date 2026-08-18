@@ -8,12 +8,12 @@ struct Vault;
 #[hooks]
 impl Vault {
     #[hook(0, on = [Invoke])]
-    fn main() -> i64 {
+    fn main(&self) -> i64 {
         0
     }
 
     #[cbak(0, on = [Invoke])]
-    fn cbak() -> i64 {
+    fn cbak(&self) -> i64 {
         0
     }
 }

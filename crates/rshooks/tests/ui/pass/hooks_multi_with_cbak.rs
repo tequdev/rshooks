@@ -10,18 +10,18 @@ struct Vault;
 impl Vault {
     /// The first entry, with a callback.
     #[hook(0, name = "first", on = [Invoke])]
-    fn first() -> i64 {
+    fn first(&self) -> i64 {
         0
     }
 
     #[cbak(0)]
-    fn first_cbak() -> i64 {
+    fn first_cbak(&self) -> i64 {
         0
     }
 
     /// The second entry, directional and able to emit `Payment`.
     #[hook(1, name = "second", on_incoming = [Payment], on_outgoing = [Invoke], can_emit = [Payment])]
-    fn second() -> i64 {
+    fn second(&self) -> i64 {
         0
     }
 }

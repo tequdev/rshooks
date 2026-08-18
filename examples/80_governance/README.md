@@ -4,10 +4,9 @@ A behavior-equivalent Rust port of xahaud's genesis governance/reward
 chain — [`hook/genesis/govern.c`](https://raw.githubusercontent.com/Xahau/xahaud/dev/hook/genesis/govern.c)
 and [`hook/genesis/reward.c`](https://raw.githubusercontent.com/Xahau/xahaud/dev/hook/genesis/reward.c)
 — declared as **one crate, two hooks**, via the `#[hooks]` multi-hook
-chain model (`docs/MULTI_HOOK_STRUCT_DESIGN.md`). This example replaces
-the earlier `examples/80_reward`/`examples/81_govern` pair, which declared
-the same two hooks as two independent crates with two independent (and, in
-one case, drifting) copies of the shared state layout.
+chain model (`docs/MULTI_HOOK_STRUCT_DESIGN.md`). One shared state layout
+backs both hooks, so `govern` and `reward` cannot drift out of sync with
+each other.
 
 ## The chain model: one crate, two artifacts
 
@@ -30,10 +29,10 @@ pub struct Governance {
 #[hooks]
 impl Governance {
     #[hook(0, on = [Invoke], can_emit = [Invoke, SetHook])]
-    fn govern() -> i64 { /* ... */ }
+    fn govern(&self) -> i64 { /* ... */ }
 
     #[hook(1, on = [Invoke, ClaimReward], can_emit = [GenesisMint])]
-    fn reward() -> i64 { /* ... */ }
+    fn reward(&self) -> i64 { /* ... */ }
 }
 ```
 
@@ -61,11 +60,7 @@ writes, under `out/current/`:
 
 Measured this build: `0.govern.wasm` is 14851 bytes (WCE 44185, max
 nesting 23/32); `1.reward.wasm` is 7710 bytes (WCE 13985, max nesting
-22/32) — both close to (govern: slightly better than; reward: within a few
-percent of) the two predecessor crates' own numbers (14521 bytes/44465 WCE
-and 7175 bytes/13680 WCE respectively), confirming the split-artifact
-model doesn't inflate either binary. Both stay well under the 65,535-byte
-SetHook `CreateCode` limit.
+22/32). Both stay well under the 65,535-byte SetHook `CreateCode` limit.
 
 ## Shared declaration: what's actually consolidated
 
@@ -80,11 +75,9 @@ just "live on the same account":
 | `seat_forward` | 1-byte seat number | governance | **both** — reward looks up an active validator's seat's current member |
 | `member_reverse` | 20-byte account | governance | **both** — reward looks up whether a validator's owning account currently holds a seat |
 
-Before this consolidation, `80_reward` and `81_govern` each declared
-`"RR"`/`"RD"` (and, informally, the seat/member key shapes) independently;
-nothing but code review kept the two declarations in sync. They're now
-declared once, on `Governance`, and both `#[hook]` entries reference the
-same fields.
+`"RR"`/`"RD"` (and the seat/member key shapes) are declared once, on
+`Governance`, and both `#[hook]` entries reference the same fields — so
+`govern` and `reward` cannot silently drift apart on these keys.
 
 `member_count` and every vote/vote-count entry remain governance-only and
 are not part of the shared story. Vote/vote-count keys in particular
@@ -110,7 +103,7 @@ sites — both reads, `self.reward_rate`/`self.reward_delay` under
 `"RR"`/`"RD"` keys through raw `state_set` (`setup_initial_reward_rate_and_delay`
 in `src/lib.rs`), for the same call-site-density reason as `setup`'s other
 raw calls above — `govern`'s dense paths have no field accesses of their
-own (see above) and stay receiver-less.
+own (see above), so its mandatory `&self` receiver goes unused there.
 
 This is a real, measured build constraint, not a style preference. Every
 layer of the typed accessor chain (`State::at` -> `StateEntry::get` ->
@@ -146,17 +139,10 @@ does) or the library needs a shallower/flatter accessor implementation.
 
 ## Behavior equivalence and differences from govern.c/reward.c
 
-Unchanged from the predecessor crates — see their behavior-equivalence
-and differences tables, which this port preserves exactly, in the git
-history for `examples/80_reward/README.md` and
-`examples/81_govern/README.md` (both removed by this consolidation; their
-content is not duplicated here beyond the summary above). One genuine,
-intentional refinement over `81_govern`'s original code: its `"MC"`-state
-presence check now precisely matches govern.c's own `== DOESNT_EXIST`
-check (`Err(_)` from `state_u64` still selects the setup path, matching
-`81_govern`'s worked-around form exactly — no externally observable change,
-since every other `state_u64("MC")` failure was already unreachable for a
-well-formed table).
+This crate's `"MC"`-state presence check precisely matches govern.c's own
+`== DOESNT_EXIST` check: `Err(_)` from `state_u64` selects the setup path,
+with no externally observable difference, since every other
+`state_u64("MC")` failure is already unreachable for a well-formed table.
 
 ## Testing
 

@@ -37,7 +37,7 @@ impl HookParams {
     /// Rejects the originating transaction if its native `Amount` falls
     /// below the configured (or default) minimum.
     #[hook(0, on = [Payment])]
-    fn main() -> i64 {
+    fn main(&self) -> i64 {
         let drops = match otxn_field_typed(sfAmount) {
             Ok(AmountBytes::Native(n)) => u64::from_be_bytes(n.0) & !NATIVE_AMOUNT_FLAG_BITS,
             Ok(AmountBytes::Iou(_)) | Err(_) => rollback!(

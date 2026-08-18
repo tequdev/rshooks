@@ -195,10 +195,10 @@ pub struct EmitTxn;
 #[hooks]
 impl EmitTxn {
     #[hook(0, name = "emit-tx", on = [Invoke], can_emit = [Payment])]
-    fn main() -> i64 { /* ... */ }
+    fn main(&self) -> i64 { /* ... */ }
 
     #[cbak(0)]
-    fn cbak() -> i64 {
+    fn cbak(&self) -> i64 {
         accept!()
     }
 }
@@ -222,7 +222,7 @@ transaction type this entry's wasm might emit:
 
 ```rust,ignore
 #[hook(0, name = "emit-tx", on = [Invoke], can_emit = [Payment])]
-fn main() -> i64 { /* ... */ }
+fn main(&self) -> i64 { /* ... */ }
 ```
 
 `rshooks build` cross-checks a declared `can_emit` against whether the

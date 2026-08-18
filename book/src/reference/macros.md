@@ -12,26 +12,27 @@ the tutorial chapter that covers it, or the macro's own rustdoc in
 |---|---|---|
 | `#[hooks(description = "...")]` on a struct | Declares this crate's Hook chain — a container for shared `#[state]`/`#[hook_param]`/`#[otxn_param]` fields, no runtime instance. Exactly one per crate. | `#[hooks] pub struct MyHook;` |
 | `#[hooks]` on an inherent `impl` | Declares this chain's entry points. Exactly one per `#[hooks]` struct, in the same module. | `#[hooks] impl MyHook { .. }` |
-| `#[hook(<index>, ...)]` | Inside a `#[hooks]` impl: declares one Hook entry at the given chain position (`0..=9`, required). Turns a plain `fn name() -> i64` into that index's `hook` export. Named args: `name`, `on`/`on_incoming`+`on_outgoing`, `can_emit`, `description`. | `#[hook(0, name = "accept", on = [Invoke])] fn main() -> i64 { accept!() }` |
-| `#[cbak(<index>)]` | Pairs with a `#[hook]` at the same index; exports `cbak` for that index — the optional callback invoked when a transaction this entry emitted later settles. Index only, no other arguments. | `#[cbak(0)] fn my_cbak() -> i64 { accept!() }` |
+| `#[hook(<index>, ...)]` | Inside a `#[hooks]` impl: declares one Hook entry at the given chain position (`0..=9`, required). Turns `fn name(&self) -> i64` into that index's `hook` export. Named args: `name`, `on`/`on_incoming`+`on_outgoing`, `can_emit`, `description`. | `#[hook(0, name = "accept", on = [Invoke])] fn main(&self) -> i64 { accept!() }` |
+| `#[cbak(<index>)]` | Pairs with a `#[hook]` at the same index; exports `cbak` for that index — the optional callback invoked when a transaction this entry emitted later settles. Index only, no other arguments. | `#[cbak(0)] fn my_cbak(&self) -> i64 { accept!() }` |
 
 ### Receivers on `#[hook]`/`#[cbak]` entries and impl helpers
 
-An entry function, and a non-attributed helper declared inside the same
-`#[hooks] impl`, accept exactly one optional receiver:
+An entry function requires exactly `&self` — it always receives the chain
+declaration by shared reference, even for a unit-struct or field-less
+chain with nothing to read through it. A non-attributed helper declared
+inside the same `#[hooks] impl` accepts either no receiver or `&self`.
 
-| receiver | accepted? |
-|---|---|
-| none (`fn main() -> i64`) | yes — the pre-existing, still-canonical form for a chain with nothing declared to read |
-| `&self` (`fn main(&self) -> i64`) | yes — receives the chain's single zero-sized static by shared reference; reach its fields as `self.<field>` |
-| `self` / `mut self` / `&'a self` / `self: T` | **no** — diagnostic: "use `&self` — hook entrypoints receive the chain declaration by shared reference (it is zero-sized)" |
-| `&mut self` / `&'a mut self` | **no** — diagnostic: "chain handles are zero-sized and immutable; ledger state is accessed through the handles, not by mutating the struct — use `&self`" |
+| receiver | entry (`#[hook]`/`#[cbak]`) | impl helper |
+|---|---|---|
+| none (`fn helper() -> ...`) | **no** — diagnostic: "hook entry functions take `&self` — the chain declaration is passed by shared reference (it is zero-sized)" | yes |
+| `&self` (`fn main(&self) -> i64`) | yes — receives the chain's single zero-sized static by shared reference; reach its fields as `self.<field>` | yes |
+| `self` / `mut self` / `&'a self` / `self: T` | **no** — diagnostic: "use `&self` — hook entrypoints receive the chain declaration by shared reference (it is zero-sized)" | **no** — same diagnostic |
+| `&mut self` / `&'a mut self` | **no** — diagnostic: "chain handles are zero-sized and immutable; ledger state is accessed through the handles, not by mutating the struct — use `&self`" | **no** — same diagnostic |
 
-Both accepted forms measure byte-identical wasm; the choice is style, not
-performance. Code outside the annotated `impl` (a free function, another
-module) has no `self` to borrow and reaches the same static by the
-struct's own name instead (`MyHook.some_field`) — see [Anatomy of a
-Hook](../concepts/anatomy.md#the-struct-has-no-runtime-instance-but-entries-may-borrow-it).
+Code outside the annotated `impl` (a free function, another module) has no
+`self` to borrow and reaches the same static by the struct's own name
+instead (`MyHook.some_field`) — see [Anatomy of a
+Hook](../concepts/anatomy.md#the-struct-has-no-runtime-instance-but-every-entry-borrows-it).
 
 See [Anatomy of a Hook](../concepts/anatomy.md), [Hook
 Chains](../concepts/chains.md), [Per-Hook

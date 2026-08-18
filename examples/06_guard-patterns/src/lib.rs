@@ -22,11 +22,8 @@ hook_errors! {
 
 /// Reads the configured `BL` blocklist account, if any.
 ///
-/// Deliberately masks a decode failure too, matching this example's
-/// original `hook_parameter!`-based behavior of falling straight to
-/// "nothing to block" on *any* read failure — not just when `BL` is unset.
-/// See `firewall`'s identical helper and example 12's `config()` helper
-/// for the precedent.
+/// Treats a decode failure the same as an absent parameter: any read
+/// failure falls straight to "nothing to block", not just an unset `BL`.
 fn blocked_account() -> Option<AccountId> {
     GuardPatterns.blocked.get().ok().flatten()
 }
@@ -36,7 +33,7 @@ impl GuardPatterns {
     #[hook(0, on = [Invoke])]
     // Keep the loops on one line to demonstrate `guard_m!` disambiguators.
     #[rustfmt::skip]
-    fn main() -> i64 {
+    fn main(&self) -> i64 {
         let sender: AccountId = match otxn_field_exact(sfAccount) {
             Ok(s) => s,
             Err(_) => rollback!(

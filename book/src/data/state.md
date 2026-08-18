@@ -133,7 +133,7 @@ pub struct StateCounter {
 declares a field named `counter`, addressed by the fixed key `b"counter"`,
 holding a `u64`. Because the struct has a named field, the macro also
 generates a `static` value named after the struct (`StateCounter`, same
-name, different namespace — see [Anatomy of a Hook](../concepts/anatomy.md#the-struct-has-no-runtime-instance-but-entries-may-borrow-it)).
+name, different namespace — see [Anatomy of a Hook](../concepts/anatomy.md#the-struct-has-no-runtime-instance-but-every-entry-borrows-it)).
 An entry (or a helper inside the same `#[hooks] impl`) declares `&self` to
 receive that static and calls the field's accessors as
 `self.counter.get()`; code outside the impl reaches the identical static by

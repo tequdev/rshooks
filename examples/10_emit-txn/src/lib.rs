@@ -49,7 +49,7 @@ pub struct EmitTxn;
 #[hooks]
 impl EmitTxn {
     #[hook(0, name = "emit-tx", on = [Invoke], can_emit = [Payment])]
-    fn main() -> i64 {
+    fn main(&self) -> i64 {
         if etxn_reserve(1).is_err() {
             rollback!(
                 b"emit-txn: etxn_reserve failed",
@@ -93,7 +93,7 @@ impl EmitTxn {
     }
 
     #[cbak(0)]
-    fn cbak() -> i64 {
+    fn cbak(&self) -> i64 {
         accept!()
     }
 }

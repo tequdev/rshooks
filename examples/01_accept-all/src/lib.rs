@@ -9,7 +9,7 @@ pub struct AcceptAll;
 impl AcceptAll {
     /// Accepts every triggering transaction.
     #[hook(0, name = "accept", on = [Invoke])]
-    fn main() -> i64 {
+    fn main(&self) -> i64 {
         trace!(b"accept-all: accepting transaction");
         accept!()
     }

@@ -113,7 +113,7 @@ pub struct Keylets;
 impl Keylets {
     /// Hook entry point. See the module doc comment for the full behavior.
     #[hook(0, on = [Invoke])]
-    fn main() -> i64 {
+    fn main(&self) -> i64 {
         let Ok(owner) = otxn_field_typed(sfAccount) else {
             rollback!(
                 b"keylets: sfAccount missing from the originating transaction",

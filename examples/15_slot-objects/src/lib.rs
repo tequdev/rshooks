@@ -257,9 +257,9 @@ fn check_cast_cleanup_loop(keylet: &Keylet) -> bool {
 /// depending on; the magnitude is the fact being checked.
 ///
 /// `SlotObjects.iss.get()` distinguishes absence from decode failure, but
-/// this check treats them alike — like the original `otxn_param_exact`-based
-/// read, either case just means "this check group's precondition isn't
-/// met," so both fall through the same `else { return false }`.
+/// this check treats them alike: either case just means "this check group's
+/// precondition isn't met," so both fall through the same
+/// `else { return false }`.
 #[inline(never)]
 fn check_iou_amount(holder: &AccountId) -> bool {
     let Ok(Some(issuer)) = SlotObjects.iss.get() else {
@@ -346,11 +346,10 @@ const CHK_MIDHOP: u8 = 4;
 const CHK_IOU: u8 = 5;
 
 /// Returns the requested check group, masking *any* read failure — absence
-/// or an undecodable value — to [`CHK_CHEAP`]. This mirrors the original
-/// `otxn_param_exact::<[u8; 1]>(b"CHK").map(|v| v[0]).unwrap_or(CHK_CHEAP)`
-/// behavior: `.get_or_default()` alone only substitutes the default for
-/// absence (a malformed `CHK` would stay `Err`), so the outer
-/// `.unwrap_or(..)` re-applies the same masking to a decode failure too.
+/// or an undecodable value — to [`CHK_CHEAP`]. `.get_or_default()` alone
+/// only substitutes the default for absence (a malformed `CHK` would stay
+/// `Err`), so the outer `.unwrap_or(..)` re-applies the same masking to a
+/// decode failure too.
 fn selected_group() -> u8 {
     SlotObjects
         .chk
@@ -378,7 +377,7 @@ impl SlotObjects {
     /// Runs the check group named by the `CHK` parameter (absent = group 0)
     /// and accepts with the bits it earned.
     #[hook(0, on = [Invoke])]
-    fn main() -> i64 {
+    fn main(&self) -> i64 {
         let Ok(sender) = otxn_field_typed(sfAccount) else {
             rollback!(b"slot-objects: no sfAccount", SlotObjectsError::NoSender)
         };

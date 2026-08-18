@@ -119,9 +119,8 @@ signal — never inferred after the fact from a decode failure. A parameter
 that *is* set, but to the wrong number of bytes for `V`, is a decode
 failure, and `.get_or_default()` reports that as `Err` rather than quietly
 substituting the default. If you want "any read failure at all, absence or
-malformed, falls back to the same value" — the pre-0.2 behavior of the
-`hook_parameter!` macro's `get_value()` — write that explicitly at the call
-site instead, the same way `examples/05_firewall` and
+malformed, falls back to the same value," write that explicitly at the
+call site instead, the same way `examples/05_firewall` and
 `examples/12_typed-data` both do:
 
 ```rust,ignore

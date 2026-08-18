@@ -43,16 +43,13 @@ hex-encoding/`SetHook` details, which apply here unchanged (just a
 different parameter name and a 20-byte `AccountId` payload instead of an
 8-byte integer).
 
-`enabled`'s `.get_foreign()`, unlike the raw `state_foreign` call it
-replaces, decodes through `[u8; 1]`'s `FromBytes` impl — a lenient
-*prefix* decode (it reads only the entry's first byte, silently ignoring
-any bytes beyond it), not the byte-count-exact check the original raw
-code performed (`Ok(n) if n == flag.len()`). An oversized `enabled` entry
-on the target account is therefore no longer rejected as `ReadFailed`; it
-is read as if it were exactly 1 byte. `ENABLED_KEY` itself is unaffected —
-declaring it via `#[state(key = &ENABLED_KEY)]` re-uses the exact same
-`pad!`-based right-padded const, so the 32-byte key computed is
-byte-identical to before.
+`enabled`'s `.get_foreign()` decodes through `[u8; 1]`'s `FromBytes` impl —
+a lenient *prefix* decode: it reads only the entry's first byte, silently
+ignoring any bytes beyond it. An oversized `enabled` entry on the target
+account is not rejected as `ReadFailed`; it is read as if it were exactly
+1 byte. `ENABLED_KEY` is declared via `#[state(key = &ENABLED_KEY)]`,
+which re-uses the same `pad!`-based right-padded const, so the 32-byte key
+computed is fixed and deterministic.
 
 `get_foreign`'s `Ok(None)` (no entry at all — the common, expected "not
 configured" case) is deliberately distinguished from every other `Err`

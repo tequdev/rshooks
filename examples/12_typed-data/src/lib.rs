@@ -131,14 +131,9 @@ pub struct TypedData {
     admin_pause: HookParam<PauseSwitch>,
 }
 
-/// Returns configured values or defaults.
-///
-/// Deliberately masks a decode failure too (`.unwrap_or(..)` wrapping
-/// [`HookParam::get_or_default`]'s `Result`), matching this example's
-/// original `hook_parameter!`-based behavior of falling back to the default
-/// on *any* read failure — not just absence. See the module `decl` doc
-/// comment for why `get_or_default` alone treats a present-but-malformed
-/// `CFG` as `Err` rather than substituting the default.
+/// Returns the configured `CFG` values, falling back to the default when
+/// `CFG` is absent *or* present-but-malformed: `.unwrap_or(..)` masks any
+/// `Err` from [`HookParam::get_or_default`], not just the "absent" case.
 fn config() -> Config {
     TypedData
         .config

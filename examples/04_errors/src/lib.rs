@@ -51,7 +51,7 @@ impl Errors {
     /// Runs a short chain of policy checks, rolling back on the first
     /// failure with its own [`RejectReason`] code.
     #[hook(0, on = [Payment])]
-    fn main() -> i64 {
+    fn main(&self) -> i64 {
         if otxn_field_typed(sfAccount).is_err() {
             RejectReason::BadAccountField.rollback();
         }

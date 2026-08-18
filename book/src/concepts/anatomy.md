@@ -26,7 +26,7 @@ pub struct AcceptAll;
 #[hooks]
 impl AcceptAll {
     #[hook(0, name = "accept", on = [Invoke])]
-    fn main() -> i64 {
+    fn main(&self) -> i64 {
         trace!(b"accept-all: accepting transaction");
         accept!()
     }
@@ -66,7 +66,7 @@ named-field struct whose fields carry `#[state]`/`#[hook_param]`/
 to the other is exactly "replace the trailing `;` with a field block";
 nothing else about the declaration changes.
 
-### The struct has no runtime instance — but entries may borrow it
+### The struct has no runtime instance — but every entry borrows it
 
 This is worth stating plainly, because Rust's struct/`impl` syntax normally
 implies an object with methods that take `self`. Here, *you* never
@@ -77,13 +77,12 @@ state/parameters have something to hang accessor methods off. `AcceptAll`
 is a unit struct (`struct AcceptAll;`) with no fields to hang anything off,
 so no `static` is generated for it at all; `AcceptAll` the identifier
 already names its own unit value (Rust gives every unit struct exactly one,
-for free), which is why its entry above takes no receiver at all.
+for free), and that's the value `&self` borrows in its entry above.
 
-Once a chain *does* declare fields (see [Hook State](../data/state.md)), an
-entry can declare `&self` to receive that one static by shared reference,
-and read its fields as `self.some_field` — the canonical style whenever an
-entry, or a helper function inside the same `impl`, touches a declared
-field:
+Every entry takes `&self` to receive that value by shared reference, and
+reads any declared fields as `self.some_field` — the canonical style
+whenever an entry, or a helper function inside the same `impl`, touches a
+declared field:
 
 ```rust,ignore
 #[hooks]
@@ -99,17 +98,19 @@ impl StateCounter {
 Code *outside* the impl — a free function, another module — has no `self`
 to borrow, so it reaches the identical static by the struct's own name
 instead: `StateCounter.counter.get()`. Both spellings name the same
-zero-sized value and measure byte-identical wasm — `&self` is a reference
-to a zero-sized value, so it optimizes away completely, even across an
-`#[inline(never)]` boundary. Neither form is "the real one"; use `&self`
-inside the annotated `impl` and the struct-name static everywhere else.
+zero-sized value; `&self` is a reference to a zero-sized value, so it
+optimizes away completely, even across an `#[inline(never)]` boundary. Use
+`&self` inside the annotated `impl` and the struct-name static everywhere
+else.
 
-The one receiver `#[hooks]` accepts is bare `&self` — no lifetime, not
-`mut`. Every other self-receiver shape (`self`, `mut self`, `&mut self`,
-`self: T`) is a compile error with a dedicated diagnostic rather than a
-type mismatch: chain handles are zero-sized and immutable, so there is
-nothing to own or write through — only to read through a shared
-reference.
+The one receiver an entry accepts is bare `&self` — no lifetime, not
+`mut`, and not optional. A missing receiver, or any other self-receiver
+shape (`self`, `mut self`, `&mut self`, `self: T`), is a compile error
+with a dedicated diagnostic rather than a type mismatch: chain handles are
+zero-sized and immutable, so there is nothing to own or write through —
+only to read through a shared reference. A non-attributed helper function
+declared inside the same `impl` is less strict: it accepts either no
+receiver or `&self`, whichever its own body needs.
 
 ## Entry functions: `#[hook(<index>, ...)]` and `#[cbak(<index>)]`
 
@@ -124,7 +125,7 @@ for what "per selected build" means).
 #[hooks]
 impl AcceptAll {
     #[hook(0)]
-    fn main() -> i64 {
+    fn main(&self) -> i64 {
         0
     }
 }
@@ -136,15 +137,15 @@ plus:
 ```rust,ignore
 #[unsafe(export_name = "hook")]
 pub extern "C" fn __rshooks_hook_sel_0(_reserved: u32) -> i64 {
-    AcceptAll::main()
+    AcceptAll::main(&AcceptAll)
 }
 ```
 
 The macro enforces the annotated item's shape exactly, and reports any
 violation as a `compile_error!` at the offending token rather than a panic:
 
-- an optional bare `&self` receiver (see above) and otherwise no arguments,
-  plus a return type of exactly `-> i64`;
+- exactly one argument, a bare `&self` receiver (see above), and a return
+  type of exactly `-> i64`;
 - no `async`/`unsafe`/`const`/`extern` modifiers;
 - no generics, no `where` clause.
 

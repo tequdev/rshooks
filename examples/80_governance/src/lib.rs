@@ -9,14 +9,12 @@
 //! On the real Xahau genesis account, `govern` and `reward` are installed
 //! side by side, in that order (`Hooks[0] = govern`, `Hooks[1] = reward`):
 //! governance sets the reward rate/delay and the L1 seat table; reward
-//! reads both to compute and distribute `ClaimReward` payouts. Before this
-//! example, `examples/80_reward`/`examples/81_govern` each declared their
-//! own copy of the state layout the two genuinely share — `"RR"`/`"RD"`
-//! (reward rate/delay) and the seat/member forward-reverse mapping are
-//! written by governance and read by *both* hooks (governance's own
-//! seat-change bookkeeping, and reward's active-validator-seat lookup for
-//! L1 distribution) — with nothing but code review holding the two
-//! declarations in sync. This crate declares each of those once, on
+//! reads both to compute and distribute `ClaimReward` payouts. The two
+//! genuinely share part of their state layout — `"RR"`/`"RD"` (reward
+//! rate/delay) and the seat/member forward-reverse mapping are written by
+//! governance and read by *both* hooks (governance's own seat-change
+//! bookkeeping, and reward's active-validator-seat lookup for L1
+//! distribution). This crate declares each of those once, on
 //! [`Governance`], and both `#[hook]` entries below reference the same
 //! fields.
 //!
@@ -235,7 +233,7 @@ impl Governance {
     /// Governance entry point (`Hooks[0]` on the real genesis account).
     /// See the crate module doc comment for the full behavior.
     #[hook(0, on = [Invoke], can_emit = [Invoke, SetHook])]
-    fn govern() -> i64 {
+    fn govern(&self) -> i64 {
         if etxn_reserve(1).is_err() {
             GovernError::EmitFailed.nope(b"govern: etxn_reserve failed");
         }
@@ -629,8 +627,7 @@ impl Governance {
 /// their actual length — the right match for `"MC"`'s actual 1-byte
 /// stored value); and testing only `is_err()`-equivalent (never reading
 /// which specific error occurred) matches govern.c's own `==
-/// DOESNT_EXIST` check for every reachable case on this fixed 2-byte key
-/// (see `examples/81_govern`'s original README for the full argument).
+/// DOESNT_EXIST` check for every reachable case on this fixed 2-byte key.
 fn member_count_or_setup(is_l1_table: bool) -> i64 {
     match state_u64(&keys::MEMBER_COUNT) {
         Ok(v) => v as i64,
@@ -675,16 +672,14 @@ fn read_layer_required() -> core::result::Result<[u8; 1], ()> {
 // `initial_reward_delay`) use — instead of those fields' typed accessors:
 // see [`keys`]'s module doc comment. Going through the typed accessors here
 // was measured to push `setup`'s compiled nesting from 22 to 63 of the Hook
-// API's 32-level guard-checker limit (see `examples/81_govern`'s original
-// README, "build-budget finding"), so this stays on the raw API exactly
+// API's 32-level guard-checker limit, so this stays on the raw API exactly
 // like the rest of the setup path.
 
 /// Reads `IRR`/`IRD` (L1-table-only setup) and writes `"RR"`/`"RD"` state.
 /// Kept in its own `#[inline(never)]` function: reading both inline inside
 /// `setup` pushes `setup`'s own compiled nesting close to the 32-level
-/// limit (see `examples/81_govern`'s original README for the measured
-/// numbers this crate inherits) — this function boundary keeps it well
-/// under. Raw `state_set` writes, not [`Governance::reward_rate`]/
+/// limit — this function boundary keeps it well under. Raw `state_set`
+/// writes, not [`Governance::reward_rate`]/
 /// [`Governance::reward_delay`]'s typed `.set()` — see [`keys`]'s module
 /// doc comment.
 #[inline(never)]
@@ -863,7 +858,7 @@ fn action_seat(n: u8, topic_data_zero: bool, topic_data: &[u8; 32]) -> ! {
     }
 
     // Masks every read failure (not just absence) to "not currently
-    // holding a seat," matching `examples/81_govern`'s original masking.
+    // holding a seat."
     let existing_member = state_u64(new_account).map(|v| v as i64).unwrap_or(-1);
     let existing_member_moving = existing_member >= 0;
 
@@ -953,9 +948,7 @@ fn garbage_collect_votes(previous_member: &mut [u8; 32], vote_value: &mut [u8; 3
         // `action_seat` call (`tbl` 1 and 2), so the two calls'
         // iteration counts *accumulate* against this one guard site
         // within a single hook execution. `66` is govern.c's own
-        // `GUARD(66)` bound for this exact loop (`2 * 32` plus slack) —
-        // see `examples/81_govern`'s original README for how this was
-        // confirmed live.
+        // `GUARD(66)` bound for this exact loop (`2 * 32` plus slack).
         guard!(66);
         let this_i = i;
         i = i.wrapping_add(1);
@@ -1063,11 +1056,10 @@ struct RewardFields {
 
 /// Reads the sender's reward accounting off their account root.
 ///
-/// `#[inline(never)]`, and that is load-bearing rather than stylistic: see
-/// `examples/80_reward`'s original README (§"Slot API: the typed layer,
-/// with an extraction") for the measured nesting-depth argument this
-/// crate inherits unchanged — `examples/81_govern`'s `action_hook` uses
-/// the identical escape hatch.
+/// `#[inline(never)]`, and that is load-bearing rather than stylistic:
+/// extracting these reads out of the caller keeps its compiled nesting
+/// depth under the Hook API's guard-checker limit — the same escape hatch
+/// [`action_hook`] uses for governance's dense read paths.
 #[inline(never)]
 fn read_reward_fields(keylet: &Keylet) -> RewardFieldRead {
     let Ok(account) = SlotObject::from_keylet(keylet) else {
@@ -1157,8 +1149,7 @@ fn push_l1_seat_entries(txn: &mut MintTxn, l1_drops: u64) {
         // C's off-by-one (`seat > L1SEATS` rather than `>=`, so a stored
         // seat byte of exactly 20 is let through) is preserved here too,
         // but `can_reward.get_mut` turns the resulting out-of-range index
-        // into a safe no-op instead of C's out-of-bounds array write —
-        // see `examples/80_reward`'s original README differences table.
+        // into a safe no-op instead of C's out-of-bounds array write.
         // `seat` values only ever come from `govern`, which never
         // assigns 20, so this is unreachable in practice.
         let mut seat = [0u8; 1];

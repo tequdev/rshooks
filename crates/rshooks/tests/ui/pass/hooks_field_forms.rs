@@ -44,7 +44,7 @@ struct Vault {
 #[hooks]
 impl Vault {
     #[hook(0, on = [Invoke])]
-    fn main() -> i64 {
+    fn main(&self) -> i64 {
         0
     }
 }

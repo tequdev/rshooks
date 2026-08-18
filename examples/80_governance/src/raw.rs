@@ -1,4 +1,4 @@
-//! Raw XFL calls used to preserve the reward calculation's error semantics.
+//! Raw XFL calls that preserve the reward calculation's error semantics.
 
 use rshooks::raw as rshooks_core;
 

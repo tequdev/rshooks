@@ -1,11 +1,10 @@
 //! A chain mixing the accepted entry/cbak/helper receiver forms
 //! (HOOKS_SELF_RECEIVER_DESIGN.md §3): a `&self` hook entry that reads a
 //! declared field through `self.<field>` and calls a `&self` helper via
-//! `self.helper()`, a no-receiver hook entry (the pre-existing form, still
-//! legal alongside `&self`), a `&self` cbak, and an `&self` entry/helper
-//! pair each carrying a leading attribute on the receiver itself — a legal
-//! receiver attribute must not make the receiver look absent (R1 of the
-//! self-receiver review).
+//! `self.helper()`, a second plain `&self` entry, a `&self` cbak, and a
+//! `&self` entry/helper pair each carrying a leading attribute on the
+//! receiver itself — a legal receiver attribute must not make the receiver
+//! look absent (R1 of the self-receiver review).
 
 use rshooks::hooks;
 
@@ -31,10 +30,9 @@ impl Vault {
         i64::from(self.counter.get().is_err())
     }
 
-    /// No-receiver entry: the pre-existing form remains legal alongside
-    /// `&self` entries in the same chain.
+    /// A second plain `&self` entry.
     #[hook(1, on = [Invoke])]
-    fn second() -> i64 {
+    fn second(&self) -> i64 {
         0
     }
 

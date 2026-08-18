@@ -22,11 +22,9 @@ hook_errors! {
 
 /// Reads the configured `BL` blocklist account, if any.
 ///
-/// Deliberately masks a decode failure too (`.ok().flatten()` collapsing
-/// both `Err` and `Ok(None)` to `None`), matching this example's original
-/// `hook_parameter!`-based behavior of falling straight to "nothing to
-/// block" on *any* read failure — not just when `BL` is unset. See example
-/// 12's `config()` helper for the identical masking precedent.
+/// Treats a decode failure the same as an absent parameter (`.ok().flatten()`
+/// collapsing both `Err` and `Ok(None)` to `None`): any read failure falls
+/// straight to "nothing to block", not just an unset `BL`.
 fn blocked_account() -> Option<AccountId> {
     Firewall.blocked.get().ok().flatten()
 }
@@ -36,7 +34,7 @@ impl Firewall {
     /// Rejects the originating transaction if its sender matches the
     /// configured blocklist account.
     #[hook(0, on = [Payment])]
-    fn main() -> i64 {
+    fn main(&self) -> i64 {
         let Ok(sender) = otxn_field_typed(sfAccount) else {
             rollback!(
                 b"firewall: could not read otxn sender",

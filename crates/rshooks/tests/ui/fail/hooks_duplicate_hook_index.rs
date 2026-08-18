@@ -8,12 +8,12 @@ struct Vault;
 #[hooks]
 impl Vault {
     #[hook(0, on = [Invoke])]
-    fn first() -> i64 {
+    fn first(&self) -> i64 {
         0
     }
 
     #[hook(0, on = [Payment])]
-    fn second() -> i64 {
+    fn second(&self) -> i64 {
         0
     }
 }
