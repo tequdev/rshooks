@@ -1,18 +1,21 @@
-# `#[hooks]` エントリの `&self` レシーバ設計検討
+# `&self` Receiver Design for `#[hooks]` Entries
 
-Status: adopted & implemented (v0.2) — macro support (§3〜§6) landed; book/examples
-の正典スタイル移行(§9 S1/S2、本設計 O2 の採用)も完了。
+Status: adopted & implemented (v0.2) — macro support (§3–§6) has landed. The
+receiver is now REQUIRED on entry functions (option O3, adopted after the
+maintainer authorized breaking changes on the feature branch — see §1). The
+canonical-style migration for the book/examples (§9 S1/S2, reflecting the
+final O3 decision) is also complete.
 
-Target: rshooks v0.2.x(採用する場合。§8 の導入タイミング判断を参照)
+Target: rshooks v0.2.x (folded into the feature branch before the v0.2.0 merge — see §8)
 
 Last updated: 2026-08-18
 
-Relates to: [MULTI_HOOK_STRUCT_DESIGN.md](./MULTI_HOOK_STRUCT_DESIGN.md)(r4 §5.5 / §5.7 の改訂提案)
+Relates to: [MULTI_HOOK_STRUCT_DESIGN.md](./MULTI_HOOK_STRUCT_DESIGN.md) (r4 §5.5 / §5.7 revision proposal)
 
-## 0. 提案
+## 0. Proposal
 
-現行 v0.2 では、`#[hooks]` struct で宣言した state / param へのアクセスは
-**struct と同名の static** を経由する:
+In the current v0.2 design, state/param declared in a `#[hooks]` struct are
+accessed via a **static with the same name as the struct**:
 
 ```rust
 #[hooks]
@@ -25,7 +28,7 @@ impl Vault {
 }
 ```
 
-これを `&self` レシーバで書けるようにする:
+This proposal makes it possible to write the same thing with a `&self` receiver:
 
 ```rust
 #[hooks]
@@ -38,60 +41,87 @@ impl Vault {
 }
 ```
 
-## 1. 結論(要約)
+## 1. Conclusion (summary)
 
-**採用を推奨する。形態は「任意の `&self`」(現行の self なし形式も引き続き合法)、
-book の正典スタイルは `&self` とする。**
+**Original recommendation: adopt with "optional `&self`"** — the existing
+no-receiver form remains legal, with `&self` as the book's canonical style
+(this was option O2 in §7).
 
-- **WCE / サイズ / ネストへの影響は実測ゼロ**(§5)。`#[inline(never)]` 境界を
-  挟んだ場合でも self なし版と **wasm バイト一致**。コスト面の反対理由は存在しない。
-- DX は明確に向上する(§4): `self.` による宣言フィールドの列挙・補完、
-  struct リネーム耐性、ヘルパー合成の自然さ。
-- r4 §5.7 の却下理由(「実体があるかのような誤解」)は再検証の結果、
-  **論拠が逆転する**(§2): エントリを「唯一のインスタンス(static)のメソッド」と
-  読ませる方が、現行の「struct 名を値として使う」形式より Rust として正直である。
-- 必須化(全エントリに `&self` を強制)は**推奨しない**(§7)。宣言を持たない
-  unit struct の最小形に儀式を足すだけであり、impl 外の自由関数からの
-  アクセスには結局 static が必要なため、self なし形式を排除する利得がない。
+**Final decision: `&self` is REQUIRED on every entry (O3).** After this
+analysis was written, the maintainer authorized breaking changes on the
+feature branch, ahead of its merge into v0.2.0. That authorization removed
+the constraint that made O2 the recommendation in §7: once a breaking
+migration was already on the table, a single uniform style across all code,
+examples, and the book outweighed the extra ceremony `&self` adds to the
+minimal unit-struct form. §7 records this reasoning in full; §8 records the
+resulting timing decision; §9 records the resulting example migration.
 
-## 2. 現行設計(r4 §5.7)の根拠の再検証
+- **Measured impact on WCE / size / nesting is zero** (§5). Even across an
+  `#[inline(never)]` boundary, the receiver and no-receiver forms produce
+  **byte-identical wasm**. There is no cost-based objection.
+- DX clearly improves (§4): `self.`-based enumeration/completion of declared
+  fields, resilience to struct renames, and natural helper composition.
+- The rejection rationale in r4 §5.7 ("`&self` implies an instance that
+  doesn't really exist") does not survive re-examination (§2): reading an
+  entry as "a method on the sole (static) instance" is, if anything, more
+  honest about what the code does than the current "use the struct name as
+  a value" form.
+- Requiring `&self` on every entry adds ceremony to the declaration-free
+  unit-struct minimal form, and free functions outside the `impl` still need
+  the static regardless — so mandating `&self` does not, by itself, let the
+  no-receiver form be dropped from the language. This was the basis for the
+  original O2 recommendation (§7); it was overridden once breaking changes
+  were authorized on the feature branch, where the value of one uniform
+  style across the whole codebase was judged to outweigh that ceremony cost.
 
-r4 §5.7 が self を却下した理由と、その再評価:
+## 2. Re-examining the rationale behind the current design (r4 §5.7)
 
-| r4 の論拠 | 再評価 |
+The reasons r4 §5.7 rejected `self`, and their reassessment:
+
+| r4's rationale | Reassessment |
 |---|---|
-| 「`&self` を許すと実体があるかのような誤解を生む」 | **実体は既にある**。r4 §5.5 が同名 static(`static Vault: Vault`)を導入した時点で、`Vault.deposits` という「値としてのアクセス」は存在している。`&self` はその同じ値を引数で受け取るだけで、新しい誤解を導入しない。むしろ「`Vault` という式が型なのか値なのか」という現行形式の分かりにくさ(Rust 初学者には unit struct 値 / static の値 namespace は非自明)を、「エントリは chain インスタンスのメソッド」という一貫した読みに置き換える |
-| 「ラッパー生成が無駄に複雑になる」 | 実測で無視できる差(§6): wrapper の呼び出しが `Vault::deposit()` → `Vault::deposit(&Vault)` に変わるだけ。receiver 検出はエントリ形状検査(既存の `scan` が receiver 形状を既に認識している)の分岐 1 つ |
-| 「`self` の誤用(`&mut self` 等)への診断が必要」 | どのみち必要(現行も self 全種を拒否する診断を持つ)。拒否対象が「self 全種」から「`&self` 以外の receiver」に変わるだけで、診断の実装量は同等 |
+| "Allowing `&self` creates the false impression that an instance exists" | **An instance already exists.** The moment r4 §5.5 introduced the same-named static (`static Vault: Vault`), "value-style access" via `Vault.deposits` already existed. `&self` just receives that same value as a parameter — it introduces no new misconception. If anything, it replaces the current form's ambiguity ("is the expression `Vault` a type or a value?" — non-obvious to Rust beginners, given the unit-struct value / static value namespaces) with the consistent reading "an entry is a method on the chain instance." |
+| "Wrapper generation becomes needlessly complex" | The measured difference is negligible (§6): the wrapper call just changes from `Vault::deposit()` to `Vault::deposit(&Vault)`. Receiver detection is one extra branch in the entry-shape check (the existing `scan` already recognizes receiver shapes) |
+| "A diagnostic is needed for `self` misuse (`&mut self`, etc.)" | Needed either way (the current design already has a diagnostic that rejects every kind of `self`). The rejection target just changes from "every kind of `self`" to "any receiver other than `&self`" — the diagnostic implementation cost is about the same |
 
-一方、r4 の懸念のうち**今も有効なもの**:
+On the other hand, some of r4's concerns **remain valid**:
 
-- **OO 的期待の助長**: `&self` があると「フィールドに実行時状態を持てる」
-  「`&mut self` で書き換えられる」という期待が強まる。→ 対策は §6.2 の
-  専用診断と book の明示(「フィールドは ZST ハンドル。ledger 状態はハンドル
-  経由でのみ読み書きする」)。
-- **2 形式併存による一貫性低下**(任意化する場合)。→ §7 で評価。
+- **Encouraging OO-style expectations**: `&self` strengthens the expectation
+  that "fields can hold runtime state" or "`&mut self` lets you mutate them."
+  → Mitigated by the dedicated diagnostic in §6.2 and an explicit book note
+  ("fields are ZST handles; ledger state is only read/written through the
+  handle").
+- **Reduced consistency from two coexisting forms** (in the optional case).
+  → Evaluated in §7.
 
-## 3. 意味論(採用する場合の確定案)
+## 3. Semantics (final adopted design)
 
-### 3.1 受理する receiver
+### 3.1 Accepted receivers
 
-| receiver | 扱い |
+**On entry functions** (`#[hook(..)]` / `#[cbak(..)]`):
+
+| receiver | treatment |
 |---|---|
-| なし(現行) | 引き続き合法 |
-| `&self` | 合法(新規) |
-| `self` / `mut self` / `&'a self` / `self: T` 型注釈付き | **エラー**(一般診断: "use `&self`"。§6.2) |
-| `&mut self` / `&'a mut self` | **エラー**(専用診断: 可変性。§6.2) |
+| none | **ERROR** (dedicated diagnostic: "add `&self` — hook entries require the chain declaration receiver." §6.2) |
+| `&self` | **the only legal form** |
+| `self` / `mut self` / `&'a self` / type-ascribed `self: T` | ERROR (generic diagnostic: "use `&self`". §6.2) |
+| `&mut self` / `&'a mut self` | ERROR (dedicated diagnostic: mutability. §6.2) |
 
-`self`(値渡し)は ZST なので技術的には等価だが、**教えることを 1 つに絞る**ため
-`&self` のみとする。
+`self` (by value) is technically equivalent since it's a ZST, but to keep the
+taught surface to a single form, only `&self` is accepted.
 
-### 3.2 ラッパー生成
+**On helpers** (unattributed associated functions inside an annotated
+`impl`, §3.3) the rule is unchanged from the original proposal: no receiver
+or `&self` are both legal; `&mut self` (and the other rejected forms above)
+remain errors there too.
 
-エントリ関数の receiver 有無を検出し、export ラッパーの呼び出しを切り替える:
+### 3.2 Wrapper generation
+
+The macro detects whether the entry function has a receiver, and switches
+the export wrapper's call accordingly:
 
 ```rust
-// receiver なし(現行どおり)
+// no receiver (as before)
 #[unsafe(export_name = "hook")]
 pub extern "C" fn __rshooks_hook_sel_0(_reserved: u32) -> i64 { super::Vault::deposit() }
 
@@ -100,171 +130,223 @@ pub extern "C" fn __rshooks_hook_sel_0(_reserved: u32) -> i64 { super::Vault::de
 pub extern "C" fn __rshooks_hook_sel_0(_reserved: u32) -> i64 { super::Vault::deposit(&super::Vault) }
 ```
 
-`&Vault` は**両方の struct 形で同じ式**が使える:
+`&Vault` is **the same expression for both struct shapes**:
 
-- 名前付きフィールド struct: `Vault` = 生成済み static(値 namespace)
-- unit struct: `Vault` = unit 構築子の値
+- Named-field struct: `Vault` is the generated static (value namespace)
+- Unit struct: `Vault` is the value of the unit constructor
 
-つまり unit struct のために static を追加生成する必要は**ない**(現行の
-「unit struct は static を生成しない」ルール(r4 §5.5)は不変)。
+In other words, unit structs never need a generated static just for this
+(the existing rule that "unit structs do not generate a static," r4 §5.5,
+is unchanged).
 
-### 3.3 cbak・ヘルパー
+### 3.3 `cbak` and helpers
 
-- `#[cbak(i)]` も同じ規則(receiver なし / `&self` の二択)。
-- **annotated impl 内のヘルパー関数(属性なし)は `&self` を受理する(実装済み)**。
-  ヘルパーは receiver なし / `&self` の両方が合法。`&mut self`(および
-  `self` / `mut self` / `&'a self` / `self: T` 型注釈付き)はヘルパーでも
-  拒否する — ZST に対して無意味であり、可変性の誤解を招くだけのため。
-  エントリ用の receiver 分類(§3.1/§6.2)とヘルパーの分類は同じ判定ロジック
-  (`hooks_impl.rs` の `classify_receiver_kinds`/`detect_receiver`)を共有する。
-- impl 外の自由関数・別モジュールからのアクセスは従来どおり static
-  (`Vault.deposits`)を使う。static は今後も公開インターフェースの一部である。
+- `#[cbak(i)]` follows the same rule as `#[hook]`: `&self` is the only legal
+  entry receiver.
+- **Helper functions (no attribute) inside an annotated impl accept `&self`
+  (implemented).** Helpers may take no receiver or `&self`; either is legal.
+  `&mut self` (and `self` / `mut self` / `&'a self` / type-ascribed
+  `self: T`) is rejected for helpers too — it's meaningless for a ZST and
+  only invites a mutability misconception. The entry receiver classification
+  (§3.1) and the helper classification share the same detection logic
+  (`classify_receiver_kinds` / `detect_receiver` in `hooks_impl.rs`).
+- Access from free functions and other modules outside the `impl` still uses
+  the static (`Vault.deposits`), as before. The static remains part of the
+  public interface.
 
-### 3.4 変わらないもの
+### 3.4 What doesn't change
 
-- carrier(JSON にはエントリの fn 名しか載らず、receiver は現れない)
-- rshooks-build(discovery / 選択ビルド / sidecar / テンプレート全て不変)
-- ハンドシェイク・マーカー型・アクセサ API
-- 診断カタログの他の項目(index 検証等)
+- The carrier (only entry fn names appear in the JSON; receivers never do)
+- rshooks-build (discovery / selective builds / sidecars / templates —
+  all unaffected)
+- The handshake, marker types, accessor API
+- The rest of the diagnostic catalog (index validation, etc.)
 
-## 4. DX 分析
+## 4. DX analysis
 
-### 4.1 メリット
+### 4.1 Benefits
 
-1. **宣言の列挙・補完**: エントリ本文で `self.` と打つと、その chain が宣言する
-   全 state / param が IDE に列挙される。「この Hook は何を読めるのか」が
-   タイプ 1 つで見える。static 形式(`Vault.`)でも補完自体は効くが、
-   struct 名を思い出して打つ必要があり、エントリごとに綴りが揺れる余地がある。
-2. **リネーム耐性**: struct 名変更時にエントリ本文の書き換えが不要になる
-   (rust-analyzer のリネームは static 参照も追うが、レビュー diff が小さいに
-   越したことはない)。
-3. **Rust としての自然さ**: 「chain 宣言オブジェクトのメソッドとしてのエントリ」
-   という読みは、`impl` ブロックの本来の意味と一致する。r4 §4.3 が認めた
-   「struct + impl という形の意味論的な嘘」が一段小さくなる。
-4. **ヘルパー合成**: `self.helper_read()?` のような private メソッド分割が
-   自然になる(現行はヘルパーも static 経由か引数渡し)。
-5. **教材の一貫性**: book の説明が「`#[hooks]` は Vault のインスタンス
-   (中身は空)を 1 つ用意し、エントリはそのメソッド」で完結する。
+1. **Declaration enumeration/completion**: typing `self.` inside an entry
+   body lists every state/param the chain declares, in the IDE. "What can
+   this hook read?" becomes visible in one keystroke. The static form
+   (`Vault.`) also gets completion, but requires recalling and typing the
+   struct name, leaving room for spelling drift between entries.
+2. **Rename resilience**: renaming the struct no longer requires rewriting
+   entry bodies (rust-analyzer's rename does follow static references too,
+   but a smaller review diff is still preferable).
+3. **More natural Rust**: reading "an entry as a method on the chain
+   declaration object" matches what an `impl` block is supposed to mean.
+   The "semantic lie" r4 §4.3 admitted to in the struct+impl shape becomes
+   a little smaller.
+4. **Helper composition**: splitting private methods like
+   `self.helper_read()?` becomes natural (previously, helpers also had to
+   go through the static or take parameters).
+5. **Teaching consistency**: the book's explanation can settle on "`#[hooks]`
+   provisions a single (empty) instance of `Vault`, and entries are methods
+   on it."
 
-### 4.2 デメリット・リスク
+### 4.2 Drawbacks and risks
 
-1. **OO 的期待の助長**(§2)。`&mut self` を試みる利用者は必ず現れる。
-   → 専用診断(§6.2)+ book の early warning で受け止める。実測ゼロコスト
-   なので「動くのに遅い」類の罠はない。
-2. **2 形式併存**(任意化の場合): 同一 codebase に `self.x` と `Vault.x` が
-   混在し得る。→ book・examples は `&self` に統一し、self なし形式は
-   「宣言を持たない最小 Hook」の形として位置づける。lint 的強制はしない。
-3. **診断・fixture の改訂コスト**: 既存の「Hook entrypoints are stateless
-   associated functions」診断の文言変更 + trybuild 更新(§6.3)。小。
-4. **`Self` 型としての混乱は増えない**: 現行でも `Self::helper()` は書ける。
-   receiver の有無は `Self` の可視性に影響しない。
+1. **Encourages OO-style expectations** (§2). Some users will inevitably try
+   `&mut self`. → Addressed by the dedicated diagnostic (§6.2) and an
+   early-warning note in the book. Since the measured cost is zero, there's
+   no "works but is slower" trap.
+2. **Two coexisting forms** (in the optional case): a codebase could mix
+   `self.x` and `Vault.x` in the same file. → the book and examples
+   standardize on `&self`, with the no-receiver form positioned as "the
+   shape of a minimal hook with no declarations." No lint-level enforcement.
+3. **Diagnostic/fixture update cost**: rewording the existing "Hook
+   entrypoints are stateless associated functions" diagnostic, plus trybuild
+   updates (§6.3). Small.
+4. **No added confusion around the `Self` type**: `Self::helper()` already
+   works today. Whether a receiver is present doesn't affect `Self`'s
+   visibility.
 
-## 5. WCE / サイズ / ネストへの影響(実測)
+## 5. Measured impact on WCE / size / nesting
 
-実際の rshooks-build パイプライン(examples と同一プロファイル、
-discovery + 選択ビルド + clean/flatten/unnest/guard/validate)で、
-同一ロジック(typed アクセサ約 6 呼び出し: param 読み + state read/modify/write ×2)を
-6 形態でビルドし比較した。
+Using the actual rshooks-build pipeline (same profile as the examples:
+discovery + selective build + clean/flatten/unnest/guard/validate), the same
+logic (about 6 typed-accessor calls: one param read plus a state
+read/modify/write pair) was built and compared across six forms.
 
-| 形態 | WCE (hook) | サイズ (bytes) | 最大ネスト | 備考 |
+| Form | WCE (hook) | Size (bytes) | Max nesting | Notes |
 |---|---:|---:|---:|---|
-| V0: 現行形式(エントリ内に直書き、static 経由) | 630 | 1562 | 4 | 基準 |
-| V1: `&self` メソッドに委譲(inline 指定なし) | 630 | 1561 | 4 | V0 と実質同一(差は rodata の 1 byte のみ。シンボル名差によるデータ配置ずれで、コードパス差ではない) |
-| V0n: self なしヘルパー `#[inline(never)]` | 637 | 1574 | 4 | |
-| V1n: `&self` ヘルパー `#[inline(never)]` | 637 | 1574 | 4 | **V0n と wasm バイト一致** |
-| V2n: 3 分割 `#[inline(never)]`(self なし) | 684 | 1665 | 5 | |
-| V2: 3 分割 `#[inline(never)]`(`&self`) | 684 | 1665 | 5 | **V2n と wasm バイト一致** |
+| V0: current form (inline in the entry, via static) | 630 | 1562 | 4 | baseline |
+| V1: delegated to a `&self` method (no inline directive) | 630 | 1561 | 4 | Effectively identical to V0 (the only difference is 1 byte of rodata, from symbol-name-driven data layout, not a code-path difference) |
+| V0n: no-receiver helper, `#[inline(never)]` | 637 | 1574 | 4 | |
+| V1n: `&self` helper, `#[inline(never)]` | 637 | 1574 | 4 | **byte-identical to V0n** |
+| V2n: split into 3, `#[inline(never)]` (no receiver) | 684 | 1665 | 5 | |
+| V2: split into 3, `#[inline(never)]` (`&self`) | 684 | 1665 | 5 | **byte-identical to V2n** |
 
-読み取れること:
+Takeaways:
 
-1. **`&self` 自体のコストはゼロ**。LLVM が自由に inline できる場合(V1)は
-   完全に消え、`#[inline(never)]` 境界を挟んでも(V1n/V2)self なし版と
-   バイト一致する。ZST への参照は最適化で完全に消滅し、flatten パスの
-   引数 spill にも現れない。
-2. コストが出るのは **`#[inline(never)]` 境界の個数**(V0→V0n: +7 WCE、
-   1 境界→3 境界: +47 WCE、ネスト 4→5)であり、receiver の有無とは無関係。
-   これは既知の関数境界コストで、本提案では増減しない。
-3. したがって「`&self` はゼロコスト抽象である」と book に明記してよい
-   (実測の裏付けあり)。
+1. **`&self` itself costs nothing.** When LLVM is free to inline (V1), it
+   disappears entirely; even across an `#[inline(never)]` boundary (V1n/V2)
+   it's byte-identical to the no-receiver version. References to a ZST
+   vanish under optimization and never show up as argument spill in the
+   flatten pass.
+2. Cost only comes from the **number of `#[inline(never)]` boundaries**
+   (V0→V0n: +7 WCE; 1 boundary → 3 boundaries: +47 WCE, nesting 4→5), which
+   is unrelated to receiver presence. This is a known function-boundary
+   cost that this proposal neither increases nor decreases.
+3. It is therefore accurate to state in the book that "`&self` is a
+   zero-cost abstraction" (backed by measurement).
 
-(補足: 80_governance の「typed アクセサ高密度によるネスト爆発」問題
-(build-budget finding)は呼び出し**密度**の問題であり、receiver 形式とは
-独立。`&self` の採否はこの問題を改善も悪化もさせない。)
+(Aside: the "nesting explosion from a high density of typed accessors" issue
+in `80_governance` (a build-budget finding) is a function of call
+**density**, independent of receiver form. Adopting or not adopting `&self`
+neither improves nor worsens that issue.)
 
-## 6. 実装影響(採用する場合)
+## 6. Implementation impact
 
-### 6.1 変更点一覧
+### 6.1 Change list
 
-| 箇所 | 変更 | 規模 |
+| Area | Change | Size |
 |---|---|---|
-| `hooks_impl.rs` エントリ形状検査 | receiver 検出を「拒否」から「なし / `&self` の二値」へ。ラッパー呼び出し式の分岐 | 小 |
-| `hooks_impl.rs` ヘルパー分類 | 属性なし関数の `&self` を通過させる(`&mut self` は拒否) | 小 |
-| 診断 | §6.2 の文言に差し替え | 小 |
-| trybuild fixtures | §6.3 | 小 |
-| book / examples | 正典スタイルを `&self` へ(採用判断とセットで) | 中(機械的) |
-| decl / build / carrier | **変更なし** | — |
+| `hooks_impl.rs` entry-shape check | Receiver detection changes from "reject" to "none / `&self`, a two-valued check." Branches the wrapper call expression accordingly | Small |
+| `hooks_impl.rs` helper classification | Let unattributed functions accept `&self` (`&mut self` still rejected) | Small |
+| Diagnostics | Replaced with the wording in §6.2 | Small |
+| trybuild fixtures | §6.3 | Small |
+| book / examples | Canonical style switched to `&self` (bundled with the adoption decision) | Medium (mechanical) |
+| decl / build / carrier | **No change** | — |
 
-### 6.2 診断(案)
+### 6.2 Diagnostics (draft)
 
-- `self` / `mut self` / `&'a self` / 型注釈付き: 「use `&self` — hook
+- No receiver on an entry: "add `&self` — hook entries require the chain
+  declaration receiver (it is zero-sized)"
+- `self` / `mut self` / `&'a self` / type-ascribed: "use `&self` — hook
   entrypoints receive the chain declaration by shared reference (it is
-  zero-sized)」
-- `&mut self` / `&'a mut self`: 「chain handles are zero-sized and immutable;
+  zero-sized)"
+- `&mut self` / `&'a mut self`: "chain handles are zero-sized and immutable;
   ledger state is accessed through the handles, not by mutating the struct
-  — use `&self`」
-- 文言確定時に既存の「stateless associated functions」文言を置換。
+  — use `&self`"
+- These replace the previous "stateless associated functions" wording once
+  finalized.
 
 ### 6.3 trybuild
 
-- 既存 fail: `hooks_self_receiver.rs`(self 全種拒否)→ `&self` は pass 側へ
-  移動し、fail 側は `&mut self` / `mut self` / 値渡し `self` の 3 ケースに分割。
-- pass 追加: `&self` エントリ + `&self` ヘルパー + cbak `&self` の混在ケース、
-  self なしとの混在ケース(両形式併存が合法であることの固定)。
+- Existing fail case `hooks_self_receiver.rs` (rejected every kind of
+  `self`) is split: `&self` moves to the pass side as the required form; the
+  fail side is split into no-receiver-on-entry, `&mut self` / `mut self`,
+  and by-value `self`.
+- New pass cases: `&self` entries plus `&self` helpers, `&self` on `cbak`,
+  and helpers mixing no-receiver and `&self` in the same impl (pinning down
+  that both helper forms remain legal even though entries require `&self`).
 
-### 6.4 互換性
+### 6.4 Compatibility
 
-**任意化(推奨案)は完全に追加的(additive)**で、既存の v0.2 コードは
-一切変更不要。semver 上も 0.2.x のマイナー追加として成立する。
+Making `&self` mandatory (the final decision, O3) is a **breaking change**
+relative to both the no-receiver form and the optional form (O2) this
+document originally recommended: every existing entry needs a `&self`
+parameter added. This is acceptable because the change was folded into the
+v0.2.0 feature branch **before it merged** (§8) — there is no released
+version with the optional or no-receiver entry shape that this breaks, so no
+separate semver-breaking release is required. Had this been made mandatory
+after v0.2.0 had already merged, it would have been a second breaking
+change.
 
-## 7. 選択肢比較
+## 7. Option comparison
 
-| | O1: 現状維持 | **O2: 任意の `&self`(推奨)** | O3: `&self` 必須 |
+| | O1: status quo | O2: optional `&self` (original recommendation) | **O3: `&self` mandatory (final decision)** |
 |---|---|---|---|
-| WCE | — | 影響ゼロ(実測) | 影響ゼロ(実測) |
-| DX | static 名の綴り依存 | `self.` 補完・統一的な読み。2 形式併存が唯一の弱点 | 形式が 1 つで最も一貫 |
-| 破壊性 | なし | **なし**(追加的) | 全エントリ書き換え(PR #53 マージ前なら実質コストゼロ、マージ後は破壊的) |
-| 最小形(unit struct) | `fn main() -> i64` | 変わらず | `fn main(&self) -> i64` — 宣言のない Hook に儀式を追加 |
-| impl 外アクセス | static | static(併存) | static(結局必要 = 「self だけの世界」は作れない) |
-| 教育 | 「struct 名 = 値」の説明が必要 | 「エントリはメソッド」+「外からは static」 | 同左だが self なし形式の説明が不要 |
+| WCE | — | zero impact (measured) | zero impact (measured) |
+| DX | depends on spelling the static name correctly | `self.` completion, a uniform reading. Coexisting forms is the only weakness | one form only — most consistent |
+| Breakage | none | **none** (additive) | every entry rewritten (essentially free before PR #53 merges; breaking after) |
+| Minimal form (unit struct) | `fn main() -> i64` | unchanged | `fn main(&self) -> i64` — adds ceremony to a hook with no declarations |
+| Access from outside impl | static | static (coexists) | static (still required — a "self-only world" isn't achievable) |
+| Teaching | must explain "struct name = value" | "entries are methods" + "static from the outside" | same, but no need to explain the no-receiver form |
 
-O3(必須化)を推奨しない決め手は 2 つ:
-(a) impl 外(自由関数・他モジュール)からのアクセスに static が残る以上、
-「アクセスは常に self 経由」という一貫性は**どのみち完成しない**。
-(b) 宣言を持たない unit struct の最小形(book の最初の例)に `&self` を
-書かせるのは、初学者に「この self には何があるのか(答え: 何もない)」を
-最初に説明させる羽目になり、教育順序が悪化する。
+**Final decision: O3.** The two reasons that originally ruled out O3 remain
+technically valid — they are exactly why this document's original
+recommendation was O2:
 
-## 8. 導入タイミング
+(a) since static access remains necessary from outside the `impl` (free
+functions, other modules), "access is always through `self`" was never
+going to be a complete story regardless of this decision — statics stay
+public (§3.3);
 
-- **推奨(O2)を採る場合**: 追加的変更なので PR #53 と切り離せる。
-  マージ後に独立した small PR(macro + 診断 + fixtures + book の正典スタイル
-  切り替え + examples の `&self` 化)として実装するのが最も低リスク。
-- **もし O3(必須)を選ぶなら**: PR #53 がマージされる**前**に組み込むべき
-  (マージ後では 2 度目の破壊的変更になる)。この場合は examples 16 クレートの
-  再書き換えが発生する。
+(b) writing `&self` on the declaration-free unit-struct minimal form (the
+book's first example) forces beginners to be told upfront "what's in this
+`self`? (answer: nothing)," which is a worse teaching order.
 
-## 9. 未決事項(→ 決定事項)
+What changed the outcome was the authorization for breaking changes on the
+feature branch (§1): once a breaking migration was already acceptable, the
+calculus shifted from "minimize ceremony in the minimal form" to "minimize
+the number of styles a reader has to learn." A single uniform entry style —
+always `&self` — across every code sample, example crate, and book page was
+judged worth the ceremony cost in (b). Reason (a) is unaffected by this
+decision and still holds exactly as stated: O3 does not make "access is
+always through `self`" complete, it only makes the *entry* function shape
+uniform.
 
-| ID | 論点 | 推奨 | 状態 |
+## 8. Adoption timing
+
+- **If the original recommendation (O2) had been adopted**: being additive,
+  it could ship decoupled from PR #53 — as an independent, low-risk small PR
+  after merge (macro + diagnostics + fixtures + book canonical-style switch
+  + `&self`-ifying the examples).
+- **Since O3 (mandatory) was chosen instead**: it needed to land **before**
+  PR #53 merged (landing it afterward would have made it a second breaking
+  change). This required rewriting all 16 example crates as part of the same
+  branch.
+
+**Resolved**: `&self` was made mandatory (O3) and folded into the feature
+branch, completed **before** that branch's merge into v0.2.0.
+
+## 9. Open questions (→ decisions)
+
+| ID | Question | Recommendation | Status |
 |---|---|---|---|
-| S1 | examples を `&self` 正典スタイルへ一括移行するか、新規ページのみ `&self` にするか | 一括移行(book と examples の乖離を作らない) | **決定・実施済み**: 宣言フィールドを直接使う entry(02/09/12/80_governance の `reward`)を `&self`/`self.field` に移行。宣言なし entry(01/03/04/05/06/07/08/10/13/14/15、および 80_governance の `govern`)はフィールドを直接使わない(free fn 経由)ため §7 のルール通り no-receiver のまま。WCE/サイズ/ネストは全例で移行前後バイト一致(実測、02/12/80_governance で確認)。 |
-| S2 | `Vault.` static 直アクセスを book でどう位置づけるか | 「impl 外からのアクセス手段」として 1 箇所で説明 | **決定・実施済み**: `concepts/anatomy.md` §"The struct has no runtime instance — but entries may borrow it" に一本化して説明し、`data/state.md`/`data/parameters.md`/`reference/macros.md` から相互参照。 |
-| S3 | ヘルパーの `&mut self` を将来許すか(ZST なので無害ではある) | 拒否を維持(可変性の誤解に対する教育的一線) | 未変更(本移行のスコープ外) |
-| S4 | clippy 相当の style lint(self なしエントリへの nudge)を build 側 info 診断で出すか | 出さない(両形式とも正当。うるさい lint は DX を下げる) | 未変更(本移行のスコープ外) |
+| S1 | Migrate all examples to the `&self` canonical style at once, or only new pages | Migrate everything at once (don't let the book and examples diverge) | **Superseded by the O3 mandate (§1/§7) and then decided/implemented on that basis**: since `&self` is now required on every entry, the original question is moot — every entry across all examples (01–15, and 80_governance's `reward` and `govern`) now takes `&self`, whether or not it reads a declared field; entries that don't use the receiver simply carry an unused `&self` parameter. WCE/size/nesting are byte-identical before/after for entries that already read declared fields (measured on 02/12/80_governance); the newly added unused `&self` parameter on declaration-free entries also measured byte-identical (a ZST parameter never spills). |
+| S2 | How to present direct `Vault.` static access in the book | Explain it in one place, as "the way to access from outside the impl" | **Decided & implemented**: consolidated under "The struct has no runtime instance — but entries may borrow it" in `concepts/anatomy.md`, cross-referenced from `data/state.md` / `data/parameters.md` / `reference/macros.md`. This remains accurate under O3: the static is still the only way to reach declared fields from outside the `impl` (§3.3, §7). |
+| S3 | Whether to allow `&mut self` on helpers in the future (harmless in principle, since it's a ZST) | Keep rejecting it (an educational line against the mutability misconception) | Unchanged (out of scope for this migration) |
+| S4 | Whether to add a clippy-style lint (nudging no-receiver entries) as a build-side info diagnostic | Don't (both forms were equally valid; a noisy lint hurts DX) | Unchanged (out of scope for this migration) |
 
-## 10. 参照
+## 10. References
 
-- [MULTI_HOOK_STRUCT_DESIGN.md](./MULTI_HOOK_STRUCT_DESIGN.md) r4 §4.3 / §5.5 / §5.7(本提案が改訂を提案する箇所)
-- 実測プローブ: 同一ロジック 6 形態の WCE/サイズ/ネスト比較(§5 の表。
-  スクラッチクレートによる実ビルドパイプライン測定、2026-08-18)
-- `crates/rshooks/tests/ui/pass/hooks_impl_qualified_helpers.rs`(現行のヘルパー通過仕様)
+- [MULTI_HOOK_STRUCT_DESIGN.md](./MULTI_HOOK_STRUCT_DESIGN.md) r4 §4.3 / §5.5 / §5.7 (the sections this proposal revises)
+- Measurement probe: WCE/size/nesting comparison across the same logic in
+  six forms (the table in §5; measured against a real build pipeline using
+  scratch crates, 2026-08-18)
+- `crates/rshooks/tests/ui/pass/hooks_impl_qualified_helpers.rs` (current
+  helper pass-through spec)

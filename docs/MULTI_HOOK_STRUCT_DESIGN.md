@@ -1,44 +1,52 @@
-# Multi-Hook Struct API 設計書 (v0.2.0)
+# Multi-Hook Struct API Design Document (v0.2.0)
 
-Status: design draft(実装なし・設計のみ)
+Status: design draft (no implementation yet — design only)
 
-Target: rshooks v0.2.0(破壊的変更を許容)
+Target: rshooks v0.2.0 (breaking changes permitted)
 
 Last updated: 2026-08-18
 
-改訂履歴:
+Revision history:
 
-- r1: 初版
-- r2: Codex (gpt-5.6-sol) レビュー 1 回目の指摘 26 件を反映
-- r3: Codex レビュー 2 回目の指摘 24 件を反映
-- r4: Codex レビュー 3 回目(最終)の指摘 17 件を反映。
-  **critical だったハンドル表現の欠陥を「フィールド型へのマーカー型引数注入」で
-  解決**(§5.4)。双方向ハンドシェイクの具体化(§5.1)、受理する item 形状表
-  (§5.1)、トリガー省略の継承 caveat と `on = all` の追加(§5.3)、
-  欠落判定の正規規則(§5.6)、BuildPlan の cargo metadata 解決・専用 target
-  ディレクトリ(§7.1)、素の cargo/rustdoc 契約(§7.6)、Phase 再配分
-  (§12–§13)、hex 大文字の正規化(§9)、他
-- r5: エントリ関数の `&self` レシーバを受理するよう改訂(§5.7)。詳細は
-  [HOOKS_SELF_RECEIVER_DESIGN.md](./HOOKS_SELF_RECEIVER_DESIGN.md) を参照。
+- r1: initial version
+- r2: incorporated all 26 findings from Codex (gpt-5.6-sol) review round 1
+- r3: incorporated all 24 findings from Codex review round 2
+- r4: incorporated all 17 findings from Codex review round 3 (final).
+  **Resolved the critical handle-representation flaw by "injecting a marker
+  type argument into the field type"** (§5.4). Fleshed out the bidirectional
+  handshake (§5.1), the accepted item-shape table (§5.1), the trigger-omission
+  inheritance caveat and the addition of `on = all` (§5.3), the canonical
+  absence-detection rule (§5.6), BuildPlan's cargo-metadata resolution and
+  dedicated target directory (§7.1), the plain cargo/rustdoc contract
+  (§7.6), the Phase reallocation (§12–§13), uppercase hex normalization
+  (§9), and more.
+- r5: revised to accept a `&self` receiver on entry functions (§5.7). See
+  [HOOKS_SELF_RECEIVER_DESIGN.md](./HOOKS_SELF_RECEIVER_DESIGN.md) for
+  details.
+- r6: entries now require `&self`; see
+  [HOOKS_SELF_RECEIVER_DESIGN.md](./HOOKS_SELF_RECEIVER_DESIGN.md).
 
-## 0. 提案の原型(歴史的記録)
+## 0. Origin of the proposal (historical record)
 
-> **注意**: 以下は最初のアイデアスケッチの記録である。引数名・cbak の name 指定など
-> ここに現れる構文は本設計の確定構文ではない。**規範となる骨格は §8 を参照**
-> (属性文法の完全な BNF とアクセサ名は Phase 1 で確定する)。
+> **Note**: what follows is a record of the earliest idea sketch. Syntax
+> details that appear here — argument names, the `cbak` name argument, etc.
+> — are not this design's finalized syntax. **See §8 for the normative
+> skeleton** (the attribute grammar's full BNF and accessor names are
+> finalized in Phase 1).
 
-トップレベルの `#[hook]` / `#[cbak]` 定義を廃止し、struct + impl ブロックへ移す。
+Retire the top-level `#[hook]` / `#[cbak]` definitions and move them into a
+struct + impl block.
 
 ```rust
 pub struct Hook {
-    // state 定義
-    // hook_param 定義
-    // otxn_param 定義
+    // state definitions
+    // hook_param definitions
+    // otxn_param definitions
 }
 
 impl Hook {
     #[hook(0, name = "func1", onincoming = [Payment], canemit = [])]
-    // metadata も定義可能
+    // metadata can also be defined here
     pub fn func1(...) {}
 
     #[hook(1, "func1")]
@@ -49,129 +57,144 @@ impl Hook {
 }
 ```
 
-ビルドすると index に対応する hook/cbak ペアごとに wasm が生成され、
-インストール用の `SetHook` トランザクションテンプレートも生成される。
-`name` は on-ledger の `HookName` を表す。
+Building this generates a wasm for each hook/cbak pair corresponding to an
+index, along with a `SetHook` transaction template for installation. `name`
+represents the on-ledger `HookName`.
 
-## 1. 確定事項
+## 1. Settled points
 
-| # | 論点 | 決定 |
+| # | Question | Decision |
 |---|---|---|
-| 1 | 定義の単位 | struct + impl を「1 チェーン = 1 クレート」の一級市民とする。トップレベル `#[hook]` は v0.2 で廃止し一本化 |
-| 2 | index の意味 | **チェーン位置(SetHook `Hooks` 配列の位置)をソースで直接指定する**。0..=9、歯抜け可 |
-| 3 | index の記法 | 属性の**先頭位置引数**(`#[hook(0, ...)]`)。named 形式は提供しない。単一 Hook でも省略不可 |
-| 4 | hook/cbak の対応 | cbak は `#[cbak(0)]` のように **index のみ**で対応付ける。name の再指定はしない |
-| 5 | 単独定義 | hook のみの index は可。**cbak のみの index はコンパイルエラー**。hook が 1 つも無い struct はエラー |
-| 6 | 外側マクロ名 | `#[hooks]`(struct と impl の両方に付ける) |
-| 7 | ビルド戦略 | まず**案 A(discovery + index ごとの `--cfg` 再コンパイル)**を採用。案 B(1 回コンパイル + wasm 分割)が理想形であり、将来の最適化として置き換える(§7) |
-| 8 | Gas Hook (HookApiVersion 1) | **対象外**。v0.2 は Guard 型 (api_version 0) のみ |
-| 9 | manifest との関係 | manifest(docs/spec.md 等)は検討段階のため、**本設計では考慮しない** |
-| 10 | パラメータ default | 属性の `default` は**実行時 fallback 式のみ**。SetHook テンプレートへの installed value 埋め込みは v0.2 では行わない(§5.6, §9.2) |
-| 11 | テンプレートの意味論 | SetHook テンプレートは**占有位置パッチ**であり、チェーン全体の宣言的実現ではない。デフォルトは fail-closed(override なし)(§9) |
-| 12 | トリガー省略 | 全省略は合法で「**installation override を置かない**」を意味する(新規 HookDefinition なら protocol 既定 = SetHook 以外の全 type で発火。既存 definition の再利用時はその値を継承)。**保証付きの全 type 発火は明示形 `on = all`** で書く(§5.3) |
-| 13 | 記述的名前 | struct 属性に記述的 `name` は**置かない**(クレート識別は Cargo package name)。entry 属性の `name` は on-ledger `HookName` 専用 |
-| 14 | 生成物メタ情報 | テンプレート JSON は protocol-shaped に保ち、生成情報は**別 sidecar**(`sethook.template.meta.json`)へ置く(§9.2) |
-| 15 | ハンドル表現 | フィールド型はマクロが**フィールド固有のマーカー型を第 2 型引数として注入**する形で書き換える(`State<V>` → `State<V, __Marker>`)。span 契約の唯一の例外(§5.4) |
-| 16 | 生成 hex | テンプレート・sidecar 中の hex(HookName / CreateCode / マスク / namespace / hash)は**大文字**で正規化する |
+| 1 | Unit of definition | struct + impl becomes the first-class citizen for "1 chain = 1 crate." The top-level `#[hook]` is retired and unified into this in v0.2 |
+| 2 | Meaning of index | **The chain position (the position in the SetHook `Hooks` array) is specified directly in the source.** 0..=9, gaps allowed |
+| 3 | index notation | The attribute's **leading positional argument** (`#[hook(0, ...)]`). No named form is provided. Not omittable even for a single hook |
+| 4 | hook/cbak pairing | `cbak` is paired **only by index**, e.g. `#[cbak(0)]`. No re-specifying `name` |
+| 5 | Standalone definitions | An index with only a hook is fine. **An index with only a `cbak` is a compile error.** A struct with zero hooks is an error |
+| 6 | Outer macro name | `#[hooks]` (attached to both the struct and the impl) |
+| 7 | Build strategy | Adopt **Approach A (discovery + per-index `--cfg` recompilation)** first. Approach B (compile once + split the wasm) is the ideal form and will replace A as a future optimization (§7) |
+| 8 | Gas Hook (HookApiVersion 1) | **Out of scope.** v0.2 covers only the Guard type (api_version 0) |
+| 9 | Relationship to the manifest | The manifest (docs/spec.md etc.) is still under discussion, so **this design does not take it into account** |
+| 10 | Parameter defaults | The attribute's `default` is **a runtime fallback expression only**. Embedding the installed value into the SetHook template is not done in v0.2 (§5.6, §9.2) |
+| 11 | Template semantics | A SetHook template is an **owned-position patch**, not a declarative realization of the whole chain. Default is fail-closed (no override) (§9) |
+| 12 | Trigger omission | Omitting the trigger entirely is legal and means "**do not place an installation override**" (for a new HookDefinition, the protocol default fires on every type except `SetHook`; reusing an existing definition inherits its value). **Guaranteed all-type firing is written explicitly as `on = all`** (§5.3) |
+| 13 | Descriptive names | No descriptive `name` on the struct attribute (crate identity comes from the Cargo package name). The entry attribute's `name` is reserved for the on-ledger `HookName` |
+| 14 | Generated-artifact metadata | The template JSON stays protocol-shaped; generation info goes into a **separate sidecar** (`sethook.template.meta.json`) (§9.2) |
+| 15 | Handle representation | Field types are rewritten by the macro to **inject a field-specific marker type as a second type argument** (`State<V>` → `State<V, __Marker>`). The sole exception to the span contract (§5.4) |
+| 16 | Generated hex | Hex in templates/sidecars (HookName / CreateCode / masks / namespace / hash) is normalized to **uppercase** |
 
-## 2. 背景: 現状の構造と、この提案が解く問題
+## 2. Background: the current structure, and the problem this proposal solves
 
-### 2.1 現状 (v0.0.x)
+### 2.1 Current state (v0.0.x)
 
-- 1 クレート = 1 Hook。`#[hook]` / `#[cbak]` を自由関数に付けると
-  `export_name = "hook"` / `"cbak"` のラッパーが生成される。
-- HookOn / HookCanEmit / HookName / name / description は `metadata!` で
-  エントリポイントとは**別の場所**に宣言する。トリガーは対称形
-  (`HookOn`)・方向形(`IncomingHookOn`+`OutgoingHookOn`)・全省略の
-  三形を受け付ける。
-- state / パラメータは `hook_state!` / `hook_parameter!` / `otxn_parameter!` で宣言する。
-- ビルドは cargo (wasm32v1-none) → rshooks-build 後処理
-  (cleaner / flatten / unnest / guard / validator)で、1 つの wasm を出力する。
-- SetHook の組み立ては利用者の責任。
+- 1 crate = 1 hook. Attaching `#[hook]` / `#[cbak]` to a free function
+  generates an `export_name = "hook"` / `"cbak"` wrapper.
+- HookOn / HookCanEmit / HookName / name / description are declared via
+  `metadata!`, **separately** from the entry point. Triggers accept three
+  forms: symmetric (`HookOn`), directional (`IncomingHookOn` +
+  `OutgoingHookOn`), and full omission.
+- state / parameters are declared with `hook_state!` / `hook_parameter!` /
+  `otxn_parameter!`.
+- The build is cargo (wasm32v1-none) → rshooks-build post-processing
+  (cleaner / flatten / unnest / guard / validator), producing a single wasm.
+- Assembling the SetHook transaction is the user's own responsibility.
 
-### 2.2 現状の痛点
+### 2.2 Current pain points
 
-1. **チェーン(複数 Hook)をプロジェクトとして表現できない。**
-   `80_reward` と `81_govern` のような「同じアカウントに載る関連 Hook 群」は
-   別クレートになり、共有する state レイアウト(seat/member key、`V*` 投票 key)を
-   **各クレートに複製**している。複製された宣言は静かに drift する。
-2. **メタデータとエントリポイントが離れている。**
-3. **hook と cbak の対応が暗黙。**
-4. **チェーン位置が管理されない。** どの Hook を `Hooks` 配列の何番目に置くかは
-   ソースにもビルド成果物にも現れない。
-5. **デプロイ工程が手作業。** SetHook JSON の組み立ては利用者に委ねられている。
+1. **A chain (multiple hooks) has no project-level representation.**
+   Related hook groups on the same account, like `80_reward` and
+   `81_govern`, end up as separate crates and **duplicate** the state layout
+   they share (seat/member keys, `V*` voting keys). Duplicated declarations
+   silently drift apart.
+2. **Metadata is separated from the entry point.**
+3. **The hook/cbak pairing is implicit.**
+4. **Chain position isn't managed.** Which position in the `Hooks` array a
+   given hook occupies appears in neither the source nor the build
+   artifacts.
+5. **Deployment is manual.** Assembling the SetHook JSON is left to the user.
 
-本提案は 1〜5 をまとめて解決する。特に 4 は「index をソースに書く」ことで
-**チェーン内の自分が占有する位置構成をコードレビューの対象にする**という
-設計判断である。
+This proposal resolves 1 through 5 together. Point 4 in particular is a
+design decision that writing the index into the source **makes the chain's
+occupied-position layout a code-review artifact**.
 
-## 3. 何が良くなるか
+## 3. What gets better
 
-### 3.1 共有 ABI の単一宣言(最大の利得)
+### 3.1 A single shared declaration of the ABI (the biggest win)
 
-同一 namespace / 同一アカウントを共有する Hook 群が、**state・パラメータの型宣言を
-一箇所で共有**できる。key レイアウトの複製が消え、「govern が書き、reward が読む」
-ような state の producer/consumer が同じ型を参照することをコンパイラが保証する。
+A group of hooks sharing the same namespace/account can **share a single
+declaration** of their state and parameter types. Duplicated key layouts
+disappear, and the compiler guarantees that state producers and consumers —
+e.g. "`govern` writes what `reward` reads" — reference the same type.
 
-これは単なる利便性ではなく安全性の改善である。state レイアウトの不一致は
-実行時にしか現れず、on-ledger データを壊す。現状この保証は目視レビューしかない。
+This is not merely a convenience; it's a safety improvement. A state-layout
+mismatch currently only shows up at runtime, corrupting on-ledger data.
+Today the only safeguard is manual review.
 
-注意: 共有されるのは **Rust 上の型・レイアウト宣言(スキーマ)**である。
-installed parameter の実値は Hook エントリ(index)ごとに ledger 上で独立であり、
-宣言の共有は値の共有を意味しない(§5.4 末尾)。
+Note: what's shared is the **Rust-level type/layout declaration (the
+schema)**. The actual value of an installed parameter is independent per
+hook entry (index) on the ledger; sharing the declaration does not mean
+sharing the value (end of §5.4).
 
-### 3.2 占有位置構成のコード化
+### 3.2 Codifying the occupied-position layout
 
-index がチェーン位置を直接表すため、「このプロジェクトがどの位置にどの Hook を
-置くか」がソースコードに現れ、diff・レビュー・履歴管理の対象になる。
-先行 Hook の accept/rollback が後続へ与える影響や、`hook_param_set` による
-先行→後続の受け渡しといった**順序に意味がある設計**を、デプロイ手順書ではなく
-コードとして表現できる。
+Because index directly represents chain position, "which hook this project
+places at which position" appears in the source code, subject to diff,
+review, and history tracking. Order-sensitive designs — how a preceding
+hook's accept/rollback affects a later one, or handing values from a
+preceding hook to a later one via `hook_param_set` — can be expressed as
+code rather than a deployment runbook.
 
-(ソースが宣言するのは自分が占有する位置だけであり、アカウント上の
-チェーン全体を宣言的に規定するものではない。§9.3)
+(The source only declares the positions it owns; it does not declaratively
+specify the entire chain on the account. §9.3)
 
-### 3.3 メタデータの局所性
+### 3.3 Localized metadata
 
-`on_incoming` / `can_emit` / `name` がエントリ関数に直接付くことで:
+With `on_incoming` / `can_emit` / `name` attached directly to the entry
+function:
 
-- 関数を読めばトリガー条件が分かる(レビュー性向上)
-- `metadata!` とエントリの対応付けという暗黙知が消える
-- 関数の追加・削除とメタデータの追加・削除が構文的に連動する
+- Reading the function tells you its trigger conditions (better
+  reviewability)
+- The implicit knowledge of mapping `metadata!` to an entry point disappears
+- Adding/removing a function and adding/removing its metadata are now
+  syntactically linked
 
-### 3.4 hook/cbak ペアの明示化と検証
+### 3.4 Explicit, verified hook/cbak pairs
 
-index によるペアリングで、index 重複・対応の欠落などがコンパイル時に、
-emit 能力と cbak の整合が build 時に検証可能になる。
-**hook/cbak/emit 系の検証項目・重大度・実行フェーズの正規定義は §6.2(表)と
-§6.3(真理値表)にある**(§6.2 はそれ以外の構文・形状診断も併載する)。
+Pairing by index lets duplicate-index and missing-pairing issues be caught
+at compile time, and the consistency between emit capability and `cbak` be
+verified at build time. **The normative definition of the hook/cbak/emit
+validation items, their severity, and their execution phase lives in the
+table in §6.2 and the truth table in §6.3** (§6.2 also covers other
+syntax/shape diagnostics).
 
-### 3.5 デプロイ成果物の自動生成
+### 3.5 Automatic generation of deployment artifacts
 
-struct 全体を見れば「このクレートが占有する位置と各 Hook の設定」が静的に
-分かるため:
+Looking at the whole struct statically reveals "which positions this crate
+occupies and each hook's configuration," so a single build command can
+produce:
 
-- index ごとの wasm(それぞれ 64 KiB 上限に個別に収まる)
-- index ごとの metadata sidecar
-- 占有位置に対する SetHook トランザクション**テンプレート**(§9)+ 生成情報 sidecar
+- a wasm per index (each independently fitting the 64 KiB limit)
+- a metadata sidecar per index
+- a SetHook transaction **template** for the occupied positions (§9) plus a
+  generation-info sidecar
 
-が 1 回のビルドコマンドで出せる。テンプレートは Account / HookNamespace を
-プレースホルダーに持つ**提出前編集を前提とした雛形**であり、そのまま submit
-できる完成品ではない(§9.3)。それでも「マスク・CreateCode・位置」を
-手で組む作業が消えることは DX として大きい。
+The template holds `Account` / `HookNamespace` as placeholders and is a
+**draft meant to be edited before submission**, not a finished product ready
+to submit as-is (§9.3). Even so, eliminating the manual work of assembling
+masks, `CreateCode`, and positions is a substantial DX win.
 
-### 3.6 wasm サイズ戦略として合理的
+### 3.6 A sound wasm-size strategy
 
-コードを共有しつつ artifact を分割するので、共通ヘルパー(XFL 演算等)は各 wasm に
-複製されるが、**各 wasm は自分のエントリから到達可能なコードだけ**を含む。
-65,535 bytes 制限は Hook ごとに独立なので、チェーン全体としては実質的に上限が
-10 倍に広がる。1 wasm に全部詰める方式より明確に有利。
+Because code is shared while artifacts are split, common helpers (XFL
+arithmetic, etc.) get duplicated into each wasm, but **each wasm only
+contains code reachable from its own entry point**. Since the 65,535-byte
+limit applies per hook, the chain as a whole effectively gets a 10x larger
+budget. This is clearly better than packing everything into one wasm.
 
-## 4. 何が悪くなるか・リスク
+## 4. What gets worse, and the risks
 
-### 4.1 単純ケースの体験悪化(最重要リスク)
+### 4.1 A worse experience for the simple case (the most important risk)
 
-現在の examples 01〜15 はすべて単一 Hook であり、最小例は
+Examples 01–15 today are all single-hook, with a minimal example as short as:
 
 ```rust
 metadata! { name: "accept-all" }
@@ -180,511 +203,604 @@ metadata! { name: "accept-all" }
 fn my_hook() -> i64 { accept!(b"ok", 0) }
 ```
 
-で済む。新形式の最小形(§8.4)は struct 宣言・impl ブロック・必須 index が
-加わり、**正味 4〜6 行と概念 2 つ(struct の器、index)が増える**。
-トリガー省略が引き続き合法(§5.3)なので最小形に `on` は不要だが、
-初学者向けチュートリアルの第一印象がやや悪化することは率直に認める。
+The new form's minimal shape (§8.4) adds a struct declaration, an impl
+block, and a required index — **a net 4–6 lines and two new concepts (the
+struct container, the index)**. Since trigger omission stays legal (§5.3),
+the minimal form doesn't need `on`, but it's fair to admit the first
+impression of a beginner tutorial gets somewhat worse.
 
-explicit index を単一 Hook にも要求するのは「2 個目を足すときに初めて 0 を
-書き足す」という非対称を避けるためであり、一様性を初回コストより優先した
-トレードオフである(book の最初の章で明示的に説明する)。
+Requiring an explicit index even for a single hook avoids the asymmetry of
+"only writing the `0` once you add a second hook" — uniformity was
+prioritized over first-touch cost, a tradeoff the book will state explicitly
+in its opening chapter.
 
-「トップレベル `#[hook]` を sugar として残す」案は、2 系統の定義方法が併存して
-教材・実装が二重化するため採らない。v0.2 で一本化する。
+The option of "keeping the top-level `#[hook]` as sugar" was not taken,
+since two coexisting definition styles would duplicate both teaching
+material and implementation. v0.2 unifies on one form.
 
-### 4.2 チェーン位置の再配置はソース変更になる
+### 4.2 Relocating a chain position becomes a source change
 
-index = チェーン位置なので、同じ Hook 群を別の位置構成で載せ替える場合は
-ソースの index を書き換えて再ビルドすることになる。
+Since index equals chain position, re-deploying the same group of hooks at a
+different position layout means editing the index in the source and
+rebuilding.
 
-これは意図した設計である(§3.2)。別位置への使い回しが必要なケースは、
-生成された SetHook テンプレートの `Hooks` 配列を手で並べ替えることでも対応できる
-(wasm 自体は位置に依存しない)。テンプレートは「ソース宣言どおりのデフォルト」
-であり、最終的な提出前編集は妨げない。
+This is intentional (§3.2). Reusing hooks at a different position can also
+be handled by hand-reordering the `Hooks` array in the generated SetHook
+template (the wasm itself is position-independent). The template is "the
+default that matches the source declaration" and doesn't prevent final
+pre-submission edits.
 
-### 4.3 「struct + impl」という形の意味論的な嘘
+### 4.3 The semantic lie of the "struct + impl" shape
 
-Rust の struct/impl は本来インスタンスとメソッドのためのもの。Hook エントリは
-インスタンスを持たない静的なエクスポートであり、`&self` は存在し得ない。
-また struct フィールドも実データを持たない(ZST マーカー)。つまりこの構文は
-**名前空間としての struct の借用**であり、OO 的な期待(「self の状態」)を
-持った開発者を裏切る可能性がある。
+Rust's struct/impl exists for instances and their methods. A hook entry is a
+static export with no instance, and `&self` cannot exist. The struct's
+fields also hold no real data (ZST markers). This syntax is effectively
+**borrowing struct as a namespace**, and can mislead developers who bring
+OO-style expectations ("state in self") to it.
 
-これは致命傷ではない(wasm_bindgen や pymethods など前例は多い)が、
-ドキュメントで「struct はチェーン宣言の器であり、実行時実体はない」と
-明示する必要がある。
+This isn't fatal — there's plenty of precedent (wasm_bindgen, pymethods,
+etc.) — but the docs need to state explicitly that "the struct is a
+container for the chain declaration, with no runtime instance."
 
-### 4.4 マクロの複雑化と IDE 体験
+### 4.4 Macro complexity and IDE experience
 
-impl ブロック全体を書き換える外側マクロは、メソッド単位の属性より
-実装・保守コストが一段上がる。対策として次を**実装要件**とする:
+An outer macro that rewrites the entire impl block is a step up in
+implementation/maintenance cost compared to a per-method attribute. To
+mitigate this, the following are **implementation requirements**:
 
-- **span 保持契約**(§6.1): ユーザーが書いたメソッド本体・シグネチャ・
-  doc コメント・無関係な属性は span を保持したまま原文どおり再出力し、
-  消費した helper 属性だけを取り除く。文字列化からの再構築はしない。
-  **唯一の例外**は `#[hooks]` struct のフィールド型で、マーカー型引数の注入
-  (§5.4)のために書き換える。その場合もユーザーが書いた既存トークン
-  (値型引数など)は span を保持して再利用する。
-- **診断カタログ**(Phase 1 成果物): よくある誤り —
-  外側 `#[hooks]` の片方欠落、現行(v0.0.x)マクロの残存、方向指定の片側欠落、
-  方向マスクの一致、`required` + `default` の併用、entry への `#[cfg]`、
-  `self` 付きエントリ、非対応の struct/impl 形状(§5.1)— のそれぞれについて、
-  エラーメッセージ・primary span・help 文言を仕様化し、trybuild UI テストで
-  固定する。
-- rust-analyzer 上での補完・goto のスモーク確認を Phase 1 の完了条件に含める。
+- **Span-preservation contract** (§6.1): user-written method bodies,
+  signatures, doc comments, and unrelated attributes are re-emitted verbatim
+  with their spans preserved; only the consumed helper attributes are
+  stripped. No reconstruction from stringification. The **sole exception**
+  is the `#[hooks]` struct's field types, which are rewritten to inject the
+  marker type argument (§5.4) — even there, tokens the user wrote (such as
+  the value-type argument) are reused with their spans preserved.
+- **Diagnostic catalog** (a Phase 1 deliverable): common mistakes — a
+  missing outer `#[hooks]` on one side, leftover current-generation (v0.0.x)
+  macros, a missing directional trigger side, direction-mask mismatches,
+  combining `required` with `default`, `#[cfg]` on an entry, `self` on an
+  entry, unsupported struct/impl shapes (§5.1) — each get their error
+  message, primary span, and help text specified, and pinned down with
+  trybuild UI tests.
+- A rust-analyzer completion/goto-definition smoke test is included as a
+  Phase 1 completion criterion.
 
-### 4.5 state/param 宣言の「フィールド化」は見た目ほど自然ではない
+### 4.5 "Fieldifying" state/param declarations is less natural than it looks
 
-`hook_state!(Counter, CounterKey {...} => u64)` は key リテラル・key 形状・値型を
-1 宣言に束ねている。これをフィールドにするには、フィールド型だけでは表現できない
-情報(key のリテラル値、パラメータ名バイト列)を**フィールド属性**で補う必要がある。
-理由: `&'static str` / バイト列の const generics は stable でないため、
-`HookParam<"CFG", Config>` のような型レベル埋め込みはできない。
-属性の内容は§5.4 のとおりフィールド固有のマーカー型へ落とし込む。
+`hook_state!(Counter, CounterKey {...} => u64)` bundles a key literal, key
+shape, and value type into one declaration. Turning this into a field
+requires supplementing information the field type alone can't express (the
+key's literal value, the parameter name's byte string) via a **field
+attribute**. Reason: since `&'static str`/byte-slice const generics aren't
+stable, type-level embedding like `HookParam<"CFG", Config>` isn't possible.
+The attribute's contents get folded down into a field-specific marker type,
+as in §5.4.
 
-つまりフィールド化しても「型 + 属性」の 2 要素宣言になり、現行マクロと情報量は
-同じである。得られるのは局所性と全体の見通しであって、記述量の削減ではない。
+In other words, fieldifying still results in a two-part "type + attribute"
+declaration carrying the same amount of information as the current macros.
+What's gained is locality and overall visibility, not less to write.
 
-### 4.6 ビルドパイプラインの複雑化
+### 4.6 Build-pipeline complexity
 
-1 クレート → N wasm は、cargo の「1 cdylib = 1 成果物」モデルから外れる。
-BuildPlan(§7.1)・per-index 処理順序(§7.2)・成果物世代管理(§7.4)・
-素の cargo との契約(§7.6)を仕様として固定することでリスクを限定する。
+Going from 1 crate to N wasm files breaks out of cargo's "1 cdylib = 1
+artifact" model. Fixing BuildPlan (§7.1), per-index processing order
+(§7.2), artifact generation management (§7.4), and the plain-cargo contract
+(§7.6) as specifications bounds this risk.
 
-### 4.7 移行コスト
+### 4.7 Migration cost
 
-examples 15 本 + book + e2e + テンプレートがすべて書き換えになる。
-v0.2.0 の破壊的変更として許容範囲だが、作業量としてはマクロ実装と同オーダーの
-工数を見込むべき。**移行の正規手順と検収基準は §12(移行計画)に定める。**
+All 15 examples, plus the book, e2e tests, and templates, all need
+rewriting. This is within the acceptable range for a v0.2.0 breaking
+change, but should be budgeted at roughly the same order of effort as the
+macro implementation itself. **The canonical migration procedure and
+acceptance criteria are defined in §12 (migration plan).**
 
-## 5. 意味論の確定
+## 5. Finalized semantics
 
-### 5.1 struct の単位・配置・受理する形
+### 5.1 Struct unit, placement, and accepted shapes
 
-- **1 crate につき Hook struct は 1 つ**(v0.2)。
-- `#[hooks]` を付けた impl ブロックは **struct につき厳密に 1 つ**。
-  属性なしの通常の impl ブロック(ヘルパー用)は自由に併存でき、
-  annotated impl の中に helper 属性を持たない通常の関連関数を置くことも
-  **許可**する(マクロは無変更で通す)。
-- **受理する item 形状**(v0.2。これ以外は専用診断で reject):
+- **Exactly one Hook struct per crate** (v0.2).
+- An impl block carrying `#[hooks]` must be **exactly one per struct**.
+  Ordinary, unattributed impl blocks (for helpers) may coexist freely, and
+  placing an ordinary associated function without a helper attribute inside
+  the annotated impl is **also allowed** (the macro passes it through
+  unchanged).
+- **Accepted item shapes** (v0.2; anything else is rejected with a
+  dedicated diagnostic):
 
-  | 対象 | 受理 | 拒否 |
+  | Target | Accepted | Rejected |
   |---|---|---|
-  | struct | 非ジェネリックの unit struct(`struct X;`)/ 名前付きフィールド struct(空 `{}` 含む) | tuple struct、ジェネリクス・lifetime・where 句付き |
-  | struct フィールド | 宣言属性(`#[state]`/`#[hook_param]`/`#[otxn_param]`)を**ちょうど 1 つ**持つフィールド | 属性なしフィールド、複数宣言属性 |
-  | impl | 非ジェネリックの inherent impl(self 型は裸の struct 名) | trait impl、ジェネリック impl、修飾付き self 型 |
-  | impl 内 item | 関連関数(エントリ/ヘルパー)、関連定数 | 関連型 |
+  | struct | non-generic unit struct (`struct X;`) / named-field struct (including empty `{}`) | tuple struct; generics, lifetimes, or a `where` clause |
+  | struct field | a field with **exactly one** declaration attribute (`#[state]`/`#[hook_param]`/`#[otxn_param]`) | an unattributed field; multiple declaration attributes |
+  | impl | a non-generic inherent impl (whose `Self` type is the bare struct name) | trait impl; generic impl; qualified `Self` type |
+  | item inside impl | associated functions (entries/helpers), associated constants | associated types |
 
-  unit struct から名前付き struct への移行は「`;` をフィールドブロックへ
-  置き換えるだけ」であることを book に明記する。
-- **struct/impl の双方向ハンドシェイク**:
-  - struct マクロは (a) フィールドごとのマーカー型とハンドル static(§5.4/§5.5)、
-    (b) `impl Vault { #[doc(hidden)] pub const __RSHOOKS_STRUCT: () = (); }`、
-    (c) `const _: () = { fn assert<T: HookChainImpl>() {} let _ = assert::<Vault>; };`
-    相当のアサーション(impl 側の trait 実装を要求)を生成する。
-  - impl マクロは (a) 生成コード内で `Self::__RSHOOKS_STRUCT` を参照
-    (**struct 側が annotated であることを要求** — 素の struct に annotated impl
-    を付けると未定義関連定数エラー)、(b) `#[doc(hidden)]` の内部 trait
-    `HookChainImpl` の実装(struct 側アサーションの要求先)、
-    (c) `impl Vault { #[doc(hidden)] pub const __RSHOOKS_IMPL: () = (); }` を
-    生成する(annotated impl が 2 つあると**関連定数の重複定義エラー**で確実に
-    衝突する。trait 実装の E0119 に依存しない)。
-  - 内部 trait / 定数は `#[doc(hidden)]` の内部 API であり、ユーザーが手で
-    実装・定義して偽装することは**サポート外(結果未定義)**と文書化する。
-    ここは悪意あるコードからの防御機構ではない。
-- **「1 crate 1 struct」の強制はリンカに委ねる**: struct マクロは固定名の
-  `#[unsafe(no_mangle)]` シンボル(wasm ターゲットのみ、`#[doc(hidden)]`)を
-  生成し、struct が 2 つあると重複シンボルのリンクエラーになる。リンクが
-  失敗する以上 discovery は走らないため、これ以上の診断品質は提供しない
-  (エラー文言の由来は book のトラブルシューティングに記載)。
-- `#[hooks]` の struct と impl は**同一モジュール内に置くこと**を要件とする。
-  生成される値バインディング(§5.5)の可視性は struct の可視性に、
-  各フィールドハンドルの可視性はフィールドの可視性に従う。
-- struct 名は自由。クレート識別は Cargo.toml の package name/version を使う。
-  struct 属性は `#[hooks(description = "...")]` のみ(確定事項 #13)。
-- エントリメソッドおよび宣言フィールドへの `#[cfg]` / `#[cfg_attr]` は
-  **v0.2 では禁止**(マクロがエラーにする)。
+  The book will note explicitly that migrating a unit struct to a
+  named-field struct is "just replacing the `;` with a field block."
+- **Bidirectional struct/impl handshake**:
+  - The struct macro generates (a) a per-field marker type and handle static
+    (§5.4/§5.5), (b) `impl Vault { #[doc(hidden)] pub const __RSHOOKS_STRUCT: () = (); }`,
+    and (c) an assertion equivalent to
+    `const _: () = { fn assert<T: HookChainImpl>() {} let _ = assert::<Vault>; };`
+    (requiring the impl side's trait implementation).
+  - The impl macro generates (a) code that references
+    `Self::__RSHOOKS_STRUCT` (**requiring the struct side to be annotated**
+    — attaching an annotated impl to a bare struct produces an "undefined
+    associated constant" error), (b) an implementation of the
+    `#[doc(hidden)]` internal trait `HookChainImpl` (the target the struct
+    side's assertion requires), and (c)
+    `impl Vault { #[doc(hidden)] pub const __RSHOOKS_IMPL: () = (); }` (two
+    annotated impls reliably collide with a **duplicate associated constant
+    error**, without relying on trait impl's E0119).
+  - The internal trait/constants are `#[doc(hidden)]` internal API, and
+    hand-implementing or hand-defining them to spoof the handshake is
+    documented as **unsupported (undefined behavior)**. This is not a
+    defense mechanism against malicious code.
+- **"1 crate 1 struct" is enforced via the linker**: the struct macro emits
+  a fixed-name `#[unsafe(no_mangle)]` symbol (wasm target only,
+  `#[doc(hidden)]`), so two structs produce a duplicate-symbol link error.
+  Since discovery never runs once linking fails, no further diagnostic
+  quality is provided beyond that (the error message's origin is documented
+  in the book's troubleshooting section).
+- The `#[hooks]` struct and impl are required to live **in the same
+  module**. The generated value binding's (§5.5) visibility follows the
+  struct's visibility; each field handle's visibility follows the field's
+  visibility.
+- The struct name is free-form; crate identity uses the Cargo.toml package
+  name/version. The only struct attribute is `#[hooks(description = "...")]`
+  (settled point #13).
+- `#[cfg]` / `#[cfg_attr]` on entry methods or declared fields are
+  **forbidden in v0.2** (the macro errors on them).
 
-### 5.2 index と name の意味
+### 5.2 Meaning of index and name
 
-- `index` は **0..=9 の一意な整数**で、次の 2 つを同時に意味する。
-  1. このクレートが生成する artifact(hook/cbak ペア)の識別子
-  2. 生成される SetHook テンプレートにおける `Hooks` 配列の位置(= チェーン位置)
-- 記法は属性の**先頭位置引数**: `#[hook(0, ...)]` / `#[cbak(0)]`。
-- 歯抜け(0, 2 のみ等)は**許可**する。テンプレートの空き位置は `{"Hook": {}}`
-  (位置維持の no-op)になる。`Hooks` 配列は **0..=最大宣言 index** ちょうどの
-  長さで生成し、末尾に余分なエントリは付けない(§9.2)。
-- `name` は on-ledger `HookName`(NamedHooks amendment)で **optional**。
-  省略時は無名 Hook。長さ規則は protocol 規範に従う
-  (注意: 現行 `metadata!` の「2..=8 Unicode scalar」という authoring 規則と、
-  byte 長ベースの規則案が混在してきた経緯がある。**Phase 1 で vendored xahaud
-  実装を規範として長さ検証を確定**し、authoring 独自規則は廃止する)。
-  複数 index の name 共有はプロトコル上合法なので許可するが、build 時に
-  info 診断を出す。
-- **cbak は `#[cbak(0)]` のように index のみで対応付ける。** hook のみの index は
-  可。**cbak のみの index はエラー**。1 つの index に cbak は最大 1 つ。
-- **hook が 1 つも無い struct はコンパイルエラー**(§5.1 ハンドシェイク)。
+- `index` is a **unique integer in 0..=9** that simultaneously means two
+  things:
+  1. The identifier of the artifact (hook/cbak pair) this crate produces
+  2. The position in the generated SetHook template's `Hooks` array (i.e.
+     the chain position)
+- The notation is the attribute's **leading positional argument**:
+  `#[hook(0, ...)]` / `#[cbak(0)]`.
+- Gaps (e.g. only 0 and 2) are **allowed**. An empty template position
+  becomes `{"Hook": {}}` (a position-preserving no-op). The `Hooks` array is
+  generated with a length of **exactly 0..=the highest declared index**,
+  with no trailing extra entries (§9.2).
+- `name` is the on-ledger `HookName` (the NamedHooks amendment) and is
+  **optional**. Omitting it means an unnamed hook. Length rules follow the
+  protocol's normative spec (note: there has been a history of confusion
+  between the current `metadata!`'s authoring rule of "2..=8 Unicode
+  scalars" and a proposed byte-length-based rule. **Phase 1 settles length
+  validation against the vendored xahaud implementation as the normative
+  source** and retires the independent authoring rule). Sharing the same
+  `name` across multiple indices is protocol-legal and therefore permitted,
+  but the build emits an info diagnostic.
+- **`cbak` is paired only by index**, e.g. `#[cbak(0)]`. A hook-only index
+  is fine. **A cbak-only index is an error.** At most one `cbak` per index.
+- **A struct with zero hooks is a compile error** (§5.1 handshake).
 
-### 5.3 per-hook 属性で宣言できるメタデータ
+### 5.3 Metadata declarable via the per-hook attribute
 
-| 引数 | 対応 | 必須 |
+| Argument | Corresponds to | Required |
 |---|---|---|
-| 先頭位置引数 `0..=9` | index(artifact ID / チェーン位置) | Yes |
+| leading positional `0..=9` | index (artifact ID / chain position) | Yes |
 | `name = "..."` | `HookName` | No |
-| `on = all` / `on = [Tx, ...]` | 対称トリガー | No(下記) |
-| `on_incoming = [..]` / `on_outgoing = [..]` | 方向指定トリガー。**必ずペアで書く**。両方向の集合が一致する場合は `on` を使うこと(エラー) | No(下記) |
-| `can_emit = [Tx, ...]` | HookCanEmit(下記三値) | No |
-| `description = "..."` | sidecar 用 | No |
+| `on = all` / `on = [Tx, ...]` | symmetric trigger | No (see below) |
+| `on_incoming = [..]` / `on_outgoing = [..]` | directional trigger. **Must always be paired.** If both directions' sets coincide, use `on` instead (error) | No (see below) |
+| `can_emit = [Tx, ...]` | `HookCanEmit` (three-valued, see below) | No |
+| `description = "..."` | for the sidecar | No |
 
-**トリガーの宣言形**(現行 `metadata!` の三形 + 明示 catch-all):
+**Trigger declaration forms** (the current `metadata!`'s three forms, plus
+an explicit catch-all):
 
-| 宣言 | wire 上の出力 | 意味 |
+| Declaration | Wire output | Meaning |
 |---|---|---|
-| 全省略 | トリガーフィールドを出さない | **installation override を置かない**。新規 HookDefinition なら protocol 既定(SetHook を除く全 type で発火、将来の type にも追従)。**同一 wasm の HookDefinition が既に存在する場合は Install 扱いでその definition のトリガーを継承**するため、catch-all の保証ではない |
-| `on = all` | `HookOn` の all-zero マスク(SetHook ビットのみ非発火) | **保証付き catch-all**。将来追加される type にも追従(列挙ではなくマスクで表現) |
-| `on = [..]` | `HookOn`(64-hex マスク) | 記載 type のみで発火。`on = []` は「どの type でも発火しない」 |
-| `on_incoming` + `on_outgoing` | `HookOnIncoming` + `HookOnOutgoing`(各 64-hex マスク、`HookOn` とは排他) | HookOnV2 の方向別発火 |
+| fully omitted | no trigger field emitted | **Do not place an installation override.** For a new HookDefinition, the protocol default applies (fires on every type except SetHook, tracking future types automatically). **If a HookDefinition for the same wasm already exists, this is treated as an Install and inherits that definition's trigger**, so omission is not a catch-all guarantee |
+| `on = all` | `HookOn`'s all-zero mask (only the SetHook bit doesn't fire) | **A guaranteed catch-all.** Tracks future added types automatically (expressed as a mask, not an enumeration) |
+| `on = [..]` | `HookOn` (64-hex mask) | Fires only for the listed types. `on = []` means "fires for no type" |
+| `on_incoming` + `on_outgoing` | `HookOnIncoming` + `HookOnOutgoing` (each a 64-hex mask, mutually exclusive with `HookOn`) | HookOnV2's directional firing |
 
-「全 type で発火」を type 名の列挙で再現してはならない(将来の type 追加に
-追従できない)。省略(継承あり得る)と `on = all`(保証)の使い分けを book に
-明記する。
+"Fires for every type" must never be reproduced by enumerating type names
+(it wouldn't track future type additions). The book will clearly document
+the distinction between omission (inheritance possible) and `on = all`
+(guaranteed).
 
-**`can_emit` の三値意味論**:
+**`can_emit`'s three-valued semantics**:
 
-| 宣言 | wire 上の意味 |
+| Declaration | Wire meaning |
 |---|---|
-| 省略 | `HookCanEmit` フィールドを出さない = **installation override を置かない**。新規 HookDefinition なら制限なし(SetHook 含む全 type を emit 可)。既存 definition の再利用時はその値を継承。**「制限なしの保証」ではない** |
-| `can_emit = []` | 全拒否マスクを設置(**deny-all**) |
-| `can_emit = [Payment]` | 記載 type のみ許可する allowlist マスクを設置 |
+| omitted | no `HookCanEmit` field emitted = **do not place an installation override.** For a new HookDefinition, no restriction applies (every type including SetHook can be emitted). Reusing an existing definition inherits its value. **This is not a "guaranteed no restriction"** |
+| `can_emit = []` | installs a deny-all mask (**deny-all**) |
+| `can_emit = [Payment]` | installs an allowlist mask permitting only the listed types |
 
-命名は snake_case(`on_incoming` / `can_emit`)。
-`HookApiVersion` は 0 固定であり、属性引数を設けない(Gas Hook は対象外)。
+Naming is snake_case (`on_incoming` / `can_emit`). `HookApiVersion` is fixed
+at 0, with no attribute argument (Gas Hook is out of scope).
 
-**amendment 依存**: `name` は NamedHooks、方向指定は HookOnV2、
-`can_emit`(present)は HookCanEmit を要求する。導出した集合の扱いは §9.2。
+**Amendment dependencies**: `name` requires NamedHooks, directional triggers
+require HookOnV2, and a present `can_emit` requires HookCanEmit. How the
+derived set is handled is covered in §9.2.
 
-### 5.4 struct フィールドの宣言形式とハンドル表現
+### 5.4 Struct field declaration form and handle representation
 
-フィールドは「マーカー付き ZST 型 + 属性」で宣言する。
+Fields are declared as "a marker-carrying ZST type + attribute."
 
 ```rust
 #[hooks(description = "Deposit vault with sweep")]
 pub struct Vault {
-    /// アカウントごとの預入残高。
+    /// Per-account deposit balance.
     #[state(key(prefix = b"B", field(account: AccountId)))]
     deposits: State<DepositValue>,
 
-    /// 運用者が SetHook 時に設定する上限。
+    /// The cap the operator sets at SetHook time.
     #[hook_param(name = b"CFG", default = Config { max: xfl!(1000), lock: 10 })]
     config: HookParam<Config>,
 
-    /// 呼び出しトランザクションが指定する命令。
+    /// The instruction the calling transaction specifies.
     #[otxn_param(name = b"INS", required)]
     instruction: OtxnParam<Instruction>,
 }
 ```
 
-**ハンドル表現(確定事項 #15)**: ユーザーが書くフィールド型
-`State<DepositValue>` / `HookParam<Config>` は**宣言糖衣**である。
-同じ値型のフィールドが 2 つあると(例: `State<DepositValue>` が 2 つ)
-型だけでは受信側を区別できず、属性の key/name をメソッドディスパッチへ
-結び付けられない。そこで struct マクロは:
+**Handle representation (settled point #15)**: the field type the user
+writes, `State<DepositValue>` / `HookParam<Config>`, is **declaration
+sugar**. If two fields share the same value type (e.g. two
+`State<DepositValue>` fields), the type alone can't distinguish which
+receiver is which, and the attribute's key/name can't be bound to method
+dispatch. So the struct macro:
 
-1. フィールドごとに固有のマーカー ZST(例: `__VaultFieldDeposits`)を生成し、
-   属性から導出した key/name 仕様(リテラル・形状・エンコード)を
-   内部 trait(`KeySpec` / `NameSpec` 相当)の実装として与える
-2. フィールド型を `State<DepositValue, __VaultFieldDeposits>` のように
-   **マーカーを第 2 型引数として注入した型へ書き換える**
-   (ユーザーが書いた第 1 型引数のトークンは span を保持して再利用)
+1. Generates a field-specific marker ZST for each field (e.g.
+   `__VaultFieldDeposits`), giving it the key/name spec derived from the
+   attribute (literal, shape, encoding) as an implementation of an internal
+   trait (roughly `KeySpec` / `NameSpec`)
+2. Rewrites the field type to **inject the marker as a second type
+   argument**, e.g. `State<DepositValue, __VaultFieldDeposits>` (the
+   tokens for the user-written first type argument are reused with their
+   spans preserved)
 
-これによりフィールドごとの一意な受信型が得られ、アクセサはマーカーの
-trait 実装から key/name を静的に解決する。フィールド型の書き換えは
-span 保持契約の**唯一の例外**として §4.4 に明記した。
+This gives each field a unique receiving type, and accessors statically
+resolve the key/name from the marker's trait implementation. This field-type
+rewrite was already called out in §4.4 as the **sole exception** to the
+span-preservation contract.
 
-- 生成される get/set の意味論、`FromBytes`/`ToBytes`(prefix/exact decode)、
-  key エンコードの意味論は**現行実装から変更しない**。宣言の置き場所の変更であり、
-  byte ABI の変更ではない。
-- 既存の `hook_state!` / `hook_parameter!` / `otxn_parameter!` は v0.2 で削除。
-  実装上は内部ロジック(shape parser、key encoder)をフィールド属性パーサーから
-  呼び出す。
-- **フィールド属性文法の網羅性**: 上記は代表例であり、正式文法は現行 3 マクロが
-  受け付ける**全宣言形**(リテラル key(utf8/hex/bytes)、複合 key 形状、
-  既存型参照、pairing 形、複合パラメータ名パターン — examples 12/81 の全形)を
-  1:1 で表現できなければならない。Phase 1 で「現行宣言 → フィールド属性」の
-  **正規移行表**(§12.1)を作成し、機械的書き換え可能性をもって文法の完全性を
-  検収する。属性文法の BNF は Phase 1 で確定する。
-- **共有されるのはスキーマであって値ではない**: struct の宣言はチェーン内の
-  全 Hook が同じレイアウトを使うことを保証するだけである。installed parameter の
-  実値は Hook エントリ(index)ごとに ledger 上で独立に設定・継承・消去される。
-  例えば `config` を index 0 には `max=1000`、index 1 には `max=50` として
-  インストールすることは正当である。per-index sidecar には全宣言が載るが、
-  これは「共有スキーマの転記」であって「その Hook が使う宣言の列挙」ではない
-  (§10 D2)。
+- The generated get/set semantics, `FromBytes`/`ToBytes` (prefix/exact
+  decode), and key-encoding semantics are **unchanged from the current
+  implementation**. This changes where the declaration lives, not the byte
+  ABI.
+- The existing `hook_state!` / `hook_parameter!` / `otxn_parameter!` are
+  removed in v0.2. Internally, the shape parser and key encoder logic is
+  called from the field-attribute parser instead.
+- **Field-attribute grammar completeness**: the example above is
+  representative; the actual grammar must be able to represent, 1:1, **every
+  declaration form the current three macros accept** (literal keys —
+  utf8/hex/bytes —, composite key shapes, existing type references, pairing
+  forms, composite parameter-name patterns — every form used in examples
+  12/81). Phase 1 produces a **canonical migration table** ("current
+  declaration → field attribute," §12.1) whose mechanical rewritability is
+  the acceptance criterion for grammar completeness. The attribute grammar's
+  BNF is finalized in Phase 1.
+- **What's shared is the schema, not the value**: the struct declaration
+  only guarantees that every hook in the chain uses the same layout. The
+  actual value of an installed parameter is set/inherited/cleared
+  independently per hook entry (index) on the ledger. For instance,
+  installing `config` with `max=1000` on index 0 and `max=50` on index 1 is
+  perfectly valid. The per-index sidecar carries every declaration, but this
+  is "a transcription of the shared schema," not "the list of declarations
+  that hook actually uses" (§10 D2).
 
-### 5.5 生成される値バインディングと lint 契約
+### 5.5 Generated value bindings and lint contract
 
-- **名前付きフィールドを持つ struct** に対しては、マクロが
-  `static Vault: Vault`(struct 名と同名の static)を生成し、
-  `Vault.deposits.get(&acct)` のように値としてアクセスする。
-  型名と値名は別 namespace のため衝突しない。フィールドは全て ZST で
-  `Sync` かつ const 構築可能なので static の要件は自明に満たされる。
-- **unit struct** はフィールドを持たないため **static を生成しない**
-  (unit 構築子と同名になり `E0428` で衝突するため)。空の名前付き struct
-  (`struct X {}`)は static を生成してもよいが、アクセス対象が無いので
-  どちらでも観測差はない。
-- **lint 契約**: 生成コードは repository 標準の `-D warnings` ビルドを
-  素通りしなければならない。小文字 static には scoped な
-  `#[allow(non_upper_case_globals)]`、未使用になり得る生成物には必要最小限の
-  `#[allow(dead_code)]` を付与する。生成する内部 item(ラッパー・マーカー・
-  ハンドシェイク定数・carrier)はすべて `#[doc(hidden)]` とする。
-  examples 全体を `-D warnings` でビルドする CI をこの契約の検収とする。
+- For a **struct with named fields**, the macro generates
+  `static Vault: Vault` (a static with the same name as the struct), and
+  it's accessed as a value, e.g. `Vault.deposits.get(&acct)`. Type names and
+  value names live in separate namespaces, so there's no collision. Since
+  every field is a ZST that is `Sync` and const-constructible, the static's
+  requirements are trivially satisfied.
+- A **unit struct** has no fields, so **no static is generated** (it would
+  collide with the unit constructor of the same name, `E0428`). An empty
+  named-field struct (`struct X {}`) may generate a static, but since
+  there's nothing to access, the two are observationally identical either
+  way.
+- **Lint contract**: generated code must pass the repository's standard
+  `-D warnings` build cleanly. A scoped `#[allow(non_upper_case_globals)]`
+  is applied to lowercase statics, and the minimum necessary
+  `#[allow(dead_code)]` to artifacts that might go unused. Every internal
+  item the macro generates (wrappers, markers, handshake constants,
+  carrier) is `#[doc(hidden)]`. Building the entire examples tree under
+  `-D warnings` in CI serves as the acceptance test for this contract.
 
-### 5.6 パラメータの presence とアクセサ
+### 5.6 Parameter presence and accessors
 
-`required` / `default` は排他。アクセサは**欠落と不正データを区別**する:
+`required` and `default` are mutually exclusive. Accessors **distinguish
+absence from bad data**:
 
-| 宣言 | 追加されるアクセサ(名称は Phase 1 で確定する暫定) | 意味 |
+| Declaration | Accessor added (names are provisional, finalized in Phase 1) | Meaning |
 |---|---|---|
-| (常に) | `get() -> Result<Option<T>, Error>` | 欠落 = `Ok(None)`。**decode 失敗・host エラー = `Err`** |
-| `default = <expr>` | `get_or_default() -> Result<T, Error>` | 欠落時のみ宣言式の値。decode 失敗は `Err` のまま |
-| `required` | `get_required() -> Result<T, Error>` | 欠落も `Err`(欠落専用のエラー種別) |
+| (always) | `get() -> Result<Option<T>, Error>` | absence = `Ok(None)`. **A decode failure or host error is `Err`** |
+| `default = <expr>` | `get_or_default() -> Result<T, Error>` | the declared expression's value only on absence. A decode failure is still `Err` |
+| `required` | `get_required() -> Result<T, Error>` | absence is also `Err` (a dedicated absence error variant) |
 
-- **欠落判定の正規規則**: 「欠落」は **decode 前の host API 戻り値
-  (`DOESNT_EXIST`)によってのみ**判定する。decoder(`FromBytes`/`FixedRead`)が
-  返したエラーは何であれ**再解釈しない**(decoder 由来の `DoesntExist` を
-  欠落へ誤変換しない)。現行の typed ヘルパーが host 読み取りと decode を
-  1 つの `Result` に畳んでいる箇所は、この規則を満たす形に内部を分離する。
-  `get_required()` の欠落エラーは専用 variant(名称は Phase 1 で確定)とし、
-  decode エラーと判別可能にする。
-- 基本形 `get()` は宣言モードに依らず同一シグネチャで常に提供する。
-- `default = <expr>` は**実行時の compiled fallback 式**である。
-  任意の Rust 式はマクロ展開時にバイト列へ評価できないため、
-  **`default` の値は SetHook テンプレートへは載らない**(§9.2)。
-  encoded default を成果物へ運ぶ仕組みは将来課題(§10 D5)。
-- 現行 `hook_parameter!` / `otxn_parameter!` が生成する API との対応表を
-  Phase 1 で作成して名称・シグネチャを確定する(§12.1)。現行 API との
-  意味差(特に「decode 失敗時に fallback を適用しない」への変更が生じる場合)は
-  移行表に明記する。
+- **Canonical absence-detection rule**: "absence" is determined **solely by
+  the pre-decode host API return value** (`DOESNT_EXIST`). Whatever error the
+  decoder (`FromBytes`/`FixedRead`) returns is **never reinterpreted**
+  (never miscoerce a decoder-originated `DoesntExist` into absence). Wherever
+  the current typed helpers fold host reads and decode into a single
+  `Result`, the internals must be split apart to satisfy this rule.
+  `get_required()`'s absence error is a dedicated variant (name finalized in
+  Phase 1), distinguishable from a decode error.
+- The basic form, `get()`, is provided with the same signature regardless of
+  declaration mode.
+- `default = <expr>` is a **runtime, compiled fallback expression**. Since
+  an arbitrary Rust expression can't be evaluated to bytes at macro-expansion
+  time, **the `default` value never makes it into the SetHook template**
+  (§9.2). Carrying the encoded default into the artifact is a future concern
+  (§10 D5).
+- A correspondence table against the current `hook_parameter!` /
+  `otxn_parameter!`-generated API is produced in Phase 1 to finalize names
+  and signatures (§12.1). Semantic differences from the current API
+  (particularly if "the fallback is not applied on a decode failure"
+  becomes the new behavior) are documented in the migration table.
 
-### 5.7 エントリ関数のシグネチャ
+### 5.7 Entry function signatures
 
-impl 内のエントリは **`self` を取らない関連関数**とし、シグネチャは現行と同じ
-`fn() -> i64`(cbak も同様)。誤って `self` を書いた場合は
-「Hook entrypoints are stateless associated functions」と専用診断を出す(§4.4)。
+Entries inside the impl are **associated functions that take no `self`**,
+with the same signature as today, `fn() -> i64` (likewise for `cbak`).
+Writing `self` by mistake produces a dedicated "Hook entrypoints are
+stateless associated functions" diagnostic (§4.4).
 
-> **r5 改訂**: 上記は初版(r4)時点の記述。r5 で `&self` レシーバ
-> (`fn(&self) -> i64`)も受理するよう改訂された — 詳細・意味論・診断文言は
-> [HOOKS_SELF_RECEIVER_DESIGN.md](./HOOKS_SELF_RECEIVER_DESIGN.md) を参照。
+> **r5 revision**: the paragraph above reflects the original (r4) text. r5
+> revised this so that a `&self` receiver (`fn(&self) -> i64`) is also
+> accepted — see [HOOKS_SELF_RECEIVER_DESIGN.md](./HOOKS_SELF_RECEIVER_DESIGN.md)
+> for the details, semantics, and diagnostic wording.
+>
+> **r6 revision**: `&self` is now REQUIRED on every entry (and every
+> `#[cbak]`); the no-receiver form is an error. This is a breaking change
+> that was folded into this feature branch before its merge into v0.2.0 —
+> see [HOOKS_SELF_RECEIVER_DESIGN.md](./HOOKS_SELF_RECEIVER_DESIGN.md) §1,
+> §3.1, §6.4, §7, and §8 for the final decision and its rationale.
 
-## 6. 実装上の技術的検討
+## 6. Implementation-level technical considerations
 
-### 6.1 マクロ構成: 外側 `#[hooks]` + 内側 inert 属性
+### 6.1 Macro structure: outer `#[hooks]` plus inner inert attributes
 
-メソッド単位の属性マクロでは index 重複検出・cbak 対応検証・チェーン全体の
-メタデータ収集ができないため、wasm_bindgen / pymethods と同じく
-**impl ブロックに `#[hooks]` を付け、内側の `#[hook(...)]` / `#[cbak(...)]` は
-外側マクロが消費する inert 属性**とする。struct 側も `#[hooks(...)]` を付ける。
-struct と impl は同一モジュール内で、§5.1 の双方向ハンドシェイクにより結ばれる。
-struct マクロと impl マクロは互いの展開を見られないため、残りの整合検証
-(フィールド参照の実在など)は通常の型検査に委ねる。
+A per-method attribute macro can't detect duplicate indices, verify
+hook/cbak pairing, or collect chain-wide metadata, so — as with
+wasm_bindgen / pymethods — this design attaches **`#[hooks]` to the impl
+block, with the inner `#[hook(...)]` / `#[cbak(...)]` as inert attributes
+the outer macro consumes**. The struct side also carries `#[hooks(...)]`.
+Struct and impl live in the same module and are tied together by the
+bidirectional handshake in §5.1. Since the struct macro and impl macro can't
+see each other's expansion, remaining consistency checks (e.g. that
+referenced fields actually exist) are left to ordinary type checking.
 
-展開時に生成するもの:
+Generated during expansion:
 
-1. 各エントリの extern ラッパー
+1. Each entry's extern wrapper,
    `#[unsafe(export_name = "__rshooks_hook_3")] extern "C" fn ...`
-   (選択ビルド時は該当 index のみ `hook` / `cbak` 名になる。§7)
-2. index → メタデータ表の carrier(現行 `metadata!` carrier の複数 index 対応版)
-3. エラー級のクロスチェック診断(§6.2)
-4. フィールドごとのマーカー型と書き換え済みフィールド型(§5.4)
-5. struct/impl 双方向ハンドシェイク(trait 実装・関連定数・アサーション。§5.1)
-6. 「1 crate 1 struct」検出用の固定名リンクシンボル(§5.1)
+   (during a selective build, only the target index gets the `hook` /
+   `cbak` name. §7)
+2. An index → metadata table carrier (a multi-index extension of the
+   current `metadata!` carrier)
+3. Error-level cross-check diagnostics (§6.2)
+4. Per-field marker types and the rewritten field types (§5.4)
+5. The bidirectional struct/impl handshake (trait impl, associated
+   constants, assertion. §5.1)
+6. The fixed-name link symbol for "1 crate 1 struct" detection (§5.1)
 
-**span 保持契約**: ユーザーの書いたトークンは原文 span のまま再出力し、
-消費した helper 属性のみ除去する。唯一の例外はフィールド型への
-マーカー注入(§5.4)。文字列化からの再構築はしない。
+**Span-preservation contract**: user-written tokens are re-emitted verbatim
+at their original spans, with only the consumed helper attributes stripped.
+The sole exception is the marker injection into field types (§5.4). No
+reconstruction from stringification.
 
-### 6.2 検証の置き場所
+### 6.2 Where each check lives
 
-| 検証 | 場所 | 種別 |
+| Check | Location | Kind |
 |---|---|---|
-| index 重複・範囲(0..=9)・cbak 対応・hook ゼロ(ブロック内)・トリガー形式の排他・方向指定の片側欠落・方向集合の一致・`required`+`default` 併用 | マクロ展開時 | error |
-| 非対応の struct/impl 形状(§5.1 の表)・属性なしフィールド・`self` 付きエントリ | マクロ展開時 | error |
-| annotated impl の欠落 / annotated struct の欠落 / annotated impl の重複 | 型検査(双方向ハンドシェイク §5.1) | error |
-| 現行(v0.0.x)マクロの残存(`metadata!` 等) | 名前解決(v0.2 で削除済みのため未解決エラー)+ book の移行章で案内 | error |
-| トランザクション名の解決(TRANSACTION_TYPES) | マクロ展開時(vendored 表) | error |
-| `#[cfg]`/`#[cfg_attr]` の entry/フィールドへの使用 | マクロ展開時 | error |
-| 複数チェーン struct | リンク(シンボル衝突) | error |
-| `HookName` 長さ規則(Phase 1 確定の protocol 規範) | マクロ展開時 | error |
-| cbak 宣言 vs `cbak` export の実在(index ごとの選択ビルド後・クリーニング前後) | rshooks-build | error |
-| emit / can_emit / cbak の整合(§6.3) | rshooks-build(index ごとの選択ビルド wasm に対して) | §6.3 のとおり |
-| `HookName` の重複共有 | rshooks-build | info |
-| 64 KiB 制限・guard・validator | rshooks-build(wasm ごと、現行と同じ) | error |
+| index duplication/range (0..=9), cbak pairing, zero hooks (within a block), trigger-form exclusivity, missing directional-trigger side, direction-mask agreement, `required`+`default` combined | macro expansion | error |
+| unsupported struct/impl shape (the table in §5.1), unattributed field, `self` on an entry | macro expansion | error |
+| missing annotated impl / missing annotated struct / duplicate annotated impl | type checking (bidirectional handshake, §5.1) | error |
+| leftover current-generation (v0.0.x) macros (`metadata!` etc.) | name resolution (unresolved error, since removed in v0.2) + guided by the book's migration chapter | error |
+| transaction-name resolution (TRANSACTION_TYPES) | macro expansion (vendored table) | error |
+| `#[cfg]`/`#[cfg_attr]` on an entry/field | macro expansion | error |
+| multiple chain structs | linking (symbol collision) | error |
+| `HookName` length rule (Phase-1-finalized protocol norm) | macro expansion | error |
+| cbak declaration vs. `cbak` export's existence (per-index, after the selective build, before cleaning) | rshooks-build | error |
+| emit / can_emit / cbak consistency (§6.3) | rshooks-build (against the selectively-built wasm, per index) | as in §6.3 |
+| duplicate `HookName` sharing | rshooks-build | info |
+| 64 KiB limit, guard, validator | rshooks-build (per wasm, as today) | error |
 
-**stable Rust の proc macro は `compile_error!` によるハードエラーしか
-確実に出せない**ため、warning / info 級はすべて rshooks-build 側で報告する。
+**Stable Rust's proc macros can only reliably emit hard errors via
+`compile_error!`**, so all warning/info-level diagnostics are reported by
+rshooks-build instead.
 
-### 6.3 emit / can_emit / cbak 整合の正規真理値表
+### 6.3 The canonical emit/can_emit/cbak consistency truth table
 
-到達可能な `emit` の検出は **index ごとの選択ビルド後の wasm** に対して行う
-(discovery ビルドは全エントリを含み、per-index の到達性を持たないため)。
-「`emit` import が最終 wasm に残っている」ことを「emit を使う」の判定とする。
+Detecting reachable `emit` usage is done against **the wasm from the
+per-index selective build** (the discovery build includes every entry and
+has no per-index reachability). "The `emit` import remains in the final
+wasm" is the criterion for "uses emit."
 
-| `can_emit` 宣言 | `emit` 使用(検出) | cbak 宣言 | 判定 |
+| `can_emit` declaration | `emit` usage (detected) | `cbak` declared | Verdict |
 |---|---|---|---|
-| 省略(override なし) | あり | あり | OK |
-| 省略 | あり | なし | warning(emit するのに cbak が無い) |
-| 省略 | なし | あり | warning(emit しないのに cbak がある) |
-| 省略 | なし | なし | OK |
-| `[]`(deny-all) | あり | — | warning(emit は実行時に必ず失敗する) |
-| `[]` | なし | あり | warning(emit も許可も無いのに cbak がある) |
-| `[]` | なし | なし | OK |
-| 非空 allowlist | あり | あり | OK |
-| 非空 allowlist | あり | なし | warning |
-| 非空 allowlist | なし | — | warning(宣言が未使用) |
+| omitted (no override) | yes | yes | OK |
+| omitted | yes | no | warning (emits but has no cbak) |
+| omitted | no | yes | warning (doesn't emit but has a cbak) |
+| omitted | no | no | OK |
+| `[]` (deny-all) | yes | — | warning (emit will always fail at runtime) |
+| `[]` | no | yes | warning (neither emits nor is permitted to, yet has a cbak) |
+| `[]` | no | no | OK |
+| non-empty allowlist | yes | yes | OK |
+| non-empty allowlist | yes | no | warning |
+| non-empty allowlist | no | — | warning (declaration unused) |
 
-## 7. ビルド戦略: 1 クレート → N wasm
+## 7. Build strategy: 1 crate → N wasm
 
-### 案 A: discovery ビルド + index ごとの `--cfg` 再コンパイル(v0.2 で採用)
+### Approach A: discovery build + per-index `--cfg` recompilation (adopted for v0.2)
 
-#### 7.1 BuildPlan(全呼び出しの固定)
+#### 7.1 BuildPlan (fixing every invocation)
 
-オーケストレータ(rshooks-build / xtask)は最初に**不変の BuildPlan** を構築し、
-**discovery と全選択ビルドの両方**に適用する。BuildPlan は少なくとも次を固定する:
+The orchestrator (rshooks-build / xtask) first constructs an **immutable
+BuildPlan**, applied to **both discovery and every selective build**. The
+BuildPlan fixes at least the following:
 
-- `cargo metadata` により解決した package ID・workspace root・
-  **正規の lockfile パス**(workspace member は workspace の lock を使う。
-  examples workspace のように複数 lockfile が存在するリポジトリでの
-  取り違えを防ぐ)
-- lockfile の存在(無ければ生成してから開始)と digest。**各呼び出しの前後で
-  digest を再検証**し、途中変化はエラー
-- 完全な argv(`cargo rustc --release --target wasm32v1-none --locked
-  -p <package-id> --crate-type cdylib` + `--cfg` / `--check-cfg`)、
-  feature 集合、profile、incremental の無効化
-- toolchain(rustc/cargo バージョン)、canonical な cwd、
-  関与する Cargo 設定ファイル(`.cargo/config.toml`)の内容 digest
-- 環境変数の allowlist と各値(それ以外は伝播させない)
-- **本オーケストレーション実行専用の target ディレクトリ**
-  (`target/rshooks-build/<run or package>` 等)。discovery と選択ビルドは
-  この専用ディレクトリを共有してキャッシュを効かせるが、ユーザーの通常の
-  `cargo build` とは分離し、**cargo の artifact 出力を読むまでの間に別プロセスが
-  上書きする TOCTOU を構造的に排除**する。オーケストレーションロックは
-  コンパイル開始からステージング完了まで保持する
-- `--check-cfg=cfg(rshooks_entry, values("0","1",...,"9"))` は**オーケストレータが
-  毎回の呼び出しに自分で渡す**。値域は discovery 前でも既知の全定義域
-  0..=9 で固定する(discovery 結果に依存させない)
+- The package ID, workspace root, and **canonical lockfile path** resolved
+  via `cargo metadata` (a workspace member uses the workspace's lock,
+  preventing mix-ups in repos with multiple lockfiles, like the examples
+  workspace)
+- The lockfile's existence (generated first if absent) and its digest.
+  **The digest is re-verified before and after each invocation**; any
+  mid-run change is an error
+- The complete argv (`cargo rustc --release --target wasm32v1-none --locked
+  -p <package-id> --crate-type cdylib` plus `--cfg` / `--check-cfg`), the
+  feature set, the profile, incremental builds disabled
+- The toolchain (rustc/cargo version), the canonical cwd, and a content
+  digest of every involved Cargo config file (`.cargo/config.toml`)
+- An allowlist of environment variables and their values (nothing else
+  propagates)
+- **A target directory dedicated to this orchestration run**
+  (`target/rshooks-build/<run or package>`, etc.). Discovery and the
+  selective builds share this dedicated directory to benefit from caching,
+  but it's kept separate from the user's normal `cargo build`, **structurally
+  eliminating the TOCTOU where another process overwrites cargo's artifact
+  output before it's read**. The orchestration lock is held from the start
+  of compilation through staging completion
+- `--check-cfg=cfg(rshooks_entry, values("0","1",...,"9"))` is **supplied by
+  the orchestrator itself on every invocation**. The value domain is fixed
+  to the full known range 0..=9 even before discovery (it does not depend
+  on discovery's result)
 
-cfg 名 `rshooks_entry` は予約とする。ユーザーコードが `cfg!(rshooks_entry)` を
-参照して index ごとに挙動を変えることは**機械的に検出できない**ため、
-「サポート外(結果は未定義)」という文書化された契約とする。
+The cfg name `rshooks_entry` is reserved. Since it's **mechanically
+impossible to detect** user code referencing `cfg!(rshooks_entry)` to vary
+behavior per index, this is documented as an unsupported contract (undefined
+result).
 
-#### 7.2 per-index 処理順序(正規)
+#### 7.2 Canonical per-index processing order
 
-discovery の後、**index ごとに次を完了してから次の index へ進む**
-(全体を通じて §7.1 のロックを保持):
+After discovery, **each index is completed in full before moving to the
+next** (the §7.1 lock is held throughout):
 
-1. BuildPlan + `--cfg 'rshooks_entry="<i>"'` でコンパイル
-2. **直ちに** raw wasm バイト列をステージング領域へ読み取る
-3. raw wasm から carrier を抽出し、§7.3 の整合検証を行う
-   (**cleaner は carrier を除去するので、抽出は必ずクリーニング前**)
-4. cbak 宣言 vs export の照合(クリーニング前の export 表に対して)
-5. 既存 rshooks-build パイプライン(cleaner/flatten/unnest/guard/validator)
-6. 最終 wasm の export が正確に `hook`(+宣言時 `cbak`)であることを確認し、
-   ステージングへ確定
+1. Compile with BuildPlan + `--cfg 'rshooks_entry="<i>"'`
+2. Read the raw wasm bytes into the staging area **immediately**
+3. Extract the carrier from the raw wasm and run the §7.3 consistency check
+   (**extraction must happen before cleaning**, since the cleaner strips
+   the carrier)
+4. Cross-check cbak declaration vs. export (against the pre-cleaning export
+   table)
+5. Run the existing rshooks-build pipeline (cleaner/flatten/unnest/
+   guard/validator)
+6. Confirm the final wasm's exports are exactly `hook` (plus `cbak` if
+   declared) and commit it to staging
 
-#### 7.3 discovery / 選択ビルドの整合検証(CanonicalRecord)
+#### 7.3 Discovery/selective-build consistency verification (CanonicalRecord)
 
-- 各選択ビルドの carrier に **`CanonicalRecordV1`** を含め、discovery のものと
-  比較する。V1 に含める内容(最小):
-  - schema バージョンタグ
-  - index 集合(数値昇順)
-  - index ごと: エントリ関数名、cbak の有無、`name`、トリガー宣言
-    (**省略/`all`/`[]`/列挙・対称/方向を判別可能な形**)、`can_emit`
-    (**省略と `[]` を判別可能な形**)、description
-  - struct レベル: description、共有スキーマ(state/param 宣言)の正規化表現
-  - `default` は**式のトークン列の正規化文字列**として含める(値は評価しない)
-- 直列化はバージョン付き canonical byte 列(固定フィールド順、集合の正規順序、
-  UTF-8、absent/empty の区別を保持)とし、digest は SHA-256。
-  正確なバイトレイアウトは **Phase 2 開始時に確定**する(マクロ着手は妨げない)。
-- 不一致時は bare digest ではなく**構造的差分**(どの index のどのフィールドか)
-  と両ビルドのコンテキストを報告する。
-- この検証が保証するのは**宣言メタデータの一致のみ**である。build script や
-  環境依存マクロによるコード差分は BuildPlan の固定(§7.1)で抑えるが、
-  完全な検出は保証しない(その旨を文書化する)。
+- Each selective build's carrier includes a **`CanonicalRecordV1`**,
+  compared against discovery's. What V1 includes (minimum):
+  - a schema version tag
+  - the index set (numerically ascending)
+  - per index: entry function name, whether a cbak exists, `name`, trigger
+    declaration (**in a form distinguishing omission / `all` / `[]` /
+    enumerated, and symmetric/directional**), `can_emit` (**in a form
+    distinguishing omission from `[]`**), description
+  - struct level: description, and a normalized representation of the
+    shared schema (state/param declarations)
+  - `default` is included as a **normalized token-string of the
+    expression** (the value is never evaluated)
+- Serialization uses a versioned canonical byte sequence (fixed field
+  order, canonical set ordering, UTF-8, preserving the absent/empty
+  distinction), digested with SHA-256. The exact byte layout is
+  **finalized at the start of Phase 2** (this doesn't block starting the
+  macro work).
+- On mismatch, report a **structural diff** (which field of which index)
+  and both builds' context, not a bare digest.
+- This check only guarantees **declared-metadata agreement**. Code
+  differences from build scripts or environment-dependent macros are
+  bounded by fixing the BuildPlan (§7.1), but not guaranteed to be fully
+  detected (documented as such).
 
-#### 7.4 成果物世代管理(原子性)
+#### 7.4 Artifact generation management (atomicity)
 
-- 出力は世代ディレクトリ `gen-<n>/` に書き、その Phase の**公開成果物一式**
-  (Phase 2: wasm + per-index sidecar / Phase 3 以降: + テンプレート + meta
-  sidecar)が揃って検証を通った後に `current` シンボリックリンクを付け替える。
-- **消費者は `current` を 1 回だけ解決し、以後は解決先の不変な `gen-<n>/`
-  パスを使うこと**(複数パスを `current/...` 経由で別々に開くと世代をまたぐ
-  恐れがある)。この規約は成果物ディレクトリの README に明記する。
-- ステージングは出力先と同一ファイルシステム上に置く。同時ビルドは
-  ロックファイルで排他する。失敗時は `current` に触れない(前世代を保全)。
-  古い世代は既定数(例: 2)を残して成功時に掃除し、掃除は解決済み `gen-<n>` を
-  使用中の消費者と衝突し得ることを文書化する(即時削除しない猶予をおく)。
+- Output goes to a generation directory `gen-<n>/`, and the `current`
+  symlink is repointed only after that phase's **complete set of public
+  artifacts** (Phase 2: wasm + per-index sidecar; Phase 3 onward: plus
+  template + meta sidecar) is present and has passed verification.
+- **Consumers must resolve `current` exactly once and use the resolved,
+  immutable `gen-<n>/` path from then on** (opening multiple paths through
+  `current/...` separately risks straddling generations). This convention is
+  documented in the artifact directory's README.
+- Staging lives on the same filesystem as the output destination.
+  Concurrent builds are mutually excluded via a lock file. On failure,
+  `current` is left untouched (preserving the previous generation). Old
+  generations are pruned to a fixed count (e.g. 2) on success; pruning is
+  documented as potentially racing with a consumer still using a resolved
+  `gen-<n>` (hence a grace period before immediate deletion).
 
-長所: 後処理パイプラインが「1 wasm = hook + optional cbak」という現行前提の
-まま使える。LLVM の DCE でデータセグメント含め最小化される。
-短所: コンパイル回数 N+1(依存クレートはキャッシュされるので leaf crate のみ)。
+Advantages: the post-processing pipeline can keep assuming "1 wasm = hook +
+optional cbak," as it does today. LLVM's DCE minimizes it, data segments
+included. Disadvantage: N+1 compilations (dependency crates are cached, so
+only the leaf crate recompiles).
 
-### 案 B: 1 回コンパイル + wasm 分割パス(理想形・将来の最適化)
+### Approach B: single compile + wasm-splitting pass (ideal form, future optimization)
 
-suffix 付き export を全部含む 1 つの wasm を作り、split パスが index ごとに
-「対象 export を `hook`/`cbak` に改名 → 他を削除 → DCE → 既存パイプライン」を
-行う。コンパイル 1 回で最短、discovery と成果物が同一物になり §7.3 も不要に
-なるが、wasm 手術(関数・テーブル・データセグメントの到達解析)の新規実装が
-必要で、バグると全 Hook に波及する。
+Build one wasm containing every suffixed export, then have a split pass
+perform, per index, "rename the target exports to `hook`/`cbak` → delete the
+rest → DCE → the existing pipeline." This compiles once — the fastest —
+and makes discovery and the artifact the same thing, eliminating the need
+for §7.3 as well, but it requires new wasm-surgery implementation (function,
+table, and data-segment reachability analysis), and a bug there would affect
+every hook.
 
-**決定: 理想形は案 B だが、v0.2 はシンプルさと既存パイプライン再利用を優先して
-案 A を採用する。**
+**Decision: the ideal form is Approach B, but v0.2 adopts Approach A,
+prioritizing simplicity and reuse of the existing pipeline.**
 
-A→B の**同等性の定義**(§10 D4): バイト同一性・HookHash・サイズ・WCE は
-**一致を期待しない**。要求するのは (1) index → (hook, cbak) 対応と全
-deployment メタデータの一致、(2) 各 index の validator 通過、(3) index ごとの
-差分実行テスト(同一入力に対する e2e での accept/rollback・戻り値・
-host 呼び出し列の一致)。
+The **definition of equivalence** for A→B (§10 D4): byte identity, HookHash,
+size, and WCE are **not expected to match**. What's required is (1) the
+index → (hook, cbak) mapping and all deployment metadata agree, (2) each
+index passes the validator, and (3) per-index differential execution tests
+agree (matching accept/rollback, return value, and host call sequence in e2e
+for the same input).
 
-(案 C: shim クレート生成は利点がなく不採用。)
+(Approach C, generating a shim crate, has no advantages and is not adopted.)
 
-### 7.5 成果物の命名
+### 7.5 Artifact naming
 
 ```
 target/rshooks/<crate-name>/
   current -> gen-3/
   gen-3/
-    0.deposit.wasm              # <index>.<fn名>.wasm
-    0.deposit.metadata.json     # 現行 sidecar の per-index 版(共有スキーマ転記を含む)
+    0.deposit.wasm              # <index>.<fn name>.wasm
+    0.deposit.metadata.json     # per-index version of the current sidecar (includes the shared-schema transcription)
     1.sweep.wasm
     1.sweep.metadata.json
-    sethook.template.json       # 占有位置パッチ(§9)
-    sethook.template.meta.json  # 生成情報 sidecar(§9.2)
+    sethook.template.json       # owned-position patch (§9)
+    sethook.template.meta.json  # generation-info sidecar (§9.2)
 ```
 
-### 7.6 素の cargo / rustdoc との契約
+### 7.6 The contract with plain cargo / rustdoc
 
-オーケストレータを介さない直接の cargo 実行についても挙動を規範化する:
+Behavior is also specified for direct cargo invocations that bypass the
+orchestrator:
 
-- `cargo check` / `cargo doc` / docs.rs: **サポートする**(コンパイル可能で
-  警告なし)。生成 item はすべて `#[doc(hidden)]` であり(§5.5)、rustdoc には
-  ユーザーの公開 API だけが現れる。
-- 素の `cargo build`: コンパイルは成功するが、成果物は suffix 付き export のみを
-  持つ **discovery 相当の非デプロイ品**である(exact な `hook` export を
-  持たないため、誤ってそのままインストールすることはできない —
-  これは安全側の性質として意図的に維持する)。インストール可能な wasm は
-  オーケストレータ経由でのみ生成される。この区別を book に明記する。
-- 生成コード内の `cfg(rshooks_entry = ...)` 使用箇所は、`--check-cfg` を渡さない
-  素の cargo でも `unexpected_cfgs` 警告を出さないよう、生成 item に scoped な
-  `#[allow(unexpected_cfgs)]` を付与する(lint 契約 §5.5 の一部)。
-- 素の check / build / doc の三通りに対する契約テストを Phase 1 に含める。
+- `cargo check` / `cargo doc` / docs.rs: **supported** (compiles cleanly,
+  no warnings). Every generated item is `#[doc(hidden)]` (§5.5), so rustdoc
+  shows only the user's public API.
+- Plain `cargo build`: compiles successfully, but the artifact is a
+  **discovery-equivalent, non-deployable product** carrying only
+  suffixed exports (it lacks the exact `hook` export, so it can't be
+  accidentally installed as-is — this is deliberately preserved as a safety
+  property). Installable wasm is only produced through the orchestrator.
+- Generated code's use of `cfg(rshooks_entry = ...)` gets a scoped
+  `#[allow(unexpected_cfgs)]` on the generated item, so plain cargo (which
+  doesn't pass `--check-cfg`) never emits an `unexpected_cfgs` warning
+  (part of the lint contract in §5.5).
+- Phase 1 includes contract tests for all three of plain check / build /
+  doc.
 
-## 8. 構文(規範となる骨格)
+## 8. Syntax (normative skeleton)
 
-> 属性文法の完全な BNF とアクセサ名は Phase 1 で確定する(§5.4, §5.6)。
-> 以下の例のアクセサ名は暫定である。骨格(struct/impl、index、属性引数の
-> 語彙と意味論)は本書で確定する。
+> The attribute grammar's complete BNF and accessor names are finalized in
+> Phase 1 (§5.4, §5.6). The accessor names in the examples below are
+> provisional. The skeleton (struct/impl, index, the attribute arguments'
+> vocabulary and semantics) is settled by this document.
 
-### 8.1 マルチ Hook の例
+### 8.1 Multi-hook example
 
 ```rust
 #![no_std]
@@ -704,38 +820,39 @@ pub struct Vault {
 
 #[hooks]
 impl Vault {
-    /// 入金を記録する。
+    /// Records a deposit.
     #[hook(0, name = "deposit", on_incoming = [Payment], on_outgoing = [], can_emit = [])]
-    fn deposit() -> i64 {
-        // 欠落時は default 式の値、decode 失敗は Err(§5.6)
-        let Ok(cfg) = Vault.config.get_or_default() else {
+    fn deposit(&self) -> i64 {
+        // On absence, the default expression's value; a decode failure is Err (§5.6)
+        let Ok(cfg) = self.config.get_or_default() else {
             rollback!(b"vault: bad CFG", 1);
         };
         // ...
         accept!(b"deposited", 0)
     }
 
-    /// 残高を回収して送金する。
+    /// Collects the balance and sends it.
     #[hook(1, name = "sweep", on = [Invoke], can_emit = [Payment])]
-    fn sweep() -> i64 { /* ... */ }
+    fn sweep(&self) -> i64 { /* ... */ }
 
     #[cbak(1)]
-    fn sweep_cbak() -> i64 { accept!() }
+    fn sweep_cbak(&self) -> i64 { accept!() }
 }
 ```
 
-### 8.2 hook_errors! / txn_template! との関係
+### 8.2 Relationship to `hook_errors!` / `txn_template!`
 
-`hook_errors!` と `txn_template!` は Hook 横断で共有可能な独立宣言なので、
-v0.2 でも**トップレベルのまま変更しない**。
+`hook_errors!` and `txn_template!` are independent declarations that can be
+shared across hooks, so v0.2 **leaves them unchanged, at the top level**.
 
-### 8.3 guard との関係
+### 8.3 Relationship to guard
 
-エントリの形(export ラッパー + 内部 fn)は現行 `#[hook]` の生成物と同じであり、
-guard 挿入・検査(`_g` import、WCE 計算)は index ごとの wasm 単位で
-従来どおり動く。影響なし。
+The entry shape (export wrapper + inner fn) matches what the current
+`#[hook]` generates today, so guard insertion/checking (the `_g` import,
+WCE computation) continues to work per-wasm, per index, exactly as before.
+No impact.
 
-### 8.4 単一 Hook の最小形
+### 8.4 Minimal form of a single hook
 
 ```rust
 #[hooks]
@@ -743,25 +860,26 @@ pub struct MyHook;
 
 #[hooks]
 impl MyHook {
-    #[hook(0)]  // トリガー省略 = installation override なし(§5.3)
-    fn main() -> i64 {
+    #[hook(0)]  // trigger omitted = no installation override (§5.3)
+    fn main(&self) -> i64 {
         accept!(b"ok", 0)
     }
 }
 ```
 
-現行最小形(`metadata!` + `#[hook]` fn)との差は正味 4〜6 行(§4.1 の
-評価を参照)。unit struct を許し、state/param が無ければフィールドは不要
-(この場合 static は生成されない。§5.5)。index は単一でも省略不可
-(確定事項 #3、根拠は §4.1)。
+The difference from the current minimal form (`metadata!` + `#[hook] fn`) is
+a net 4–6 lines (see the assessment in §4.1). Unit structs are allowed, and
+if there's no state/param, no fields are needed (in that case no static is
+generated, §5.5). The index is not omittable even for a single hook
+(settled point #3; rationale in §4.1).
 
-## 9. SetHook トランザクションテンプレート生成
+## 9. SetHook transaction template generation
 
-### 9.1 生成物
+### 9.1 Artifacts
 
-`sethook.template.json`(占有位置パッチ。**protocol-shaped な編集用 JSON**:
-フィールド構成はプロトコルどおりだが、プレースホルダーの置換と検証を経て
-初めて valid なトランザクションになる):
+`sethook.template.json` (an owned-position patch. **A protocol-shaped,
+editable JSON**: its field layout matches the protocol, but it only becomes
+a valid transaction after placeholder substitution and validation):
 
 ```json
 {
@@ -789,7 +907,7 @@ impl MyHook {
 }
 ```
 
-`sethook.template.meta.json`(生成情報 sidecar、submit 対象外):
+`sethook.template.meta.json` (generation-info sidecar, not for submission):
 
 ```json
 {
@@ -802,163 +920,192 @@ impl MyHook {
 }
 ```
 
-マスク値は実際の生成物では 64 桁 hex の完全な値になる(HookOn は active-low +
-SetHook ビット特例、HookCanEmit の deny-all は「全ビット 1、ただし SetHook
-ビットのみ 0」であり、単純な all-F ではない。導出は既存実装を再利用)。
-**生成する hex はすべて大文字で正規化する**(確定事項 #16)。
+Mask values in real generated output are complete 64-digit hex (HookOn is
+active-low with a SetHook-bit special case; HookCanEmit's deny-all is "every
+bit 1, except the SetHook bit is 0," not simply all-F. Derivation reuses the
+existing implementation). **All generated hex is normalized to uppercase**
+(settled point #16).
 
-### 9.2 生成規則
+### 9.2 Generation rules
 
-- **トリガーの写像**(§5.3 の宣言形をそのまま wire へ):
-  全省略 → トリガーフィールドなし / `on = all` → all-zero `HookOn` マスク /
-  `on = [..]` → `HookOn` / 方向指定 → `HookOnIncoming` + `HookOnOutgoing`
-  (`HookOn` とは排他)。
-- `Hooks[i]` は index i の Hook。歯抜け index は `{"Hook": {}}`(位置維持の
-  no-op)。配列長は **0..=最大宣言 index** ちょうど。
-- `can_emit` 省略時は `HookCanEmit` フィールドを出さない(§5.3 の三値を
-  wire までそのまま運ぶ)。
-- `Account` / `HookNamespace` は**プレースホルダー**。CLI オプション
-  (`--account`, `--namespace`)での充填は許すが、ソース属性では書けない。
-- **`Flags` はデフォルトでは出力しない(fail-closed)。**
-  `--override` 指定時は `hsfOVERRIDE` を**宣言された(非 gap)エントリにのみ**
-  付与する。gap の `{"Hook": {}}` に `Flags` を足すと no-op でなくなり
-  別 operation として解釈・拒否されるため、**gap オブジェクトは常に厳密に
-  空のまま**とする(歯抜け構成 + `--override` の検証ケースを Phase 3 に含める)。
-- **`HookParameters` は生成しない**(確定事項 #10)。installed parameter を
-  設定したい場合はテンプレートへ手で追加する。wire 上は「omission =
-  HookDefinition default の継承」「name のみ = 継承値の消去」「name+value =
-  明示設定」の三状態であり、omission は「パラメータ無し」を保証しない。
-  この注意はテンプレートのドキュメントに明記する。
-- **生成情報は別 sidecar**(`sethook.template.meta.json`)に置き、テンプレート
-  本体は protocol-shaped な JSON に保つ。sidecar には RFC 3339 の
-  `generated_at`、HookHash、位置情報(`declared` / `gaps` / `untouched_beyond`)、
-  `required_amendments` を含める。
-- `required_amendments` は **`Hooks` を無条件に含み**、テンプレートの
-  フィールドから導出できる範囲(NamedHooks / HookOnV2 / HookCanEmit)を
-  加えたものである。**wasm 内の Hook API 使用に由来する amendment 依存は
-  カバーしない**(この制限を sidecar のドキュメントに明記する。
-  feature→amendment レジストリによる拡張は将来課題)。
+- **Trigger mapping** (§5.3's declaration forms carried straight to the
+  wire): fully omitted → no trigger field / `on = all` → an all-zero
+  `HookOn` mask / `on = [..]` → `HookOn` / directional → `HookOnIncoming` +
+  `HookOnOutgoing` (mutually exclusive with `HookOn`).
+- `Hooks[i]` is the hook at index i. A gap index becomes `{"Hook": {}}` (a
+  position-preserving no-op). Array length is **exactly 0..=the highest
+  declared index**.
+- When `can_emit` is omitted, no `HookCanEmit` field is emitted (carrying
+  §5.3's three-valued semantics straight through to the wire).
+- `Account` / `HookNamespace` are **placeholders**. Filling them via CLI
+  options (`--account`, `--namespace`) is allowed, but they can't be written
+  as source attributes.
+- **`Flags` is not emitted by default (fail-closed).** With `--override`,
+  `hsfOVERRIDE` is applied **only to declared (non-gap) entries**. Adding
+  `Flags` to a gap's `{"Hook": {}}` would make it no longer a no-op —
+  interpreted and rejected as a different operation — so **gap objects
+  always stay strictly empty** (gapped-layout + `--override` verification
+  cases are included in Phase 3).
+- **`HookParameters` is never generated** (settled point #10). To set an
+  installed parameter, add it to the template by hand. On the wire, the
+  three states are "omission = inherit the HookDefinition default," "name
+  only = clear the inherited value," and "name+value = set explicitly";
+  omission does not guarantee "no parameter." This caveat is documented in
+  the template's own documentation.
+- **Generation info goes in a separate sidecar**
+  (`sethook.template.meta.json`); the template body itself stays
+  protocol-shaped JSON. The sidecar includes an RFC 3339 `generated_at`,
+  the HookHash, position info (`declared` / `gaps` / `untouched_beyond`),
+  and `required_amendments`.
+- `required_amendments` **unconditionally includes `Hooks`**, plus whatever
+  can be derived from the template's fields (NamedHooks / HookOnV2 /
+  HookCanEmit). **It does not cover amendment dependencies arising from
+  Hook API usage inside the wasm** (this limitation is documented in the
+  sidecar's docs; extending it via a feature→amendment registry is a future
+  concern).
 
-### 9.3 テンプレートの意味論: 占有位置パッチ
+### 9.3 Template semantics: an owned-position patch
 
-`{"Hook": {}}` は「この位置に触らない」という**位置合わせの no-op**であり、
-「この位置が空である」という表明ではない。したがってこのテンプレートは:
+`{"Hook": {}}` means "don't touch this position" — a **positional no-op** —
+not "this position is empty." Consequently this template:
 
-- 歯抜け位置に既にインストール済みの Hook があっても**そのまま残す**
-- 最大宣言 index より後ろの位置の既存 Hook も**そのまま残す**
-- つまり「チェーン全体の宣言的な実現」ではなく、
-  **「宣言した占有位置に対するパッチ(owned-position patch)」**である
+- **leaves any already-installed hook at a gap position untouched**
+- **leaves any existing hook at a position past the highest declared index
+  untouched**
+- is, in other words, not "a declarative realization of the whole chain,"
+  but **"a patch against the declared owned positions" (an owned-position
+  patch)**
 
-このため、**テンプレートの適用が成功しても、アカウント上のチェーン全体の
-挙動がソース宣言だけから決まるとは限らない**。運用者は submit 前に対象
-アカウントの既存チェーンを確認すること。sidecar の `positions` は
-この確認を支援するための情報である。ledger を読んで宣言どおりへ収束させる
-(不要位置の削除・置換の導出)は v0.2 の範囲外とする。
+Because of this, **successfully applying the template does not guarantee
+the account's whole-chain behavior is fully determined by the source
+declaration alone.** Operators should check the target account's existing
+chain before submitting. The sidecar's `positions` field exists to support
+that check. Converging the ledger to match the declaration (deriving
+deletions/replacements for unwanted positions) is out of scope for v0.2.
 
-同様に、次もテンプレートには**含めない**: 複数アカウント・ネットワーク別の
-設定、grant、既存チェーンとの diff、削除操作、パラメータ実値・secret。
+Likewise, the template **never includes**: multi-account or per-network
+configuration, grants, a diff against the existing chain, delete operations,
+or actual parameter values/secrets.
 
-テンプレートは、デフォルト(非 `--override`)では「ソース宣言どおりに、
-宣言位置が空いているアカウントへ新規インストールする 1 トランザクション」の
-編集可能な雛形であり、`--override` 指定時は宣言位置の既存 Hook の置換を
-許可する雛形になる。
+By default (without `--override`), the template is an editable draft of "a
+single transaction that installs fresh, exactly as the source declares,
+into an account whose declared positions are empty." With `--override`, it
+becomes a draft that also permits replacing an existing hook at a declared
+position.
 
-## 10. 未決事項
+## 10. Open questions
 
-| ID | 論点 | 推奨 | 備考 |
+| ID | Question | Recommendation | Notes |
 |---|---|---|---|
-| D1 | struct を跨ぐ state 共有(別クレートのチェーンと同じ state を読む) | v0.2 では対象外 | 型定義クレートの共有(通常の Rust の手段)で対応 |
-| D2 | per-hook の state/param 使用宣言(`uses = [...]`) | v0.2 では入れない(全宣言 = 共有スキーマ) | sidecar の宣言は「共有スキーマの転記」とラベルする(§5.4)。検出ベースの絞り込みは将来課題 |
-| D3 | weak/collect/again 等の実行モード属性 | v0.2 では入れない | 必要になった時点で属性を追加 |
-| D4 | ビルド戦略 A→B の切替条件 | 実測でビルド時間が問題化したら | 同等性の定義は §7 に固定済み(バイト同一性は要求しない) |
-| D5 | encoded default の成果物への搬送 | 将来課題 | const 評価可能な encode か、wasm carrier 経由の抽出。実現すればテンプレートへの `HookParameters` 出力を再検討 |
-| D6 | 条件付きコンパイル(`#[cfg]`)対応 | v0.2 は禁止(§5.1) | 必要になったら discovery との整合意味論を定義して解禁 |
+| D1 | Sharing state across structs (reading the same state as a chain in another crate) | Out of scope for v0.2 | Handled via sharing the type-definition crate (an ordinary Rust mechanism) |
+| D2 | Per-hook state/param usage declarations (`uses = [...]`) | Not included in v0.2 (every declaration = the shared schema) | The sidecar's declarations are labeled "a transcription of the shared schema" (§5.4). Detection-based narrowing is a future concern |
+| D3 | Execution-mode attributes like weak/collect/again | Not included in v0.2 | Add the attribute once it's needed |
+| D4 | The switchover condition from build strategy A to B | Once measurement shows build time is a real problem | The equivalence definition is already fixed in §7 (byte identity is not required) |
+| D5 | Carrying the encoded default into the artifact | Future concern | Either a const-evaluable encoding, or extraction via the wasm carrier. If realized, revisit emitting `HookParameters` into the template |
+| D6 | Conditional-compilation (`#[cfg]`) support | Forbidden in v0.2 (§5.1) | Define the consistency semantics with discovery once needed, then lift the ban |
 
-## 11. 開発者体験への総合評価
+## 11. Overall developer-experience assessment
 
-| 観点 | 単一 Hook プロジェクト | チェーン(複数 Hook)プロジェクト |
+| Dimension | Single-hook project | Chain (multi-hook) project |
 |---|---|---|
-| 記述量 | 増(正味 4〜6 行 + 概念 2 つ。§4.1) | 大幅減(クレート統合、宣言共有) |
-| 正しさ | ほぼ同等(メタデータ局所化で微改善) | 大幅改善(共有スキーマの型保証、ペア検証、占有位置のコード化) |
-| ビルド | 実質不変 | ビルド時間 N+1 倍(leaf のみ)だが手作業の統合が消える |
-| デプロイ | テンプレート生成で改善 | 大幅改善(占有位置パッチが 1 JSON で出る) |
-| 学習 | struct 儀式 + index の説明が必要 | 「1 struct = 1 チェーン」は概念としてむしろ教えやすい |
-| IDE/デバッグ | マクロ複雑化で悪化リスク(span 保持契約・診断カタログ §4.4 で緩和) | 同左 |
+| Amount to write | more (net 4–6 lines plus two concepts, §4.1) | much less (crate consolidation, shared declarations) |
+| Correctness | about the same (slight improvement from localized metadata) | much better (compiler-guaranteed shared schema, pair verification, codified occupied positions) |
+| Build | essentially unchanged | N+1x build time (leaf only), but manual integration disappears |
+| Deployment | improved via template generation | much better (the owned-position patch comes out as one JSON) |
+| Learning | needs the struct ritual + index explained | "1 struct = 1 chain" is, if anything, an easier concept to teach |
+| IDE/debugging | risk of regression from macro complexity (mitigated by the span-preservation contract and diagnostic catalog, §4.4) | same |
 
-総合すると、**この提案の価値はチェーン開発で最大化され、コストは単一 Hook の
-儀式増とマクロ実装の複雑化に集中する**。Xahau の実プロダクト(governance、
-reward、firewall 群)はチェーン前提のものが多く、ツールチェーンとして
-チェーンを一級市民にする判断は妥当である。
+Overall, **this proposal's value is maximized for chain development, while
+its cost concentrates in the added ritual for a single hook and the macro
+implementation's complexity**. Xahau's real products (governance, reward,
+firewall groups) are mostly chain-oriented, so making the chain a
+first-class citizen of the toolchain is a sound call.
 
-## 12. 移行計画
+## 12. Migration plan
 
-移行元は**現行 v0.0.x API** である(本書で「現行」は常に v0.0.x を指す)。
+The migration source is **the current v0.0.x API** (in this document,
+"current" always means v0.0.x).
 
-### 12.1 正規移行表(Phase 1 成果物)
+### 12.1 Canonical migration table (a Phase 1 deliverable)
 
-次の対応表を Phase 1 で作成し、機械的な書き換え可能性を検収基準とする:
+The following correspondence table is produced in Phase 1, with mechanical
+rewritability as the acceptance criterion:
 
-| 旧(現行 v0.0.x) | 新(v0.2) |
+| Old (current v0.0.x) | New (v0.2) |
 |---|---|
 | `metadata! { name, description }` | Cargo package name / `#[hooks(description = ...)]` |
-| `metadata! { HookOn / IncomingHookOn / OutgoingHookOn / 全省略 }` | entry 属性 `on` / `on_incoming` + `on_outgoing` / 全省略(+新設 `on = all`) |
-| `metadata! { HookCanEmit, HookName }` | entry 属性 `can_emit` / `name` |
-| `#[hook] fn` / `#[cbak] fn` | `#[hooks] impl` 内の `#[hook(i, ...)]` / `#[cbak(i)]` |
-| `hook_state!`(全宣言形) | `#[state(...)]` フィールド |
-| `hook_parameter!` / `otxn_parameter!`(全宣言形) | `#[hook_param(...)]` / `#[otxn_param(...)]` フィールド |
-| 各宣言マクロの生成アクセサ | ハンドルのアクセサ(対応表で名称・シグネチャ・意味差を明記。§5.6) |
-| 成果物パス(単一 wasm + sidecar) | `target/rshooks/<crate>/current/` 世代構成(§7.5) |
+| `metadata! { HookOn / IncomingHookOn / OutgoingHookOn / fully omitted }` | entry attribute `on` / `on_incoming` + `on_outgoing` / fully omitted (plus the new `on = all`) |
+| `metadata! { HookCanEmit, HookName }` | entry attributes `can_emit` / `name` |
+| `#[hook] fn` / `#[cbak] fn` | `#[hook(i, ...)]` / `#[cbak(i)]` inside a `#[hooks] impl` |
+| `hook_state!` (every declaration form) | `#[state(...)]` field |
+| `hook_parameter!` / `otxn_parameter!` (every declaration form) | `#[hook_param(...)]` / `#[otxn_param(...)]` field |
+| each declaration macro's generated accessor | the handle's accessor (names, signatures, and semantic differences documented in the correspondence table, §5.6) |
+| artifact path (single wasm + sidecar) | `target/rshooks/<crate>/current/` generation layout (§7.5) |
 
-### 12.2 examples / book
+### 12.2 Examples / book
 
-- examples 01〜15: 単一 Hook のまま新形式へ機械的に書き換え(移行表の検収対象)。
-- **`80_reward` + `81_govern` は 1 クレートのチェーン example へ統合する**
-  (この統合こそ本提案の実証であるため、機械的書き換えではなく設計タスクとして
-  扱う)。共有 key レイアウト型を struct 宣言に一本化し、index の割り当て
-  (genesis アカウントのチェーン構成に合わせる)までを行う。
-  **Phase の割り当て**: Phase 1 では「80/81 の全宣言形が新文法で表現可能で
-  ある」ことの机上証明まで(移行表の網羅性検収の一部)。統合クレートの実装と
-  ビルドは Phase 2(マルチ index が前提)。生成テンプレートによる e2e
-  インストール検証は Phase 3。旧 2 クレート版は統合完了時に削除する。
-- book はチュートリアル冒頭を新最小形(§8.4)で書き直し、
-  「struct は宣言の器で実行時実体はない」「index は占有位置」を最初に説明する。
+- Examples 01–15: stay single-hook, mechanically rewritten into the new
+  form (subject to the migration table's acceptance criteria).
+- **`80_reward` + `81_govern` are consolidated into a single chain example
+  crate** (this consolidation is itself the proof of this proposal, so it's
+  treated as a design task, not a mechanical rewrite). This unifies the
+  shared key-layout types into the struct declaration and assigns indices
+  (matching the genesis account's chain layout). **Phase allocation**:
+  Phase 1 only goes as far as a desk proof that every declaration form in
+  80/81 is expressible in the new grammar (part of the migration table's
+  completeness acceptance criteria). Implementing and building the
+  consolidated crate is Phase 2 (it requires multiple indices). e2e
+  installation verification via the generated template is Phase 3. The old
+  two-crate version is deleted once consolidation is complete.
+- The book rewrites its opening tutorial around the new minimal form
+  (§8.4), explaining upfront that "the struct is a container for the
+  declaration, with no runtime instance" and "index is the occupied
+  position."
 
-### 12.3 検収基準
+### 12.3 Acceptance criteria
 
-- 全 examples が `-D warnings` でビルドできる(lint 契約 §5.5)
-- 移行表のみを参照して旧→新の書き換えが完了できる(追加の口頭知識を要しない)
-- e2e: 統合 govern/reward チェーンが生成テンプレートで standalone ノードへ
-  インストールでき、既存の e2e シナリオが通る(Phase 3)
+- All examples build under `-D warnings` (the lint contract, §5.5)
+- The old→new rewrite can be completed using only the migration table (no
+  additional word-of-mouth knowledge required)
+- e2e: the consolidated govern/reward chain can be installed onto a
+  standalone node via the generated template, and the existing e2e
+  scenarios pass (Phase 3)
 
-## 13. 実装ロードマップ(参考)
+## 13. Implementation roadmap (reference)
 
-1. **Phase 1**: `#[hooks]` struct/impl マクロ(マーカー型注入 §5.4、
-   双方向ハンドシェイク §5.1、形状表 §5.1)+ **単一 index で完結する
-   Strategy A の安全基盤一式**: BuildPlan(§7.1)、per-index 処理順序
-   (§7.2)、discovery/選択ビルドの整合比較(§7.3。CanonicalRecord の
-   バイトレイアウト確定は Phase 2 冒頭でよいが、比較そのものは Phase 1 から
-   行う)。現行パイプラインは exact な `hook`/`cbak` export を要求するため、
-   選択ビルドまで含めて初めて動く成果物になる。正規移行表(§12.1)+
-   80/81 表現可能性の机上証明(§12.2)、アクセサ対応表と欠落判定規則
-   (§5.6)、診断カタログ + trybuild(§4.4)、compile-fail/pass テスト
-   (§5.1)、lint 契約 CI(§5.5)、素の cargo/rustdoc 契約テスト(§7.6)。
-   examples 01〜15 と book の移行。
-2. **Phase 2**: マルチ index 対応(反復と複数成果物の組み立て)。
-   CanonicalRecordV1 バイトレイアウト確定(§7.3)、世代管理(§7.4。
-   公開成果物一式は wasm + per-index sidecar)、§6.3 真理値表の実装、
-   80/81 統合クレートの実装・ビルド。
-3. **Phase 3**: SetHook テンプレート + meta sidecar 生成(§9。世代の公開
-   成果物一式にテンプレート類を追加)。歯抜け + `--override` 検証。
-   e2e(hooks-toolkit)でテンプレートを使った実インストール検証
-   (govern/reward 統合 example を含む)。
-4. **Phase 4**(任意): ビルド戦略 B(wasm 分割パス)への差し替え
-   (同等性テスト §7 を先に整備)。
+1. **Phase 1**: the `#[hooks]` struct/impl macro (marker-type injection
+   §5.4, bidirectional handshake §5.1, shape table §5.1) plus **the full
+   safety foundation for Strategy A, complete for a single index**:
+   BuildPlan (§7.1), per-index processing order (§7.2),
+   discovery/selective-build consistency comparison (§7.3; finalizing
+   CanonicalRecord's byte layout can wait until the start of Phase 2, but
+   the comparison itself runs from Phase 1). Since the existing pipeline
+   requires an exact `hook`/`cbak` export, the artifact only really works
+   once the selective build is included. Plus the canonical migration table
+   (§12.1), the 80/81 expressibility desk proof (§12.2), the accessor
+   correspondence table and absence-detection rule (§5.6), the diagnostic
+   catalog plus trybuild (§4.4), compile-fail/pass tests (§5.1), the lint
+   contract CI (§5.5), and the plain cargo/rustdoc contract tests (§7.6).
+   Migration of examples 01–15 and the book.
+2. **Phase 2**: multi-index support (iterating and assembling multiple
+   artifacts). Finalize CanonicalRecordV1's byte layout (§7.3), generation
+   management (§7.4; the public artifact set is wasm + per-index sidecar),
+   implementing the §6.3 truth table, implementing and building the 80/81
+   consolidated crate.
+3. **Phase 3**: SetHook template + meta sidecar generation (§9; templates
+   added to the generation's public artifact set). Gap + `--override`
+   verification. e2e (hooks-toolkit) verification of a real install using
+   the template (including the consolidated govern/reward example).
+4. **Phase 4** (optional): swap in build strategy B (the wasm-splitting
+   pass) (equivalence tests from §7 are prepared first).
 
-## 14. 参照
+## 14. References
 
-- [docs/DESIGN.md](./DESIGN.md) — 現行アーキテクチャ(§5.4 エントリポイント、§6 rshooks-build)
-- `crates/rshooks-build/src/metadata.rs` — トリガー三形の検証と
-  `HookOnIncoming`/`HookOnOutgoing` の wire 直列化(現行実装)
-- [Xahau SetHook](https://xahau.network/docs/protocol-reference/transactions/transaction-types/sethook/) — `Hooks` 配列の位置意味論、空 `Hook` オブジェクト、hsfOVERRIDE、Install 時のフィールド継承
+- [docs/DESIGN.md](./DESIGN.md) — the current architecture (§5.4 entry
+  points, §6 rshooks-build)
+- `crates/rshooks-build/src/metadata.rs` — the current implementation's
+  validation of the three trigger forms and wire serialization of
+  `HookOnIncoming`/`HookOnOutgoing`
+- [Xahau SetHook](https://xahau.network/docs/protocol-reference/transactions/transaction-types/sethook/) — the `Hooks` array's positional semantics, empty `Hook` objects, hsfOVERRIDE, field inheritance on Install
 - [Xahau HookOn](https://xahau.network/docs/hooks/concepts/hookon-field/) / HookOnV2 / NamedHooks / HookCanEmit amendments
-- [Xahau Parameters](https://xahau.network/docs/hooks/concepts/parameters/) — HookParameters の継承・消去・明示設定
+- [Xahau Parameters](https://xahau.network/docs/hooks/concepts/parameters/) — inheritance, clearing, and explicit setting of HookParameters
