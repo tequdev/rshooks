@@ -1,0 +1,19 @@
+[package]
+name = "governance"
+version = "0.0.1"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+# This crate is no_std with no `test` crate available for wasm32v1-none;
+# disable the (impossible) unit-test harness target rather than let
+# `cargo test`/`--all-targets` fail trying to build one.
+test = false
+
+[dependencies]
+rshooks = { path = "../../crates/rshooks", features = ["host-panic-handler"] }
+
+[lints]
+workspace = true

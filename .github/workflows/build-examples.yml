@@ -64,11 +64,9 @@ jobs:
           for manifest in examples/*/Cargo.toml; do
             dir="$(dirname "$manifest")"
             name="$(basename "$dir")"
-            pkg="$(grep -m1 '^name = ' "$manifest" | sed -E 's/name = "(.*)"/\1/')"
-            wasm="${pkg//-/_}"
             args="${EXTRA_ARGS[$name]:-}"
-            entry="$(jq -nc --arg name "$name" --arg dir "$dir" --arg wasm "$wasm" --arg args "$args" \
-              '{name: $name, dir: $dir, wasm: $wasm, args: $args}')"
+            entry="$(jq -nc --arg name "$name" --arg dir "$dir" --arg args "$args" \
+              '{name: $name, dir: $dir, args: $args}')"
             matrix="$(jq -c --argjson e "$entry" '. + [$e]' <<<"$matrix")"
           done
 
@@ -141,22 +139,27 @@ jobs:
           name: rshooks-build-bin
           path: bin
 
-      # Building each example through rshooks-build and then `check`ing the
-      # produced binary doubles as the end-to-end test of the whole
+      # Building each example through rshooks-build and then `check`ing
+      # every entry it declares doubles as the end-to-end test of the whole
       # toolchain (cleaner, guard pass, validator) — no_std cdylib hooks
       # have no runnable unit tests. `bin/rshooks` is the binary
       # `build-tool` built once and shared above, so it isn't recompiled
-      # once per example here.
+      # once per example here. A crate may declare more than one `#[hook]`
+      # entry (see `80_governance`), each landing as its own
+      # `<index>.<entry-fn>.wasm` under `out/current/` — check every
+      # artifact the build produced rather than assuming exactly one.
       - name: Build and check
         run: |
           set -euo pipefail
           chmod +x bin/rshooks
-          bin/rshooks build --manifest-path "${{ matrix.dir }}/Cargo.toml" ${{ matrix.args }}
-          bin/rshooks check "${{ matrix.dir }}/out/${{ matrix.wasm }}.wasm"
+          bin/rshooks build --manifest-path "${{ matrix.dir }}/Cargo.toml" --out "${{ matrix.dir }}/out" ${{ matrix.args }}
+          for wasm in "${{ matrix.dir }}/out/current"/*.wasm; do
+            bin/rshooks check "$wasm"
+          done
 
       - name: Upload hook binary
         uses: actions/upload-artifact@v7
         with:
           name: example-hooks-${{ matrix.name }}
-          path: ${{ matrix.dir }}/out/*.wasm
+          path: ${{ matrix.dir }}/out/current/*.wasm
           if-no-files-found: error

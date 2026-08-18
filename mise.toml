@@ -35,53 +35,21 @@ description = "Build every example through rshooks-build and check the output (e
 run = """
 set -e
 
-cargo run -p rshooks-build -- build --manifest-path examples/01_accept-all/Cargo.toml
-cargo run -p rshooks-build -- check examples/01_accept-all/out/accept_all.wasm
+# Every single-hook example's `#[hook(0, ..)]` entry fn is named `main`, so
+# each produces `0.main.wasm` under its own generation root.
+for dir in \
+  01_accept-all 02_state-counter 03_hook-params 04_errors 05_firewall \
+  06_guard-patterns 07_xfl-math 08_slot-ledger 09_state-foreign 10_emit-txn \
+  12_typed-data 13_keylets 14_account-id-macro 15_slot-objects \
+; do
+  cargo run -p rshooks-build -- build --manifest-path "examples/${dir}/Cargo.toml" --out "examples/${dir}/out"
+  cargo run -p rshooks-build -- check "examples/${dir}/out/current/0.main.wasm"
+done
 
-cargo run -p rshooks-build -- build --manifest-path examples/02_state-counter/Cargo.toml
-cargo run -p rshooks-build -- check examples/02_state-counter/out/state_counter.wasm
-
-cargo run -p rshooks-build -- build --manifest-path examples/03_hook-params/Cargo.toml
-cargo run -p rshooks-build -- check examples/03_hook-params/out/hook_params.wasm
-
-cargo run -p rshooks-build -- build --manifest-path examples/04_errors/Cargo.toml
-cargo run -p rshooks-build -- check examples/04_errors/out/errors.wasm
-
-cargo run -p rshooks-build -- build --manifest-path examples/05_firewall/Cargo.toml
-cargo run -p rshooks-build -- check examples/05_firewall/out/firewall.wasm
-
-cargo run -p rshooks-build -- build --manifest-path examples/06_guard-patterns/Cargo.toml
-cargo run -p rshooks-build -- check examples/06_guard-patterns/out/guard_patterns.wasm
-
-cargo run -p rshooks-build -- build --manifest-path examples/07_xfl-math/Cargo.toml
-cargo run -p rshooks-build -- check examples/07_xfl-math/out/xfl_math.wasm
-
-cargo run -p rshooks-build -- build --manifest-path examples/08_slot-ledger/Cargo.toml
-cargo run -p rshooks-build -- check examples/08_slot-ledger/out/slot_ledger.wasm
-
-cargo run -p rshooks-build -- build --manifest-path examples/09_state-foreign/Cargo.toml
-cargo run -p rshooks-build -- check examples/09_state-foreign/out/state_foreign.wasm
-
-cargo run -p rshooks-build -- build --manifest-path examples/10_emit-txn/Cargo.toml
-cargo run -p rshooks-build -- check examples/10_emit-txn/out/emit_txn.wasm
-
-cargo run -p rshooks-build -- build --manifest-path examples/12_typed-data/Cargo.toml
-cargo run -p rshooks-build -- check examples/12_typed-data/out/typed_data.wasm
-
-cargo run -p rshooks-build -- build --manifest-path examples/13_keylets/Cargo.toml
-cargo run -p rshooks-build -- check examples/13_keylets/out/keylets.wasm
-
-cargo run -p rshooks-build -- build --manifest-path examples/14_account-id-macro/Cargo.toml
-cargo run -p rshooks-build -- check examples/14_account-id-macro/out/account_id_macro.wasm
-
-cargo run -p rshooks-build -- build --manifest-path examples/15_slot-objects/Cargo.toml
-cargo run -p rshooks-build -- check examples/15_slot-objects/out/slot_objects.wasm
-
-cargo run -p rshooks-build -- build --manifest-path examples/80_reward/Cargo.toml
-cargo run -p rshooks-build -- check examples/80_reward/out/reward.wasm
-
-cargo run -p rshooks-build -- build --manifest-path examples/81_govern/Cargo.toml
-cargo run -p rshooks-build -- check examples/81_govern/out/govern.wasm
+# 80_governance declares two hooks in one chain: `0.govern` and `1.reward`.
+cargo run -p rshooks-build -- build --manifest-path examples/80_governance/Cargo.toml --out examples/80_governance/out
+cargo run -p rshooks-build -- check examples/80_governance/out/current/0.govern.wasm
+cargo run -p rshooks-build -- check examples/80_governance/out/current/1.reward.wasm
 """
 
 [tasks."book:build"]

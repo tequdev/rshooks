@@ -6,76 +6,81 @@
 //! permits bounded arithmetic used by its parsers and encoders.
 #![allow(clippy::arithmetic_side_effects)]
 
-mod base58;
-mod metadata;
 mod sha256;
 
 use proc_macro::{Delimiter, Group, Ident, Literal, Punct, Spacing, Span, TokenStream, TokenTree};
 
-mod decl_pair;
+mod base58;
 mod hook_data;
 mod hook_key;
+mod hooks_impl;
+mod hooks_shared;
+mod hooks_struct;
 mod param_name;
 mod param_value;
 mod shape;
 mod xfl_literal;
 
-/// Turns a plain `fn name() -> i64 { .. }` into the Hook host's required
-/// `hook` export.
+/// Declares a multi-hook chain — see `docs/MULTI_HOOK_STRUCT_DESIGN.md` for
+/// the full rationale and the v0.2 implementation contract for the
+/// normative grammar.
 ///
-/// Expands to the original function (unchanged) plus:
+/// Applied to a struct, it declares the chain's shared state/parameter
+/// schema (see [`hooks_struct`]); applied to that struct's inherent `impl`
+/// block, it declares the chain's hook/cbak entries (see [`hooks_impl`]).
+/// Anything else is rejected.
 ///
-/// ```ignore
-/// #[unsafe(no_mangle)]
-/// pub extern "C" fn hook(_reserved: u32) -> i64 {
-///     name()
-/// }
-/// ```
-///
-/// # Requirements
-///
-/// The annotated item must be a plain (`async`/`unsafe`/`const`/`extern`
-/// modifiers not allowed, no generics, no `where` clause) `fn` that takes no
-/// arguments and returns `i64`; `#[hook]` itself takes no arguments. Any
-/// violation is reported as a `compile_error!` pointing at the offending
-/// token, not a panic.
-///
-/// # Examples
-///
-/// ```
-/// use rshooks_macros::hook;
-///
-/// #[hook]
-/// fn my_hook() -> i64 {
-///     0
-/// }
-/// ```
-///
-/// Hook authors do not depend on `rshooks-macros` directly in practice — see
-/// `rshooks::hook`, which re-exports this and is what hook crates
-/// actually import.
+/// Hook authors use the re-exported `rshooks::hooks` rather than depending
+/// on this proc-macro crate directly.
 #[proc_macro_attribute]
-pub fn hook(attr: TokenStream, item: TokenStream) -> TokenStream {
-    entry_point("hook", attr, item)
+pub fn hooks(attr: TokenStream, item: TokenStream) -> TokenStream {
+    match dispatch_hooks_target(&item) {
+        HooksTarget::Struct => hooks_struct::expand(attr, item),
+        HooksTarget::Impl => hooks_impl::expand(attr, item),
+        HooksTarget::Other => err(
+            Span::call_site(),
+            "#[hooks] must be applied to a struct or an inherent impl",
+        ),
+    }
 }
 
-/// Like [`macro@hook`], but exports `cbak` instead of `hook` — for the
-/// optional callback a Hook module can export, invoked when a transaction it
-/// previously emitted settles. See [`macro@hook`] for the exact requirements
-/// and generated shape (identical, save for the export name).
-#[proc_macro_attribute]
-pub fn cbak(attr: TokenStream, item: TokenStream) -> TokenStream {
-    entry_point("cbak", attr, item)
+enum HooksTarget {
+    Struct,
+    Impl,
+    Other,
 }
 
-/// Embeds build-only Hook metadata in a dead WebAssembly export.
-///
-/// Hook authors use the re-exported [`rshooks::metadata!`] macro rather
-/// than depending on this proc-macro crate directly. See that re-export for
-/// the complete grammar and the JSON/cleaning contract.
-#[proc_macro]
-pub fn metadata(input: TokenStream) -> TokenStream {
-    metadata::expand(input)
+/// Peeks far enough into `item`'s tokens (past leading attributes and an
+/// optional `pub`/`pub(..)` visibility — visibility never precedes `impl`)
+/// to tell whether [`hooks`] should dispatch to [`hooks_struct::expand`] or
+/// [`hooks_impl::expand`]. Full shape validation happens inside whichever
+/// module is dispatched to; this only needs to disambiguate the two.
+fn dispatch_hooks_target(item: &TokenStream) -> HooksTarget {
+    let mut iter = item.clone().into_iter().peekable();
+    loop {
+        match iter.peek() {
+            Some(TokenTree::Punct(p)) if p.as_char() == '#' => {
+                iter.next();
+                iter.next();
+            }
+            _ => break,
+        }
+    }
+    if let Some(TokenTree::Ident(id)) = iter.peek() {
+        if id.to_string() == "pub" {
+            iter.next();
+            if let Some(TokenTree::Group(g)) = iter.peek() {
+                if g.delimiter() == Delimiter::Parenthesis {
+                    iter.next();
+                }
+            }
+        }
+    }
+    match iter.peek() {
+        Some(TokenTree::Ident(id)) if id.to_string() == "struct" => HooksTarget::Struct,
+        Some(TokenTree::Ident(id)) if id.to_string() == "impl" => HooksTarget::Impl,
+        _ => HooksTarget::Other,
+    }
 }
 
 /// Derives `rshooks::convert::ToBytes` plus an explicit
@@ -125,38 +130,6 @@ pub fn derive_param_name(input: TokenStream) -> TokenStream {
 #[proc_macro_derive(ParamValue)]
 pub fn derive_param_value(input: TokenStream) -> TokenStream {
     param_value::derive(input)
-}
-
-/// Declares a hook-state key/value pairing — see `rshooks::hook_state!`'s
-/// doc comment (the public-facing re-export site) for the full grammar
-/// staircase (Forms 1–4, the `existing` keyword form and the pairing form),
-/// the entity every form declares and the accessors it carries, and worked
-/// examples. Implemented in [`decl_pair`]; kept as a thin
-/// `#[proc_macro]` entry point here, mirroring [`hook`]/[`cbak`]'s split
-/// between the `#[proc_macro...]` entry point and its implementation.
-#[proc_macro]
-pub fn hook_state(input: TokenStream) -> TokenStream {
-    decl_pair::expand(input, decl_pair::Role::State)
-}
-
-/// Declares a Hook API parameter name/value pairing, read via
-/// `hook_param_typed` — see `rshooks::hook_parameter!`'s doc comment (the
-/// public-facing re-export site) for the full grammar staircase and worked
-/// examples. Implemented in [`decl_pair`]; kept as a thin `#[proc_macro]`
-/// entry point here, mirroring [`hook`]/[`cbak`]'s split between the
-/// `#[proc_macro...]` entry point and its implementation.
-#[proc_macro]
-pub fn hook_parameter(input: TokenStream) -> TokenStream {
-    decl_pair::expand(input, decl_pair::Role::HookParam)
-}
-
-/// Identical grammar to [`macro@hook_parameter`], targeting
-/// `otxn_param_typed` (a parameter attached to the *originating
-/// transaction*) instead of `hook_param_typed` — see
-/// `rshooks::otxn_parameter!`'s doc comment for the full writeup.
-#[proc_macro]
-pub fn otxn_parameter(input: TokenStream) -> TokenStream {
-    decl_pair::expand(input, decl_pair::Role::OtxnParam)
 }
 
 /// Decodes a classic XRPL/Xahau r-address (base58check string literal,
@@ -265,176 +238,6 @@ pub fn XFL(input: TokenStream) -> TokenStream {
 fn unquote_str(text: &str) -> Option<String> {
     let inner = text.strip_prefix('"')?.strip_suffix('"')?;
     Some(inner.to_string())
-}
-
-/// Shared implementation for [`hook`] and [`cbak`]: validates the annotated
-/// item's shape, then appends a generated `extern "C"` export named
-/// `export_name` that calls it.
-fn entry_point(export_name: &str, attr: TokenStream, item: TokenStream) -> TokenStream {
-    if !attr.is_empty() {
-        return err(
-            Span::call_site(),
-            &format!("#[{export_name}] takes no arguments"),
-        );
-    }
-
-    let tail = match extract_fn_name(item.clone(), export_name) {
-        Ok(name) => match build_wrapper(export_name, &name) {
-            Ok(wrapper) => wrapper,
-            Err(e) => e,
-        },
-        Err(e) => e,
-    };
-
-    let mut out = item;
-    out.extend(tail);
-    out
-}
-
-/// Walks `item`'s tokens far enough to confirm it is a plain, no-argument,
-/// `i64`-returning `fn`, and returns its name.
-///
-/// Deliberately tolerant of leading attributes (including doc comments) and
-/// a leading `pub`/`pub(...)` visibility on the item, since those are
-/// legal (if unusual) on a hook entry point and don't affect the generated
-/// wrapper. Everything else about the shape is required exactly, since the
-/// generated wrapper's `name()` call assumes it.
-fn extract_fn_name(item: TokenStream, export_name: &str) -> Result<Ident, TokenStream> {
-    let mut iter = item.into_iter().peekable();
-
-    // Leading attributes: `#` followed by a `[...]` group, repeated.
-    loop {
-        match iter.peek() {
-            Some(TokenTree::Punct(p)) if p.as_char() == '#' => {
-                iter.next();
-                match iter.next() {
-                    Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Bracket => {}
-                    Some(other) => {
-                        return Err(err(other.span(), "malformed attribute before `fn`"));
-                    }
-                    None => return Err(err(Span::call_site(), "malformed attribute before `fn`")),
-                }
-            }
-            _ => break,
-        }
-    }
-
-    // Optional visibility: `pub` or `pub(...)`.
-    if let Some(TokenTree::Ident(id)) = iter.peek() {
-        if id.to_string() == "pub" {
-            iter.next();
-            if let Some(TokenTree::Group(g)) = iter.peek() {
-                if g.delimiter() == Delimiter::Parenthesis {
-                    iter.next();
-                }
-            }
-        }
-    }
-
-    // `fn` keyword: no `async`/`unsafe`/`const`/`extern` modifiers allowed.
-    match iter.next() {
-        Some(TokenTree::Ident(id)) if id.to_string() == "fn" => {}
-        Some(other) => {
-            return Err(err(
-                other.span(),
-                &format!(
-                    "#[{export_name}] can only be applied to a plain `fn` item \
-                     (no `async`/`unsafe`/`const`/`extern` modifiers)"
-                ),
-            ));
-        }
-        None => return Err(err(Span::call_site(), "expected a function")),
-    }
-
-    // Function name.
-    let name = match iter.next() {
-        Some(TokenTree::Ident(id)) => id,
-        Some(other) => return Err(err(other.span(), "expected a function name")),
-        None => return Err(err(Span::call_site(), "expected a function name")),
-    };
-
-    // No generics.
-    if let Some(TokenTree::Punct(p)) = iter.peek() {
-        if p.as_char() == '<' {
-            return Err(err(
-                p.span(),
-                &format!("#[{export_name}] does not support generic functions"),
-            ));
-        }
-    }
-
-    // Argument list: must be present and empty.
-    match iter.next() {
-        Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Parenthesis => {
-            if !g.stream().is_empty() {
-                return Err(err(
-                    g.span(),
-                    &format!("#[{export_name}] functions must take no arguments"),
-                ));
-            }
-        }
-        Some(other) => return Err(err(other.span(), "expected `()` after the function name")),
-        None => return Err(err(name.span(), "expected `()` after the function name")),
-    }
-
-    // Return type: exactly `-> i64`.
-    match iter.next() {
-        Some(TokenTree::Punct(p)) if p.as_char() == '-' => {}
-        Some(other) => {
-            return Err(err(
-                other.span(),
-                &format!("#[{export_name}] functions must return `i64` (expected `-> i64`)"),
-            ));
-        }
-        None => return Err(err(name.span(), "expected `-> i64`")),
-    }
-    match iter.next() {
-        Some(TokenTree::Punct(p)) if p.as_char() == '>' => {}
-        Some(other) => return Err(err(other.span(), "expected `-> i64`")),
-        None => return Err(err(name.span(), "expected `-> i64`")),
-    }
-    match iter.next() {
-        Some(TokenTree::Ident(id)) if id.to_string() == "i64" => {}
-        Some(other) => {
-            return Err(err(
-                other.span(),
-                &format!("#[{export_name}] functions must return `i64`"),
-            ));
-        }
-        None => return Err(err(name.span(), "expected `i64` return type")),
-    }
-
-    // Body: a single `{ .. }` group, nothing after it (no `where` clause).
-    match iter.next() {
-        Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Brace => {}
-        Some(other) => return Err(err(other.span(), "expected a function body")),
-        None => return Err(err(name.span(), "expected a function body")),
-    }
-    if let Some(extra) = iter.next() {
-        return Err(err(
-            extra.span(),
-            &format!(
-                "#[{export_name}]: unexpected tokens after the function body \
-                 (`where` clauses are not supported)"
-            ),
-        ));
-    }
-
-    Ok(name)
-}
-
-/// Builds the `extern "C"` export calling `target_name`, named
-/// `export_name`.
-fn build_wrapper(export_name: &str, target_name: &Ident) -> Result<TokenStream, TokenStream> {
-    let src = format!(
-        "#[unsafe(no_mangle)] pub extern \"C\" fn {export_name}(_reserved: u32) -> i64 {{ {target_name}() }}"
-    );
-    src.parse::<TokenStream>().map_err(|_| {
-        err(
-            Span::call_site(),
-            "rshooks-macros: internal wrapper generation failed",
-        )
-    })
 }
 
 /// Builds a `compile_error!("msg");` item at `span`, so validation failures

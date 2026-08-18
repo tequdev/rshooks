@@ -5,6 +5,16 @@ gpt-5.5, reasoning effort high, 2026-07-23) have been incorporated; see §11.
 Author: design by Claude (Fable 5); implementation delegated per phase
 Date: 2026-07-23
 
+> **Status note (post-0.2):** this document predates the `#[hooks]` chain
+> model. In particular, §5.4 ("Macros & entry point") and §6.6 ("Build-only
+> Hook metadata") describe the pre-0.2 architecture — the declaration
+> macros (`metadata!`, `hook_state!`, `hook_parameter!`, `otxn_parameter!`)
+> and top-level `#[hook]`/`#[cbak]` entry points they cover have been
+> removed and superseded by the `#[hooks]` struct/impl chain model
+> specified in [`docs/MULTI_HOOK_STRUCT_DESIGN.md`](MULTI_HOOK_STRUCT_DESIGN.md).
+> Everything else below — the core API wrappers, XFL, the build pipeline
+> passes, and the guard machinery — still applies.
+
 ## 1. Goals
 
 Provide a Rust monorepo for developing Xahau Hooks (WebAssembly smart

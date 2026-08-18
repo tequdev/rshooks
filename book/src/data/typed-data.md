@@ -159,35 +159,72 @@ assert_eq!(buf, expected);
 
 ## A worked example: `examples/12_typed-data`
 
-That example declares a composite hook-state key/value pair and two
-composite parameter name/value pairs, each in one line, via the entity
-macros covered in [Hook State](state.md) and [Hook and Transaction
+That example declares composite key/value and name/value structs with the
+derives this page covers, then wires each into a `#[hooks]` struct field —
+covered in full in [Hook State](state.md) and [Hook and Transaction
 Parameters](parameters.md):
 
-```rust
-// Per-account deposit record: a tag byte + AccountId key, an
-// amount + deadline + flags value.
-hook_state!(DepositState, DepositKey {tag: u8, owner: AccountId} => DepositValue {amount: u64, deadline: u32, flags: u8});
+```rust,ignore
+// Per-account deposit record key: a tag byte + AccountId.
+#[derive(HookKey, Clone, Copy)]
+struct DepositKey {
+    tag: u8,
+    owner: AccountId,
+}
 
-// Install-time configuration.
-hook_parameter!(Cfg, CfgName = b"CFG" => Config {min_amount: u64, lock_ledgers: u32});
+// Per-account deposit record value.
+#[derive(HookData, Clone, Copy)]
+struct DepositValue {
+    amount: u64,
+    deadline: u32,
+    flags: u8,
+}
 
-// Per-invocation instruction, attached to the triggering Invoke transaction.
-otxn_parameter!(Ins, InsName = b"INS" => Instruction {action: u8, amount: u64});
+// Install-time configuration, read from the `CFG` Hook parameter.
+#[derive(ParamValue)]
+struct Config {
+    min_amount: u64,
+    lock_ledgers: u32,
+}
+
+// Per-invocation instruction, read from the `INS` originating-transaction
+// parameter.
+#[derive(ParamValue)]
+struct Instruction {
+    action: u8,
+    amount: u64,
+}
+
+#[hooks]
+pub struct TypedData {
+    /// Per-account deposit record, keyed by [`DepositKey`].
+    #[state(key_by = DepositKey)]
+    deposits: State<DepositValue>,
+
+    /// Install-time configuration (`CFG`).
+    #[hook_param(name = b"CFG", default = Config { min_amount: DEFAULT_MIN_AMOUNT, lock_ledgers: DEFAULT_LOCK_LEDGERS })]
+    config: HookParam<Config>,
+
+    /// Per-invocation instruction (`INS`). Missing or malformed is a
+    /// rollback, never a silent default.
+    #[otxn_param(name = b"INS", required)]
+    instruction: OtxnParam<Instruction>,
+}
 ```
 
-Under the hood, each declaration expands to the same narrow derives this
-page describes — `DepositKey` gets `HookKey`-equivalent codegen,
-`DepositValue`/`Config`/`Instruction` get `HookData`/`ParamValue`-equivalent
-codegen — plus the pairing trait (`TypedStateKey`/`TypedParamName`) that
-ties key/name to value. Used directly, with no manual byte packing
+`DepositKey` gets `HookKey`-equivalent codegen; `DepositValue`/`Config`/
+`Instruction` get `HookData`/`ParamValue`-equivalent codegen — the field
+attributes (`#[state(key_by = ...)]`, `#[hook_param(...)]`,
+`#[otxn_param(...)]`) tie each field's key/name to its value type, the
+struct-field equivalent of `HookState`'s pairing form. Used directly inside
+the `#[hooks] impl` via a `&self` entry, with no manual byte packing
 anywhere:
 
-```rust
-let deposit = DepositState { tag: DEPOSIT_TAG, owner };
-let current = deposit.get_state()?.unwrap_or(EMPTY_DEPOSIT);
+```rust,ignore
+let deposit = self.deposits.at(DepositKey { tag: DEPOSIT_TAG, owner });
+let current = deposit.get()?.unwrap_or(EMPTY_DEPOSIT);
 // ...
-deposit.set_state(&next)?;
+deposit.set(&next)?;
 ```
 
 ### What the derives replace

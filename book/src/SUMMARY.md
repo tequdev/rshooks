@@ -11,6 +11,7 @@
 # Core Concepts
 
 - [Anatomy of a Hook](concepts/anatomy.md)
+- [Hook Chains](concepts/chains.md)
 - [Accept, Rollback, and Errors](concepts/errors.md)
 - [Guards and Loops](concepts/guards.md)
 - [Tracing and Debugging](concepts/tracing.md)
@@ -32,7 +33,7 @@
 # Build Toolchain
 
 - [The rshooks CLI](build/cli.md)
-- [Hook Metadata](build/metadata.md)
+- [Per-Hook Attributes and the SetHook Template](build/metadata.md)
 
 # Reference
 

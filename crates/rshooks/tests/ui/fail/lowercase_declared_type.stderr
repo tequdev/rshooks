@@ -1,7 +1,0 @@
-error: hook_state!: `my_key` is not UpperCamelCase — a type name declared by hook_state! must start with an uppercase ASCII letter and contain no underscores (e.g. `RewardRateKey`, not `reward_rate_key` or `Reward_Rate_Key`)
- --> tests/ui/fail/lowercase_declared_type.rs:7:1
-  |
-7 | hook_state!(MyState, my_key = b"MK" => u64);
-  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  |
-  = note: this error originates in the macro `hook_state` (in Nightly builds, run with -Z macro-backtrace for more info)

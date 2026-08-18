@@ -93,8 +93,9 @@ pub fn hook_param_exact<T: FixedRead>(name: &[u8]) -> Result<T> {
 /// return type) is inferred from `name`'s own type — no turbofish.
 ///
 /// Costs nothing beyond [`hook_param_exact`] for the common
-/// plain-byte-string-name case (e.g. via
-/// [`hook_parameter!`](crate::hook_parameter)'s fixed-bytes forms) — see
+/// plain-byte-string-name case (e.g. a hand-written
+/// [`crate::convert::TypedParamName`] impl overriding `with_name_bytes` to
+/// hand back a `'static` literal) — see
 /// [`crate::convert::TypedParamName`]'s "Zero-cost" section. A
 /// **composite, struct-shaped** name costs a small, genuine runtime encode
 /// instead (unavoidable for an arbitrary type) — see the same doc comment.
@@ -135,6 +136,69 @@ pub fn hook_param_typed<N: TypedParamName>(name: &N) -> Result<N::Value> {
     name.with_name_bytes(hook_param_exact::<N::Value>)
 }
 
+/// Calls the host `hook_param` function directly and returns its
+/// **undecoded** `i64` result — no [`res`] applied, so no
+/// [`crate::error::HookError`] is ever constructed here.
+/// `#[inline(always)]` and `pub(crate)`: an internal fast path for
+/// [`hook_param_opt`], which must compare the raw code against
+/// [`rshooks_core::DOESNT_EXIST`] *before* deciding whether to decode at
+/// all — see [`crate::api::state::state_raw_code`]'s doc comment for the
+/// identical pattern (including why this deliberately duplicates
+/// [`hook_param`]'s own call rather than routing through it: doing so would
+/// change the compiled block nesting of unrelated call sites elsewhere in a
+/// hook, per the measurement noted there).
+#[inline(always)]
+pub(crate) fn hook_param_raw_code(buf: &mut [u8], name: &[u8]) -> i64 {
+    unsafe {
+        rshooks_core::hook_param(
+            buf.as_mut_ptr() as u32,
+            buf.len() as u32,
+            name.as_ptr() as u32,
+            name.len() as u32,
+        )
+    }
+}
+
+/// Read this hook's own parameter `name`, distinguishing "parameter is
+/// absent" from every other outcome — the absence-aware counterpart to
+/// [`hook_param_exact`], used by [`crate::decl`]'s `HookParam`/`HookParamAt`
+/// accessors.
+///
+/// `Ok(None)` means no parameter named `name` was supplied. A parameter
+/// that *is* present but fails to decode as `T` (too short, wrong shape)
+/// still comes back as `Err` — this never folds a genuine decode failure
+/// into `None`, the same "absence vs. error, never confused" contract
+/// [`mod@crate::state`]'s `state_get` documents for hook state.
+///
+/// # Examples
+///
+/// ```
+/// use rshooks::api::hook_ctx::hook_param_opt;
+/// use rshooks::error::{HookError, Result};
+///
+/// // Host stub: every Hook API call returns `NotImplemented` on a host
+/// // build, so this only proves the call chain compiles and runs (it is
+/// // not the `DOESNT_EXIST` sentinel `hook_param_opt` maps to `Ok(None)`).
+/// let value: Result<Option<[u8; 4]>> = hook_param_opt(b"x");
+/// assert_eq!(value, Err(HookError::NotImplemented));
+/// ```
+#[inline(always)]
+pub fn hook_param_opt<T: FixedRead>(name: &[u8]) -> Result<Option<T>> {
+    let mut absent = false;
+    let r = T::read_exact(|buf| {
+        let code = hook_param_raw_code(buf, name);
+        if code == rshooks_core::DOESNT_EXIST {
+            absent = true;
+            return Ok(0);
+        }
+        res(code).map(|v| v as usize)
+    });
+    if absent {
+        return Ok(None);
+    }
+    r.map(Some)
+}
+
 /// Set a parameter named `name` to `value` on the hook identified by
 /// `hook_hash`. Returns the number of bytes written.
 #[inline(always)]
@@ -171,6 +235,10 @@ mod tests {
         );
         assert_eq!(
             hook_param_exact::<[u8; 4]>(b"x"),
+            Err(HookError::NotImplemented)
+        );
+        assert_eq!(
+            hook_param_opt::<[u8; 4]>(b"x"),
             Err(HookError::NotImplemented)
         );
         assert_eq!(

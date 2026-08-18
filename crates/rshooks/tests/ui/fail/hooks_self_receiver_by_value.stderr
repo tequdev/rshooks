@@ -1,0 +1,41 @@
+error: use `&self` — hook entrypoints receive the chain declaration by shared reference (it is zero-sized)
+  --> tests/ui/fail/hooks_self_receiver_by_value.rs:11:1
+   |
+11 | #[hooks]
+   | ^^^^^^^^
+   |
+   = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: use `&self` — hook entrypoints receive the chain declaration by shared reference (it is zero-sized)
+  --> tests/ui/fail/hooks_self_receiver_by_value.rs:22:1
+   |
+22 | #[hooks]
+   | ^^^^^^^^
+   |
+   = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `Vault: HookChainImpl` is not satisfied
+ --> tests/ui/fail/hooks_self_receiver_by_value.rs:8:1
+  |
+8 | #[hooks]
+  | ^^^^^^^^ the trait `HookChainImpl` is not implemented for `Vault`
+  |
+note: required by a bound in `__rshooks_assert_chain_impl_vault::assert`
+ --> tests/ui/fail/hooks_self_receiver_by_value.rs:8:1
+  |
+8 | #[hooks]
+  | ^^^^^^^^ required by this bound in `assert`
+  = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `VaultRef: HookChainImpl` is not satisfied
+  --> tests/ui/fail/hooks_self_receiver_by_value.rs:19:1
+   |
+19 | #[hooks]
+   | ^^^^^^^^ the trait `HookChainImpl` is not implemented for `VaultRef`
+   |
+note: required by a bound in `__rshooks_assert_chain_impl_vault_ref::assert`
+  --> tests/ui/fail/hooks_self_receiver_by_value.rs:19:1
+   |
+19 | #[hooks]
+   | ^^^^^^^^ required by this bound in `assert`
+   = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)

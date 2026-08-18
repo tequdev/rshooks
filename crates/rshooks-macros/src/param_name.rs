@@ -4,8 +4,8 @@
 //! zero-cost `rshooks::convert::ToBytes` impl for use as a **composite
 //! Hook API parameter name** — satisfying
 //! `rshooks::convert::TypedParamName`'s `Self: ToBytes` supertrait bound,
-//! so `rshooks::hook_parameter!`/`rshooks::otxn_parameter!`'s composite
-//! form (`Name => Ty`) can implement `TypedParamName` for it directly. See
+//! so a hand-written `TypedParamName` impl can pair it with a value type
+//! directly. See
 //! `rshooks::ParamName`'s doc comment (the public-facing re-export site)
 //! for the full user-facing writeup, grammar, and worked/compile-fail
 //! examples — this module only implements the codegen.
@@ -139,12 +139,10 @@ impl ::rshooks::convert::ToBytes for {name} {{
 /// parameter-name length bound (`name` must already have a `ToBytes` impl
 /// in scope).
 ///
-/// Factored out so [`crate::decl_pair`]'s `hook_parameter!`/
-/// `otxn_parameter!` declaration-macro grammar (whose fixed-byte-string ZST
-/// name form has no struct fields for this module's normal per-field
-/// codegen to walk) can reuse the exact same bound check this derive uses
-/// for a field-based struct, rather than a second, potentially-drifting
-/// copy.
+/// Factored out so [`crate::hooks_struct`]'s `name_by` field codegen (which
+/// re-emits the same bound check for a caller-supplied name type) can reuse
+/// the exact same logic this derive uses for a field-based struct, rather
+/// than a second, potentially-drifting copy.
 pub(crate) fn param_name_length_assert(name: &str) -> String {
     format!(
         "

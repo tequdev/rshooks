@@ -38,13 +38,18 @@ jobs:
           pattern: example-hooks-*
           path: examples-out
 
-      - name: Place downloaded wasm files back under examples/*/out/
+      # `examples/scripts/copy-wasm.mjs` reads each artifact from
+      # `out/current/<index>.<entry-fn>.wasm`, matching `rshooks build`'s
+      # own publication layout (see mise.toml's `build-examples` task) —
+      # reconstruct that same layout from the flat per-example artifact
+      # downloaded above.
+      - name: Place downloaded wasm files back under examples/*/out/current/
         run: |
           set -e
           for dir in examples-out/example-hooks-*; do
             example="$(basename "$dir" | sed 's/^example-hooks-//')"
-            mkdir -p "examples/${example}/out"
-            cp "$dir"/*.wasm "examples/${example}/out/"
+            mkdir -p "examples/${example}/out/current"
+            cp "$dir"/*.wasm "examples/${example}/out/current/"
           done
           find examples -name '*.wasm'
 

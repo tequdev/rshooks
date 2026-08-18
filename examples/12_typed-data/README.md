@@ -3,16 +3,15 @@
 ## What you'll learn
 
 How to declare a composite hook-state key/value pair and a composite Hook
-API parameter name/value pair in **one line each**, via `hook_state!`'s/
-`hook_parameter!`'s/`otxn_parameter!`'s declaration-macro grammar — instead
-of hand-packing each into a raw byte buffer yourself — and how to confirm
-the generated code costs nothing extra at the wasm level (a real
+API parameter name/value pair against a `#[hooks]` chain-declaration
+struct's `State`/`HookParam`/`OtxnParam` fields — instead of hand-packing
+each into a raw byte buffer yourself — and how to confirm the generated
+code costs nothing extra at the wasm level (a real
 worst-case-instruction-count measurement, not just an assertion).
 
-Under the hood, each declaration still expands to the same four narrow,
-purpose-built impls the separate derives generate —
-`#[derive(HookKey)]`, `#[derive(HookData)]`, `#[derive(ParamName)]`,
-`#[derive(ParamValue)]` — plus the pairing trait:
+Under the hood, each field's declared key/name/value type is backed by the
+same four narrow, purpose-built derives: `#[derive(HookKey)]`,
+`#[derive(HookData)]`, `#[derive(ParamName)]`, `#[derive(ParamValue)]`:
 
 | role | generates | example (declared inline below) |
 |---|---|---|
@@ -24,20 +23,21 @@ purpose-built impls the separate derives generate —
 A key/name is only ever *encoded outward* (to locate something); a
 value/payload is only ever *decoded* (read back) — that read/write split is
 exactly why these are four separate roles rather than one covering
-everything. See `rshooks::hook_state!`'s doc comment for the full
-declaration-macro grammar (six forms, from a fully-fixed key/name down to
-a fully composite, runtime-constructed one), and each underlying derive's
-own rustdoc (`rshooks::{HookKey, HookData, ParamName, ParamValue}`) for
-the codegen rationale and `compile_fail` examples pinning misuse.
+everything. See `docs/MULTI_HOOK_STRUCT_DESIGN.md` for the full `#[hooks]`
+field-attribute grammar (`#[state(key = ..)]`/`#[state(key_by = ..)]`,
+`#[hook_param(name = ..)]`/`#[hook_param(name_by = ..)]`, and their
+`#[otxn_param(..)]` twin), and each underlying derive's own rustdoc
+(`rshooks::{HookKey, HookData, ParamName, ParamValue}`) for the codegen
+rationale and `compile_fail` examples pinning misuse.
 
 ## The hook
 
 A per-account deposit ledger, invoked via an `Invoke` transaction. Every
 invocation attaches its own instruction as a Hook parameter on the
-transaction itself (`INS`, read via `otxn_param`) — distinct from the
-hook's own installed configuration (`CFG`, read via `hook_param`, the same
-mechanism `examples/03_hook-params` uses for a single value, here extended
-to a whole struct):
+transaction itself (`INS`, an `#[otxn_param(..)]` field) — distinct from the
+hook's own installed configuration (`CFG`, an `#[hook_param(..)]` field, the
+same mechanism `examples/03_hook-params` uses for a single value, here
+extended to a whole struct):
 
 - `deposit` (`action = 1`): rejects (rolls back) if the deposited amount is
   below the configured minimum; otherwise adds it to the sender's balance
@@ -48,44 +48,73 @@ to a whole struct):
 
 Each sender's record is looked up by a **composite key** — a tag byte plus
 their `AccountId` — and stored as a **composite value** — an amount, a
-deadline ledger sequence, and a flags byte. One `hook_state!` declaration
-(**Form 3**: a struct-shaped key, constructed at each call site, with an
-**inline** value definition) covers both:
+deadline ledger sequence, and a flags byte. `TypedData`'s `deposits` field
+declares the key type via `#[state(key_by = DepositKey)]`, keyed per call
+site; `DepositKey`/`DepositValue` are ordinary `#[derive(HookKey)]`/
+`#[derive(HookData)]` structs declared alongside it:
 
 ```rust
-hook_state!(DepositState, DepositKey {tag: u8, owner: AccountId} => DepositValue {amount: u64, deadline: u32, flags: u8});
+#[derive(HookKey, Clone, Copy)]
+struct DepositKey {
+    tag: u8,
+    owner: AccountId,
+}
+
+#[derive(HookData, Clone, Copy)]
+struct DepositValue {
+    amount: u64,
+    deadline: u32,
+    flags: u8,
+}
+
+#[hooks]
+pub struct TypedData {
+    #[state(key_by = DepositKey)]
+    deposits: State<DepositValue>,
+    // ...
+}
 ```
 
-`DepositState` is the **entity** — the thing this hook operates on, and what
-carries the accessors. `DepositKey` is the key component that addresses it,
-declared alongside so the identifier has a name of its own. The declaration
-is equivalent to separately declaring `#[derive(HookKey)] struct
-DepositKey { tag: u8, owner: AccountId }`, `#[derive(HookData)] struct
-DepositValue { amount: u64, deadline: u32, flags: u8 }`, and
-`hook_state!(DepositState, DepositKey => DepositValue)` to pair them (see
-`rshooks::hook_state!`'s doc comment for that longhand pairing form) — and used directly — no manual byte packing anywhere in
-`src/lib.rs`:
+`deposits` is the **field** — the thing this hook operates on, and what
+carries the accessors once bound to a key via `.at(..)`. `main` declares a
+`&self` receiver, so it reaches its own chain's fields as `self.deposits` —
+no manual byte packing anywhere:
 
 ```rust
-let deposit = DepositState { tag: DEPOSIT_TAG, owner };
-let current = deposit.get_state()?.unwrap_or(EMPTY_DEPOSIT);
-// ...
-deposit.set_state(&next)?;
+#[hook(0, on = [Invoke])]
+fn main(&self) -> i64 {
+    let deposit = self.deposits.at(DepositKey { tag: DEPOSIT_TAG, owner });
+    let current = deposit.get()?.unwrap_or(EMPTY_DEPOSIT);
+    // ...
+    deposit.set(&next)?;
+}
 ```
 
-`get_state`/`set_state`/`delete_state` (and `update_state`, unused here) are
-inherent methods `hook_state!` puts on the **entity** of every form, each an
-`#[inline(always)]` forward to
-`state_get_typed(&deposit)`/`state_set_typed(&deposit, &value)` — the same
-code, written in the order it reads best. The parameter side has the same
-shape: `Cfg.get_value()` for `hook_param_typed(&CfgName)`, and
-`Ins.get_value()` for `otxn_param_typed(&InsName)`.
+`.get()`/`.set()`/`.delete()` (and `.update()`, unused here) are inherent
+methods on the bound `StateEntry` `.at(..)` returns, each an
+`#[inline(always)]` forward to `state::state_get`/`state_set_loose` — the
+same code, written in the order it reads best. The parameter side has the
+same shape: `self.instruction.get_required()`, resolving `Instruction`
+from the field's own declared value type — no turbofish, no independently
+inferred return type. (`config()` below reads `config` the same way, but
+from a free function outside the `#[hooks] impl`, so it reaches the field
+by its struct-name static instead: `TypedData.config.get_or_default()` —
+see "`self` vs. the struct-name static" below.)
 
-The key type gets none of them: it is a trait carrier, still perfectly
-usable with the free functions (`state_get_typed(&DepositKey { .. })`) when
-the component rather than the entity is what you have.
+### `self` vs. the struct-name static
 
-## Pairing a key with its value type (and a param name with its value type)
+`&self` and `TypedData` name the exact same value — the single, zero-sized
+instance the `#[hooks]` struct macro generates as `static TypedData:
+TypedData`. An entry or helper declared *inside* the `#[hooks] impl` gets
+that instance handed to it as `&self` and writes `self.deposits`; code
+*outside* the impl — `config()`/`deposits_paused()` below are free
+functions, not impl members — has no `self` to borrow, so it names the
+same static directly: `TypedData.config`. Both forms are permanently legal
+and measure byte-identical wasm (a reference to a zero-sized value
+optimizes away entirely); this crate's examples use `&self` inside the
+annotated impl and the struct-name static everywhere else.
+
+## Pairing a key/name with its value type
 
 `state_get`/`state_set_loose` take the key and the value type as two
 *independent* generic parameters — nothing stops calling
@@ -96,41 +125,17 @@ type). The same shape of bug existed for `otxn_param_exact`/`hook_param_exact`:
 the parameter name and the value type are independent arguments, so nothing
 stops decoding the `INS` parameter as `Config` by mistake.
 
-This crate closes both gaps the same way — a one-line pairing declaration,
-then an accessor that takes **a reference to a key/name value** and
-resolves the paired type from it, never a turbofish or an independently
-inferred return type:
-
-```rust
-// Ties DepositKey to exactly one value type (Form 3, shown above already
-// declares this pairing — repeated here only to name it explicitly).
-hook_state!(DepositState, DepositKey {tag: u8, owner: AccountId} => DepositValue {amount: u64, deadline: u32, flags: u8});
-
-// Ties CfgName/InsName to exactly one parameter value type each —
-// hook_parameter! for a hook's own installed parameter, otxn_parameter!
-// for one attached to the originating transaction (same grammar, same
-// TypedParamName impl; the entity's `get_value` is what differs). Form 1,
-// `Entity, Name = bytes => Ty`, declares the entity and `Name` as two new
-// zero-sized types and ties both to the fixed byte-string name and the
-// value type, all in one line — no separate `struct CfgName;` needed.
-hook_parameter!(Cfg, CfgName = b"CFG" => Config {min_amount: u64, lock_ledgers: u32});
-otxn_parameter!(Ins, InsName = b"INS" => Instruction {action: u8, amount: u64});
-```
-
-`deposit.get_state()`/`deposit.set_state(&value)` (used above) resolve
-`DepositState`'s value type from the entity they are called on — there is
-no second, independently-chosen `T` left for a mismatch to hide in — and
-`Cfg.get_value()`/`Ins.get_value()` resolve `Config`/`Instruction` the same
-way. `Config`/
-`Instruction`/`DepositValue` never need a type annotation anywhere in
-`src/lib.rs` (see `config()`/`my_hook()`) — the argument alone always picks
-the right type. Passing the wrong value type for `DepositKey` (e.g.
-`deposit.set_state(&some_other_struct)`) is now a compile error, not
-a silent bug waiting to be discovered on a live node — see
+A `#[hooks]` struct field closes both gaps the same way: its declared type
+(`State<DepositValue>`, `HookParam<Config>`, `OtxnParam<Instruction>`) fixes
+the value type at the field's own definition, so every accessor on it
+resolves that one type — never a turbofish, never a second, independently-
+chosen `T` for a mismatch to hide in. Passing the wrong value type for
+`DepositKey` is a type error at the field's `.at(..)`/`.get()`/`.set()` call
+sites, not a silent bug waiting to be discovered on a live node — see
 `rshooks::state::TypedStateKey`'s and `rshooks::convert::TypedParamName`'s
-doc comments for the full rationale, and `rshooks::HookKey`'s doc
-comment for a `compile_fail` example pinning the mismatch case.
-The typed layer costs
+doc comments for the full rationale (the machinery the `#[hooks]`-generated
+marker types build on), and `rshooks::HookKey`'s doc comment for a
+`compile_fail` example pinning the mismatch case. The typed layer costs
 nothing beyond the loose functions it replaces, *for a plain-tag
 parameter name* — measured at 441 worst-case instructions either way, the
 same as this hook's logic minus the `AdminName` pause switch covered next
@@ -140,40 +145,25 @@ why).
 A Hook API parameter name isn't always a plain tag like `"CFG"`/`"INS"`,
 either — per the Hook API itself, it's a genuine variable-length key of up
 to 32 bytes, and (exactly like a hook state key) can be a whole composite,
-struct-shaped value instead of a literal byte string. `hook_parameter!`/
-`otxn_parameter!` cover both, via the same declaration-macro grammar
-`hook_state!` uses (see `rshooks::hook_state!`'s doc comment for the full
-staircase) — Form 1 for a fully fixed name (`CfgName`/`InsName` above),
-Form 3 for a struct-shaped one constructed per call site (`AdminName`
-below) — and both are read by the exact same `get_value()`/
-`hook_param_typed`/`otxn_param_typed` path. (`hook_parameter!` and
-`otxn_parameter!` share their grammar and their pairing codegen — the same
-`TypedParamName` impl either way — and differ in exactly one place: the
-generated `get_value()` calls `hook_param_typed` for one and
-`otxn_param_typed` for the other, so the declaration site fixes which of
-`hook_param`/`otxn_param` the name is read from; see
-`rshooks::convert::TypedParamName`'s doc comment.) Only a *plain,
-already-known-at-compile-time* name is free, though — Form 1 (used above)
-overrides `TypedParamName::with_name_bytes` to hand over the already-`'static`
-literal bytes directly, at zero runtime cost. A composite name (Form 3,
-used below for `AdminName`) can't skip encoding — something has to lay its
+struct-shaped value instead of a literal byte string.
+`#[hook_param(name = ..)]`/`#[otxn_param(name = ..)]` cover the fixed case
+(`CFG`/`INS` above); `#[hook_param(name_by = ..)]` covers a struct-shaped
+name constructed per call site (`AdminName` below, via
+`TypedData.admin_pause.at(ADMIN_PAUSE_NAME)`) — both read through the exact
+same `get()`/`get_or_default()`/`get_required()` path. Only a *plain,
+already-known-at-compile-time* name (`name = b"CFG"`) is free, though —
+its generated `ParamSpec::with_name_bytes` hands over the already-`'static`
+literal bytes directly, at zero runtime cost. A composite name
+(`name_by = AdminName`) can't skip encoding — something has to lay its
 fields out — so its generated override encodes into a
 `[u8; AdminName::MAX_LEN]` buffer, sized to exactly that name and no more.
 That is still cheaper than the trait's *generic* default body, which has
 no way to spell `Self::MAX_LEN` as an array length and falls back to a full
 32-byte `PARAM_NAME_MAX_LEN` scratch; what it cannot avoid is the encode
 itself, since Rust has no stable way to run a trait method at compile
-time. (Form 1 and the `existing` form additionally hand
-those literal bytes back as `Cfg.get_name() -> &'static [u8]`, a
-`const fn`; a composite name has no stored bytes to hand back and gets no
-such method.) When the name type has to be declared separately by the
-caller — to carry its own visibility, derives or docs — the `existing`
-keyword form does that: `hook_parameter!(Cfg, existing CfgName = b"CFG" =>
-Config)`; see `rshooks::hook_parameter!`'s doc comment for a worked
-example. See
-`rshooks::convert::TypedParamName`'s doc comment for the full zero-cost
-rationale, and the "Composite parameter names" section below for this hook's own worked composite-name example and
-its measured cost.
+time. See `rshooks::convert::TypedParamName`'s doc comment for the full
+zero-cost rationale, and the "Composite parameter names" section below for
+this hook's own worked composite-name example and its measured cost.
 
 ## Before/after: what `#[derive(HookKey)]`/`#[derive(HookData)]` replace
 
@@ -280,8 +270,9 @@ why it's the idiom this crate prefers).
 
 ## Hook parameter hex encoding
 
-Both `CFG` (installed at `SetHook` time, named by `CfgName`) and `INS`
-(attached to each `Invoke` transaction, named by `InsName`) decode as
+Both `CFG` (installed at `SetHook` time, `TypedData`'s `config` field) and
+`INS` (attached to each `Invoke` transaction, `TypedData`'s `instruction`
+field) decode as
 `#[derive(ParamValue)]` structs, so their wire layout is exactly "every
 field, in declaration order, little-endian, back-to-back"
 (`rshooks::convert`'s crate-wide convention — see `Config`/
@@ -355,49 +346,47 @@ struct AdminName {
     field: u8,
 }
 
-hook_parameter!(AdminPause, AdminName => PauseSwitch {paused: u8});
+#[derive(ParamValue)]
+struct PauseSwitch {
+    paused: u8,
+}
 
-const ADMIN_PAUSE: AdminPause = AdminPause(AdminName { section: 0, field: 0 });
+const ADMIN_PAUSE_NAME: AdminName = AdminName { section: 0, field: 0 };
+
+#[hooks]
+pub struct TypedData {
+    // ...
+    #[hook_param(name_by = AdminName, default = PauseSwitch { paused: 0 })]
+    admin_pause: HookParam<PauseSwitch>,
+}
 ```
 
-This is `hook_parameter!`'s **pairing form** — an entity wrapping a name
-type the caller already declared — with an inline `PauseSwitch` value. The
-one-line Form 3 (`hook_parameter!(AdminPause, AdminName {section: u8, field:
-u8} => PauseSwitch {paused: u8})`) would declare exactly the same thing and
-is what `CFG`/`INS` use; the longhand is spelled out here to show what the
-pairing form does, and to measure it (see below — it costs nothing).
-
-Under either spelling `AdminName` gets `ParamName`-equivalent codegen
-(`ToBytes` only — no `FromBytes`, no `FixedRead`, no inherent `LEN` const),
-never `HookData`-equivalent codegen:
-a Hook parameter *name* is a genuinely different concept from a hook-state
-key/value or a parameter *payload* (`PauseSwitch`, which — being something
-this hook actually reads back and decodes — gets `ParamValue`-equivalent
-codegen instead, same as `Config`/`Instruction`): a name is only ever
-**written**, to locate a value, never read back and decoded as itself —
-see `rshooks::ParamName`'s doc comment for the full rationale, and its
-`compile_fail` examples pinning that a `ParamName`-shaped type can't be
-read back as a value. Because `AdminName` is composite (not a fixed byte
-string like `CfgName`/`InsName` above), its `TypedParamName` impl overrides
-`with_name_bytes` with a genuine encode into a `[u8; AdminName::MAX_LEN]`
-(2-byte) buffer, rather than with the fixed forms' zero-copy hand-off of a
-`'static` literal — see the "Measured cost of a composite name" section
-below for what that costs. (It is still an override: the trait's generic
-*default* body would use a full 32-byte scratch buffer, since generic code
-cannot spell `Self::MAX_LEN` as an array length.)
-
-The `AdminPause` **entity** does not re-derive that override — it forwards
-`with_name_bytes` straight to `AdminName`'s, so the 2-byte buffer that name
-already had is what the lookup uses. That is the whole point of the pairing
-form's delegation, and it is why wrapping costs nothing: the measured
-numbers below are unchanged by it.
-
-The `const ADMIN_PAUSE` declared separately above (not part of
-`hook_state!`'s Form 2 fixed-instance mechanism, since this name scheme is
+`TypedData.admin_pause` is a **keyed** `HookParam` field: `name_by =
+AdminName` means each call site binds its own name value via `.at(..)`
+(here always the one fixed `ADMIN_PAUSE_NAME`, since this name scheme is
 meant to accommodate *multiple* future administrative parameters, not just
-one canonical instance) is what [`deposits_paused`] calls `get_value()`
-**on**, `PauseSwitch`'s type inferred from the entity itself, no
-annotation.
+one canonical instance) — `TypedData.admin_pause.at(ADMIN_PAUSE_NAME)
+.get_or_default()`, `PauseSwitch`'s type inferred from the field's own
+declared value type, no annotation.
+
+`AdminName` gets `ParamName`-equivalent codegen (`ToBytes` only — no
+`FromBytes`, no `FixedRead`, no inherent `LEN` const), never
+`HookData`-equivalent codegen: a Hook parameter *name* is a genuinely
+different concept from a hook-state key/value or a parameter *payload*
+(`PauseSwitch`, which — being something this hook actually reads back and
+decodes — gets `ParamValue`-equivalent codegen instead, same as
+`Config`/`Instruction`): a name is only ever **written**, to locate a
+value, never read back and decoded as itself — see `rshooks::ParamName`'s
+doc comment for the full rationale, and its `compile_fail` examples
+pinning that a `ParamName`-shaped type can't be read back as a value.
+Because `AdminName` is composite (not a fixed byte string like
+`CFG`/`INS` above), the field's generated `ParamSpec::with_name_bytes`
+override does a genuine encode into a `[u8; AdminName::MAX_LEN]` (2-byte)
+buffer, rather than the fixed forms' zero-copy hand-off of a `'static`
+literal — see the "Measured cost of a composite name" section below for
+what that costs. (It is still an override: the trait's generic *default*
+body would use a full 32-byte scratch buffer, since generic code cannot
+spell `Self::MAX_LEN` as an array length.)
 
 ### The 1–32-byte constraint
 
@@ -464,8 +453,8 @@ lookup (the struct encode itself, plus the extra branch/rollback path
 checking it).
 
 The third row is a **behavior** change, not an abstraction cost: the
-withdraw branch calls `key.delete_state()` and accepts from inside the
-branch instead of falling through to the shared `deposit.set_state(&next)`,
+withdraw branch calls `deposit.delete()` and accepts from inside the
+branch instead of falling through to the shared `deposit.set(&next)`,
 so the hook now carries two distinct terminating state writes rather than
 one. +34 instructions, +74 bytes buys the reserve refund a deleted entry
 gets and an all-zero stored entry does not. (Both earlier rows were
@@ -478,7 +467,7 @@ Still guard-clean at the source level throughout: no `--auto-guard`/
 ## Build
 
 ```sh
-cargo run -p rshooks-build -- build --manifest-path examples/12_typed-data/Cargo.toml
+cargo run -p rshooks-build -- build --manifest-path examples/12_typed-data/Cargo.toml --out examples/12_typed-data/out
 ```
 
 No extra flags — see "Zero-cost: measured, not assumed" above.

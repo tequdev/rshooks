@@ -113,20 +113,20 @@ even though nothing here will stop you if you don't.
 ## Measured worst-case instruction count
 
 Numbers from this repo's own `rshooks build` output (they'll drift a
-little across compiler versions — these are current-toolchain
-measurements, not a guarantee), at this workspace's `opt-level = 3`
-default (`examples/Cargo.toml`, see `docs/DESIGN.md` §2 C6):
+little across compiler and `rshooks-build` pipeline versions — these are
+current-toolchain measurements, not a guarantee). The `#[hooks]` per-index
+build pipeline compiles each entry in isolation via a dedicated
+`--cfg`-selected build, at this workspace's `opt-level = 3` default
+(`examples/Cargo.toml`, see `docs/DESIGN.md` §2 C6):
 
 | Build | worst-case instructions (`hook=`) | size |
 |---|---:|---:|
-| `accounts_equal` only (the two `guard_m!` loops removed) | 594 | 1554 bytes |
-| Full hook (`accounts_equal` + both `guard_m!` loops) | **615** | **1621 bytes** |
+| `accounts_equal` only (the two `guard_m!` loops removed) | 230 | 746 bytes |
+| Full hook (`accounts_equal` + both `guard_m!` loops) | **352** | **1015 bytes** |
 
-The two `maxiter = 8` demonstration loops together add only **21**
-instructions to the worst case (`615 - 594`) at this optimization level —
-much smaller than the **503**-instruction jump the identical source
-produces at `opt-level = "z"` (832 → 1335). The reason is `opt-level = 3`
-itself: LLVM unrolls a small, compile-time-bounded loop like these
+The two `maxiter = 8` demonstration loops together add **122**
+instructions to the worst case (`352 - 230`) at this optimization level.
+The reason is `opt-level = 3` itself: LLVM unrolls a small, compile-time-bounded loop like these
 (`maxiter = 8`) into straight-line code rather than leaving it as a real
 `loop` construct, so the guard checker's worst-case analysis no longer has
 to multiply the loop body's cost by `maxiter` — it just counts the

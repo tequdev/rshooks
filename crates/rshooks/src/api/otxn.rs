@@ -332,6 +332,60 @@ pub fn otxn_param_exact<T: FixedRead>(name: &[u8]) -> Result<T> {
     T::read_exact(|buf| otxn_param(buf, name))
 }
 
+/// Calls the host `otxn_param` function directly and returns its
+/// **undecoded** `i64` result — no [`res`] applied. `#[inline(always)]` and
+/// `pub(crate)`: an internal fast path for [`otxn_param_opt`] — see
+/// [`crate::api::hook_ctx::hook_param_raw_code`]'s doc comment for the
+/// identical rationale (including why this deliberately duplicates
+/// [`otxn_param`]'s own call rather than routing through it).
+#[inline(always)]
+pub(crate) fn otxn_param_raw_code(buf: &mut [u8], name: &[u8]) -> i64 {
+    unsafe {
+        rshooks_core::otxn_param(
+            buf.as_mut_ptr() as u32,
+            buf.len() as u32,
+            name.as_ptr() as u32,
+            name.len() as u32,
+        )
+    }
+}
+
+/// Read a Hook parameter attached to the originating transaction,
+/// distinguishing "parameter is absent" from every other outcome — the
+/// absence-aware counterpart to [`otxn_param_exact`], used by
+/// [`crate::decl`]'s `OtxnParam`/`OtxnParamAt` accessors. See
+/// [`crate::api::hook_ctx::hook_param_opt`]'s doc comment for the exact
+/// absence-vs-decode-failure contract this mirrors.
+///
+/// # Examples
+///
+/// ```
+/// use rshooks::api::otxn::otxn_param_opt;
+/// use rshooks::error::{HookError, Result};
+///
+/// // Host stub: every Hook API call returns `NotImplemented` on a host
+/// // build, so this only proves the call chain compiles and runs (it is
+/// // not the `DOESNT_EXIST` sentinel `otxn_param_opt` maps to `Ok(None)`).
+/// let value: Result<Option<[u8; 4]>> = otxn_param_opt(b"x");
+/// assert_eq!(value, Err(HookError::NotImplemented));
+/// ```
+#[inline(always)]
+pub fn otxn_param_opt<T: FixedRead>(name: &[u8]) -> Result<Option<T>> {
+    let mut absent = false;
+    let r = T::read_exact(|buf| {
+        let code = otxn_param_raw_code(buf, name);
+        if code == rshooks_core::DOESNT_EXIST {
+            absent = true;
+            return Ok(0);
+        }
+        res(code).map(|v| v as usize)
+    });
+    if absent {
+        return Ok(None);
+    }
+    r.map(Some)
+}
+
 /// Read a Hook parameter attached to the originating transaction, named by
 /// `name` itself — see [`crate::convert::TypedParamName`]'s doc comment
 /// for why this is the safer alternative to [`otxn_param_exact`] when a
@@ -342,8 +396,9 @@ pub fn otxn_param_exact<T: FixedRead>(name: &[u8]) -> Result<T> {
 /// type — no turbofish.
 ///
 /// Costs nothing beyond [`otxn_param_exact`] for the common
-/// plain-byte-string-name case (e.g. via
-/// [`otxn_parameter!`](crate::otxn_parameter)'s fixed-bytes forms) — see
+/// plain-byte-string-name case (e.g. a hand-written
+/// [`crate::convert::TypedParamName`] impl overriding `with_name_bytes` to
+/// hand back a `'static` literal) — see
 /// [`crate::convert::TypedParamName`]'s "Zero-cost" section. A
 /// **composite, struct-shaped** name costs a small, genuine runtime encode
 /// instead (unavoidable for an arbitrary type) — see the same doc comment.
@@ -437,6 +492,10 @@ mod tests {
         assert_eq!(otxn_param(&mut buf, b"x"), Err(HookError::NotImplemented));
         assert_eq!(
             otxn_param_exact::<[u8; 4]>(b"x"),
+            Err(HookError::NotImplemented)
+        );
+        assert_eq!(
+            otxn_param_opt::<[u8; 4]>(b"x"),
             Err(HookError::NotImplemented)
         );
         assert_eq!(

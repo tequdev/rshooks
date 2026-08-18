@@ -3,11 +3,6 @@
 use rshooks::prelude::*;
 use rshooks::*;
 
-metadata! {
-    name: "xfl-math",
-    HookOn: [Payment],
-}
-
 /// The numerator for the computed percentage.
 const PERCENT_NUM: u32 = 1;
 /// The denominator for the computed percentage.
@@ -49,105 +44,111 @@ hook_errors! {
     }
 }
 
-#[hook]
-// XFL operators delegate to checked Hook API calls.
-#[allow(clippy::arithmetic_side_effects)]
-fn my_hook() -> i64 {
-    let Ok(txn) = SlotObject::from_otxn() else {
-        rollback!(b"xfl-math: otxn_slot failed", XflMathError::OtxnSlotFailed)
-    };
-    let Ok(amount_slot) = txn.get(sfAmount) else {
-        rollback!(
-            b"xfl-math: no Amount field on otxn",
-            XflMathError::NoAmountField
-        )
-    };
+#[hooks]
+pub struct XflMath;
 
-    let Ok(amount) = amount_slot.as_xfl() else {
-        rollback!(
-            b"xfl-math: Amount is not a valid XFL amount",
-            XflMathError::InvalidAmount
-        )
-    };
+#[hooks]
+impl XflMath {
+    // XFL operators delegate to checked Hook API calls.
+    #[allow(clippy::arithmetic_side_effects)]
+    #[hook(0, on = [Payment])]
+    fn main(&self) -> i64 {
+        let Ok(txn) = SlotObject::from_otxn() else {
+            rollback!(b"xfl-math: otxn_slot failed", XflMathError::OtxnSlotFailed)
+        };
+        let Ok(amount_slot) = txn.get(sfAmount) else {
+            rollback!(
+                b"xfl-math: no Amount field on otxn",
+                XflMathError::NoAmountField
+            )
+        };
 
-    let Ok(share) = amount.mulratio(false, PERCENT_NUM, PERCENT_DEN) else {
-        rollback!(
-            b"xfl-math: mulratio failed (overflow?)",
-            XflMathError::MulratioFailed
-        )
-    };
+        let Ok(amount) = amount_slot.as_xfl() else {
+            rollback!(
+                b"xfl-math: Amount is not a valid XFL amount",
+                XflMathError::InvalidAmount
+            )
+        };
 
-    let Ok(min_share) = XFL::new(-21, 1_000_000_000_000_000) else {
-        rollback!(
-            b"xfl-math: could not construct min_share",
-            XflMathError::MinShareConstructFailed
-        )
-    };
+        let Ok(share) = amount.mulratio(false, PERCENT_NUM, PERCENT_DEN) else {
+            rollback!(
+                b"xfl-math: mulratio failed (overflow?)",
+                XflMathError::MulratioFailed
+            )
+        };
 
-    match share.lt(min_share) {
-        Ok(true) => rollback!(
-            b"xfl-math: computed share below minimum",
-            XflMathError::BelowMinimum
-        ),
-        Ok(false) => {}
-        Err(_) => rollback!(
-            b"xfl-math: comparison failed",
-            XflMathError::ComparisonFailed
-        ),
+        let Ok(min_share) = XFL::new(-21, 1_000_000_000_000_000) else {
+            rollback!(
+                b"xfl-math: could not construct min_share",
+                XflMathError::MinShareConstructFailed
+            )
+        };
+
+        match share.lt(min_share) {
+            Ok(true) => rollback!(
+                b"xfl-math: computed share below minimum",
+                XflMathError::BelowMinimum
+            ),
+            Ok(false) => {}
+            Err(_) => rollback!(
+                b"xfl-math: comparison failed",
+                XflMathError::ComparisonFailed
+            ),
+        }
+
+        let Ok(remaining) = amount - share else {
+            rollback!(
+                b"xfl-math: amount - share failed",
+                XflMathError::RemainingComputeFailed
+            )
+        };
+        match remaining.compare(XFL::from_raw_bits(0), COMPARE_LESS | COMPARE_EQUAL) {
+            Ok(true) => rollback!(
+                b"xfl-math: amount - share was not positive",
+                XflMathError::NotEnoughRemaining
+            ),
+            Ok(false) => {}
+            Err(_) => rollback!(
+                b"xfl-math: remaining comparison failed",
+                XflMathError::RemainingComparisonFailed
+            ),
+        }
+
+        let Ok(growth) = XFL::new(-15, 1_010_000_000_000_000) else {
+            rollback!(
+                b"xfl-math: could not construct growth factor",
+                XflMathError::GrowthConstructFailed
+            )
+        };
+        let compounded_raw =
+            share.unchecked() * growth.unchecked() * growth.unchecked() * growth.unchecked();
+        let Ok(compounded) = compounded_raw.validate() else {
+            rollback!(
+                b"xfl-math: compounded share failed to validate",
+                XflMathError::CompoundValidationFailed
+            )
+        };
+        match compounded.compare(share, COMPARE_LESS | COMPARE_EQUAL) {
+            Ok(true) => rollback!(
+                b"xfl-math: compounded share did not increase",
+                XflMathError::CompoundNotIncreasing
+            ),
+            Ok(false) => {}
+            Err(_) => rollback!(
+                b"xfl-math: compound comparison failed",
+                XflMathError::CompoundComparisonFailed
+            ),
+        }
+
+        if compounded > remaining {
+            rollback!(
+                b"xfl-math: compounded share unexpectedly exceeds remaining amount",
+                XflMathError::CompoundExceedsRemaining
+            );
+        }
+
+        let _ = txn.clear();
+
+        accept!()
     }
-
-    let Ok(remaining) = amount - share else {
-        rollback!(
-            b"xfl-math: amount - share failed",
-            XflMathError::RemainingComputeFailed
-        )
-    };
-    match remaining.compare(XFL::from_raw_bits(0), COMPARE_LESS | COMPARE_EQUAL) {
-        Ok(true) => rollback!(
-            b"xfl-math: amount - share was not positive",
-            XflMathError::NotEnoughRemaining
-        ),
-        Ok(false) => {}
-        Err(_) => rollback!(
-            b"xfl-math: remaining comparison failed",
-            XflMathError::RemainingComparisonFailed
-        ),
-    }
-
-    let Ok(growth) = XFL::new(-15, 1_010_000_000_000_000) else {
-        rollback!(
-            b"xfl-math: could not construct growth factor",
-            XflMathError::GrowthConstructFailed
-        )
-    };
-    let compounded_raw =
-        share.unchecked() * growth.unchecked() * growth.unchecked() * growth.unchecked();
-    let Ok(compounded) = compounded_raw.validate() else {
-        rollback!(
-            b"xfl-math: compounded share failed to validate",
-            XflMathError::CompoundValidationFailed
-        )
-    };
-    match compounded.compare(share, COMPARE_LESS | COMPARE_EQUAL) {
-        Ok(true) => rollback!(
-            b"xfl-math: compounded share did not increase",
-            XflMathError::CompoundNotIncreasing
-        ),
-        Ok(false) => {}
-        Err(_) => rollback!(
-            b"xfl-math: compound comparison failed",
-            XflMathError::CompoundComparisonFailed
-        ),
-    }
-
-    if compounded > remaining {
-        rollback!(
-            b"xfl-math: compounded share unexpectedly exceeds remaining amount",
-            XflMathError::CompoundExceedsRemaining
-        );
-    }
-
-    let _ = txn.clear();
-
-    accept!()
 }

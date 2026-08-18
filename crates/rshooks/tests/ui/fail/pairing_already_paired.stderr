@@ -1,9 +1,0 @@
-error[E0119]: conflicting implementations of trait `TypedStateKey` for type `MyKey`
-  --> tests/ui/fail/pairing_already_paired.rs:21:1
-   |
-20 | hook_state!(FirstState, MyKey => MyValue);
-   | ----------------------------------------- first implementation here
-21 | hook_state!(SecondState, MyKey => MyValue);
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ conflicting implementation for `MyKey`
-   |
-   = note: this error originates in the macro `hook_state` (in Nightly builds, run with -Z macro-backtrace for more info)

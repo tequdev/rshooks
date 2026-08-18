@@ -1,0 +1,20 @@
+error: #[hooks]: `#[cfg]`/`#[cfg_attr]` are not allowed on a `self` receiver
+  --> tests/ui/fail/hooks_cfg_on_receiver.rs:13:1
+   |
+13 | #[hooks]
+   | ^^^^^^^^
+   |
+   = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `Vault: HookChainImpl` is not satisfied
+  --> tests/ui/fail/hooks_cfg_on_receiver.rs:10:1
+   |
+10 | #[hooks]
+   | ^^^^^^^^ the trait `HookChainImpl` is not implemented for `Vault`
+   |
+note: required by a bound in `assert`
+  --> tests/ui/fail/hooks_cfg_on_receiver.rs:10:1
+   |
+10 | #[hooks]
+   | ^^^^^^^^ required by this bound in `assert`
+   = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)

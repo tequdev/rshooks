@@ -1,0 +1,7 @@
+error: #[hook_param]: `name` must decode to 1..=32 bytes (the Hook API's parameter-name length limit), found 0
+ --> tests/ui/fail/hooks_param_name_empty.rs:6:1
+  |
+6 | #[hooks]
+  | ^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -3,13 +3,6 @@
 use rshooks::prelude::*;
 use rshooks::*;
 
-metadata! {
-    name: "state-foreign",
-    HookOn: [Invoke],
-}
-
-hook_parameter!(AcctParam, AcctParamName = b"ACCT" => AccountId);
-
 /// The right-padded key for the target account's flag.
 const ENABLED_KEY: StateKey = StateKey(pad!(b"enabled"));
 
@@ -27,34 +20,48 @@ hook_errors! {
     }
 }
 
-#[hook]
-fn my_hook() -> i64 {
-    let Ok(target) = AcctParam.get_value() else {
-        rollback!(
-            b"state-foreign: ACCT parameter not configured",
-            StateForeignError::AcctNotConfigured
-        )
-    };
+#[hooks]
+pub struct StateForeign {
+    /// The target account whose flag this hook reads (`ACCT`).
+    #[hook_param(name = b"ACCT", required)]
+    acct: HookParam<AccountId>,
 
-    let mut flag = [0u8; 1];
-    match state_foreign(&mut flag, &ENABLED_KEY, None, &target) {
-        Ok(n) if n == flag.len() => {}
-        Err(HookError::DoesntExist) => rollback!(
-            b"state-foreign: not configured on target account",
-            StateForeignError::NotConfiguredOnTarget
-        ),
-        _ => rollback!(
-            b"state-foreign: state_foreign read failed",
-            StateForeignError::ReadFailed
-        ),
+    /// The target account's flag, read via `state_foreign` under
+    /// [`ENABLED_KEY`] in this hook's own namespace.
+    #[state(key = &ENABLED_KEY)]
+    enabled: State<[u8; 1]>,
+}
+
+#[hooks]
+impl StateForeign {
+    #[hook(0, on = [Invoke])]
+    fn main(&self) -> i64 {
+        let Ok(target) = self.acct.get_required() else {
+            rollback!(
+                b"state-foreign: ACCT parameter not configured",
+                StateForeignError::AcctNotConfigured
+            )
+        };
+
+        let flag = match self.enabled.get_foreign(None, Some(target.as_ref())) {
+            Ok(Some(v)) => v,
+            Ok(None) => rollback!(
+                b"state-foreign: not configured on target account",
+                StateForeignError::NotConfiguredOnTarget
+            ),
+            Err(_) => rollback!(
+                b"state-foreign: state_foreign read failed",
+                StateForeignError::ReadFailed
+            ),
+        };
+
+        if flag[0] == 0 {
+            rollback!(
+                b"state-foreign: target account's flag is off",
+                StateForeignError::FlagOff
+            );
+        }
+
+        accept!()
     }
-
-    if flag[0] == 0 {
-        rollback!(
-            b"state-foreign: target account's flag is off",
-            StateForeignError::FlagOff
-        );
-    }
-
-    accept!()
 }

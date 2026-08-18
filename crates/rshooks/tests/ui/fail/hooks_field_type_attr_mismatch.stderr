@@ -1,0 +1,15 @@
+error: #[hooks]: `#[state]` requires a `State<V>` field type, found `HookParam`
+ --> tests/ui/fail/hooks_field_type_attr_mismatch.rs:7:1
+  |
+7 | #[hooks]
+  | ^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unused import: `rshooks::decl::HookParam`
+ --> tests/ui/fail/hooks_field_type_attr_mismatch.rs:4:5
+  |
+4 | use rshooks::decl::HookParam;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default

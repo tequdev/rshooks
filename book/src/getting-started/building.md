@@ -2,58 +2,88 @@
 
 The previous chapter ran `rshooks build` without explaining what it
 actually does. This chapter walks through the pipeline stage by stage, so
-the printed report and the `check` subcommand make sense on their own.
+the printed report and the `check` subcommand make sense on their own. A
+crate can declare more than one Hook (see [Hook
+Chains](../concepts/chains.md)); this chapter describes the pipeline for
+one declared entry, and the next section covers how it repeats.
 
 ## The pipeline
 
 `rshooks build` runs cargo, then a fixed sequence of post-processing
-and validation steps on the resulting `.wasm`:
+and validation steps:
 
-1. **`cargo build --release --target wasm32v1-none`** — compiles your
-   crate exactly as any other Rust crate would be, using your `Cargo.toml`
-   and its `[profile.release]` settings (see [Installation](installation.md)
-   for why that profile matters). The output is an ordinary `cdylib`
-   artifact; on its own it is **not** SetHook-valid — it still exports
-   `memory`, and Rust's own code generation gives no guarantee about loop
-   guards or WASM feature usage.
-2. **Hook-cleaner** — strips the disallowed `memory` export and any other
-   dead or non-`hook`/`cbak` exports, and (for Guard-type, API version 0,
-   modules) flattens and inlines the crate's call graph into the `hook`/
-   `cbak` entry points, untangling the resulting block/loop/if nesting so
-   it fits the host's structural limits. This is also the stage that
-   strips a `metadata!` declaration's carrier export — see [Hook
-   Metadata](../build/metadata.md) for why that carrier never reaches the
-   deployable binary.
-3. **Guard checker** — for API version 0, validates that every loop begins
-   with the exact guard call sequence the host requires, and computes the
-   static worst-case instruction count (WCE) for `hook` and, if present,
-   `cbak`, from those guards. This step is skipped for API version 1
-   (Gas-type hooks meter instructions at runtime instead of requiring
-   static guards).
-4. **Validator** — checks the complete SetHook rule set: exactly one
-   `hook` export (and at most one `cbak`), no disallowed imports, no
-   recursion, and a binary size at or under the 65,535-byte SetHook limit
-   (unless `--allow-oversize` is passed, in which case the output is still
-   written but clearly marked invalid).
-5. **Metadata sidecar** — if the crate declared `metadata!`, writes the
-   `<crate>.json` sidecar next to the cleaned wasm, combining the source
-   declaration with the final binary's `HookHash` and WCE.
+1. **Discovery build** — `cargo build --release --target wasm32v1-none`
+   once, with no entry selected, compiling every declared Hook and `cbak`
+   into one artifact. This build is never deployed; its only purpose is to
+   read back the crate's declarations (the `#[hooks]` struct's shared
+   schema and every `#[hook]`/`#[cbak]` entry's metadata), extracted from
+   dead, hex-encoded carrier exports the macros generate and this artifact
+   alone carries.
+2. **Per-index build, once per declared entry** — for each index the crate
+   declares, `cargo rustc --release --target wasm32v1-none -- --cfg
+   'rshooks_entry="<i>"'` recompiles the same crate with that one entry
+   selected. The `--cfg` flag steers the same `#[hooks]`-generated code to
+   export exactly `hook` (and `cbak`, if this index declares one) instead
+   of the discovery build's suffixed names — this is the only artifact
+   that's ever SetHook-valid for that index. The tool then re-extracts this
+   build's own carriers and checks them **byte-for-byte** against
+   discovery's — a mismatch (a build script or `cfg`-sensitive macro
+   producing different declarations at a different `--cfg` value) is a
+   build error naming exactly which entry and field diverged.
+3. **Hook-cleaner** (per index) — strips the disallowed `memory` export,
+   the now-redundant carrier exports, and any other dead export, and (for
+   Guard-type, API version 0, modules) flattens and inlines the crate's
+   call graph into the `hook`/`cbak` entry points for *this index only*,
+   untangling the resulting block/loop/if nesting so it fits the host's
+   structural limits. Because each index is compiled and cleaned
+   separately, one index's unreachable code (another entry's logic, in a
+   multi-Hook chain) never counts against this index's own size or nesting
+   budget.
+4. **Guard checker** (per index) — for API version 0, validates that every
+   loop begins with the exact guard call sequence the host requires, and
+   computes the static worst-case instruction count (WCE) for `hook` and,
+   if present, `cbak`, from those guards. This step is skipped for API
+   version 1 (Gas-type hooks meter instructions at runtime instead of
+   requiring static guards).
+5. **Validator** (per index) — checks the complete SetHook rule set:
+   exactly one `hook` export (and at most one `cbak`, and only if this
+   index declared one), no disallowed imports, no recursion, and a binary
+   size at or under the 65,535-byte SetHook limit (unless
+   `--allow-oversize` is passed, in which case the output is still written
+   but clearly marked invalid).
+6. **Sidecar and template generation** — once every index has been built
+   and validated, writes one `<index>.<fn>.metadata.json` sidecar per
+   entry, then a `sethook.template.json` covering every declared index in
+   one `Hooks` array, plus its `sethook.template.meta.json` generation
+   sidecar. Covered in [Hook Chains](../concepts/chains.md) and [Per-Hook
+   Attributes](../build/metadata.md).
+7. **Publish** — stages every artifact from this run, then atomically
+   updates `out/current` to point at it. A failed run never touches
+   `current`; it always resolves to the most recent complete, validated
+   build.
 
-Every one of these steps runs against the exact bytes that will be
+Every wasm-producing step runs against the exact bytes that will be
 deployed — the printed WCE and `HookHash` describe the file actually
-written to `out/`, not an intermediate artifact.
+written to `out/current/`, not an intermediate artifact.
 
 ## Reading the printed report
 
-A successful `build` prints, in order:
+A successful `build` prints, per index, in order:
 
 ```text
-worst-case instructions: hook=15 cbak=0
-max nesting depth: 0
-wrote out/my_hook.wasm
-size: 174 bytes
-estimated SetHook fee: 870000 drops (0.870000 XAH)
-wrote out/my_hook.json
+[0] main: worst-case instructions: hook=15 cbak=0
+[0] main: max nesting depth: 0
+[0] main: wrote out/current/0.main.wasm
+[0] main: size: 174 bytes
+[0] main: estimated SetHook fee: 870000 drops (0.870000 XAH)
+[0] main: wrote out/current/0.main.metadata.json
+```
+
+followed by the template lines once every index is done:
+
+```text
+wrote out/current/sethook.template.json
+wrote out/current/sethook.template.meta.json
 ```
 
 - **`worst-case instructions`** is the guard checker's static upper bound
@@ -61,11 +91,18 @@ wrote out/my_hook.json
   appears for API version 0 (Guard-type) modules — a Gas-type module has no
   static bound of this kind.
 - **`max nesting depth`** is the deepest block/loop/if nesting in the final
-  module, checked against the host's structural limit.
-- **`size` / `estimated SetHook fee`** are computed directly from the final
-  binary's byte count — SetHook's fee schedule is `bytes × 5000` drops, so
-  this is the actual one-time deployment fee cost of the binary you just
-  built, not an approximation.
+  module, checked against the host's structural limit — 32 for a
+  Guard-type module. This is the number [Hook Chains](../concepts/chains.md)
+  covers in more depth: dense use of the typed `#[state]`/`#[hook_param]`/
+  `#[otxn_param]` accessors at one call site can push it close to that
+  ceiling.
+- **`size` / `estimated SetHook fee`** are computed directly from that
+  entry's final binary byte count — SetHook's fee schedule is
+  `bytes × 5000` drops, so this is the actual one-time deployment fee cost
+  of the binary you just built, not an approximation. Because each index is
+  its own independent wasm, each has its own size and its own fee — a
+  multi-Hook crate's total deployment cost is the sum across every declared
+  index.
 
 ## Validating a binary without building it
 

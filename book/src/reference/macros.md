@@ -6,14 +6,37 @@ for the full grammar, worked examples, and edge cases, follow the link into
 the tutorial chapter that covers it, or the macro's own rustdoc in
 `crates/rshooks/src/lib.rs`.
 
-## Entry points
+## Chain declaration and entry points
 
-| macro | purpose | sketch |
+| attribute | purpose | sketch |
 |---|---|---|
-| `#[hook]` | Turns a plain `fn name() -> i64` into the required wasm `hook` export. | `#[hook] fn my_hook() -> i64 { accept!() }` |
-| `#[cbak]` | Same as `#[hook]`, but exports `cbak` — the optional callback invoked when a transaction this hook emitted later settles. | `#[cbak] fn my_cbak() -> i64 { accept!() }` |
+| `#[hooks(description = "...")]` on a struct | Declares this crate's Hook chain — a container for shared `#[state]`/`#[hook_param]`/`#[otxn_param]` fields, no runtime instance. Exactly one per crate. | `#[hooks] pub struct MyHook;` |
+| `#[hooks]` on an inherent `impl` | Declares this chain's entry points. Exactly one per `#[hooks]` struct, in the same module. | `#[hooks] impl MyHook { .. }` |
+| `#[hook(<index>, ...)]` | Inside a `#[hooks]` impl: declares one Hook entry at the given chain position (`0..=9`, required). Turns `fn name(&self) -> i64` into that index's `hook` export. Named args: `name`, `on`/`on_incoming`+`on_outgoing`, `can_emit`, `description`. | `#[hook(0, name = "accept", on = [Invoke])] fn main(&self) -> i64 { accept!() }` |
+| `#[cbak(<index>)]` | Pairs with a `#[hook]` at the same index; exports `cbak` for that index — the optional callback invoked when a transaction this entry emitted later settles. Index only, no other arguments. | `#[cbak(0)] fn my_cbak(&self) -> i64 { accept!() }` |
 
-See [Anatomy of a Hook](../concepts/anatomy.md) and [Emitting
+### Receivers on `#[hook]`/`#[cbak]` entries and impl helpers
+
+An entry function requires exactly `&self` — it always receives the chain
+declaration by shared reference, even for a unit-struct or field-less
+chain with nothing to read through it. A non-attributed helper declared
+inside the same `#[hooks] impl` accepts either no receiver or `&self`.
+
+| receiver | entry (`#[hook]`/`#[cbak]`) | impl helper |
+|---|---|---|
+| none (`fn helper() -> ...`) | **no** — diagnostic: "hook entry functions take `&self` — the chain declaration is passed by shared reference (it is zero-sized)" | yes |
+| `&self` (`fn main(&self) -> i64`) | yes — receives the chain's single zero-sized static by shared reference; reach its fields as `self.<field>` | yes |
+| `self` / `mut self` / `&'a self` / `self: T` | **no** — diagnostic: "use `&self` — hook entrypoints receive the chain declaration by shared reference (it is zero-sized)" | **no** — same diagnostic |
+| `&mut self` / `&'a mut self` | **no** — diagnostic: "chain handles are zero-sized and immutable; ledger state is accessed through the handles, not by mutating the struct — use `&self`" | **no** — same diagnostic |
+
+Code outside the annotated `impl` (a free function, another module) has no
+`self` to borrow and reaches the same static by the struct's own name
+instead (`MyHook.some_field`) — see [Anatomy of a
+Hook](../concepts/anatomy.md#the-struct-has-no-runtime-instance-but-every-entry-borrows-it).
+
+See [Anatomy of a Hook](../concepts/anatomy.md), [Hook
+Chains](../concepts/chains.md), [Per-Hook
+Attributes](../build/metadata.md), and [Emitting
 Transactions](../emit/emitting.md).
 
 ## Control flow & exit
@@ -32,16 +55,16 @@ Loops](../concepts/guards.md).
 
 ## Data & typing
 
-| macro | purpose | sketch |
+| macro/attribute | purpose | sketch |
 |---|---|---|
 | `#[derive(HookData)]` | Encode/decode a fixed-size, named-field struct as a **hook-state value** (or a parameter value, or a nested field). | `#[derive(HookData)] struct Deposit { amount: u64 }` |
 | `#[derive(HookKey)]` | Encode a fixed-size, named-field struct as a **hook-state key** (encode-only, 32-byte bound checked at derive time). | `#[derive(HookKey)] struct DepositKey { tag: u8, owner: AccountId }` |
 | `#[derive(ParamName)]` | Encode a fixed-size, named-field struct as a **Hook API parameter name** (encode-only, 1–32-byte bound checked at derive time). | `#[derive(ParamName)] struct SeatParamName { topic: u8, seat: u8 }` |
 | `#[derive(ParamValue)]` | Decode a fixed-size, named-field struct as a **Hook API parameter value** (decode-only). | `#[derive(ParamValue)] struct Config { min_amount: u64 }` |
-| `hook_state!` | Declare a hook-state entity — key + value pairing, with `get_state`/`set_state`/`update_state`/`delete_state` accessors. Six grammar forms. | `hook_state!(DepositState, DepositKey {tag: u8} => Deposit {amount: u64});` |
+| `#[state(key = ...)]` / `#[state(key_by = ...)]` | On a `#[hooks]` struct field of type `State<V>`: declares a hook-state entity — key + value pairing, with `.get()`/`.set()`/`.update()`/`.delete()` (and `.at(args)` for `key_by`). | `#[state(key_by = DepositKey)] deposits: State<Deposit>,` |
 | `state_keys!` | Declare an enum of hook-state keys, each variant its own real byte length. | `state_keys! { enum DataKey { Counter, Balance(AccountId) } }` |
-| `hook_parameter!` | Declare a Hook API parameter (this hook's own installed parameters) — name + value pairing, `get_value` (and `get_name` for byte-string names). Same grammar staircase as `hook_state!`. | `hook_parameter!(Cfg, CfgName = b"CFG" => Config);` |
-| `otxn_parameter!` | Identical to `hook_parameter!`, but reads the *originating transaction's* parameters via `otxn_param_typed`. | `otxn_parameter!(Ins, InsName = b"INS" => Instruction);` |
+| `#[hook_param(name = ...)]` / `#[hook_param(name_by = ...)]` | On a `#[hooks]` struct field of type `HookParam<V>`: declares a Hook parameter (this hook's own installed parameters) — name + value pairing, `.get()`/`.get_or_default()`/`.get_required()` (and `.at(args)` for `name_by`). | `#[hook_param(name = b"CFG", default = Config::default())] config: HookParam<Config>,` |
+| `#[otxn_param(name = ...)]` / `#[otxn_param(name_by = ...)]` | Identical grammar to `#[hook_param]`, but reads the *originating transaction's* parameters. | `#[otxn_param(name = b"INS", required)] instruction: OtxnParam<Instruction>,` |
 
 See [Hook State](../data/state.md), [Hook and Transaction
 Parameters](../data/parameters.md), and [Typed Data with
@@ -88,8 +111,10 @@ State](../data/state.md).
 
 ## Build metadata
 
-| macro | purpose | sketch |
-|---|---|---|
-| `metadata!` | Declare a Hook's descriptive/SetHook-facing metadata (name, `HookOn`, `HookCanEmit`, ...) for `rshooks` to extract into a sidecar JSON. Build-only — adds nothing to the final wasm. | `metadata! { name: "accept-all", HookOn: [Invoke], HookName: "accept" }` |
-
-See [Hook Metadata](../build/metadata.md).
+There's no separate metadata macro — a chain's descriptive and
+SetHook-facing metadata is the `#[hooks(description = ...)]` struct
+attribute plus each entry's `#[hook(<index>, name = ..., on = ...,
+can_emit = ..., description = ...)]` arguments, listed under "Chain
+declaration and entry points" above. `rshooks build` extracts them into a
+per-entry sidecar JSON and a `SetHook` template — see [Per-Hook
+Attributes](../build/metadata.md).

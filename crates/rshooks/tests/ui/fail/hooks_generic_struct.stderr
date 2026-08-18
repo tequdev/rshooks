@@ -1,0 +1,7 @@
+error: #[hooks]: a chain-declaration struct cannot be generic (no type parameters or lifetimes)
+ --> tests/ui/fail/hooks_generic_struct.rs:5:1
+  |
+5 | #[hooks]
+  | ^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)

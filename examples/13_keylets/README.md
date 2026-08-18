@@ -72,8 +72,7 @@ cargo run -p rshooks-build -- build --manifest-path examples/13_keylets/Cargo.to
 ```
 
 No extra flags — see "Toolchain note" below for why this needs neither
-`--auto-guard` nor a per-package `opt-level` override, unlike an earlier
-version of this example.
+`--auto-guard` nor a per-package `opt-level` override.
 
 ## Toolchain note: `Keylet`'s 34 bytes, at this workspace's `opt-level = 3`
 
@@ -93,17 +92,13 @@ call a `"z"`/`"s"` build of the same source would need
 Measured (25 of the 26 `keylet_xxx` calls actually exercised — see "e2e
 verification scope" below for why not all 26): **4150** worst-case
 instructions, 1 nesting level after `rshooks-build`'s own ladder-flattening
-pass, 9638 bytes — up from an earlier, `opt-level = "z"`-plus-per-package-
-override measurement of 3637/8436 taken before this workspace's default
-switched to `opt-level = 3` everywhere (`docs/DESIGN.md`'s §2 C6): a
-per-package override that raised only *this* crate's own optimization
-level produced measurably different inlining than the same level applied
-workspace-wide (`rshooks`/`rshooks-core` now also build at `opt-level =
-3`), and this hook's 25 near-identical `compute`/`store` call sites
-compound that difference more than most examples do. Still comfortably
-under the 65,535-byte `SetHook` limit, and still guard-clean (no
-`--auto-guard` needed) — see the workspace root's `docs/DESIGN.md` §2 C6
-for the full before/after table across all examples.
+pass, 9638 bytes. This workspace builds every crate — including
+`rshooks`/`rshooks-core` — at `opt-level = 3` (`docs/DESIGN.md`'s §2 C6);
+this hook's 25 near-identical `compute`/`store` call sites make its
+inlining more sensitive to that setting than most examples. Still
+comfortably under the 65,535-byte `SetHook` limit, and still guard-clean
+(no `--auto-guard` needed) — see the workspace root's `docs/DESIGN.md` §2
+C6 for the full instruction-count table across all examples.
 
 ## Expected behavior
 

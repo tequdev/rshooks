@@ -61,9 +61,20 @@ at `opt-level = "z"`. See [Guards and Loops](../concepts/guards.md).
 
 `crate::convert::{FixedRead, FromBytes, ToBytes, TypedParamName}` — the
 traits `#[derive(HookData)]`/`#[derive(HookKey)]`/`#[derive(ParamName)]`/
-`#[derive(ParamValue)]` implement, and the trait a `hook_parameter!`/
-`otxn_parameter!` name type carries. See [Typed Data with
+`#[derive(ParamValue)]` implement, and the trait a `#[hook_param(...)]`/
+`#[otxn_param(...)]` field's name carries. See [Typed Data with
 Derives](../data/typed-data.md).
+
+## The `decl` module: struct field handle types
+
+`crate::decl::{State, HookParam, OtxnParam, StateEntry, HookParamAt,
+OtxnParamAt}` — re-exported at the crate root *and* here in the prelude,
+since `State<V>`/`HookParam<V>`/`OtxnParam<V>` are the field types a
+`#[hooks]` struct's `#[state]`/`#[hook_param]`/`#[otxn_param]` fields are
+written with (see [Hook State](../data/state.md) and [Hook and Transaction
+Parameters](../data/parameters.md)). `StateEntry`/`HookParamAt`/
+`OtxnParamAt` are the handles `.at(args)` returns for a keyed/named-family
+field.
 
 ## `HookError`/`Result`
 
@@ -78,9 +89,9 @@ Errors](../concepts/errors.md).
 state_foreign_get_typed, state_foreign_set_loose, state_foreign_set_typed,
 state_foreign_update_loose, state_foreign_update_typed, state_get,
 state_get_typed, state_set_loose, state_set_typed, state_update_loose,
-state_update_typed}` — the composite/typed hook-state layer backing
-`hook_state!`, plus the `_foreign` twins for reading another account's
-state. See [Hook State](../data/state.md).
+state_update_typed}` — the composite/typed hook-state layer a `#[state(...)]`
+struct field's accessors forward to, plus the `_foreign` twins for reading
+another account's state. See [Hook State](../data/state.md).
 
 ## `HookStatic`
 
@@ -92,8 +103,8 @@ of a Hook](../concepts/anatomy.md).
 ## `TxType`
 
 `crate::tx_type::TxType` — the typed transaction-type enum (`TxType::Payment`,
-...), used by `otxn_type` and by `metadata!`'s `HookOn`/`HookCanEmit` lists.
-See [Reading the Originating Transaction](../data/otxn.md).
+...), used by `otxn_type` and by `#[hook(<index>, ...)]`'s `on`/`can_emit`
+lists. See [Reading the Originating Transaction](../data/otxn.md).
 
 ## Types
 

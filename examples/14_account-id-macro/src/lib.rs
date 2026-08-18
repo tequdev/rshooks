@@ -5,11 +5,6 @@
 use rshooks::prelude::*;
 use rshooks::*;
 
-metadata! {
-    name: "account-id-macro",
-    HookOn: [Invoke],
-}
-
 /// r-address used by the compile-time and runtime conversions.
 const OWNER_RADDR: &[u8; 34] = b"rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh";
 
@@ -43,59 +38,65 @@ hook_errors! {
     }
 }
 
-/// Accepts only when all conversion paths agree.
-#[hook]
-fn my_hook() -> i64 {
-    let Ok(installed_on) = hook_account_buf() else {
-        rollback!(
-            b"account-id-macro: hook_account failed",
-            AccountIdMacroError::HookAccountFailed
-        )
-    };
-    if !buf_eq_20(&installed_on, &OWNER) {
-        rollback!(
-            b"account-id-macro: hook_account does not match the account_id! constant",
-            AccountIdMacroError::HookAccountMismatch
-        );
-    }
+#[hooks]
+pub struct AccountIdMacro;
 
-    let Ok(runtime_accid) = util_accid_buf(OWNER_RADDR) else {
-        rollback!(
-            b"account-id-macro: util_accid failed",
-            AccountIdMacroError::UtilAccidFailed
-        )
-    };
-    if !buf_eq_20(&runtime_accid, &OWNER) {
-        rollback!(
-            b"account-id-macro: util_accid does not match the account_id! constant",
-            AccountIdMacroError::UtilAccidMismatch
-        );
-    }
+#[hooks]
+impl AccountIdMacro {
+    /// Accepts only when all conversion paths agree.
+    #[hook(0, on = [Invoke])]
+    fn main(&self) -> i64 {
+        let Ok(installed_on) = hook_account_buf() else {
+            rollback!(
+                b"account-id-macro: hook_account failed",
+                AccountIdMacroError::HookAccountFailed
+            )
+        };
+        if !buf_eq_20(&installed_on, &OWNER) {
+            rollback!(
+                b"account-id-macro: hook_account does not match the account_id! constant",
+                AccountIdMacroError::HookAccountMismatch
+            );
+        }
 
-    let Some(raddr_buf) = RADDR_BUF.take() else {
-        rollback!(
-            b"account-id-macro: RADDR_BUF already taken",
-            AccountIdMacroError::RaddrBufAlreadyTaken
-        );
-    };
-    let Ok(n) = util_raddr(raddr_buf, OWNER.as_ref()) else {
-        rollback!(
-            b"account-id-macro: util_raddr failed",
-            AccountIdMacroError::UtilRaddrFailed
-        )
-    };
-    if n != OWNER_RADDR.len() {
-        rollback!(
-            b"account-id-macro: util_raddr wrote an unexpected length",
-            AccountIdMacroError::UtilRaddrLenMismatch
-        );
-    }
-    if !buf_eq_34(raddr_buf, OWNER_RADDR) {
-        rollback!(
-            b"account-id-macro: util_raddr does not round-trip to OWNER_RADDR",
-            AccountIdMacroError::UtilRaddrMismatch
-        );
-    }
+        let Ok(runtime_accid) = util_accid_buf(OWNER_RADDR) else {
+            rollback!(
+                b"account-id-macro: util_accid failed",
+                AccountIdMacroError::UtilAccidFailed
+            )
+        };
+        if !buf_eq_20(&runtime_accid, &OWNER) {
+            rollback!(
+                b"account-id-macro: util_accid does not match the account_id! constant",
+                AccountIdMacroError::UtilAccidMismatch
+            );
+        }
 
-    accept!(b"account-id-macro: all three checks passed", 0)
+        let Some(raddr_buf) = RADDR_BUF.take() else {
+            rollback!(
+                b"account-id-macro: RADDR_BUF already taken",
+                AccountIdMacroError::RaddrBufAlreadyTaken
+            );
+        };
+        let Ok(n) = util_raddr(raddr_buf, OWNER.as_ref()) else {
+            rollback!(
+                b"account-id-macro: util_raddr failed",
+                AccountIdMacroError::UtilRaddrFailed
+            )
+        };
+        if n != OWNER_RADDR.len() {
+            rollback!(
+                b"account-id-macro: util_raddr wrote an unexpected length",
+                AccountIdMacroError::UtilRaddrLenMismatch
+            );
+        }
+        if !buf_eq_34(raddr_buf, OWNER_RADDR) {
+            rollback!(
+                b"account-id-macro: util_raddr does not round-trip to OWNER_RADDR",
+                AccountIdMacroError::UtilRaddrMismatch
+            );
+        }
+
+        accept!(b"account-id-macro: all three checks passed", 0)
+    }
 }

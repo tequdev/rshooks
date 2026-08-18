@@ -2,15 +2,15 @@
 
 use rshooks::*;
 
-metadata! {
-    name: "accept-all",
-    description: "Accepts every transaction selected by HookOn.",
-    HookOn: [Invoke],
-    HookName: "accept",
-}
+#[hooks(description = "Accepts every transaction selected by HookOn.")]
+pub struct AcceptAll;
 
-#[hook]
-fn my_hook() -> i64 {
-    trace!(b"accept-all: accepting transaction");
-    accept!()
+#[hooks]
+impl AcceptAll {
+    /// Accepts every triggering transaction.
+    #[hook(0, name = "accept", on = [Invoke])]
+    fn main(&self) -> i64 {
+        trace!(b"accept-all: accepting transaction");
+        accept!()
+    }
 }

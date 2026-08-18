@@ -33,7 +33,7 @@ which passed. A full pass is `2047` (`0b111_1111_1111`).
 The Hook API's guard checker rejects a module whose block nesting exceeds 32
 levels. Five checks' worth of `if let` ladders inlined into one entry point
 measured **53**. Splitting each into its own frame brings the hook to **4** —
-the same `#[inline(never)]` escape hatch `examples/81_govern` uses against the
+the same `#[inline(never)]` escape hatch `examples/80_governance` uses against the
 same ceiling, and the reason `docs/DESIGN.md` §5.8 recommends keeping
 `slot_path!` chains short.
 
@@ -70,7 +70,7 @@ guard-clean with no extra `rshooks` flags.
 
 ```sh
 cargo run -p rshooks-build -- build --manifest-path examples/15_slot-objects/Cargo.toml
-cargo run -p rshooks-build -- check examples/15_slot-objects/out/slot_objects.wasm
+cargo run -p rshooks-build -- check examples/15_slot-objects/out/current/0.main.wasm
 ```
 
 ## Error codes

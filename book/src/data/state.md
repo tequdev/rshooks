@@ -3,9 +3,9 @@
 A Hook's persistent storage is a flat key-value store scoped to the
 account it's installed on (and, for a foreign read, another account's
 namespace too). `rshooks` gives you three tiers of access to it, from a raw
-buffer read all the way up to a one-line declaration that generates typed
-accessor methods. This page walks through all three, plus reading another
-account's state. If you haven't read [Typed Data with Derives](typed-data.md)
+buffer read all the way up to a struct field with generated typed accessor
+methods. This page walks through all three, plus reading another account's
+state. If you haven't read [Typed Data with Derives](typed-data.md)
 yet, the `#[derive(HookKey)]`/`#[derive(HookData)]` derives it covers are
 what the higher tiers here are built on.
 
@@ -52,8 +52,10 @@ Originating Transaction](otxn.md)): `T` must be exactly the right length,
 inferred from context, no turbofish.
 
 Reach for this tier for a one-off primitive read/write with no reuse
-value. For a hook with more than a couple of distinct state entries, the
-next two tiers pay off quickly.
+value, or as the escape hatch [Hook Chains](../concepts/chains.md#a-real-limit-typed-accessor-density-inside-one-entry)
+covers for a hook whose typed-accessor call-site density has outgrown its
+nesting budget. For a hook with more than a couple of distinct state
+entries, the next two tiers pay off quickly.
 
 ## Tier 2: `state_keys!` — a typed key enum, independent value type
 
@@ -96,149 +98,152 @@ was never intended, as long as `SomeOtherType: FromBytes` (true of nearly
 every fixed-size type this crate provides). That's exactly the gap Tier 3
 closes.
 
-## Tier 3: `hook_state!` — a key permanently paired with its value type
+## Tier 3: `#[state(...)]` struct fields — a key permanently paired with its value type
 
-`hook_state!` declares a hook-state **entity**: a key bound to exactly one
-value type, with four generated accessor methods
-(`get_state`/`set_state`/`update_state`/`delete_state`) and a
-`TypedStateKey` implementation that also makes it usable with every free
-`state_get_typed`/`state_set_typed`/`state_update_typed` function. There is
-no second, independently-chosen value type left for a mismatch to hide in
-— passing the wrong value for a key is a compile error.
+A field on a `#[hooks]` struct (see [Anatomy of a Hook](../concepts/anatomy.md))
+can declare a hook-state **entity**: a key bound to exactly one value type,
+via a `State<V>` field carrying a `#[state(...)]` attribute. There is no
+second, independently-chosen value type left for a mismatch to hide in —
+passing the wrong value where this field's `V` is expected is a compile
+error.
 
-It offers a **grammar staircase** of six forms, from a fully-fixed key down
-to a fully composite, runtime-constructed one. Pick the narrowest one that
-fits:
+The attribute has exactly two forms, because the key's *shape* is carried
+by an ordinary Rust type (`S::KeyArgs`, resolved through the field
+generated for it) rather than needing its own bespoke struct declaration:
 
 | form | key shape | example |
 |---|---|---|
-| 1 | fully fixed (a new zero-sized type) | `hook_state!(RewardRate, RewardRateKey = b"RR" => XFL);` |
-| 2 | struct, with a fixed instance | `hook_state!(Counter, CounterKey {name: [u8; 7]} = {name: *b"counter"} => u64);` |
-| 3 | struct, constructed per call site | `hook_state!(DepositState, DepositKey {tag: u8, owner: AccountId} => Deposit);` |
-| 4 | newtype (tuple struct) around one existing type | `hook_state!(AccountState, AccountKey AccountId => AccountData {balance: XFL, sequence: u16});` |
-| `existing` | key impls on a key type **you** declared | `hook_state!(MyOwnState, existing MyOwnKey = b"MK" => u64);` |
-| pairing | wraps a key type you already declared, that already encodes | `hook_state!(MyState, MyKey => MyValue);` |
+| `key = <expr>` | fully fixed — a constant expression whose type implements key-encoding (a byte-string literal works directly) | `#[state(key = b"RR")]` |
+| `key_by = <TypePath>` | keyed — constructed per call site from any type already implementing `StateKeyEncode` (a `#[derive(HookKey)]` struct, a `state_keys!` enum, or a primitive array type) | `#[state(key_by = DepositKey)]` |
 
-Every form declares the **entity** first — the thing your hook operates
-on, and the only thing that gets the four accessor methods. The **key**
-component gets no methods of its own; it's a trait carrier you hand to the
-free functions when you want the address rather than the thing addressed.
-The value side (after `=>`) accepts either an already-declared type or an
-inline definition (`=> Name { field: Type, .. }`), which generates a fresh
-`#[derive(HookData)]`-equivalent struct.
-
-### Form 1: fully fixed key
-
-`$Entity` and `$Name` both become new unit structs — zero-sized markers
-whose own name *is* the one value — encoding the same fixed, literal bytes
-either way:
+### `key = ...`: a fixed key
 
 ```rust
-use rshooks::prelude::*;
-use rshooks::hook_state;
+use rshooks::*;
 
-hook_state!(RewardRate, RewardRateKey = b"RR" => XFL);
-
-let current = RewardRate.get_state()?;
-RewardRate.set_state(&XFL::one())?;
+#[hooks]
+pub struct StateCounter {
+    /// Persistent invocation counter, stored at the fixed key `"counter"`.
+    #[state(key = b"counter")]
+    counter: State<u64>,
+}
 ```
 
-### Form 3: struct key, constructed per call site
+declares a field named `counter`, addressed by the fixed key `b"counter"`,
+holding a `u64`. Because the struct has a named field, the macro also
+generates a `static` value named after the struct (`StateCounter`, same
+name, different namespace — see [Anatomy of a Hook](../concepts/anatomy.md#the-struct-has-no-runtime-instance-but-every-entry-borrows-it)).
+An entry (or a helper inside the same `#[hooks] impl`) declares `&self` to
+receive that static and calls the field's accessors as
+`self.counter.get()`; code outside the impl reaches the identical static by
+the struct's own name instead: `StateCounter.counter.get()`. `key` also
+accepts a `const` reference to something more structured than a literal, as
+long as it encodes:
+
+```rust,ignore
+const ENABLED_KEY: StateKey = StateKey(pad!(b"enabled"));
+
+#[hooks]
+pub struct StateForeign {
+    #[state(key = &ENABLED_KEY)]
+    enabled: State<[u8; 1]>,
+}
+```
+
+### `key_by = ...`: a key constructed per call site
 
 Use this when the key varies at runtime — keyed by the calling account, for
 example:
 
-```rust
-use rshooks::prelude::*;
-use rshooks::hook_state;
-
-hook_state!(DepositState, DepositKey {tag: u8, owner: AccountId} => Deposit {amount: u64, deadline: u32, flags: u8});
-
-let deposit = DepositState { tag: 1, owner: AccountId::default() };
-let current = deposit.get_state()?;
-deposit.set_state(&Deposit { amount: 1, deadline: 0, flags: 0 })?;
-```
-
-`get_state`/`set_state`/`update_state`/`delete_state` are `#[inline(always)]`
-forwards to `state_get_typed(&deposit)`/`state_set_typed(&deposit, &v)`/etc
-— the method call and the free-function call compile to identical code, so
-the choice is purely about which reads better at the call site.
-
-### The pairing form: entities over derives you already wrote
-
-When you've already declared `#[derive(HookKey)]`/`#[derive(HookData)]`
-types yourself (see [Typed Data with Derives](typed-data.md)), the pairing
-form ties them together without redeclaring anything:
-
-```rust
-use rshooks::prelude::*;
-use rshooks::{hook_state, HookData, HookKey};
-
+```rust,ignore
 #[derive(HookKey, Clone, Copy)]
-struct MyKey {
+struct DepositKey {
     tag: u8,
+    owner: AccountId,
 }
 
-#[derive(HookData, Clone, Copy, Debug, PartialEq)]
-struct MyValue {
-    count: u32,
+#[hooks]
+pub struct TypedData {
+    #[state(key_by = DepositKey)]
+    deposits: State<DepositValue>,
 }
-
-hook_state!(MyState, MyKey => MyValue);
-
-let value = MyState(MyKey { tag: 0 }).get_state()?;
 ```
 
-`$Key` must be local to your crate (Rust's orphan rule — a bare `[u8; N]`
-or `types::StateKey` needs Form 4's newtype wrapper instead), already able
-to encode itself (`StateKeyEncode`, from `#[derive(HookKey)]` or
-`state_keys!`), and not already paired with another value type. A
-`state_keys!` enum — which has `StateKeyEncode` but no `ToBytes` — pairs
-just as well as a `#[derive(HookKey)]` struct, since the entity forwards
-`encode()` straight through rather than re-deriving it.
+`deposits` on its own is the *field*, not yet addressed to a specific
+entry — call `.at(args)` to bind the key's runtime arguments and get a
+handle with the same accessor set. Inside the `#[hooks] impl`, an entry
+reaches it as `self.deposits`:
 
-For the remaining forms (2, 4, and `existing`) and every edge case — the
-visibility rules, why deletion (`delete_state`) needs its own spelling
-rather than an empty-value write, and the full compile-time error messages
-for a misused pairing — see `rshooks::hook_state!`'s own rustdoc, which is
-the canonical reference this section summarizes.
+```rust,ignore
+#[hook(0, on = [Invoke])]
+fn main(&self) -> i64 {
+    let deposit = self.deposits.at(DepositKey { tag: DEPOSIT_TAG, owner });
+    let current = deposit.get()?;
+    deposit.set(&next)?;
+    // ...
+}
+```
+
+`DepositKey` here is any type that already implements `StateKeyEncode` —
+most often a `#[derive(HookKey)]` struct (see [Typed Data with
+Derives](typed-data.md)) or a `state_keys!` enum, exactly the same key
+types Tier 2 uses, so a key shape you've already declared for Tier 2 slots
+directly into `key_by` with no redeclaration.
+
+### The generated accessors
+
+Every `#[state(...)]` field — used directly for `key = ...`, or through
+`.at(args)` for `key_by = ...` — gets the same six methods:
+
+| method | signature | behavior |
+|---|---|---|
+| `.get()` | `Result<Option<V>>` | `Ok(None)` for "no entry"; a genuine decode failure or host error is `Err`, never confused with absence. |
+| `.set(&value)` | `Result<usize>` | Writes `value`, returning the byte count written. |
+| `.update(f)` | `Result<usize>` where `f: FnOnce(Option<V>) -> V` | Reads (`Option<V>`, same absence handling as `.get()`), applies `f`, writes the result — one round trip. |
+| `.delete()` | `Result<()>` | See "Deleting an entry" below. |
+| `.get_foreign(ns, acct)` | `Result<Option<V>>` | Same as `.get()`, but on another namespace/account — see "Foreign state" below. |
+| `.set_foreign(&value, ns, acct)` | `Result<usize>` | Same as `.set()`, foreign-addressed. |
+
+These are thin, `#[inline(always)]` forwards to the same underlying
+functions Tier 1/2 call (`state_get`, `state_set_loose`, and so on) — the
+struct field's job is purely to fix the key and value type together at the
+declaration site, not to introduce a new code path.
 
 ## The counter walkthrough
 
 `examples/02_state-counter` is the smallest complete tutorial for the typed
-layer, using Form 2 (a struct key with a fixed instance):
+layer:
 
-```rust
-hook_state!(Counter, CounterKey {name: [u8; 7]} = {name: *b"counter"} => u64);
+```rust,ignore
+#[hooks]
+pub struct StateCounter {
+    #[state(key = b"counter")]
+    counter: State<u64>,
+}
 
-#[hook]
-fn my_hook() -> i64 {
-    let count = Counter.get_state().unwrap_or(Some(0)).unwrap_or(0);
+#[hooks]
+impl StateCounter {
+    #[hook(0, on = [Invoke])]
+    fn main(&self) -> i64 {
+        let count = self.counter.get().unwrap_or(Some(0)).unwrap_or(0);
 
-    let next = count.wrapping_add(1);
-    if Counter.set_state(&next).is_err() {
-        rollback!(
-            b"state-counter: state_set failed",
-            StateCounterError::StateSetFailed
-        );
+        let next = count.wrapping_add(1);
+        if self.counter.set(&next).is_err() {
+            rollback!(
+                b"state-counter: state_set failed",
+                StateCounterError::StateSetFailed
+            );
+        }
+
+        accept!(b"state-counter: incremented", next as i64)
     }
-
-    accept!(b"state-counter: incremented", next as i64)
 }
 ```
 
-One line declares `Counter` (the entity, with the four accessors), `const
-Counter: Counter = Counter { .. }` (the fixed instance — legal because a
-type name and a value name live in separate namespaces), and `CounterKey`
-(the key component). `Counter.get_state()` returns `Result<Option<u64>>`:
-`Ok(None)` means "no entry yet" (see below), so the double `unwrap_or`
-handles both "never written" and "an unexpected read error" the same way,
-defaulting to zero either way.
-
-`CounterKey { name: *b"counter" }` sends exactly the same 7 bytes a bare
-`*b"counter"` array key would (see "Key length and padding" above) — the
-struct wrapper exists only to satisfy the orphan rule for the generated
-`TypedStateKey` impl, not to change what's on the wire.
+`main` declares a `&self` receiver, so `self.counter.get()` returns
+`Result<Option<u64>>`: `Ok(None)` means "no entry yet" (see below), so the
+double `unwrap_or` handles both "never written" and "an unexpected read
+error" the same way, defaulting to zero either way.
 
 ## `Ok(None)` means "no entry" — never a special-cased error
 
@@ -252,16 +257,16 @@ for "nothing was ever stored here."
 
 The Hook API has no dedicated "delete" call — an entry is deleted by
 writing zero bytes to it, which also refunds the owner reserve it was
-holding. `state_delete` (and the generated `delete_state()` method) is the
-explicit spelling for that, independent of any value type — deliberately
-not reachable by pairing a key with a value type that happens to encode to
-nothing, which would spell "delete" as an accident of the value type
-rather than an intent at the call site. `examples/12_typed-data` deletes a
-depositor's record on full withdrawal for exactly this reason (releasing
-the reserve, rather than leaving a zeroed entry behind):
+holding. `.delete()` is the explicit spelling for that, independent of any
+value type — deliberately not reachable by pairing a key with a value type
+that happens to encode to nothing, which would spell "delete" as an
+accident of the value type rather than an intent at the call site.
+`examples/12_typed-data` deletes a depositor's record on full withdrawal
+for exactly this reason (releasing the reserve, rather than leaving a
+zeroed entry behind):
 
-```rust
-if deposit.delete_state().is_err() {
+```rust,ignore
+if deposit.delete().is_err() {
     rollback!(
         b"typed-data: state_set failed",
         TypedDataError::StateSetFailed
@@ -271,73 +276,84 @@ if deposit.delete_state().is_err() {
 
 ## Foreign state: reading another account's entries
 
-`state_foreign`/`state_foreign_get`/`state_foreign_get_typed` (and their
-`set`/`update` twins) read or write a state entry belonging to another
-account, or another namespace on this hook's own account. `namespace` and
-`account` both default to "this hook's own" when passed `None`; when
-present, they're a bare reference (`&target`), not `Some(&target)` — a
-generic `Option<...>` parameter can't also accept a bare `None` literal
-without becoming ambiguous, so `rshooks` uses a small `ForeignRef` trait
-instead that accepts either shape directly.
+`.get_foreign(ns, acct)`/`.set_foreign(&value, ns, acct)` (and the raw-tier
+`state_foreign`/`state_foreign_get`/`state_foreign_get_typed` free
+functions they forward to) read or write a state entry belonging to
+another account, or another namespace on this hook's own account.
+`namespace`/`account` are `Option<&[u8]>`, defaulting to "this hook's own"
+when passed `None`.
 
 `examples/09_state-foreign` reads a flag from a target account configured
 via a Hook parameter:
 
-```rust
-hook_parameter!(AcctParam, AcctParamName = b"ACCT" => AccountId);
+```rust,ignore
+#[hooks]
+pub struct StateForeign {
+    /// The target account whose flag this hook reads (`ACCT`).
+    #[hook_param(name = b"ACCT", required)]
+    acct: HookParam<AccountId>,
 
-const ENABLED_KEY: StateKey = StateKey(pad!(b"enabled"));
+    /// The target account's flag, read via `get_foreign` under
+    /// [`ENABLED_KEY`] in this hook's own namespace.
+    #[state(key = &ENABLED_KEY)]
+    enabled: State<[u8; 1]>,
+}
 
-#[hook]
-fn my_hook() -> i64 {
-    let Ok(target) = AcctParam.get_value() else {
-        rollback!(
-            b"state-foreign: ACCT parameter not configured",
-            StateForeignError::AcctNotConfigured
-        )
-    };
+#[hooks]
+impl StateForeign {
+    #[hook(0, on = [Invoke])]
+    fn main(&self) -> i64 {
+        let Ok(target) = self.acct.get_required() else {
+            rollback!(
+                b"state-foreign: ACCT parameter not configured",
+                StateForeignError::AcctNotConfigured
+            )
+        };
 
-    let mut flag = [0u8; 1];
-    match state_foreign(&mut flag, &ENABLED_KEY, None, &target) {
-        Ok(n) if n == flag.len() => {}
-        Err(HookError::DoesntExist) => rollback!(
-            b"state-foreign: not configured on target account",
-            StateForeignError::NotConfiguredOnTarget
-        ),
-        _ => rollback!(
-            b"state-foreign: state_foreign read failed",
-            StateForeignError::ReadFailed
-        ),
+        let flag = match self
+            .enabled
+            .get_foreign(None, Some(target.as_ref()))
+        {
+            Ok(Some(v)) => v,
+            Ok(None) => rollback!(
+                b"state-foreign: not configured on target account",
+                StateForeignError::NotConfiguredOnTarget
+            ),
+            Err(_) => rollback!(
+                b"state-foreign: state_foreign read failed",
+                StateForeignError::ReadFailed
+            ),
+        };
+
+        if flag[0] == 0 {
+            rollback!(
+                b"state-foreign: target account's flag is off",
+                StateForeignError::FlagOff
+            );
+        }
+
+        accept!()
     }
-
-    if flag[0] == 0 {
-        rollback!(
-            b"state-foreign: target account's flag is off",
-            StateForeignError::FlagOff
-        );
-    }
-
-    accept!()
 }
 ```
 
-Passing `namespace = None` and `account = &target` reads the entry keyed
-`ENABLED_KEY` **in this hook's own namespace, but on `target`'s account** —
-the shape for "the same hook code, installed on account A and account B,
-where A wants to read a flag B's copy of the hook maintains about itself."
-Note this example reads the raw entry directly via `state_foreign` rather
-than the typed `state_foreign_get_typed`: the typed layer decodes a
-lenient *prefix*, not an exact length, so it would silently tolerate an
-oversized `enabled` value this raw code correctly rejects by checking `n ==
-flag.len()`. When your value type's exact length matters, decide
-deliberately between the raw and typed foreign accessors rather than
-reaching for the typed one by default.
+Passing `namespace = None` and `account = Some(target.as_ref())` reads the
+entry keyed `ENABLED_KEY` **in this hook's own namespace, but on
+`target`'s account** — the shape for "the same hook code, installed on
+account A and account B, where A wants to read a flag B's copy of the hook
+maintains about itself." `get_required()` (covered in [Hook and
+Transaction Parameters](parameters.md)) is this example's way of turning a
+missing `ACCT` parameter into an immediate, distinct rollback reason,
+distinct from `ACCT` being present but the target having no matching state
+entry (`Ok(None)` from `get_foreign`).
 
 ## Where to go next
 
 Every typed value type on this page — the `u64` in the counter example, the
-`Deposit`/`DepositValue` structs, `AccountId` as a `Balance` key payload —
-is either a primitive `rshooks` already implements `ToBytes`/`FromBytes`
-for, or a struct built with `#[derive(HookKey)]`/`#[derive(HookData)]`. See
-[Typed Data with Derives](typed-data.md) for how those derives work, their
-exact byte layout, and why they cost nothing over hand-packing.
+`DepositValue` struct, `AccountId` as a `DepositKey` field — is either a
+primitive `rshooks` already implements `ToBytes`/`FromBytes` for, or a
+struct built with `#[derive(HookKey)]`/`#[derive(HookData)]`. See [Typed
+Data with Derives](typed-data.md) for how those derives work, their exact
+byte layout, and why they cost nothing over hand-packing. See [Hook
+Chains](../concepts/chains.md) for how a `#[state(...)]` field declared
+once is shared across every Hook entry in the same chain.
