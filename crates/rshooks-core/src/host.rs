@@ -12,14 +12,23 @@
 //!
 //! `rshooks` and the examples do not use this trait today — the flat
 //! free-function API in [`crate::api`] remains the public surface they call
-//! (`docs/DESIGN.md` §4/§5). `HookHost`/`Guest` exist so a future,
-//! independently-developed native test host has a stable substitution
-//! point, without rshooks-core committing to it as its own runtime dispatch
-//! mechanism.
+//! (`docs/DESIGN.md` §4/§5).
+//!
+//! **Deprecated.** `HookHost`'s methods take raw `u32` pointers, so an
+//! implementor cannot soundly read a caller's buffer on a 64-bit host; it
+//! cannot serve as a native test seam. That role belongs to
+//! `rshooks_core::backend::HostBackend` (present only on native builds with
+//! the `testenv` feature), which uses semantic Rust types instead of FFI
+//! signatures. `HookHost`/`Guest` are kept for this release as published
+//! API with no known consumers, and will be removed in the next breaking
+//! release.
 
 /// Every Hook API host function (`_g` plus the 74 `extern.h` functions), as
 /// trait methods with the exact same names, parameter names/types, and return
 /// types as `crate::api`'s free functions and `extern.h` itself.
+#[deprecated(
+    note = "implement rshooks_core::backend::HostBackend instead; HookHost will be removed in the next breaking release"
+)]
 #[allow(clippy::missing_safety_doc)]
 pub trait HookHost {
     /// C: `int32_t _g(uint32_t guard_id, uint32_t maxiter)` (extern.h)
@@ -384,9 +393,13 @@ pub trait HookHost {
 /// stubs `crate::api` provides there. Either way, `Guest` is a zero-sized unit
 /// struct with no state of its own — it exists purely as `HookHost`'s
 /// concrete implementor.
+#[deprecated(
+    note = "implement rshooks_core::backend::HostBackend instead; HookHost will be removed in the next breaking release"
+)]
 pub struct Guest;
 
 #[allow(clippy::missing_safety_doc)]
+#[allow(deprecated)]
 impl HookHost for Guest {
     /// C: `int32_t _g(uint32_t guard_id, uint32_t maxiter)` (extern.h)
     unsafe fn _g(&self, guard_id: u32, maxiter: u32) -> i32 {

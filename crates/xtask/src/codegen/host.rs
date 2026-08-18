@@ -22,11 +22,19 @@ const MODULE_DOC: &str = "\
 //!
 //! `rshooks` and the examples do not use this trait today — the flat
 //! free-function API in [`crate::api`] remains the public surface they call
-//! (`docs/DESIGN.md` §4/§5). `HookHost`/`Guest` exist so a future,
-//! independently-developed native test host has a stable substitution
-//! point, without rshooks-core committing to it as its own runtime dispatch
-//! mechanism.
+//! (`docs/DESIGN.md` §4/§5).
+//!
+//! **Deprecated.** `HookHost`'s methods take raw `u32` pointers, so an
+//! implementor cannot soundly read a caller's buffer on a 64-bit host; it
+//! cannot serve as a native test seam. That role belongs to
+//! `rshooks_core::backend::HostBackend` (present only on native builds with
+//! the `testenv` feature), which uses semantic Rust types instead of FFI
+//! signatures. `HookHost`/`Guest` are kept for this release as published
+//! API with no known consumers, and will be removed in the next breaking
+//! release.
 ";
+
+const DEPRECATION_NOTE: &str = "implement rshooks_core::backend::HostBackend instead; HookHost will be removed in the next breaking release";
 
 fn rust_signature(f: &FunctionSpec) -> Result<(String, String)> {
     let ret_ty = c_type_to_rust(&f.ret_c_type)?;
@@ -93,6 +101,7 @@ pub fn generate(fns: &[FunctionSpec]) -> Result<String> {
         "/// trait methods with the exact same names, parameter names/types, and return\n",
     );
     out.push_str("/// types as `crate::api`'s free functions and `extern.h` itself.\n");
+    out.push_str(&format!("#[deprecated(note = \"{DEPRECATION_NOTE}\")]\n"));
     out.push_str("#[allow(clippy::missing_safety_doc)]\n");
     out.push_str("pub trait HookHost {\n");
     out.push_str(&trait_body);
@@ -108,9 +117,11 @@ pub fn generate(fns: &[FunctionSpec]) -> Result<String> {
     );
     out.push_str("/// struct with no state of its own — it exists purely as `HookHost`'s\n");
     out.push_str("/// concrete implementor.\n");
+    out.push_str(&format!("#[deprecated(note = \"{DEPRECATION_NOTE}\")]\n"));
     out.push_str("pub struct Guest;\n");
     out.push('\n');
     out.push_str("#[allow(clippy::missing_safety_doc)]\n");
+    out.push_str("#[allow(deprecated)]\n");
     out.push_str("impl HookHost for Guest {\n");
     out.push_str(&impl_body);
     out.push_str("}\n");

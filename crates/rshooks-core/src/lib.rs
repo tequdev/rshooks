@@ -7,6 +7,8 @@
 #![allow(non_upper_case_globals)]
 
 pub mod api;
+#[cfg(all(not(target_arch = "wasm32"), feature = "testenv"))]
+pub mod backend;
 pub mod consts;
 pub mod error;
 pub mod host;
