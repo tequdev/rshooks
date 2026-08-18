@@ -1560,7 +1560,7 @@ fn render_entry_body_and_wrappers(
          #[unsafe(export_name = \"hook\")]\n\
          pub extern \"C\" fn __rshooks_hook_sel_{i}(_reserved: u32) -> i64 {{ \
              __rshooks_entry_body_{i}(_reserved) }}\n\
-         #[cfg(not(any({not_any_list})))]\n\
+         #[cfg(all(target_arch = \"wasm32\", not(any({not_any_list}))))]\n\
          #[unsafe(export_name = \"__rshooks_hook_{i}\")]\n\
          pub extern \"C\" fn __rshooks_hook_disc_{i}(_reserved: u32) -> i64 {{ \
              __rshooks_entry_body_{i}(_reserved) }}\n"
@@ -1575,7 +1575,7 @@ fn render_entry_body_and_wrappers(
              #[unsafe(export_name = \"cbak\")]\n\
              pub extern \"C\" fn __rshooks_cbak_sel_{i}(_reserved: u32) -> i64 {{ \
                  __rshooks_cbak_body_{i}(_reserved) }}\n\
-             #[cfg(not(any({not_any_list})))]\n\
+             #[cfg(all(target_arch = \"wasm32\", not(any({not_any_list}))))]\n\
              #[unsafe(export_name = \"__rshooks_cbak_{i}\")]\n\
              pub extern \"C\" fn __rshooks_cbak_disc_{i}(_reserved: u32) -> i64 {{ \
                  __rshooks_cbak_body_{i}(_reserved) }}\n"
@@ -2081,6 +2081,12 @@ mod tests {
         assert!(out.contains("#[cfg(rshooks_entry = \"0\")]"));
         assert!(out.contains("#[unsafe(export_name = \"hook\")]"));
         assert!(out.contains("#[unsafe(export_name = \"__rshooks_hook_0\")]"));
+
+        // The discovery wrapper carries a crate-global export symbol, so it
+        // is wasm-only: on native targets two chains in one binary must not
+        // collide, and no extern "C" frame may sit in the native call path
+        // (unwind safety, design §2.2/§2.3).
+        assert!(out.contains("#[cfg(all(target_arch = \"wasm32\", not(any(rshooks_entry = \"0\""));
 
         // No cbak declared: no cbak body or wrapper text at all.
         assert!(!out.contains("cbak"));

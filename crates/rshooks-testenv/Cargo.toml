@@ -1,0 +1,21 @@
+[package]
+name = "rshooks-testenv"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+description = "Off-chain unit-test harness for rshooks Xahau Hooks (mock host, no wasm/node required)"
+keywords = ["xahau", "hooks", "testing", "wasm"]
+categories = ["development-tools::testing"]
+
+[dependencies]
+rshooks = { path = "../rshooks", version = "0.0.1", features = ["testenv"] }
+rshooks-core = { path = "../rshooks-core", version = "0.0.1", features = [
+    "testenv",
+] }
+sha2 = "0.10"
+
+[lints]
+workspace = true
