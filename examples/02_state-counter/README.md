@@ -74,6 +74,19 @@ cargo run -p rshooks-build -- build --manifest-path examples/02_state-counter/Ca
 
 No extra flags needed — this example is guard-clean without `--auto-guard`.
 
+## Unit tests
+
+```sh
+cargo test --manifest-path examples/Cargo.toml -p state-counter
+```
+
+`tests/counter.rs` drives the real `StateCounter` chain through
+`rshooks_testenv::TestEnv::invoke` — no wasm build, no node: a first-invoke
+assertion, persistence across two invocations, and a forced `state_set`
+failure proving the rollback path leaves no trace. See
+`book/src/testing/unit-tests.md` for the full walkthrough and what this
+harness does and does not model.
+
 ## Error codes
 
 `StateCounterError` (`rshooks::hook_errors!`, see `src/lib.rs`) is the

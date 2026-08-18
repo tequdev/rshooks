@@ -35,6 +35,10 @@
 - [The rshooks CLI](build/cli.md)
 - [Per-Hook Attributes and the SetHook Template](build/metadata.md)
 
+# Testing
+
+- [Off-Chain Unit Tests](testing/unit-tests.md)
+
 # Reference
 
 - [Macro Reference](reference/macros.md)

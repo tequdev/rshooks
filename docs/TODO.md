@@ -25,25 +25,19 @@ mind:
 Every feature below must therefore ship with probe numbers (WCE / size /
 nesting, before vs. after) and must keep a raw-API escape hatch available.
 
-## 1. Off-chain unit-test environment (priority 1)
+## 1. Off-chain unit-test environment (priority 1) — IMPLEMENTED
 
-Today the host-side stubs return `NotImplemented`, so entry functions cannot be
-executed natively; the only execution feedback loop is the live-node e2e suite.
-
-- Provide a mock host (in-memory state map, originating-transaction fields,
-  hook/otxn parameters, emission capture) so entries and helpers run as plain
-  native Rust in `cargo test`.
-- An entry attribute or harness (e.g. `#[hooks_test]`) sets up the mock host,
-  invokes an entry through the same call shape as the wasm wrapper, and lets
-  tests assert on state changes, accept/rollback codes and emitted
-  transactions.
-- Integration point: the repository already has groundwork for a pluggable
-  host backend (the earlier `HookHost`/testenv work); reconcile with it rather
-  than adding a second mechanism.
-- WCE impact: none at runtime by construction (test-only code must be gated so
-  that nothing reaches the wasm artifact) — the probe here is asserting that
-  shipped artifacts are byte-identical with and without the test machinery in
-  the workspace.
+A mock host (`rshooks_core::backend::HostBackend`, installed per-thread) now
+lets `#[hooks]` chain entries and helpers run as plain native Rust under
+`cargo test` — no wasm build, no node — with assertions on state, exit type,
+and emitted transactions, via the `crates/rshooks-testenv` harness
+(`TestEnv::invoke`). See the book's ["Off-Chain Unit
+Tests"](../book/src/testing/unit-tests.md) chapter for the developer-facing
+walkthrough and coverage table, and `docs/DESIGN.md` §7 for the shipped
+mechanism. WCE/zero-cost impact is verified by `scripts/probe-testenv-parity.sh`
+(Stage 6 of `.claude/design/TESTENV_IMPLEMENTATION.md`), which rebuilds every
+example twice at the same commit — pristine vs. test-wired — and asserts
+byte-for-byte identity of the shipped `.wasm` artifacts.
 
 ## 2. Typed `Result`-based entry return values (priority 2)
 
