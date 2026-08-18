@@ -78,8 +78,13 @@ pub struct ParamDecl {
     pub value: String,
     /// Whether `required` was declared.
     pub required: bool,
-    /// Whether a `default = ...` expression was declared.
-    pub has_default: bool,
+    /// Normalized token text of the `default = ...` expression, if
+    /// declared (`None` when no `default` was declared). Carrying the
+    /// actual expression text, not just whether one was present, keeps it
+    /// covered by the byte-equal discovery-vs-selected-build consistency
+    /// check (`assert_carriers_match`) and lets it appear in the per-entry
+    /// sidecar's transcribed `chain.decls`.
+    pub default: Option<String>,
 }
 
 /// The `#[hooks] impl` carrier: the entry table (`#[hook]`/`#[cbak]` fns).
@@ -236,6 +241,8 @@ pub fn extract_chain_carriers(wasm: &[u8], crate_label: &str) -> Result<ChainCar
     let hooks: EntriesCarrier =
         serde_json::from_slice(&hooks_raw).context("parsing JSON from #[hooks] impl carrier")?;
 
+    validate_carrier_identity(&chain, &hooks)
+        .with_context(|| format!("validating #[hooks] carrier identity in {crate_label}"))?;
     validate_entries(&hooks).with_context(|| format!("validating #[hooks] chain in {crate_label}"))?;
 
     Ok(ChainCarriers {
@@ -244,6 +251,45 @@ pub fn extract_chain_carriers(wasm: &[u8], crate_label: &str) -> Result<ChainCar
         hooks,
         hooks_raw,
     })
+}
+
+/// Schema tag every `#[hooks] struct` carrier must carry.
+const CHAIN_SCHEMA: &str = "rshooks-chain-v2";
+/// Schema tag every `#[hooks] impl` carrier must carry.
+const HOOKS_SCHEMA: &str = "rshooks-hooks-v2";
+
+/// Validates the two carriers' declared identity: exact schema tags, and
+/// that the impl carrier's target type matches the struct carrier's
+/// annotated struct — both carriers are untrusted input from the build's
+/// perspective (hand-decoded from wasm export names), so a mismatch here
+/// signals a version skew or a malformed/foreign carrier rather than a
+/// well-formed but merely invalid chain, and is reported distinctly from
+/// [`validate_entries`]'s content-level checks.
+fn validate_carrier_identity(chain: &ChainCarrier, hooks: &EntriesCarrier) -> Result<()> {
+    if chain.schema != CHAIN_SCHEMA {
+        bail!(
+            "#[hooks] struct carrier has schema `{}`, expected `{CHAIN_SCHEMA}` — this rshooks-build \
+             version cannot read a carrier from a different rshooks version",
+            chain.schema
+        );
+    }
+    if hooks.schema != HOOKS_SCHEMA {
+        bail!(
+            "#[hooks] impl carrier has schema `{}`, expected `{HOOKS_SCHEMA}` — this rshooks-build \
+             version cannot read a carrier from a different rshooks version",
+            hooks.schema
+        );
+    }
+    if chain.struct_name != hooks.impl_name {
+        bail!(
+            "#[hooks] struct carrier declares struct `{}` but the #[hooks] impl carrier targets \
+             `{}` — a crate may declare exactly one #[hooks] struct/impl pair, and they must name \
+             the same type",
+            chain.struct_name,
+            hooks.impl_name
+        );
+    }
+    Ok(())
 }
 
 /// Validates a parsed impl carrier: non-empty, unique indices in `0..=9`
@@ -459,6 +505,44 @@ mod tests {
         assert_eq!(carriers.hooks.entries.len(), 1);
         assert_eq!(carriers.hooks.entries[0].hook_fn, "deposit");
         assert_eq!(carriers.hooks.entries[0].on.form, "list");
+    }
+
+    #[test]
+    fn wrong_chain_schema_is_rejected() {
+        let on = r#"{"form":"omitted","HookOn":null,"HookOnIncoming":null,"HookOnOutgoing":null}"#;
+        let bad_chain_json = concat!(
+            r#"{"schema":"rshooks-chain-v1","struct":"Vault","description":null,"#,
+            r#""decls":{"state":[],"hook_params":[],"otxn_params":[]}}"#
+        );
+        let wasm = wasm_with_carriers(bad_chain_json, &entries_json(on, "null"));
+        let err = extract_chain_carriers(&wasm, "vault").expect_err("must fail");
+        let message = format!("{err:#}");
+        assert!(message.contains("rshooks-chain-v2"), "{message}");
+    }
+
+    #[test]
+    fn wrong_hooks_schema_is_rejected() {
+        let on = r#"{"form":"omitted","HookOn":null,"HookOnIncoming":null,"HookOnOutgoing":null}"#;
+        let bad_hooks_json = format!(
+            r#"{{"schema":"rshooks-hooks-v1","impl":"Vault","entries":[{{"index":0,"hook_fn":"deposit","cbak_fn":null,"HookName":null,"on":{on},"HookCanEmit":null,"description":null}}]}}"#
+        );
+        let wasm = wasm_with_carriers(CHAIN_JSON, &bad_hooks_json);
+        let err = extract_chain_carriers(&wasm, "vault").expect_err("must fail");
+        let message = format!("{err:#}");
+        assert!(message.contains("rshooks-hooks-v2"), "{message}");
+    }
+
+    #[test]
+    fn mismatched_struct_and_impl_names_are_rejected() {
+        let on = r#"{"form":"omitted","HookOn":null,"HookOnIncoming":null,"HookOnOutgoing":null}"#;
+        let mismatched_hooks_json = format!(
+            r#"{{"schema":"rshooks-hooks-v2","impl":"NotVault","entries":[{{"index":0,"hook_fn":"deposit","cbak_fn":null,"HookName":null,"on":{on},"HookCanEmit":null,"description":null}}]}}"#
+        );
+        let wasm = wasm_with_carriers(CHAIN_JSON, &mismatched_hooks_json);
+        let err = extract_chain_carriers(&wasm, "vault").expect_err("must fail");
+        let message = format!("{err:#}");
+        assert!(message.contains("Vault"), "{message}");
+        assert!(message.contains("NotVault"), "{message}");
     }
 
     #[test]

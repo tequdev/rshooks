@@ -54,12 +54,12 @@ enum Cmd {
         allow_oversize: bool,
         /// SetHook `Account` placeholder value for the generated template
         /// (default: the literal placeholder `<ACCOUNT>`).
-        #[arg(long)]
+        #[arg(long, value_parser = rshooks_build::sethook_template::validate_account)]
         account: Option<String>,
         /// `HookNamespace` placeholder value (64 hex chars) for the
         /// generated template (default: the literal placeholder
         /// `<NAMESPACE>`).
-        #[arg(long)]
+        #[arg(long, value_parser = rshooks_build::sethook_template::validate_namespace)]
         namespace: Option<String>,
         /// Set `hsfOVERRIDE` on declared (non-gap) template entries,
         /// permitting replacement of an existing installed Hook at that

@@ -18,6 +18,45 @@ use crate::metadata::{hook_mask, utf8_hex};
 /// existing installed Hook at a declared (non-gap) position.
 pub const HSF_OVERRIDE: u32 = 1;
 
+/// Base58 alphabet used by XRPL/Xahau addresses (excludes `0`, `O`, `I`, `l`
+/// to avoid visual ambiguity).
+const BASE58_ALPHABET: &str = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+/// Validates a `--namespace` CLI value: exactly 64 ASCII hex characters.
+/// Normalizes the result to uppercase (the conventional `HookNamespace`
+/// casing) on success. Intended for use as a clap `value_parser`.
+pub fn validate_namespace(s: &str) -> Result<String, String> {
+    if s.len() != 64 || !s.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(format!(
+            "--namespace must be exactly 64 ASCII hex characters (got {} characters)",
+            s.chars().count()
+        ));
+    }
+    Ok(s.to_ascii_uppercase())
+}
+
+/// Validates a `--account` CLI value: a superficial (non-checksum) sanity
+/// check that it looks like an XRPL/Xahau classic address — non-empty,
+/// starts with `'r'`, and every remaining character is in the base58
+/// alphabet. Intended for use as a clap `value_parser`.
+pub fn validate_account(s: &str) -> Result<String, String> {
+    if !s.starts_with('r') {
+        return Err("--account must start with 'r'".to_string());
+    }
+    let rest = s.get(1..).unwrap_or_default();
+    if rest.is_empty() {
+        return Err("--account must not be empty".to_string());
+    }
+    if !rest.chars().all(|c| BASE58_ALPHABET.contains(c)) {
+        return Err(
+            "--account must contain only base58 characters after the leading 'r' \
+             (no '0', 'O', 'I', or 'l')"
+                .to_string(),
+        );
+    }
+    Ok(s.to_string())
+}
+
 /// One `Hooks[i]` array element: either an untouched-position gap
 /// (`{"Hook": {}}`) or a fully specified declared entry.
 #[derive(Serialize)]
@@ -286,6 +325,48 @@ mod tests {
             hook_on_incoming: None,
             hook_on_outgoing: None,
         }
+    }
+
+    #[test]
+    fn validate_namespace_accepts_exact_64_hex_and_uppercases() {
+        let mixed = "aB".repeat(32);
+        assert_eq!(mixed.len(), 64);
+        let result = validate_namespace(&mixed).expect("valid namespace");
+        assert_eq!(result, mixed.to_ascii_uppercase());
+    }
+
+    #[test]
+    fn validate_namespace_rejects_wrong_length() {
+        assert!(validate_namespace(&"AB".repeat(31)).is_err());
+        assert!(validate_namespace(&"AB".repeat(33)).is_err());
+        assert!(validate_namespace("").is_err());
+    }
+
+    #[test]
+    fn validate_namespace_rejects_non_hex_chars() {
+        let mut s = "0".repeat(64);
+        s.replace_range(0..1, "g");
+        assert!(validate_namespace(&s).is_err());
+    }
+
+    #[test]
+    fn validate_account_accepts_plausible_address() {
+        assert_eq!(
+            validate_account("rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh").expect("valid account"),
+            "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh"
+        );
+    }
+
+    #[test]
+    fn validate_account_rejects_missing_r_prefix() {
+        assert!(validate_account("xHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh").is_err());
+        assert!(validate_account("").is_err());
+    }
+
+    #[test]
+    fn validate_account_rejects_excluded_base58_chars() {
+        assert!(validate_account("r0b9CJAWyB4rj91VRWn96DkukG4bwdtyTh").is_err());
+        assert!(validate_account("rOb9CJAWyB4rj91VRWn96DkukG4bwdtyTh").is_err());
     }
 
     #[test]

@@ -333,93 +333,104 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
             ));
         }
 
-        match tokens.get(i) {
-            Some(TokenTree::Ident(id)) if id.to_string() == "fn" => {
-                let scanned = scan_fn_item(tokens, i)?;
-                i = scanned.next;
-
-                if is_entry {
-                    if let Some(self_span) = scanned.self_span {
-                        return Err(err(
-                            self_span,
-                            "Hook entrypoints are stateless associated functions",
-                        ));
-                    }
-                    if scanned.has_generics {
-                        return Err(err(
-                            scanned.name.span(),
-                            "#[hooks]: an entry function cannot be generic",
-                        ));
-                    }
-                    if !scanned.args_group.stream().is_empty() {
-                        return Err(err(
-                            scanned.args_group.span(),
-                            "#[hooks]: entry functions must take no arguments",
-                        ));
-                    }
-                    let ret_ok = matches!(
-                        scanned.return_tokens.as_slice(),
-                        [TokenTree::Ident(rid)] if rid.to_string() == "i64"
-                    );
-                    if !ret_ok {
-                        return Err(err(
-                            scanned.return_span,
-                            "#[hooks]: entry functions must return `i64` (expected `-> i64`)",
-                        ));
-                    }
-                }
-
-                let fn_name = scanned.name.to_string();
-                if let Some((data, index, index_span)) = hook_attr {
-                    hooks.push(HookEntry {
-                        index,
-                        index_span,
-                        fn_name,
-                        attr: data,
-                    });
-                } else if let Some((index, index_span)) = cbak_attr {
-                    cbaks.push(CbakEntry {
-                        index,
-                        index_span,
-                        fn_name,
-                    });
-                }
-
-                output.extend(kept_attrs);
-                output.extend(vis);
-                output.extend(scanned.tokens);
+        if let Some(q) = scan_fn_qualifiers(tokens, i) {
+            if is_entry && q.has_qualifiers {
+                let bad_span = tokens.get(i).map_or_else(Span::call_site, TokenTree::span);
+                return Err(err(
+                    bad_span,
+                    "#[hooks]: a hook entry function (#[hook]/#[cbak]) must be a plain `fn` \
+                     — remove the `const`/`async`/`unsafe`/`extern \"...\"` qualifier",
+                ));
             }
-            Some(TokenTree::Ident(id)) if id.to_string() == "const" => {
-                if is_entry {
+            let qualifier_tokens = tokens.get(i..q.fn_index).unwrap_or_default().to_vec();
+            let scanned = scan_fn_item(tokens, q.fn_index)?;
+            i = scanned.next;
+
+            if is_entry {
+                if let Some(self_span) = scanned.self_span {
                     return Err(err(
-                        id.span(),
-                        "#[hooks]: `#[hook]`/`#[cbak]` can only be applied to an \
-                         associated function",
+                        self_span,
+                        "Hook entrypoints are stateless associated functions",
                     ));
                 }
-                let (const_tokens, next) = scan_const_item(tokens, i)?;
-                i = next;
-                output.extend(kept_attrs);
-                output.extend(vis);
-                output.extend(const_tokens);
+                if scanned.has_generics {
+                    return Err(err(
+                        scanned.name.span(),
+                        "#[hooks]: an entry function cannot be generic",
+                    ));
+                }
+                if !scanned.args_group.stream().is_empty() {
+                    return Err(err(
+                        scanned.args_group.span(),
+                        "#[hooks]: entry functions must take no arguments",
+                    ));
+                }
+                let ret_ok = matches!(
+                    scanned.return_tokens.as_slice(),
+                    [TokenTree::Ident(rid)] if rid.to_string() == "i64"
+                );
+                if !ret_ok {
+                    return Err(err(
+                        scanned.return_span,
+                        "#[hooks]: entry functions must return `i64` (expected `-> i64`)",
+                    ));
+                }
             }
-            Some(TokenTree::Ident(id)) if id.to_string() == "type" => {
-                return Err(err(
-                    id.span(),
-                    "#[hooks]: associated types are not allowed inside a #[hooks] impl",
-                ));
+
+            let fn_name = scanned.name.to_string();
+            if let Some((data, index, index_span)) = hook_attr {
+                hooks.push(HookEntry {
+                    index,
+                    index_span,
+                    fn_name,
+                    attr: data,
+                });
+            } else if let Some((index, index_span)) = cbak_attr {
+                cbaks.push(CbakEntry {
+                    index,
+                    index_span,
+                    fn_name,
+                });
             }
-            Some(other) => {
-                return Err(err(
-                    other.span(),
-                    "#[hooks]: expected an associated function or constant",
-                ));
-            }
-            None => {
-                return Err(err(
-                    Span::call_site(),
-                    "#[hooks]: expected an item after this attribute",
-                ));
+
+            output.extend(kept_attrs);
+            output.extend(vis);
+            output.extend(qualifier_tokens);
+            output.extend(scanned.tokens);
+        } else {
+            match tokens.get(i) {
+                Some(TokenTree::Ident(id)) if id.to_string() == "const" => {
+                    if is_entry {
+                        return Err(err(
+                            id.span(),
+                            "#[hooks]: `#[hook]`/`#[cbak]` can only be applied to an \
+                             associated function",
+                        ));
+                    }
+                    let (const_tokens, next) = scan_const_item(tokens, i)?;
+                    i = next;
+                    output.extend(kept_attrs);
+                    output.extend(vis);
+                    output.extend(const_tokens);
+                }
+                Some(TokenTree::Ident(id)) if id.to_string() == "type" => {
+                    return Err(err(
+                        id.span(),
+                        "#[hooks]: associated types are not allowed inside a #[hooks] impl",
+                    ));
+                }
+                Some(other) => {
+                    return Err(err(
+                        other.span(),
+                        "#[hooks]: expected an associated function or constant",
+                    ));
+                }
+                None => {
+                    return Err(err(
+                        Span::call_site(),
+                        "#[hooks]: expected an item after this attribute",
+                    ));
+                }
             }
         }
     }
@@ -452,6 +463,93 @@ fn inert_attr_args(
             attr_ident.span(),
             &format!("#[{mac_name}]: expected parenthesized arguments, e.g. `#[{mac_name}(0, ..)]`"),
         )),
+    }
+}
+
+/// The result of [`scan_fn_qualifiers`]: whether an item starting at some
+/// token index is a (possibly qualified) function item.
+struct FnQualifiers {
+    /// The absolute token index of the `fn` keyword itself.
+    fn_index: usize,
+    /// Whether any qualifier (`const`/`async`/`unsafe`/`extern "..."`)
+    /// preceded `fn`.
+    has_qualifiers: bool,
+}
+
+/// Classifies the token kind relevant to [`classify_fn_qualifiers`] — the
+/// four qualifier keywords, `fn` itself, a literal (the optional `extern`
+/// ABI string), or anything else. `TokenTree`-typed on purpose (unlike
+/// [`classify_fn_qualifiers`]) — this is the only place span/`Ident`
+/// inspection happens for the qualifier scan.
+fn qualifier_token_kind(tt: &TokenTree) -> &'static str {
+    match tt {
+        TokenTree::Ident(id) => match id.to_string().as_str() {
+            "const" => "const",
+            "async" => "async",
+            "unsafe" => "unsafe",
+            "extern" => "extern",
+            "fn" => "fn",
+            _ => "<other>",
+        },
+        TokenTree::Literal(_) => "<lit>",
+        _ => "<other>",
+    }
+}
+
+/// Looks ahead from `tokens[start]` for a (possibly empty) run of the
+/// function-qualifier keywords Rust allows before `fn` — `const`/`async`
+/// (mutually exclusive), then `unsafe`, then `extern "abi"` — followed by
+/// `fn` itself. Returns `None` when `tokens[start]` does not begin a
+/// (possibly qualified) function item at all (e.g. a plain associated
+/// `const NAME: Ty = ..;` item, whose leading `const` is not followed by
+/// `fn`).
+///
+/// Delegates the actual decision to [`classify_fn_qualifiers`], which is
+/// `TokenTree`-free purely for unit-testability — see
+/// [`crate::hooks_struct::ChainFieldJson`]'s doc comment for why this
+/// boundary pattern is used throughout this crate (every `proc_macro` type,
+/// `Span` included, panics outside a live macro invocation, so the tested
+/// core here works over plain `&str` "kind" tags instead).
+fn scan_fn_qualifiers(tokens: &[TokenTree], start: usize) -> Option<FnQualifiers> {
+    // At most 5 tokens are ever consulted: `const`/`async`, `unsafe`,
+    // `extern`, its optional ABI literal, `fn`.
+    let kinds: Vec<&'static str> = (0..5)
+        .map_while(|off| tokens.get(start.wrapping_add(off)).map(qualifier_token_kind))
+        .collect();
+    let (offset, has_qualifiers) = classify_fn_qualifiers(&kinds)?;
+    Some(FnQualifiers {
+        fn_index: start.wrapping_add(offset),
+        has_qualifiers,
+    })
+}
+
+/// Pure decision logic behind [`scan_fn_qualifiers`]: given the leading
+/// token "kinds" of an item (as produced by [`qualifier_token_kind`]),
+/// decides whether it is a (possibly qualified) function item and, if so,
+/// the offset of `fn` within `kinds` plus whether any qualifier preceded
+/// it. Returns `None` when no `fn` terminates the qualifier run (e.g.
+/// `["const", "NAME"]` — a plain associated const, not a const fn).
+fn classify_fn_qualifiers(kinds: &[&str]) -> Option<(usize, bool)> {
+    let mut i = 0usize;
+    let mut has_qualifiers = false;
+    if matches!(kinds.get(i), Some(&"const") | Some(&"async")) {
+        i = i.wrapping_add(1);
+        has_qualifiers = true;
+    }
+    if matches!(kinds.get(i), Some(&"unsafe")) {
+        i = i.wrapping_add(1);
+        has_qualifiers = true;
+    }
+    if matches!(kinds.get(i), Some(&"extern")) {
+        i = i.wrapping_add(1);
+        has_qualifiers = true;
+        if matches!(kinds.get(i), Some(&"<lit>")) {
+            i = i.wrapping_add(1);
+        }
+    }
+    match kinds.get(i) {
+        Some(&"fn") => Some((i, has_qualifiers)),
+        _ => None,
     }
 }
 
@@ -847,6 +945,32 @@ fn parse_hook_attr(
     ))
 }
 
+/// Finds the index of the first token that would make a bracketed
+/// transaction-type list carry an empty element — a leading `,` (`[,Foo]`),
+/// or two `,` with nothing between them anywhere (`[Foo,,Bar]`, `[,,]`) —
+/// once [`split_top_level_commas`]'s lossy split would otherwise silently
+/// drop it. A single trailing `,` (`[Foo,]`) is not a violation. Returns
+/// `None` when the list has no such violation, `[]` included.
+///
+/// Operates on a plain "is this position a comma" view rather than
+/// `&[TokenTree]` purely for unit-testability — see
+/// [`crate::hooks_struct::ChainFieldJson`]'s doc comment for why this
+/// boundary pattern is used throughout this crate.
+fn first_empty_tx_entry(is_comma: &[bool]) -> Option<usize> {
+    if is_comma.first().copied() == Some(true) {
+        return Some(0);
+    }
+    for i in 0..is_comma.len() {
+        if is_comma.get(i).copied() != Some(true) {
+            continue;
+        }
+        if is_comma.get(i.wrapping_add(1)).copied() == Some(true) {
+            return Some(i.wrapping_add(1));
+        }
+    }
+    None
+}
+
 /// Parses `[Tx, Tx, ..]` — a bracketed, comma-separated list of bare
 /// transaction-type identifiers — rejecting a non-bracket value and a
 /// duplicate entry.
@@ -869,6 +993,17 @@ fn parse_tx_list(
         }
     };
     let inner: Vec<TokenTree> = group.stream().into_iter().collect();
+    let is_comma: Vec<bool> = inner.iter().map(|tt| is_punct(tt, ',')).collect();
+    if let Some(bad_idx) = first_empty_tx_entry(&is_comma) {
+        let bad_span = inner.get(bad_idx).map_or(span, TokenTree::span);
+        return Err(err(
+            bad_span,
+            &format!(
+                "{mac}: `{field}` has an empty entry (a `,` with no transaction-type name \
+                 before it) — only a single trailing `,` is allowed"
+            ),
+        ));
+    }
     let groups = split_top_level_commas(&inner);
     let mut out: Vec<(String, Span)> = Vec::new();
     for g in groups {
@@ -1256,6 +1391,109 @@ fn hex_lower(bytes: &[u8]) -> String {
 mod tests {
     #![allow(clippy::expect_used, clippy::indexing_slicing)] // tests are exempt, docs/DESIGN.md §8
     use super::*;
+
+    // --- F6: `first_empty_tx_entry` ---
+
+    #[test]
+    fn empty_tx_entry_accepts_empty_list() {
+        assert_eq!(first_empty_tx_entry(&[]), None);
+    }
+
+    #[test]
+    fn empty_tx_entry_accepts_single_entry() {
+        // `[Payment]`
+        assert_eq!(first_empty_tx_entry(&[false]), None);
+    }
+
+    #[test]
+    fn empty_tx_entry_accepts_single_trailing_comma() {
+        // `[Payment,]`
+        assert_eq!(first_empty_tx_entry(&[false, true]), None);
+    }
+
+    #[test]
+    fn empty_tx_entry_accepts_multiple_entries_with_trailing_comma() {
+        // `[Payment, Invoke,]`
+        assert_eq!(first_empty_tx_entry(&[false, true, false, true]), None);
+    }
+
+    #[test]
+    fn empty_tx_entry_rejects_consecutive_commas_mid_list() {
+        // `[Payment,,Invoke]`
+        assert_eq!(
+            first_empty_tx_entry(&[false, true, true, false]),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn empty_tx_entry_rejects_lone_comma() {
+        // `[,]`
+        assert_eq!(first_empty_tx_entry(&[true]), Some(0));
+    }
+
+    #[test]
+    fn empty_tx_entry_rejects_double_comma() {
+        // `[,,]`
+        assert_eq!(first_empty_tx_entry(&[true, true]), Some(0));
+    }
+
+    #[test]
+    fn empty_tx_entry_rejects_leading_comma_before_entry() {
+        // `[,Payment]`
+        assert_eq!(first_empty_tx_entry(&[true, false]), Some(0));
+    }
+
+    // --- F7: `classify_fn_qualifiers` ---
+
+    #[test]
+    fn fn_qualifiers_plain_fn_has_no_qualifiers() {
+        assert_eq!(classify_fn_qualifiers(&["fn"]), Some((0, false)));
+    }
+
+    #[test]
+    fn fn_qualifiers_const_fn_is_a_qualified_fn_not_a_const_item() {
+        assert_eq!(classify_fn_qualifiers(&["const", "fn"]), Some((1, true)));
+    }
+
+    #[test]
+    fn fn_qualifiers_async_fn() {
+        assert_eq!(classify_fn_qualifiers(&["async", "fn"]), Some((1, true)));
+    }
+
+    #[test]
+    fn fn_qualifiers_unsafe_fn() {
+        assert_eq!(classify_fn_qualifiers(&["unsafe", "fn"]), Some((1, true)));
+    }
+
+    #[test]
+    fn fn_qualifiers_extern_abi_fn() {
+        // `extern "C" fn`
+        assert_eq!(
+            classify_fn_qualifiers(&["extern", "<lit>", "fn"]),
+            Some((2, true))
+        );
+    }
+
+    #[test]
+    fn fn_qualifiers_unsafe_extern_abi_fn() {
+        // `unsafe extern "C" fn`
+        assert_eq!(
+            classify_fn_qualifiers(&["unsafe", "extern", "<lit>", "fn"]),
+            Some((3, true))
+        );
+    }
+
+    #[test]
+    fn fn_qualifiers_plain_const_item_is_not_a_fn() {
+        // `const NAME: Ty = ..;` — `const` is not followed by `fn`.
+        assert_eq!(classify_fn_qualifiers(&["const", "<other>"]), None);
+    }
+
+    #[test]
+    fn fn_qualifiers_non_fn_item_is_not_classified() {
+        assert_eq!(classify_fn_qualifiers(&["type"]), None);
+    }
 
     fn sample() -> EntryJson {
         EntryJson {

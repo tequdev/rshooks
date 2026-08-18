@@ -1,0 +1,20 @@
+error: #[hooks]: a hook entry function (#[hook]/#[cbak]) must be a plain `fn` — remove the `const`/`async`/`unsafe`/`extern "..."` qualifier
+  --> tests/ui/fail/hooks_entry_qualified_fn.rs:10:1
+   |
+10 | #[hooks]
+   | ^^^^^^^^
+   |
+   = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `Vault: HookChainImpl` is not satisfied
+ --> tests/ui/fail/hooks_entry_qualified_fn.rs:7:1
+  |
+7 | #[hooks]
+  | ^^^^^^^^ the trait `HookChainImpl` is not implemented for `Vault`
+  |
+note: required by a bound in `assert`
+ --> tests/ui/fail/hooks_entry_qualified_fn.rs:7:1
+  |
+7 | #[hooks]
+  | ^^^^^^^^ required by this bound in `assert`
+  = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)

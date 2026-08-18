@@ -69,8 +69,13 @@ use crate::state::EncodedStateKey;
 /// pins down `V` as [`StateSpec::Value`]. See the module doc comment for
 /// why the accessors live in this crate's generic inherent impls rather
 /// than on `S` itself.
+///
+/// `PhantomData<fn() -> (V, S)>` rather than `PhantomData<(V, S)>` so this
+/// handle is `Send`/`Sync`/`Copy` regardless of what `V`/`S` are — see
+/// [`crate::types::SField`]'s doc comment for the same rationale: the
+/// handle *produces* a `V` (via `S`), it does not hold one.
 pub struct State<V, S> {
-    _marker: PhantomData<(V, S)>,
+    _marker: PhantomData<fn() -> (V, S)>,
 }
 
 impl<V, S> State<V, S> {
@@ -111,8 +116,12 @@ impl<V, S> Default for State<V, S> {
 /// `V` as [`ParamSpec::Value`]. See the module doc comment for why the
 /// accessors live in this crate's generic inherent impls rather than on
 /// `S` itself.
+///
+/// `PhantomData<fn() -> (V, S)>` rather than `PhantomData<(V, S)>` so this
+/// handle is `Send`/`Sync`/`Copy` regardless of what `V`/`S` are — see
+/// [`crate::types::SField`]'s doc comment for the same rationale.
 pub struct HookParam<V, S> {
-    _marker: PhantomData<(V, S)>,
+    _marker: PhantomData<fn() -> (V, S)>,
 }
 
 impl<V, S> HookParam<V, S> {
@@ -151,8 +160,12 @@ impl<V, S> Default for HookParam<V, S> {
 /// [`crate::api::otxn::otxn_param_opt`] instead of
 /// [`crate::api::hook_ctx::hook_param_opt`] — see [`HookParam`]'s doc
 /// comment for the full story.
+///
+/// `PhantomData<fn() -> (V, S)>` rather than `PhantomData<(V, S)>` so this
+/// handle is `Send`/`Sync`/`Copy` regardless of what `V`/`S` are — see
+/// [`crate::types::SField`]'s doc comment for the same rationale.
 pub struct OtxnParam<V, S> {
-    _marker: PhantomData<(V, S)>,
+    _marker: PhantomData<fn() -> (V, S)>,
 }
 
 impl<V, S> OtxnParam<V, S> {
@@ -331,9 +344,14 @@ where
 /// constant-key inherent impls, forwarding to the same
 /// [`mod@crate::state`] free functions through the already-computed
 /// [`EncodedStateKey`] this holds.
+///
+/// `PhantomData<fn() -> V>` rather than `PhantomData<V>` so this view is
+/// `Send`/`Sync`/`Copy` regardless of what `V` is — see
+/// [`crate::types::SField`]'s doc comment for the same rationale: this
+/// holds an already-encoded key, not a `V`.
 pub struct StateEntry<V> {
     key: EncodedStateKey,
-    _marker: PhantomData<V>,
+    _marker: PhantomData<fn() -> V>,
 }
 
 impl<V> Clone for StateEntry<V> {
@@ -435,6 +453,13 @@ where
 {
     /// Reads this parameter, decoded as `V`, treating absence as
     /// [`HookError::DoesntExist`] rather than `None`.
+    ///
+    /// Caveat: this maps *absence* to [`HookError::DoesntExist`]. No
+    /// in-tree [`FixedRead`] decoder ever returns that same error code for
+    /// a present-but-malformed value (they return [`HookError::TooSmall`]
+    /// instead) — but if a value type's own `FixedRead` impl ever did
+    /// return `DoesntExist` while decoding a *present* value, that case
+    /// would be indistinguishable from true absence here.
     #[inline(always)]
     pub fn get_required(&self) -> Result<V> {
         match self.get()? {
@@ -462,9 +487,14 @@ where
 
 /// A name-arguments-bound view of a [`HookParam`], via [`HookParam::at`] —
 /// same accessor set as [`HookParam`]'s literal-name inherent impls.
+///
+/// `PhantomData<fn() -> V>` rather than `PhantomData<V>` so this view does
+/// not needlessly restrict `Send`/`Sync`/`Copy` based on `V` — see
+/// [`crate::types::SField`]'s doc comment for the same rationale: this
+/// holds name arguments, not a `V`.
 pub struct HookParamAt<V, S: ParamSpec> {
     args: S::NameArgs,
-    _marker: PhantomData<V>,
+    _marker: PhantomData<fn() -> V>,
 }
 
 impl<V, S> HookParamAt<V, S>
@@ -495,6 +525,13 @@ where
 
     /// Reads this parameter, decoded as `V`, treating absence as
     /// [`HookError::DoesntExist`] rather than `None`.
+    ///
+    /// Caveat: this maps *absence* to [`HookError::DoesntExist`]. No
+    /// in-tree [`FixedRead`] decoder ever returns that same error code for
+    /// a present-but-malformed value (they return [`HookError::TooSmall`]
+    /// instead) — but if a value type's own `FixedRead` impl ever did
+    /// return `DoesntExist` while decoding a *present* value, that case
+    /// would be indistinguishable from true absence here.
     #[inline(always)]
     pub fn get_required(&self) -> Result<V>
     where
@@ -546,6 +583,13 @@ where
 {
     /// Reads this parameter, decoded as `V`, treating absence as
     /// [`HookError::DoesntExist`] rather than `None`.
+    ///
+    /// Caveat: this maps *absence* to [`HookError::DoesntExist`]. No
+    /// in-tree [`FixedRead`] decoder ever returns that same error code for
+    /// a present-but-malformed value (they return [`HookError::TooSmall`]
+    /// instead) — but if a value type's own `FixedRead` impl ever did
+    /// return `DoesntExist` while decoding a *present* value, that case
+    /// would be indistinguishable from true absence here.
     #[inline(always)]
     pub fn get_required(&self) -> Result<V> {
         match self.get()? {
@@ -573,9 +617,14 @@ where
 
 /// A name-arguments-bound view of an [`OtxnParam`], via [`OtxnParam::at`] —
 /// same accessor set as [`OtxnParam`]'s literal-name inherent impls.
+///
+/// `PhantomData<fn() -> V>` rather than `PhantomData<V>` so this view does
+/// not needlessly restrict `Send`/`Sync`/`Copy` based on `V` — see
+/// [`crate::types::SField`]'s doc comment for the same rationale: this
+/// holds name arguments, not a `V`.
 pub struct OtxnParamAt<V, S: ParamSpec> {
     args: S::NameArgs,
-    _marker: PhantomData<V>,
+    _marker: PhantomData<fn() -> V>,
 }
 
 impl<V, S> OtxnParamAt<V, S>
@@ -606,6 +655,13 @@ where
 
     /// Reads this parameter, decoded as `V`, treating absence as
     /// [`HookError::DoesntExist`] rather than `None`.
+    ///
+    /// Caveat: this maps *absence* to [`HookError::DoesntExist`]. No
+    /// in-tree [`FixedRead`] decoder ever returns that same error code for
+    /// a present-but-malformed value (they return [`HookError::TooSmall`]
+    /// instead) — but if a value type's own `FixedRead` impl ever did
+    /// return `DoesntExist` while decoding a *present* value, that case
+    /// would be indistinguishable from true absence here.
     #[inline(always)]
     pub fn get_required(&self) -> Result<V>
     where

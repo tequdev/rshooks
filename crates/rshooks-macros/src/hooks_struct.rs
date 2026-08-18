@@ -24,8 +24,8 @@
 use proc_macro::{Delimiter, Ident, Span, TokenStream, TokenTree};
 
 use crate::hooks_shared::{
-    AttrEntry, is_punct, parse_attr_entries, parse_balanced_angle, parse_string_value,
-    split_top_level_commas, to_upper_camel,
+    AttrEntry, is_punct, parse_attr_entries, parse_balanced_angle, parse_byte_string_value,
+    parse_string_value, split_top_level_commas, step_angle_depth, to_upper_camel,
 };
 use crate::shape::tokens_to_string;
 use crate::{err, sha256};
@@ -398,8 +398,13 @@ fn parse_named_fields(stream: TokenStream) -> Result<Vec<ParsedField>, TokenStre
         i = i.wrapping_add(1);
 
         let ty_start = i;
-        while tokens.get(i).is_some_and(|tt| !is_punct(tt, ',')) {
-            i = i.wrapping_add(1);
+        let mut ty_depth = 0i32;
+        while i < tokens.len()
+            && !(ty_depth == 0 && matches!(tokens.get(i), Some(tt) if is_punct(tt, ',')))
+        {
+            let (consumed, new_depth) = step_angle_depth(&tokens, i, ty_depth);
+            ty_depth = new_depth;
+            i = i.wrapping_add(consumed);
         }
         let ty_tokens = tokens.get(ty_start..i).unwrap_or_default().to_vec();
         if i < tokens.len() {
@@ -627,17 +632,18 @@ fn parse_field_decl(
                         "expected `name = b\"...\"` (a byte-string literal)",
                     ));
                 };
-                let literal = match tokens.as_slice() {
-                    [tt @ TokenTree::Literal(lit)] if lit.to_string().starts_with("b\"") => {
-                        tt.clone()
-                    }
-                    _ => {
-                        return Err(err(
-                            key_span,
-                            "expected a byte-string literal, e.g. `name = b\"CFG\"`",
-                        ));
-                    }
-                };
+                let mac = format!("#[{}]", param_kind.attr_name());
+                let (literal, decoded_len) =
+                    parse_byte_string_value(Some(&tokens), key_span, &mac, "name")?;
+                if !(1..=32).contains(&decoded_len) {
+                    return Err(err(
+                        key_span,
+                        &format!(
+                            "{mac}: `name` must decode to 1..=32 bytes (the Hook API's \
+                             parameter-name length limit), found {decoded_len}"
+                        ),
+                    ));
+                }
                 name = Some(NameSpec::Literal { literal });
             }
             "name_by" => {
@@ -659,6 +665,12 @@ fn parse_field_decl(
                 if value.is_some() {
                     return Err(err(key_span, "`required` takes no value"));
                 }
+                if required {
+                    return Err(err(
+                        key_span,
+                        &format!("#[{}]: duplicate `required`", param_kind.attr_name()),
+                    ));
+                }
                 required = true;
                 required_span = Some(key_span);
             }
@@ -666,6 +678,12 @@ fn parse_field_decl(
                 let Some(expr) = value else {
                     return Err(err(key_span, "expected `default = <expr>`"));
                 };
+                if default.is_some() {
+                    return Err(err(
+                        key_span,
+                        &format!("#[{}]: duplicate `default`", param_kind.attr_name()),
+                    ));
+                }
                 default = Some(expr);
                 default_span = Some(key_span);
             }
@@ -735,14 +753,14 @@ fn generate(parsed: &ParsedStruct, description: Option<&str>) -> TokenStream {
         }
         StructBody::Named(fields) => {
             out.push_str(&format!("{vis_text} struct {struct_name} {{\n"));
-            for f in fields {
+            for (field_index, f) in fields.iter().enumerate() {
                 out.push_str(&tokens_to_string(&f.other_attrs));
                 out.push('\n');
                 out.push_str(&tokens_to_string(&f.vis));
                 out.push(' ');
                 out.push_str(&f.name.to_string());
                 out.push_str(": ");
-                out.push_str(&rewritten_field_type(&struct_name, f));
+                out.push_str(&rewritten_field_type(&struct_name, field_index, f));
                 out.push_str(",\n");
             }
             out.push_str("}\n");
@@ -750,8 +768,14 @@ fn generate(parsed: &ParsedStruct, description: Option<&str>) -> TokenStream {
     }
 
     // 2. Per-field marker ZST + spec trait impl(s).
-    for f in fields {
-        out.push_str(&field_marker_and_impls(&struct_name, f));
+    let struct_is_pub = !parsed.vis.is_empty();
+    for (field_index, f) in fields.iter().enumerate() {
+        out.push_str(&field_marker_and_impls(
+            &struct_name,
+            field_index,
+            struct_is_pub,
+            f,
+        ));
     }
 
     // 3. Named-field structs only: a same-name static value binding.
@@ -823,34 +847,65 @@ fn generate(parsed: &ParsedStruct, description: Option<&str>) -> TokenStream {
 }
 
 /// The rewritten field type text: `::rshooks::decl::<Wrapper><V, __Marker>`.
-fn rewritten_field_type(struct_name: &str, f: &ParsedField) -> String {
+fn rewritten_field_type(struct_name: &str, field_index: usize, f: &ParsedField) -> String {
     let wrapper = match &f.decl {
         FieldDecl::State { .. } => "State",
         FieldDecl::Param { param_kind, .. } => param_kind.wrapper(),
     };
-    let marker = marker_name(struct_name, &f.name.to_string());
+    let marker = marker_name(struct_name, field_index, &f.name.to_string());
     let value_ty = tokens_to_string(&f.value_ty);
     format!("::rshooks::decl::{wrapper}<{value_ty}, {marker}>")
 }
 
-fn marker_name(struct_name: &str, field_name: &str) -> String {
-    format!("__RshooksSpec{struct_name}{}", to_upper_camel(field_name))
+/// Builds the field's marker type name: `__RshooksSpec{Struct}Field{N}{Name}`.
+///
+/// Derived from the field's *ordinal position* (`field_index`) plus a
+/// sanitized `UpperCamelCase` rendering of its name, rather than the name
+/// alone — two distinct field names that collapse to the same
+/// `UpperCamelCase` text under [`to_upper_camel`] (e.g. `foo_bar` and
+/// `foo__bar`, both `FooBar`) would otherwise collide on one marker type.
+/// The ordinal makes every marker name unique regardless of how the field
+/// names compare. `field_name` is sanitized by stripping a leading `r#`
+/// raw-identifier prefix first (`r#type` -> `type` -> `Type`) so a raw
+/// identifier field still produces a valid, non-raw marker identifier.
+fn marker_name(struct_name: &str, field_index: usize, field_name: &str) -> String {
+    let sanitized = field_name.strip_prefix("r#").unwrap_or(field_name);
+    format!(
+        "__RshooksSpec{struct_name}Field{field_index}{}",
+        to_upper_camel(sanitized)
+    )
 }
 
 /// The marker ZST declaration plus its `StateSpec`/`ParamSpec` (+
 /// `ParamDefault`/`ParamRequired`) impl(s) for one field.
-fn field_marker_and_impls(struct_name: &str, f: &ParsedField) -> String {
-    let marker = marker_name(struct_name, &f.name.to_string());
+fn field_marker_and_impls(
+    struct_name: &str,
+    field_index: usize,
+    struct_is_pub: bool,
+    f: &ParsedField,
+) -> String {
+    let marker = marker_name(struct_name, field_index, &f.name.to_string());
     let value_ty = tokens_to_string(&f.value_ty);
     // The marker's visibility follows the *field's own* declared visibility
-    // (private by default), not the struct's. A marker unconditionally
-    // `pub` would leak a private `#[state]`/`#[hook_param]`/`#[otxn_param]`
-    // value/key/name type through its `StateSpec`/`ParamSpec` associated
-    // types (`E0446`) the moment that type isn't itself `pub` — the common
-    // case for a hook's internal key/value structs. Matching the field's
-    // own visibility keeps the marker exactly as reachable as the field it
-    // backs, so it never exposes more than the field already does.
-    let field_vis = tokens_to_string(&f.vis);
+    // (private by default), not the struct's — UNLESS the struct itself
+    // carries no `pub` token at all (a private struct), in which case the
+    // marker is forced private regardless of the field's own visibility.
+    // Without that override, a `pub` field on a private struct would give
+    // its marker (and hence the `StateSpec`/`ParamSpec` associated types it
+    // exposes) wider reach than the struct that declares it is ever
+    // actually reachable at, which is a leak in the other direction from
+    // the one this whole scheme exists to prevent: a marker unconditionally
+    // `pub` would otherwise expose a private `#[state]`/`#[hook_param]`/
+    // `#[otxn_param]` value/key/name type through those associated types
+    // (`E0446`) the moment that type isn't itself `pub` — the common case
+    // for a hook's internal key/value structs. Matching the field's own
+    // visibility (when the struct is reachable at all) keeps the marker
+    // exactly as reachable as the field it backs, never more.
+    let field_vis = if struct_is_pub {
+        tokens_to_string(&f.vis)
+    } else {
+        String::new()
+    };
     let mut out = format!("#[doc(hidden)]\n{field_vis} struct {marker};\n");
 
     match &f.decl {
@@ -962,7 +1017,12 @@ enum ChainFieldJson {
         name_by: Option<String>,
         value: String,
         required: bool,
-        has_default: bool,
+        /// Normalized token text of the `default = <expr>` expression, if
+        /// declared — not just whether one was present, so downstream
+        /// consumers (the build's byte-equality consistency check, the
+        /// per-entry sidecar transcription) can see and compare the actual
+        /// default value, not merely its presence.
+        default: Option<String>,
     },
 }
 
@@ -997,7 +1057,7 @@ fn field_to_chain_json(f: &ParsedField) -> ChainFieldJson {
                 name_by,
                 value,
                 required: spec.required,
-                has_default: spec.default.is_some(),
+                default: spec.default.as_ref().map(|expr| tokens_to_string(expr)),
             }
         }
     }
@@ -1037,7 +1097,7 @@ fn encode_chain_json(
                 name_by,
                 value,
                 required,
-                has_default,
+                default,
             } => {
                 let mut obj = serde_json::Map::new();
                 obj.insert("field".into(), field.clone().into());
@@ -1051,7 +1111,10 @@ fn encode_chain_json(
                 );
                 obj.insert("value".into(), value.clone().into());
                 obj.insert("required".into(), (*required).into());
-                obj.insert("has_default".into(), (*has_default).into());
+                obj.insert(
+                    "default".into(),
+                    default.clone().map_or(serde_json::Value::Null, Into::into),
+                );
                 let entry = serde_json::Value::Object(obj);
                 match role {
                     ParamKind::HookParam => hook_params.push(entry),
@@ -1101,7 +1164,29 @@ mod tests {
 
     #[test]
     fn marker_name_shape() {
-        assert_eq!(marker_name("Vault", "deposits"), "__RshooksSpecVaultDeposits");
+        assert_eq!(
+            marker_name("Vault", 0, "deposits"),
+            "__RshooksSpecVaultField0Deposits"
+        );
+    }
+
+    #[test]
+    fn marker_name_disambiguates_names_that_collapse_to_the_same_upper_camel() {
+        // `foo_bar` and `foo__bar` both render to `FooBar` under
+        // `to_upper_camel` — only the ordinal keeps their markers distinct.
+        let a = marker_name("Vault", 0, "foo_bar");
+        let b = marker_name("Vault", 1, "foo__bar");
+        assert_ne!(a, b);
+        assert_eq!(a, "__RshooksSpecVaultField0FooBar");
+        assert_eq!(b, "__RshooksSpecVaultField1FooBar");
+    }
+
+    #[test]
+    fn marker_name_strips_raw_identifier_prefix() {
+        assert_eq!(
+            marker_name("Vault", 2, "r#type"),
+            "__RshooksSpecVaultField2Type"
+        );
     }
 
     /// `encode_chain_json` operates on the plain-`String` [`ChainFieldJson`]
@@ -1163,14 +1248,31 @@ mod tests {
             name_by: None,
             value: "Config".to_string(),
             required: false,
-            has_default: true,
+            default: Some("[0u8; 4]".to_string()),
         };
         let bytes = encode_chain_json("Vault", None, &[entry]).expect("json");
         let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
         let param = &value["decls"]["hook_params"][0];
         assert_eq!(param["field"], "config");
         assert_eq!(param["required"], false);
-        assert_eq!(param["has_default"], true);
+        assert_eq!(param["default"], "[0u8; 4]");
         assert!(param["name_by"].is_null());
+    }
+
+    #[test]
+    fn chain_json_param_entry_without_default_is_null() {
+        let entry = ChainFieldJson::Param {
+            role: ParamKind::OtxnParam,
+            field: "seat".to_string(),
+            name: Some("b\"SEAT\"".to_string()),
+            name_by: None,
+            value: "AccountId".to_string(),
+            required: false,
+            default: None,
+        };
+        let bytes = encode_chain_json("Vault", None, &[entry]).expect("json");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
+        let param = &value["decls"]["otxn_params"][0];
+        assert!(param["default"].is_null());
     }
 }

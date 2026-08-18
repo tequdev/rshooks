@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::io::{BufRead, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
@@ -64,6 +64,20 @@ pub fn run(args: &ChainBuildArgs) -> Result<()> {
     let cargo = find_cargo()?;
     let plan = BuildPlan::resolve(&cargo, args.manifest_path.as_deref(), args.package.as_deref())?;
     let rustc = detect_rustc_version(&cargo);
+
+    let root = args
+        .out
+        .clone()
+        .unwrap_or_else(|| plan.target_directory.join("rshooks").join(&plan.package_name));
+    std::fs::create_dir_all(&root)
+        .with_context(|| format!("creating output root {}", root.display()))?;
+    // Held for the *entire* chain build (discovery through publish), not
+    // just the final publish step: this closes the window where a
+    // concurrent `rshooks build` run sharing the same cargo target
+    // directory could overwrite the cdylib artifact between this process
+    // compiling it and reading it back. Released on every exit path
+    // (including early `?` returns) via `LockGuard`'s `Drop` impl.
+    let _lock = acquire_lock(&root)?;
 
     println!("discovery build ({})", plan.package_name);
     let discovery_bytes = plan.run_discovery()?;
@@ -155,11 +169,6 @@ pub fn run(args: &ChainBuildArgs) -> Result<()> {
         max_index,
         &required_amendments,
     )?;
-
-    let root = args
-        .out
-        .clone()
-        .unwrap_or_else(|| plan.target_directory.join("rshooks").join(&plan.package_name));
 
     let gen_dir = publish(
         &root,
@@ -481,42 +490,15 @@ impl BuildPlan {
             .context("internal error: cargo's stdout was not piped")?;
         let reader = std::io::BufReader::new(stdout);
 
-        let mut artifact: Option<PathBuf> = None;
+        let mut messages: Vec<Value> = Vec::new();
         for line in reader.lines() {
             let line = line.context("reading cargo output")?;
             if line.trim().is_empty() {
                 continue;
             }
-            let msg: Value = match serde_json::from_str(&line) {
-                Ok(v) => v,
-                Err(_) => continue, // cargo can emit non-JSON lines on some setups; ignore
-            };
-            if msg.get("reason").and_then(Value::as_str) != Some("compiler-artifact") {
-                continue;
-            }
-            let package_matches =
-                msg.get("package_id").and_then(Value::as_str) == Some(self.package_id.as_str());
-            let is_cdylib = msg
-                .get("target")
-                .and_then(|t| t.get("kind"))
-                .and_then(Value::as_array)
-                .is_some_and(|kinds| kinds.iter().any(|k| k.as_str() == Some("cdylib")));
-            let target_name_matches = msg
-                .get("target")
-                .and_then(|t| t.get("name"))
-                .and_then(Value::as_str)
-                == Some(self.cdylib_target_name.as_str());
-            if !(package_matches && is_cdylib && target_name_matches) {
-                continue;
-            }
-            if let Some(filenames) = msg.get("filenames").and_then(Value::as_array) {
-                for f in filenames {
-                    if let Some(s) = f.as_str()
-                        && s.ends_with(".wasm")
-                    {
-                        artifact = Some(PathBuf::from(s));
-                    }
-                }
+            // cargo can emit non-JSON lines on some setups; ignore those.
+            if let Ok(msg) = serde_json::from_str(&line) {
+                messages.push(msg);
             }
         }
 
@@ -525,10 +507,82 @@ impl BuildPlan {
         if !status.success() {
             bail!("cargo invocation failed ({status})");
         }
-        artifact.context(
+        select_wasm_artifact(&self.package_id, &self.cdylib_target_name, &messages)
+    }
+}
+
+/// Selects the single `.wasm` artifact cargo produced for `package_id`'s
+/// `cdylib_target_name` target from its `--message-format=json` output.
+///
+/// Collects every candidate path across all matching `compiler-artifact`
+/// messages rather than taking the last one seen ("last-wins"): more than
+/// one *distinct* path is an unresolvable ambiguity, reported as an error
+/// listing every candidate, rather than silently picking whichever happened
+/// to be reported last. The same path reported more than once (e.g. an
+/// identical message repeated) is not ambiguous.
+fn select_wasm_artifact(
+    package_id: &str,
+    cdylib_target_name: &str,
+    messages: &[Value],
+) -> Result<PathBuf> {
+    let mut artifacts: Vec<PathBuf> = Vec::new();
+    for msg in messages {
+        if msg.get("reason").and_then(Value::as_str) != Some("compiler-artifact") {
+            continue;
+        }
+        let package_matches = msg.get("package_id").and_then(Value::as_str) == Some(package_id);
+        let is_cdylib = msg
+            .get("target")
+            .and_then(|t| t.get("kind"))
+            .and_then(Value::as_array)
+            .is_some_and(|kinds| kinds.iter().any(|k| k.as_str() == Some("cdylib")));
+        let target_name_matches = msg
+            .get("target")
+            .and_then(|t| t.get("name"))
+            .and_then(Value::as_str)
+            == Some(cdylib_target_name);
+        if !(package_matches && is_cdylib && target_name_matches) {
+            continue;
+        }
+        if let Some(filenames) = msg.get("filenames").and_then(Value::as_array) {
+            for f in filenames {
+                if let Some(s) = f.as_str()
+                    && s.ends_with(".wasm")
+                {
+                    artifacts.push(PathBuf::from(s));
+                }
+            }
+        }
+    }
+
+    let mut distinct: Vec<PathBuf> = Vec::new();
+    for path in artifacts {
+        if !distinct.contains(&path) {
+            distinct.push(path);
+        }
+    }
+
+    match distinct.len() {
+        0 => bail!(
             "cargo did not produce a .wasm artifact for the resolved cdylib target; is this a \
-             `cdylib` crate for wasm32v1-none?",
-        )
+             `cdylib` crate for wasm32v1-none?"
+        ),
+        1 => distinct
+            .into_iter()
+            .next()
+            .context("internal error: distinct artifact candidate list became empty"),
+        _ => {
+            let list = distinct
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            bail!(
+                "cargo produced multiple distinct .wasm artifacts for the resolved cdylib \
+                 target ({list}); this is ambiguous and rshooks-build refuses to guess which \
+                 one to use"
+            );
+        }
     }
 }
 
@@ -723,8 +777,11 @@ fn write_staged_file(path: &Path, bytes: &[u8]) -> Result<()> {
 
 /// Publishes one build's artifacts to a fresh generation directory under
 /// `root`, atomically re-pointing `current`, then prunes old generations.
-/// Uses an advisory lock; on any failure, staging is removed and `current`
-/// is left untouched (design §7.4, contract §C item 7).
+/// The caller must already hold the publish advisory lock for `root` (see
+/// [`acquire_lock`]) for the whole chain build, not just this step — `run`
+/// acquires it once, before discovery, and holds it across every entry
+/// build and every `publish` call. On any failure, staging is removed and
+/// `current` is left untouched (design §7.4, contract §C item 7).
 fn publish(
     root: &Path,
     staged_wasms: &[(String, Vec<u8>)],
@@ -734,7 +791,6 @@ fn publish(
 ) -> Result<PathBuf> {
     std::fs::create_dir_all(root)
         .with_context(|| format!("creating output root {}", root.display()))?;
-    let _lock = acquire_lock(root)?;
 
     let staging_path = root.join(format!(".staging-{}", std::process::id()));
     let staging = StagingGuard::new(staging_path.clone())?;
@@ -797,9 +853,25 @@ fn list_generations(root: &Path) -> Result<Vec<(u64, PathBuf)>> {
     Ok(gens)
 }
 
-/// Deletes generations older than the newest `keep`. Best-effort: failures
-/// to remove an old generation are not fatal (a resolved `current -> gen-N`
-/// consumer may still be reading it; see design §7.4).
+/// Grace period below which a generation directory outside the retained
+/// newest-`keep` window is still never pruned — protects a generation from
+/// an in-flight or just-finished concurrent/overlapping build.
+const PRUNE_GRACE_PERIOD: Duration = Duration::from_secs(10 * 60);
+
+/// Whether a generation directory outside the retained-newest window is
+/// actually eligible for pruning, given how long ago it was last modified.
+/// Pure so it can be unit tested with synthetic ages, no filesystem or
+/// sleeping required.
+fn is_prune_eligible(age_since_modified: Duration) -> bool {
+    age_since_modified >= PRUNE_GRACE_PERIOD
+}
+
+/// Deletes generations older than the newest `keep`, skipping any candidate
+/// whose mtime is within [`PRUNE_GRACE_PERIOD`] (see [`is_prune_eligible`]).
+/// Best-effort: failures to remove an old generation, or to read its mtime,
+/// are not fatal — an unreadable mtime is treated as "not yet eligible"
+/// rather than deleted (a resolved `current -> gen-N` consumer may still be
+/// reading a pruning candidate; see design §7.4).
 fn retain_latest_generations(root: &Path, keep: usize) {
     let Ok(gens) = list_generations(root) else {
         return;
@@ -808,8 +880,16 @@ fn retain_latest_generations(root: &Path, keep: usize) {
         return;
     }
     let remove_count = gens.len() - keep;
+    let now = SystemTime::now();
     for (_, path) in gens.iter().take(remove_count) {
-        let _ = std::fs::remove_dir_all(path);
+        let eligible = std::fs::metadata(path)
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|modified| now.duration_since(modified).ok())
+            .is_some_and(is_prune_eligible);
+        if eligible {
+            let _ = std::fs::remove_dir_all(path);
+        }
     }
 }
 
@@ -951,11 +1031,33 @@ mod tests {
         std::fs::remove_dir_all(&root).expect("cleanup");
     }
 
+    /// Backdates a directory's mtime by `age`, so retention tests can
+    /// exercise the grace-period boundary without sleeping.
+    fn set_mtime(path: &Path, age: Duration) {
+        let target = SystemTime::now()
+            .checked_sub(age)
+            .expect("age is representable as a past SystemTime");
+        let file = std::fs::File::open(path).expect("open directory for mtime adjustment");
+        file.set_modified(target).expect("set directory mtime");
+    }
+
+    #[test]
+    fn prune_eligibility_respects_grace_period() {
+        assert!(!is_prune_eligible(Duration::from_secs(0)));
+        assert!(!is_prune_eligible(Duration::from_secs(9 * 60)));
+        assert!(is_prune_eligible(PRUNE_GRACE_PERIOD));
+        assert!(is_prune_eligible(Duration::from_secs(20 * 60)));
+    }
+
     #[test]
     fn retention_keeps_only_the_newest_two_generations() {
         let root = temp_dir("retention");
         for n in 1..=4 {
-            std::fs::create_dir(root.join(format!("gen-{n}"))).expect("create generation");
+            let dir = root.join(format!("gen-{n}"));
+            std::fs::create_dir(&dir).expect("create generation");
+            // Old enough to clear the grace period, so eligibility here is
+            // driven purely by the newest-2 retention window.
+            set_mtime(&dir, Duration::from_secs(20 * 60));
         }
         retain_latest_generations(&root, 2);
         assert!(!root.join("gen-1").exists());
@@ -966,10 +1068,37 @@ mod tests {
     }
 
     #[test]
+    fn retention_protects_recent_generations_within_grace_period() {
+        let root = temp_dir("retention-grace");
+        for n in 1..=4 {
+            std::fs::create_dir(root.join(format!("gen-{n}"))).expect("create generation");
+        }
+        // Freshly created: even gen-1/gen-2 (outside the newest-2 window)
+        // are within the grace period and must survive.
+        retain_latest_generations(&root, 2);
+        assert!(
+            root.join("gen-1").exists(),
+            "recent generation protected by grace period"
+        );
+        assert!(
+            root.join("gen-2").exists(),
+            "recent generation protected by grace period"
+        );
+        assert!(root.join("gen-3").exists());
+        assert!(root.join("gen-4").exists());
+        std::fs::remove_dir_all(&root).expect("cleanup");
+    }
+
+    #[test]
     fn publish_creates_generation_and_current_pointer_and_prunes_old() {
         let root = temp_dir("publish");
         let wasms = vec![("0.deposit.wasm".to_string(), b"AA".to_vec())];
         let sidecars = vec![("0.deposit.metadata.json".to_string(), b"{}".to_vec())];
+
+        // `publish` no longer acquires the lock itself — `run` acquires it
+        // once for the whole chain build and holds it across every
+        // `publish` call; simulate that here.
+        let lock = acquire_lock(&root).expect("acquire lock for the whole build, as `run` does");
 
         let gen1 = publish(&root, &wasms, &sidecars, b"{}", b"{}").expect("first publish");
         assert!(gen1.join("0.deposit.wasm").exists());
@@ -991,8 +1120,67 @@ mod tests {
             assert_eq!(pointer, gen2.file_name().expect("gen2 name").to_string_lossy());
         }
 
-        assert!(!root.join(".lock").exists(), "lock is released after publish");
+        assert!(
+            root.join(".lock").exists(),
+            "lock stays held across multiple publishes within one build"
+        );
+        drop(lock);
+        assert!(
+            !root.join(".lock").exists(),
+            "lock is released once the whole build completes"
+        );
         std::fs::remove_dir_all(&root).expect("cleanup");
+    }
+
+    fn artifact_message(package_id: &str, target_name: &str, kind: &str, filenames: &[&str]) -> Value {
+        serde_json::json!({
+            "reason": "compiler-artifact",
+            "package_id": package_id,
+            "target": { "kind": [kind], "name": target_name },
+            "filenames": filenames,
+        })
+    }
+
+    #[test]
+    fn select_wasm_artifact_picks_the_single_matching_candidate() {
+        let messages = vec![
+            artifact_message("pkg", "vault", "lib", &["target/wasm32v1-none/release/vault.rlib"]),
+            artifact_message("pkg", "vault", "cdylib", &["target/wasm32v1-none/release/vault.wasm"]),
+        ];
+        let path =
+            select_wasm_artifact("pkg", "vault", &messages).expect("selects the one candidate");
+        assert_eq!(path, PathBuf::from("target/wasm32v1-none/release/vault.wasm"));
+    }
+
+    #[test]
+    fn select_wasm_artifact_rejects_no_candidates() {
+        let messages = vec![artifact_message("other-pkg", "vault", "cdylib", &["x.wasm"])];
+        let err = select_wasm_artifact("pkg", "vault", &messages).expect_err("must fail");
+        assert!(format!("{err:#}").contains("did not produce a .wasm artifact"));
+    }
+
+    #[test]
+    fn select_wasm_artifact_treats_a_repeated_identical_path_as_unambiguous() {
+        let messages = vec![
+            artifact_message("pkg", "vault", "cdylib", &["target/dir/vault.wasm"]),
+            artifact_message("pkg", "vault", "cdylib", &["target/dir/vault.wasm"]),
+        ];
+        let path = select_wasm_artifact("pkg", "vault", &messages)
+            .expect("an identical path repeated is not ambiguous");
+        assert_eq!(path, PathBuf::from("target/dir/vault.wasm"));
+    }
+
+    #[test]
+    fn select_wasm_artifact_rejects_distinct_candidates_as_ambiguous() {
+        let messages = vec![
+            artifact_message("pkg", "vault", "cdylib", &["target/a/vault.wasm"]),
+            artifact_message("pkg", "vault", "cdylib", &["target/b/vault.wasm"]),
+        ];
+        let err = select_wasm_artifact("pkg", "vault", &messages).expect_err("must fail");
+        let message = format!("{err:#}");
+        assert!(message.contains("ambiguous"));
+        assert!(message.contains("target/a/vault.wasm"));
+        assert!(message.contains("target/b/vault.wasm"));
     }
 
     #[test]
