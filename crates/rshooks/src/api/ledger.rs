@@ -11,18 +11,30 @@ use crate::types::{Hash, Keylet, Nonce};
 /// The reference transaction fee (in drops) for the current ledger.
 #[inline(always)]
 pub fn fee_base() -> u64 {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.fee_base()) {
+        return v as u64;
+    }
     unsafe { rshooks_core::fee_base() as u64 }
 }
 
 /// The sequence number of the current ledger.
 #[inline(always)]
 pub fn ledger_seq() -> u32 {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.ledger_seq()) {
+        return v as u32;
+    }
     unsafe { rshooks_core::ledger_seq() as u32 }
 }
 
 /// The close time of the previous ledger (seconds since the Ripple epoch).
 #[inline(always)]
 pub fn ledger_last_time() -> u64 {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.ledger_last_time()) {
+        return v as u64;
+    }
     unsafe { rshooks_core::ledger_last_time() as u64 }
 }
 
@@ -32,6 +44,10 @@ pub fn ledger_last_time() -> u64 {
 #[inline(always)]
 pub fn ledger_last_hash<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
     let out = out.as_mut();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.ledger_last_hash()) {
+        return crate::testenv_bridge::write_array(out, r);
+    }
     res(unsafe { rshooks_core::ledger_last_hash(out.as_mut_ptr() as u32, out.len() as u32) })
         .map(|v| v as usize)
 }
@@ -49,6 +65,10 @@ pub fn ledger_last_hash_buf() -> Result<Hash> {
 #[inline(always)]
 pub fn ledger_nonce<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
     let out = out.as_mut();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.ledger_nonce()) {
+        return crate::testenv_bridge::write_array(out, r);
+    }
     res(unsafe { rshooks_core::ledger_nonce(out.as_mut_ptr() as u32, out.len() as u32) })
         .map(|v| v as usize)
 }

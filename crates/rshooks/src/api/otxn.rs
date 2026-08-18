@@ -37,6 +37,10 @@ use crate::types::{AccountId, Amount, CurrencyCode, Hash, Issue, SField};
 /// magnitude despite the Hook API's `i64` wire type.
 #[inline(always)]
 pub fn otxn_burden() -> u64 {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.otxn_burden()) {
+        return v as u64;
+    }
     unsafe { rshooks_core::otxn_burden() as u64 }
 }
 
@@ -46,6 +50,10 @@ pub fn otxn_burden() -> u64 {
 pub fn otxn_field<B: AsMut<[u8]> + ?Sized>(out: &mut B, field_id: impl Into<u32>) -> Result<usize> {
     let out = out.as_mut();
     let field_id = field_id.into();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.otxn_field(field_id)) {
+        return crate::testenv_bridge::write_bytes(out, r);
+    }
     res(unsafe { rshooks_core::otxn_field(out.as_mut_ptr() as u32, out.len() as u32, field_id) })
         .map(|v| v as usize)
 }
@@ -57,6 +65,10 @@ pub fn otxn_field<B: AsMut<[u8]> + ?Sized>(out: &mut B, field_id: impl Into<u32>
 #[inline(always)]
 pub fn otxn_field_u64(field_id: impl Into<u32>) -> Result<u64> {
     let field_id = field_id.into();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.otxn_field(field_id)) {
+        return res(crate::testenv_bridge::as_int64_code(r)).map(|v| v as u64);
+    }
     res(unsafe { rshooks_core::otxn_field(0, 0, field_id) }).map(|v| v as u64)
 }
 
@@ -253,6 +265,10 @@ pub fn otxn_field_typed<T: OtxnFieldValue>(field: SField<T>) -> Result<T::Output
 /// or the `sfEmitGeneration` value for an emitted transaction.
 #[inline(always)]
 pub fn otxn_generation() -> u32 {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.otxn_generation()) {
+        return v as u32;
+    }
     unsafe { rshooks_core::otxn_generation() as u32 }
 }
 
@@ -262,6 +278,10 @@ pub fn otxn_generation() -> u32 {
 #[inline(always)]
 pub fn otxn_id<B: AsMut<[u8]> + ?Sized>(out: &mut B, flags: u32) -> Result<usize> {
     let out = out.as_mut();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.otxn_id(flags)) {
+        return crate::testenv_bridge::write_bytes(out, r);
+    }
     res(unsafe { rshooks_core::otxn_id(out.as_mut_ptr() as u32, out.len() as u32, flags) })
         .map(|v| v as usize)
 }
@@ -280,6 +300,10 @@ pub fn otxn_id_buf(flags: u32) -> Result<Hash> {
 /// The [`TxType`] of the originating transaction.
 #[inline(always)]
 pub fn otxn_type() -> TxType {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.otxn_type()) {
+        return TxType::from(v as u16);
+    }
     TxType::from(unsafe { rshooks_core::otxn_type() as u16 })
 }
 
@@ -295,6 +319,10 @@ pub fn otxn_slot(slot_into: u32) -> Result<u32> {
 #[inline(always)]
 pub fn otxn_param<B: AsMut<[u8]> + ?Sized>(out: &mut B, name: &[u8]) -> Result<usize> {
     let out = out.as_mut();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.otxn_param(name)) {
+        return crate::testenv_bridge::write_bytes(out, r);
+    }
     res(unsafe {
         rshooks_core::otxn_param(
             out.as_mut_ptr() as u32,
@@ -340,6 +368,10 @@ pub fn otxn_param_exact<T: FixedRead>(name: &[u8]) -> Result<T> {
 /// [`otxn_param`]'s own call rather than routing through it).
 #[inline(always)]
 pub(crate) fn otxn_param_raw_code(buf: &mut [u8], name: &[u8]) -> i64 {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.otxn_param(name)) {
+        return crate::testenv_bridge::write_bytes_code(buf, r);
+    }
     unsafe {
         rshooks_core::otxn_param(
             buf.as_mut_ptr() as u32,

@@ -740,10 +740,13 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 ///
 /// # Generated items
 ///
-/// `Self::LEN`, `Self::new()`, one `set_<field>` per `u32_field`/
-/// `native_amount`/`account_id` field (`empty_vl` gets none),
-/// `emit_details_region()`, `bytes()`, a `Default` impl equivalent to
-/// `new()`, an `impl` [`TemplateBytes`](crate::txn::TemplateBytes)
+/// `Self::LEN`, `Self::new()`, a `derive(Clone)` (a trivial byte-buffer
+/// copy — the generated type is always a fixed-size byte array underneath;
+/// required unconditionally by
+/// [`HookStatic<T: Clone>`](crate::static_cell::HookStatic)), one
+/// `set_<field>` per `u32_field`/`native_amount`/`account_id` field
+/// (`empty_vl` gets none), `emit_details_region()`, `bytes()`, a `Default`
+/// impl equivalent to `new()`, an `impl` [`TemplateBytes`](crate::txn::TemplateBytes)
 /// forwarding to `bytes()` (so [`Prepared`](crate::txn::Prepared) can name
 /// the type generically), and `prepare_for_emit()` (see above) — the last
 /// three are unconditional because the required fields, including
@@ -1218,6 +1221,7 @@ macro_rules! __txn_template_step {
         fields = []
     ) => {
         $(#[$meta])*
+        #[derive(Clone)]
         $vis struct $Name {
             bytes: [u8; $Name::LEN],
         }

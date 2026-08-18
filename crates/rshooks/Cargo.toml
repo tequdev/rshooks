@@ -32,6 +32,12 @@ panic-handler = []
 # from a `std` context — see the handler's doc comment in lib.rs.
 host-panic-handler = []
 trace = []
+# Enables the native mock-host bridge (`rshooks_core::backend`): wrapper
+# functions in `api/*` consult an installed `HostBackend` instead of the
+# host stubs, and `HookStatic::take` gains a per-invocation claim path.
+# Default-off; forwards to `rshooks-core/testenv`. Never enable this from a
+# `wasm32` target.
+testenv = ["rshooks-core/testenv"]
 
 [lints]
 workspace = true

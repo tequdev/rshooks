@@ -1,0 +1,63 @@
+# Inventory of every direct `rshooks_core::<fn>` call site in the bridged
+# API families (state, otxn, hook_ctx, ledger, control, etxn, trace) under
+# `crates/rshooks/src/api/`. One line per bridged call site:
+#
+#   api/<file>.rs::<wrapper_fn> -> <raw_fn>
+#
+# A source-scan test asserts set-equality between a fresh grep of these
+# families and this file, so a newly added raw call site that nobody
+# bridged fails CI. See `.claude/design/TESTENV_DESIGN.md` §2.1/§6 and
+# `.claude/design/TESTENV_IMPLEMENTATION.md`'s Stage 2 contract.
+
+api/control.rs::accept -> accept
+api/control.rs::hook_pos -> hook_pos
+api/control.rs::rollback -> rollback
+api/etxn.rs::emit -> emit
+api/etxn.rs::etxn_burden -> etxn_burden
+api/etxn.rs::etxn_details -> etxn_details
+api/etxn.rs::etxn_fee_base -> etxn_fee_base
+api/etxn.rs::etxn_generation -> etxn_generation
+api/etxn.rs::etxn_nonce -> etxn_nonce
+api/etxn.rs::etxn_reserve -> etxn_reserve
+api/hook_ctx.rs::hook_account -> hook_account
+api/hook_ctx.rs::hook_hash -> hook_hash
+api/hook_ctx.rs::hook_param -> hook_param
+api/hook_ctx.rs::hook_param_raw_code -> hook_param
+api/ledger.rs::fee_base -> fee_base
+api/ledger.rs::ledger_last_hash -> ledger_last_hash
+api/ledger.rs::ledger_last_time -> ledger_last_time
+api/ledger.rs::ledger_nonce -> ledger_nonce
+api/ledger.rs::ledger_seq -> ledger_seq
+api/otxn.rs::otxn_burden -> otxn_burden
+api/otxn.rs::otxn_field -> otxn_field
+api/otxn.rs::otxn_field_u64 -> otxn_field
+api/otxn.rs::otxn_generation -> otxn_generation
+api/otxn.rs::otxn_id -> otxn_id
+api/otxn.rs::otxn_param -> otxn_param
+api/otxn.rs::otxn_param_raw_code -> otxn_param
+api/otxn.rs::otxn_type -> otxn_type
+api/state.rs::state -> state
+api/state.rs::state_foreign -> state_foreign
+api/state.rs::state_foreign_raw_code -> state_foreign
+api/state.rs::state_foreign_set -> state_foreign_set
+api/state.rs::state_foreign_u64 -> state_foreign
+api/state.rs::state_raw_code -> state
+api/state.rs::state_set -> state_set
+api/state.rs::state_u64 -> state
+api/state.rs::state_u64_raw_code -> state
+api/trace.rs::trace -> trace
+api/trace.rs::trace_num -> trace_num
+
+# --- unbridged (Phase 2) ---
+#
+# Direct raw call sites in a bridged family with no corresponding
+# `HostBackend` method — Phase 2 per `.claude/design/TESTENV_DESIGN.md` §6.
+# These still hit the `NOT_IMPLEMENTED` host stub under testenv.
+
+api/control.rs::hook_again -> hook_again  # no HostBackend method (chain-execution reinvocation; Phase 2)
+api/control.rs::hook_skip -> hook_skip  # no HostBackend method (chain-execution skip; Phase 2)
+api/etxn.rs::prepare -> prepare  # no HostBackend method (template preparation; Phase 2)
+api/hook_ctx.rs::hook_param_set -> hook_param_set  # no HostBackend method (writes another hook's parameter; Phase 2)
+api/ledger.rs::ledger_keylet -> ledger_keylet  # no HostBackend method (keylets; Phase 2 per design §6)
+api/otxn.rs::otxn_slot -> otxn_slot  # no HostBackend method (slot/STO codec; Phase 2 per design §6)
+api/trace.rs::trace_float -> trace_float  # no HostBackend method (float ops; Phase 2 per design §6)

@@ -11,6 +11,10 @@ use crate::types::{AccountId, Hash};
 #[inline(always)]
 pub fn hook_account<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
     let out = out.as_mut();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.hook_account()) {
+        return crate::testenv_bridge::write_array(out, r);
+    }
     res(unsafe { rshooks_core::hook_account(out.as_mut_ptr() as u32, out.len() as u32) })
         .map(|v| v as usize)
 }
@@ -29,6 +33,10 @@ pub fn hook_account_buf() -> Result<AccountId> {
 #[inline(always)]
 pub fn hook_hash<B: AsMut<[u8]> + ?Sized>(out: &mut B, hook_no: i32) -> Result<usize> {
     let out = out.as_mut();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.hook_hash(hook_no)) {
+        return crate::testenv_bridge::write_array(out, r);
+    }
     res(unsafe { rshooks_core::hook_hash(out.as_mut_ptr() as u32, out.len() as u32, hook_no) })
         .map(|v| v as usize)
 }
@@ -48,6 +56,10 @@ pub fn hook_hash_buf(hook_no: i32) -> Result<Hash> {
 #[inline(always)]
 pub fn hook_param<B: AsMut<[u8]> + ?Sized>(out: &mut B, name: &[u8]) -> Result<usize> {
     let out = out.as_mut();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.hook_param(name)) {
+        return crate::testenv_bridge::write_bytes(out, r);
+    }
     res(unsafe {
         rshooks_core::hook_param(
             out.as_mut_ptr() as u32,
@@ -149,6 +161,10 @@ pub fn hook_param_typed<N: TypedParamName>(name: &N) -> Result<N::Value> {
 /// hook, per the measurement noted there).
 #[inline(always)]
 pub(crate) fn hook_param_raw_code(buf: &mut [u8], name: &[u8]) -> i64 {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.hook_param(name)) {
+        return crate::testenv_bridge::write_bytes_code(buf, r);
+    }
     unsafe {
         rshooks_core::hook_param(
             buf.as_mut_ptr() as u32,

@@ -16,6 +16,8 @@ pub mod sfield;
 pub mod slot_obj;
 pub mod state;
 pub mod static_cell;
+#[cfg(all(not(target_arch = "wasm32"), feature = "testenv"))]
+pub(crate) mod testenv_bridge;
 pub mod tx_type;
 pub mod txn;
 pub mod types;
@@ -999,7 +1001,20 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 /// `rshooks = { ..., features = ["host-panic-handler"] }`, which makes
 /// host analysis work; the handler itself is never reached (host builds of
 /// hook crates are for analysis only, not execution).
-#[cfg(all(not(target_arch = "wasm32"), feature = "host-panic-handler"))]
+///
+/// Additionally gated `not(feature = "testenv")`: a `[dev-dependencies]`
+/// setup enabling both `host-panic-handler` (for rust-analyzer) and
+/// `testenv` (for `cargo test`) unifies both features into one build via
+/// ordinary Cargo feature unification. `std` already provides a
+/// `#[panic_handler]` in that build (the test harness links `std`), so
+/// this item is simply not emitted rather than colliding with it — the
+/// `testenv` build's own panic-based `HookExitSignal` unwinding uses
+/// `std`'s handler, not this one.
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    feature = "host-panic-handler",
+    not(feature = "testenv")
+))]
 #[panic_handler]
 #[allow(clippy::empty_loop)] // analysis-only target; never executed
 fn panic(_info: &core::panic::PanicInfo) -> ! {

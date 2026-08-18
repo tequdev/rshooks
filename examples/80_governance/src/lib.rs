@@ -141,7 +141,7 @@ static AV_BUF: HookStatic<[u8; AV_ARRAY_LEN]> = HookStatic::new([0u8; AV_ARRAY_L
 
 /// Takes a scratch buffer.
 #[inline(always)]
-fn take_scratch<T>(cell: &'static HookStatic<T>) -> &'static mut T {
+fn take_scratch<T: Clone>(cell: &'static HookStatic<T>) -> &'static mut T {
     let Some(buf) = cell.take() else {
         GovernError::AssertionFailed.nope(b"govern: scratch buffer already taken");
     };

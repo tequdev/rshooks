@@ -12,6 +12,10 @@ use crate::xfl::XFL;
 /// hex when `as_hex` is set, otherwise as raw bytes).
 #[inline(always)]
 pub fn trace(msg: &[u8], data: &[u8], as_hex: bool) -> Result<i64> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.trace(msg, data, as_hex)) {
+        return res(v);
+    }
     res(unsafe {
         rshooks_core::trace(
             msg.as_ptr() as u32,
@@ -26,6 +30,10 @@ pub fn trace(msg: &[u8], data: &[u8], as_hex: bool) -> Result<i64> {
 /// Emit a trace message (`msg`) followed by an integer `number`.
 #[inline(always)]
 pub fn trace_num(msg: &[u8], number: i64) -> Result<i64> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.trace_num(msg, number)) {
+        return res(v);
+    }
     res(unsafe { rshooks_core::trace_num(msg.as_ptr() as u32, msg.len() as u32, number) })
 }
 

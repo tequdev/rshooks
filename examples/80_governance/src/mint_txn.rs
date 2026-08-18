@@ -90,6 +90,7 @@ fn write_native_amount(dst: &mut [u8], drops: u64) {
 /// writer over a fixed `MAX_LEN` buffer, patched in place for the fields
 /// only known once the whole variable-length body has been written (`Fee`,
 /// `FirstLedgerSequence`/`LastLedgerSequence`).
+#[derive(Clone)]
 pub struct MintTxn {
     buf: [u8; MAX_LEN],
     len: usize,
