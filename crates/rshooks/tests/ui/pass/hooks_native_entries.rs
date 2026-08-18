@@ -1,0 +1,47 @@
+//! `<Struct as HookChainEntries>::ENTRIES` is populated correctly on the
+//! native (non-wasm) side of a `#[hooks]` chain: two entries, one paired
+//! with a `#[cbak]` and declaring `can_emit`, one bare — asserted by index,
+//! name, cbak presence, and `can_emit` contents. Never invokes an entry:
+//! without a backend installed (TESTENV_DESIGN.md §2.3), reaching an
+//! `accept!`/`rollback!` inside a real entry body would hang the process
+//! rather than return.
+
+use rshooks::decl::HookChainEntries;
+use rshooks::hooks;
+use rshooks::tx_type::TxType;
+
+#[hooks]
+struct Vault;
+
+#[hooks]
+impl Vault {
+    #[hook(0, on = [Invoke], can_emit = [Payment])]
+    fn main(&self) -> i64 {
+        0
+    }
+
+    #[cbak(0)]
+    fn main_cbak(&self) -> i64 {
+        0
+    }
+
+    #[hook(1, on = [Invoke])]
+    fn second(&self) -> i64 {
+        0
+    }
+}
+
+fn main() {
+    let entries = <Vault as HookChainEntries>::ENTRIES;
+    assert_eq!(entries.len(), 2);
+
+    let e0 = entries.iter().find(|e| e.index == 0).expect("index 0");
+    assert_eq!(e0.name, "main");
+    assert!(e0.cbak.is_some());
+    assert_eq!(e0.can_emit, &[TxType::Payment]);
+
+    let e1 = entries.iter().find(|e| e.index == 1).expect("index 1");
+    assert_eq!(e1.name, "second");
+    assert!(e1.cbak.is_none());
+    assert!(e1.can_emit.is_empty());
+}

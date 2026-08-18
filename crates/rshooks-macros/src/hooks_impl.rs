@@ -1448,8 +1448,9 @@ impl OnForm {
     }
 }
 
-/// Builds the full `mod __rshooks_entries { .. }` source (entry wrappers +
-/// `TxType` existence checks + entries carrier + handshake back-half).
+/// Builds the full `mod __rshooks_entries { .. }` source (entry bodies +
+/// forwarding wrappers + `TxType` existence checks + native entries table +
+/// entries carrier + handshake back-half).
 fn render_entries_module(
     struct_name: &str,
     entries: &[EntrySource<'_>],
@@ -1462,37 +1463,12 @@ fn render_entries_module(
 
     let mut mod_body = String::from("use super::*;\n");
 
-    for e in entries {
-        let i = e.index;
-        let hook_fn = e.hook_fn;
-        // `&{struct_name}` works identically for both struct forms
-        // (HOOKS_SELF_RECEIVER_DESIGN.md §3.2): a named-field struct's
-        // generated same-named static, or a unit struct's constructor
-        // value — no extra static is ever needed.
-        let hook_call = format!("{struct_name}::{hook_fn}(&{struct_name})");
-        mod_body.push_str(&format!(
-            "#[cfg(rshooks_entry = \"{i}\")]\n\
-             #[unsafe(export_name = \"hook\")]\n\
-             pub extern \"C\" fn __rshooks_hook_sel_{i}(_reserved: u32) -> i64 {{ \
-                 {hook_call} }}\n\
-             #[cfg(not(any({not_any_list})))]\n\
-             #[unsafe(export_name = \"__rshooks_hook_{i}\")]\n\
-             pub extern \"C\" fn __rshooks_hook_disc_{i}(_reserved: u32) -> i64 {{ \
-                 {hook_call} }}\n"
+    for e in entries_json {
+        mod_body.push_str(&render_entry_body_and_wrappers(
+            struct_name,
+            e,
+            &not_any_list,
         ));
-        if let Some(cbak_fn) = e.cbak_fn {
-            let cbak_call = format!("{struct_name}::{cbak_fn}(&{struct_name})");
-            mod_body.push_str(&format!(
-                "#[cfg(rshooks_entry = \"{i}\")]\n\
-                 #[unsafe(export_name = \"cbak\")]\n\
-                 pub extern \"C\" fn __rshooks_cbak_sel_{i}(_reserved: u32) -> i64 {{ \
-                     {cbak_call} }}\n\
-                 #[cfg(not(any({not_any_list})))]\n\
-                 #[unsafe(export_name = \"__rshooks_cbak_{i}\")]\n\
-                 pub extern \"C\" fn __rshooks_cbak_disc_{i}(_reserved: u32) -> i64 {{ \
-                     {cbak_call} }}\n"
-            ));
-        }
     }
 
     let mut tx_names: BTreeSet<&str> = BTreeSet::new();
@@ -1522,6 +1498,8 @@ fn render_entries_module(
         ));
     }
 
+    mod_body.push_str(&render_native_entries_table(struct_name, entries_json));
+
     let payload = encode_entries_json(struct_name, entries_json)?;
     let payload_hex = hex_upper(&payload);
     let digest = sha256::sha256(&payload);
@@ -1550,6 +1528,111 @@ fn render_entries_module(
          #[allow(unexpected_cfgs, dead_code)]\n\
          mod __rshooks_entries {{\n{mod_body}\n}}\n"
     ))
+}
+
+/// Renders one entry's plain-Rust-ABI body function(s) plus the wasm
+/// `extern "C"` wrappers that forward to them — design §2.3's "one entry
+/// body, two ABIs": the call expression (`{Struct}::{fn}(&{Struct})`) is
+/// built exactly once per body, and both the selected
+/// (`export_name = "hook"`/`"cbak"`) and discovery
+/// (`export_name = "__rshooks_hook_{i}"`/`"__rshooks_cbak_{i}"`) wrappers
+/// are one-line forwards to it. Operates on the Span-free [`EntryJson`]
+/// view (plain strings only), so unit tests can pin the exact generated
+/// text without a live macro invocation — see
+/// [`crate::hooks_struct::ChainFieldJson`]'s doc comment for why this
+/// boundary pattern is used throughout this crate.
+fn render_entry_body_and_wrappers(
+    struct_name: &str,
+    entry: &EntryJson,
+    not_any_list: &str,
+) -> String {
+    let i = entry.index;
+    // `&{struct_name}` works identically for both struct forms
+    // (HOOKS_SELF_RECEIVER_DESIGN.md §3.2): a named-field struct's
+    // generated same-named static, or a unit struct's constructor value —
+    // no extra static is ever needed.
+    let hook_call = format!("{struct_name}::{}(&{struct_name})", entry.hook_fn);
+    let mut out = format!(
+        "#[inline(always)]\n\
+         #[doc(hidden)]\n\
+         pub fn __rshooks_entry_body_{i}(_reserved: u32) -> i64 {{ {hook_call} }}\n\
+         #[cfg(rshooks_entry = \"{i}\")]\n\
+         #[unsafe(export_name = \"hook\")]\n\
+         pub extern \"C\" fn __rshooks_hook_sel_{i}(_reserved: u32) -> i64 {{ \
+             __rshooks_entry_body_{i}(_reserved) }}\n\
+         #[cfg(not(any({not_any_list})))]\n\
+         #[unsafe(export_name = \"__rshooks_hook_{i}\")]\n\
+         pub extern \"C\" fn __rshooks_hook_disc_{i}(_reserved: u32) -> i64 {{ \
+             __rshooks_entry_body_{i}(_reserved) }}\n"
+    );
+    if let Some(cbak_fn) = &entry.cbak_fn {
+        let cbak_call = format!("{struct_name}::{cbak_fn}(&{struct_name})");
+        out.push_str(&format!(
+            "#[inline(always)]\n\
+             #[doc(hidden)]\n\
+             pub fn __rshooks_cbak_body_{i}(_reserved: u32) -> i64 {{ {cbak_call} }}\n\
+             #[cfg(rshooks_entry = \"{i}\")]\n\
+             #[unsafe(export_name = \"cbak\")]\n\
+             pub extern \"C\" fn __rshooks_cbak_sel_{i}(_reserved: u32) -> i64 {{ \
+                 __rshooks_cbak_body_{i}(_reserved) }}\n\
+             #[cfg(not(any({not_any_list})))]\n\
+             #[unsafe(export_name = \"__rshooks_cbak_{i}\")]\n\
+             pub extern \"C\" fn __rshooks_cbak_disc_{i}(_reserved: u32) -> i64 {{ \
+                 __rshooks_cbak_body_{i}(_reserved) }}\n"
+        ));
+    }
+    out
+}
+
+/// Renders one entry's row in the native `HookChainEntries::ENTRIES` table
+/// (design §2.3): `hook` always points at the entry body function emitted
+/// by [`render_entry_body_and_wrappers`]; `cbak` is `Some(..)` pointing at
+/// the paired cbak body when one was declared, `None` otherwise;
+/// `can_emit` renders the declared `#[hook(.., can_emit = [..])]` list as
+/// `::rshooks::tx_type::TxType::` paths, or an empty slice when absent.
+/// Span-free — see [`render_entry_body_and_wrappers`]'s doc comment.
+fn render_native_entry_row(entry: &EntryJson) -> String {
+    let i = entry.index;
+    let cbak_expr = if entry.cbak_fn.is_some() {
+        format!("Some(__rshooks_cbak_body_{i})")
+    } else {
+        "None".to_string()
+    };
+    let can_emit_items: String = entry
+        .hook_can_emit
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .map(|n| format!("::rshooks::tx_type::TxType::{n}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "::rshooks::decl::NativeEntry {{\n\
+             index: {i},\n\
+             name: \"{}\",\n\
+             hook: __rshooks_entry_body_{i},\n\
+             cbak: {cbak_expr},\n\
+             can_emit: &[{can_emit_items}],\n\
+         }},\n",
+        entry.hook_fn
+    )
+}
+
+/// Renders the whole native `impl HookChainEntries for {Struct}` block
+/// (design §2.3), unconditional on non-wasm targets — no feature gate:
+/// generated code cannot see a downstream crate's Cargo features, per
+/// `rshooks::decl::HookChainEntries`'s doc comment. Lives inside the
+/// generated `__rshooks_entries` module (`use super::*;`), which is fine —
+/// a trait impl is visible crate-wide regardless of the defining module's
+/// privacy.
+fn render_native_entries_table(struct_name: &str, entries: &[EntryJson]) -> String {
+    let rows: String = entries.iter().map(render_native_entry_row).collect();
+    format!(
+        "#[cfg(not(target_arch = \"wasm32\"))]\n\
+         impl ::rshooks::decl::HookChainEntries for {struct_name} {{\n\
+             const ENTRIES: &'static [::rshooks::decl::NativeEntry] = &[\n{rows}    ];\n\
+         }}\n"
+    )
 }
 
 /// Encodes the entries carrier JSON payload (contract §B2) from a
@@ -1962,5 +2045,127 @@ mod tests {
         assert_eq!(OnForm::All.as_str(), "all");
         assert_eq!(OnForm::List.as_str(), "list");
         assert_eq!(OnForm::Directional.as_str(), "directional");
+    }
+
+    // --- `render_entry_body_and_wrappers` / `render_native_entry_row`
+    // / `render_native_entries_table` — the "one entry body, two ABIs" shape
+    // (TESTENV_DESIGN.md §2.3) ---
+
+    fn not_any_list() -> String {
+        (0..=MAX_INDEX)
+            .map(|n| format!("rshooks_entry = \"{n}\""))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    #[test]
+    fn entry_body_is_emitted_exactly_once_and_wrappers_forward() {
+        let entry = sample(); // index 0, hook_fn "deposit", no cbak
+        let out = render_entry_body_and_wrappers("Vault", &entry, &not_any_list());
+
+        // The call expression appears exactly once — in the body fn, never
+        // duplicated into either wrapper.
+        assert_eq!(out.matches("Vault::deposit(&Vault)").count(), 1);
+        assert_eq!(out.matches("pub fn __rshooks_entry_body_0").count(), 1);
+
+        // Both wrappers are one-line forwards to the body fn, not
+        // reimplementations of the call.
+        assert!(out.contains(
+            "pub extern \"C\" fn __rshooks_hook_sel_0(_reserved: u32) -> i64 { \
+             __rshooks_entry_body_0(_reserved) }"
+        ));
+        assert!(out.contains(
+            "pub extern \"C\" fn __rshooks_hook_disc_0(_reserved: u32) -> i64 { \
+             __rshooks_entry_body_0(_reserved) }"
+        ));
+        assert!(out.contains("#[cfg(rshooks_entry = \"0\")]"));
+        assert!(out.contains("#[unsafe(export_name = \"hook\")]"));
+        assert!(out.contains("#[unsafe(export_name = \"__rshooks_hook_0\")]"));
+
+        // No cbak declared: no cbak body or wrapper text at all.
+        assert!(!out.contains("cbak"));
+    }
+
+    #[test]
+    fn entry_without_cbak_emits_no_cbak_text() {
+        let mut entry = sample();
+        entry.cbak_fn = None;
+        let out = render_entry_body_and_wrappers("Vault", &entry, &not_any_list());
+        assert!(!out.contains("__rshooks_cbak_body_0"));
+    }
+
+    #[test]
+    fn cbak_body_is_emitted_exactly_once_and_wrappers_forward() {
+        let mut entry = sample();
+        entry.cbak_fn = Some("deposit_cbak".to_string());
+        let out = render_entry_body_and_wrappers("Vault", &entry, &not_any_list());
+
+        assert_eq!(out.matches("Vault::deposit_cbak(&Vault)").count(), 1);
+        assert_eq!(out.matches("pub fn __rshooks_cbak_body_0").count(), 1);
+        assert!(out.contains(
+            "pub extern \"C\" fn __rshooks_cbak_sel_0(_reserved: u32) -> i64 { \
+             __rshooks_cbak_body_0(_reserved) }"
+        ));
+        assert!(out.contains(
+            "pub extern \"C\" fn __rshooks_cbak_disc_0(_reserved: u32) -> i64 { \
+             __rshooks_cbak_body_0(_reserved) }"
+        ));
+        assert!(out.contains("#[unsafe(export_name = \"cbak\")]"));
+        assert!(out.contains("#[unsafe(export_name = \"__rshooks_cbak_0\")]"));
+    }
+
+    #[test]
+    fn native_entry_row_without_cbak_or_can_emit() {
+        let mut entry = sample();
+        entry.hook_can_emit = None;
+        let row = render_native_entry_row(&entry);
+        assert!(row.contains("index: 0,"));
+        assert!(row.contains("name: \"deposit\","));
+        assert!(row.contains("hook: __rshooks_entry_body_0,"));
+        assert!(row.contains("cbak: None,"));
+        assert!(row.contains("can_emit: &[],"));
+    }
+
+    #[test]
+    fn native_entry_row_declared_empty_can_emit_is_also_empty_slice() {
+        // `can_emit = []` (declared, but empty) renders identically to
+        // `can_emit` being absent altogether — both are "may emit nothing".
+        let entry = sample(); // hook_can_emit: Some(vec![])
+        let row = render_native_entry_row(&entry);
+        assert!(row.contains("can_emit: &[],"));
+    }
+
+    #[test]
+    fn native_entry_row_with_cbak_and_can_emit() {
+        let mut entry = sample();
+        entry.cbak_fn = Some("deposit_cbak".to_string());
+        entry.hook_can_emit = Some(vec!["Payment".to_string(), "Invoke".to_string()]);
+        let row = render_native_entry_row(&entry);
+        assert!(row.contains("cbak: Some(__rshooks_cbak_body_0),"));
+        assert!(row.contains(
+            "can_emit: &[::rshooks::tx_type::TxType::Payment, \
+             ::rshooks::tx_type::TxType::Invoke],"
+        ));
+    }
+
+    #[test]
+    fn native_entries_table_has_one_row_per_entry_gated_off_wasm() {
+        let mut e0 = sample();
+        e0.cbak_fn = Some("deposit_cbak".to_string());
+        let mut e1 = sample();
+        e1.index = 1;
+        e1.hook_fn = "withdraw".to_string();
+        e1.cbak_fn = None;
+        e1.hook_can_emit = None;
+
+        let table = render_native_entries_table("Vault", &[e0, e1]);
+        assert!(table.starts_with("#[cfg(not(target_arch = \"wasm32\"))]\n"));
+        assert!(table.contains("impl ::rshooks::decl::HookChainEntries for Vault {"));
+        assert!(table.contains("const ENTRIES: &'static [::rshooks::decl::NativeEntry] = &[\n"));
+        assert_eq!(table.matches("::rshooks::decl::NativeEntry {").count(), 2);
+        assert!(table.contains("name: \"deposit\","));
+        assert!(table.contains("name: \"withdraw\","));
+        assert!(table.contains("cbak: Some(__rshooks_cbak_body_0),"));
+        assert!(table.contains("cbak: None,"));
     }
 }
