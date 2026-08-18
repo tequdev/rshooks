@@ -1,9 +1,5 @@
 //! Generates `sethook.template.json` (the SetHook "occupied-position patch")
 //! and its `sethook.template.meta.json` provenance sidecar.
-//!
-//! See docs/MULTI_HOOK_STRUCT_DESIGN.md §9 and the rshooks v0.2
-//! implementation contract §C item 6-7 for the normative field layout and
-//! generation rules.
 
 use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -70,7 +66,7 @@ struct HooksArrayItem {
 enum HookSlot {
     /// A position-preserving no-op. MUST stay exactly `{}` — adding any
     /// field (even under `--override`) turns it into a different, non-op
-    /// SetHook operation (design §9.2).
+    /// SetHook operation.
     Gap(GapMarker),
     Entry(Box<HookEntryTemplate>),
 }
@@ -78,7 +74,10 @@ enum HookSlot {
 #[derive(Serialize)]
 struct GapMarker {}
 
-/// Field order matches design §9.1 / contract §C item 6 exactly.
+/// Field declaration order is the emitted JSON key order (serde preserves
+/// struct-field order); reordering these fields changes the generated
+/// template's byte-for-byte output, so this order must match design §9.1 /
+/// contract §C item 6 exactly.
 #[derive(Serialize)]
 struct HookEntryTemplate {
     #[serde(rename = "CreateCode")]
@@ -187,7 +186,7 @@ fn build_entry_template(
 /// Derives `required_amendments` from what the template's own fields
 /// structurally require. Always includes `"Hooks"`. Does NOT account for
 /// Hook API surface used inside the wasm itself — that limitation is
-/// documented in the sidecar's own field, per contract §C item 7.
+/// documented in the sidecar's own field.
 #[must_use]
 pub fn required_amendments(entries: &[EntryDecl]) -> Vec<String> {
     let mut amendments = vec!["Hooks".to_string()];

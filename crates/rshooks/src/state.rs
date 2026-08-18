@@ -1084,8 +1084,8 @@ mod tests {
 
     // `TypedStateKey`: a key type paired with exactly one value type, via
     // the `_typed`-suffixed functions (see their doc comments) — a plain
-    // trait impl, unlike the old `hook_state!` proc-macro pairing form, so
-    // it can be exercised directly here rather than only via a doctest.
+    // trait impl, so it can be exercised directly here rather than only
+    // via a doctest.
     impl TypedStateKey for TestKey {
         type Value = u32;
     }

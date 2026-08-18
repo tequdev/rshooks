@@ -2,13 +2,10 @@
 //!
 //! `#[hooks] struct` and `#[hooks] impl` each embed a JSON declaration in the
 //! name of a deliberately dead wasm export, using the same
-//! prefix-plus-uppercase-hex mechanism the legacy (now removed) `metadata!`
-//! carrier used. This module extracts and validates both carriers and
-//! exposes the shared trigger/mask logic the sidecar and SetHook template
-//! generators both need.
-//!
-//! See the rshooks v0.2 implementation contract §B (carrier JSON shapes) and
-//! §C (orchestrator behavior).
+//! prefix-plus-uppercase-hex mechanism as the `metadata!` carrier. This
+//! module extracts and validates both carriers and exposes the shared
+//! trigger/mask logic the sidecar and SetHook template generators both
+//! need.
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -426,7 +423,7 @@ pub fn hook_on_all_mask() -> String {
 
 /// Derives the wire-shape `HookOn`/`HookOnIncoming`/`HookOnOutgoing` values
 /// for one entry's trigger declaration, mapping the three-state carrier
-/// shape onto the protocol's mask fields exactly as design §9.2 specifies.
+/// shape onto the protocol's mask fields.
 pub fn resolve_trigger_masks(on: &OnDecl) -> Result<TriggerMasks> {
     match on.form.as_str() {
         "omitted" => Ok(TriggerMasks::default()),

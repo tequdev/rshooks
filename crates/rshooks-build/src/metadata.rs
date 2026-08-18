@@ -10,10 +10,10 @@ use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use sha2::{Digest, Sha512};
 
-/// Prefix used by the (now removed) `metadata!` carrier exports in raw Hook
-/// wasm artifacts. Still detected — never parsed — so a crate that has not
-/// migrated to `#[hooks]` gets a migration hint instead of a generic "no
-/// chain found" error.
+/// Prefix used by `metadata!` (v1) carrier exports in raw Hook wasm
+/// artifacts. Detected — never parsed — so a crate that has not migrated to
+/// `#[hooks]` gets a migration hint instead of a generic "no chain found"
+/// error.
 pub const METADATA_EXPORT_PREFIX: &str = "__rshooks_metadata_v1_";
 
 /// Canonical Xahau JSON spellings for every known `TxType` variant

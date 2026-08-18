@@ -1,9 +1,5 @@
 //! The v2 multi-artifact build orchestrator ("Strategy A" — discovery build
 //! + per-index `--cfg` reselected builds).
-//!
-//! See docs/MULTI_HOOK_STRUCT_DESIGN.md §7 (build strategy) and §9 (SetHook
-//! template), and the rshooks v0.2 implementation contract §C, for the
-//! normative behavior this module implements.
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, Read as _, Write as _};
@@ -262,8 +258,8 @@ fn precheck_exports(wasm: &[u8], entry: &EntryDecl) -> Result<()> {
     Ok(())
 }
 
-/// The design §6.3 emit/can_emit/cbak truth table, evaluated against the
-/// final (post-pipeline) wasm's reachable `emit` import.
+/// The emit/can_emit/cbak truth table, evaluated against the final
+/// (post-pipeline) wasm's reachable `emit` import.
 fn emit_truth_table_warnings(
     index: u8,
     hook_fn: &str,
@@ -311,8 +307,7 @@ fn emit_truth_table_warnings(
 
 /// The invariant inputs to every `cargo`/`rustc` invocation in one build
 /// (discovery and all per-index selected builds): resolved package
-/// identity, workspace paths, and the authoritative lockfile digest. See
-/// design §7.1.
+/// identity, workspace paths, and the authoritative lockfile digest.
 struct BuildPlan {
     cargo: PathBuf,
     manifest_path: Option<PathBuf>,
@@ -781,7 +776,7 @@ fn write_staged_file(path: &Path, bytes: &[u8]) -> Result<()> {
 /// [`acquire_lock`]) for the whole chain build, not just this step — `run`
 /// acquires it once, before discovery, and holds it across every entry
 /// build and every `publish` call. On any failure, staging is removed and
-/// `current` is left untouched (design §7.4, contract §C item 7).
+/// `current` is left untouched.
 fn publish(
     root: &Path,
     staged_wasms: &[(String, Vec<u8>)],
@@ -871,7 +866,7 @@ fn is_prune_eligible(age_since_modified: Duration) -> bool {
 /// Best-effort: failures to remove an old generation, or to read its mtime,
 /// are not fatal — an unreadable mtime is treated as "not yet eligible"
 /// rather than deleted (a resolved `current -> gen-N` consumer may still be
-/// reading a pruning candidate; see design §7.4).
+/// reading a pruning candidate).
 fn retain_latest_generations(root: &Path, keep: usize) {
     let Ok(gens) = list_generations(root) else {
         return;
@@ -1095,9 +1090,8 @@ mod tests {
         let wasms = vec![("0.deposit.wasm".to_string(), b"AA".to_vec())];
         let sidecars = vec![("0.deposit.metadata.json".to_string(), b"{}".to_vec())];
 
-        // `publish` no longer acquires the lock itself — `run` acquires it
-        // once for the whole chain build and holds it across every
-        // `publish` call; simulate that here.
+        // `publish` expects the caller to already hold the publish lock for
+        // the whole chain build; simulate that here as `run` does.
         let lock = acquire_lock(&root).expect("acquire lock for the whole build, as `run` does");
 
         let gen1 = publish(&root, &wasms, &sidecars, b"{}", b"{}").expect("first publish");

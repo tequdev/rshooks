@@ -89,7 +89,7 @@ impl Serialize for EntrySidecarDocument {
         map.serialize_entry("index", &self.entry.index)?;
         map.serialize_entry("hook_fn", &self.entry.hook_fn)?;
         map.serialize_entry("cbak_fn", &self.entry.cbak_fn)?;
-        // `name` mirrors `hook_fn` per contract §C item 5 ("name := hook_fn").
+        // Intentional duplication: `name` mirrors `hook_fn` (contract §C item 5).
         map.serialize_entry("name", &self.entry.hook_fn)?;
         map.serialize_entry("description", &self.entry.description)?;
 
