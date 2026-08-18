@@ -104,8 +104,11 @@ paths in this crate (`setup`, `action_seat`, `push_l1_seat_entries`, and
 bytes through the raw `state`/`state_set`/`otxn_param`/`hook_param_exact`
 API instead.
 `reward_rate`/`reward_delay` are the exception: those *do* use the typed
-`Governance.reward_rate`/`Governance.reward_delay` accessors, at their 4
-total call sites (2 writes in governance's setup, 2 reads in reward).
+`.reward_rate`/`.reward_delay` accessors, at their 4 total call sites (2
+writes in governance's setup, 2 reads in `reward`). `reward` declares a
+`&self` receiver and reads them as `self.reward_rate`/`self.reward_delay`
+— `govern`'s dense paths have no field accesses of their own (see above)
+and stay receiver-less.
 
 This is a real, measured build constraint, not a style preference. Every
 layer of the typed accessor chain (`State::at` -> `StateEntry::get` ->

@@ -15,6 +15,24 @@ the tutorial chapter that covers it, or the macro's own rustdoc in
 | `#[hook(<index>, ...)]` | Inside a `#[hooks]` impl: declares one Hook entry at the given chain position (`0..=9`, required). Turns a plain `fn name() -> i64` into that index's `hook` export. Named args: `name`, `on`/`on_incoming`+`on_outgoing`, `can_emit`, `description`. | `#[hook(0, name = "accept", on = [Invoke])] fn main() -> i64 { accept!() }` |
 | `#[cbak(<index>)]` | Pairs with a `#[hook]` at the same index; exports `cbak` for that index — the optional callback invoked when a transaction this entry emitted later settles. Index only, no other arguments. | `#[cbak(0)] fn my_cbak() -> i64 { accept!() }` |
 
+### Receivers on `#[hook]`/`#[cbak]` entries and impl helpers
+
+An entry function, and a non-attributed helper declared inside the same
+`#[hooks] impl`, accept exactly one optional receiver:
+
+| receiver | accepted? |
+|---|---|
+| none (`fn main() -> i64`) | yes — the pre-existing, still-canonical form for a chain with nothing declared to read |
+| `&self` (`fn main(&self) -> i64`) | yes — receives the chain's single zero-sized static by shared reference; reach its fields as `self.<field>` |
+| `self` / `mut self` / `self: T` | **no** — diagnostic: "use `&self` — hook entrypoints receive the chain declaration by shared reference (it is zero-sized)" |
+| `&mut self` / `&'a mut self` | **no** — diagnostic: "chain handles are zero-sized and immutable; ledger state is accessed through the handles, not by mutating the struct — use `&self`" |
+
+Both accepted forms measure byte-identical wasm; the choice is style, not
+performance. Code outside the annotated `impl` (a free function, another
+module) has no `self` to borrow and reaches the same static by the
+struct's own name instead (`MyHook.some_field`) — see [Anatomy of a
+Hook](../concepts/anatomy.md#the-struct-has-no-runtime-instance-but-entries-may-borrow-it).
+
 See [Anatomy of a Hook](../concepts/anatomy.md), [Hook
 Chains](../concepts/chains.md), [Per-Hook
 Attributes](../build/metadata.md), and [Emitting

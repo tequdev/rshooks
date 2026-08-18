@@ -216,11 +216,12 @@ pub struct TypedData {
 `Instruction` get `HookData`/`ParamValue`-equivalent codegen — the field
 attributes (`#[state(key_by = ...)]`, `#[hook_param(...)]`,
 `#[otxn_param(...)]`) tie each field's key/name to its value type, the
-struct-field equivalent of `HookState`'s pairing form. Used directly, with
-no manual byte packing anywhere:
+struct-field equivalent of `HookState`'s pairing form. Used directly inside
+the `#[hooks] impl` via a `&self` entry, with no manual byte packing
+anywhere:
 
 ```rust,ignore
-let deposit = TypedData.deposits.at(DepositKey { tag: DEPOSIT_TAG, owner });
+let deposit = self.deposits.at(DepositKey { tag: DEPOSIT_TAG, owner });
 let current = deposit.get()?.unwrap_or(EMPTY_DEPOSIT);
 // ...
 deposit.set(&next)?;

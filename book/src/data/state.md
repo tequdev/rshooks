@@ -133,10 +133,13 @@ pub struct StateCounter {
 declares a field named `counter`, addressed by the fixed key `b"counter"`,
 holding a `u64`. Because the struct has a named field, the macro also
 generates a `static` value named after the struct (`StateCounter`, same
-name, different namespace — see [Anatomy of a Hook](../concepts/anatomy.md#the-struct-has-no-runtime-instance)),
-so the field's accessors are called as `StateCounter.counter.get()`.
-`key` also accepts a `const` reference to something more structured than a
-literal, as long as it encodes:
+name, different namespace — see [Anatomy of a Hook](../concepts/anatomy.md#the-struct-has-no-runtime-instance-but-entries-may-borrow-it)).
+An entry (or a helper inside the same `#[hooks] impl`) declares `&self` to
+receive that static and calls the field's accessors as
+`self.counter.get()`; code outside the impl reaches the identical static by
+the struct's own name instead: `StateCounter.counter.get()`. `key` also
+accepts a `const` reference to something more structured than a literal, as
+long as it encodes:
 
 ```rust,ignore
 const ENABLED_KEY: StateKey = StateKey(pad!(b"enabled"));
@@ -167,14 +170,19 @@ pub struct TypedData {
 }
 ```
 
-`TypedData.deposits` on its own is the *field*, not yet addressed to a
-specific entry — call `.at(args)` to bind the key's runtime arguments and
-get a handle with the same accessor set:
+`deposits` on its own is the *field*, not yet addressed to a specific
+entry — call `.at(args)` to bind the key's runtime arguments and get a
+handle with the same accessor set. Inside the `#[hooks] impl`, an entry
+reaches it as `self.deposits`:
 
 ```rust,ignore
-let deposit = TypedData.deposits.at(DepositKey { tag: DEPOSIT_TAG, owner });
-let current = deposit.get()?;
-deposit.set(&next)?;
+#[hook(0, on = [Invoke])]
+fn main(&self) -> i64 {
+    let deposit = self.deposits.at(DepositKey { tag: DEPOSIT_TAG, owner });
+    let current = deposit.get()?;
+    deposit.set(&next)?;
+    // ...
+}
 ```
 
 `DepositKey` here is any type that already implements `StateKeyEncode` —
@@ -217,11 +225,11 @@ pub struct StateCounter {
 #[hooks]
 impl StateCounter {
     #[hook(0, on = [Invoke])]
-    fn main() -> i64 {
-        let count = StateCounter.counter.get().unwrap_or(Some(0)).unwrap_or(0);
+    fn main(&self) -> i64 {
+        let count = self.counter.get().unwrap_or(Some(0)).unwrap_or(0);
 
         let next = count.wrapping_add(1);
-        if StateCounter.counter.set(&next).is_err() {
+        if self.counter.set(&next).is_err() {
             rollback!(
                 b"state-counter: state_set failed",
                 StateCounterError::StateSetFailed
@@ -233,10 +241,10 @@ impl StateCounter {
 }
 ```
 
-`StateCounter.counter.get()` returns `Result<Option<u64>>`: `Ok(None)`
-means "no entry yet" (see below), so the double `unwrap_or` handles both
-"never written" and "an unexpected read error" the same way, defaulting to
-zero either way.
+`main` declares a `&self` receiver, so `self.counter.get()` returns
+`Result<Option<u64>>`: `Ok(None)` means "no entry yet" (see below), so the
+double `unwrap_or` handles both "never written" and "an unexpected read
+error" the same way, defaulting to zero either way.
 
 ## `Ok(None)` means "no entry" — never a special-cased error
 
@@ -295,15 +303,15 @@ pub struct StateForeign {
 #[hooks]
 impl StateForeign {
     #[hook(0, on = [Invoke])]
-    fn main() -> i64 {
-        let Ok(target) = StateForeign.acct.get_required() else {
+    fn main(&self) -> i64 {
+        let Ok(target) = self.acct.get_required() else {
             rollback!(
                 b"state-foreign: ACCT parameter not configured",
                 StateForeignError::AcctNotConfigured
             )
         };
 
-        let flag = match StateForeign
+        let flag = match self
             .enabled
             .get_foreign(None, Some(target.as_ref()))
         {

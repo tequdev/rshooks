@@ -75,25 +75,44 @@ pub struct TypedData {
 }
 ```
 
-`TypedData.deposits` is the **field** — the thing this hook operates on, and
-what carries the accessors once bound to a key via `.at(..)`. Used directly
-in `src/lib.rs` — no manual byte packing anywhere:
+`deposits` is the **field** — the thing this hook operates on, and what
+carries the accessors once bound to a key via `.at(..)`. `main` declares a
+`&self` receiver, so it reaches its own chain's fields as `self.deposits` —
+no manual byte packing anywhere:
 
 ```rust
-let deposit = TypedData.deposits.at(DepositKey { tag: DEPOSIT_TAG, owner });
-let current = deposit.get()?.unwrap_or(EMPTY_DEPOSIT);
-// ...
-deposit.set(&next)?;
+#[hook(0, on = [Invoke])]
+fn main(&self) -> i64 {
+    let deposit = self.deposits.at(DepositKey { tag: DEPOSIT_TAG, owner });
+    let current = deposit.get()?.unwrap_or(EMPTY_DEPOSIT);
+    // ...
+    deposit.set(&next)?;
+}
 ```
 
 `.get()`/`.set()`/`.delete()` (and `.update()`, unused here) are inherent
 methods on the bound `StateEntry` `.at(..)` returns, each an
 `#[inline(always)]` forward to `state::state_get`/`state_set_loose` — the
 same code, written in the order it reads best. The parameter side has the
-same shape: `TypedData.config.get_or_default()` and
-`TypedData.instruction.get_required()`, both resolving `Config`/
-`Instruction` from the field's own declared value type — no turbofish, no
-independently inferred return type.
+same shape: `self.instruction.get_required()`, resolving `Instruction`
+from the field's own declared value type — no turbofish, no independently
+inferred return type. (`config()` below reads `config` the same way, but
+from a free function outside the `#[hooks] impl`, so it reaches the field
+by its struct-name static instead: `TypedData.config.get_or_default()` —
+see "`self` vs. the struct-name static" below.)
+
+### `self` vs. the struct-name static
+
+`&self` and `TypedData` name the exact same value — the single, zero-sized
+instance the `#[hooks]` struct macro generates as `static TypedData:
+TypedData`. An entry or helper declared *inside* the `#[hooks] impl` gets
+that instance handed to it as `&self` and writes `self.deposits`; code
+*outside* the impl — `config()`/`deposits_paused()` below are free
+functions, not impl members — has no `self` to borrow, so it names the
+same static directly: `TypedData.config`. Both forms are permanently legal
+and measure byte-identical wasm (a reference to a zero-sized value
+optimizes away entirely); this crate's examples use `&self` inside the
+annotated impl and the struct-name static everywhere else.
 
 ## Pairing a key/name with its value type
 
@@ -251,8 +270,9 @@ why it's the idiom this crate prefers).
 
 ## Hook parameter hex encoding
 
-Both `CFG` (installed at `SetHook` time, `TypedData.config`) and `INS`
-(attached to each `Invoke` transaction, `TypedData.instruction`) decode as
+Both `CFG` (installed at `SetHook` time, `TypedData`'s `config` field) and
+`INS` (attached to each `Invoke` transaction, `TypedData`'s `instruction`
+field) decode as
 `#[derive(ParamValue)]` structs, so their wire layout is exactly "every
 field, in declaration order, little-endian, back-to-back"
 (`rshooks::convert`'s crate-wide convention — see `Config`/

@@ -443,7 +443,7 @@ impl Governance {
     /// Reward entry point (`Hooks[1]` on the real genesis account). See
     /// the crate module doc comment for the full behavior.
     #[hook(1, on = [Invoke, ClaimReward], can_emit = [GenesisMint])]
-    fn reward() -> i64 {
+    fn reward(&self) -> i64 {
         if etxn_reserve(1).is_err() {
             RewardError::EmitFailed.rollback(b"reward: etxn_reserve failed");
         }
@@ -469,12 +469,12 @@ impl Governance {
             accept!(b"Reward: Passing outgoing txn", 0);
         }
 
-        let rr = Governance
+        let rr = self
             .reward_rate
             .get()
             .unwrap_or(None)
             .unwrap_or(DEFAULT_REWARD_RATE);
-        let rd = Governance
+        let rd = self
             .reward_delay
             .get()
             .unwrap_or(None)

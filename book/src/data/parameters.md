@@ -148,7 +148,7 @@ pub struct StateForeign {
 ```
 
 ```rust,ignore
-let Ok(target) = StateForeign.acct.get_required() else {
+let Ok(target) = self.acct.get_required() else {
     rollback!(
         b"state-foreign: ACCT parameter not configured",
         StateForeignError::AcctNotConfigured
@@ -156,7 +156,8 @@ let Ok(target) = StateForeign.acct.get_required() else {
 };
 ```
 
-(from `examples/09_state-foreign`.) `get_required()` collapses "absent" and
+(from `examples/09_state-foreign`'s `&self` entry.) `get_required()`
+collapses "absent" and
 "present but malformed" into the same `Err` at this call site — the hook
 treats both as "can't proceed," and the `else` branch rolls back either
 way.
@@ -257,10 +258,11 @@ error can pair the right name with the wrong type, or the wrong name with
 the right type, and both compile fine as long as `T: FixedRead`. A
 `#[hook_param(...)]`/`#[otxn_param(...)]` field removes that degree of
 freedom: the field's declared name is permanently tied to exactly one value
-type, so `TypedData.config.get_or_default()` and
-`TypedData.instruction.get_required()` in `examples/12_typed-data` can
-never accidentally decode one parameter's bytes as the other's struct
-shape — the compiler resolves the return type from the field itself, with
+type, so `TypedData.config.get_or_default()` (read from a free function
+outside the impl) and `self.instruction.get_required()` (read directly
+inside `examples/12_typed-data`'s `&self` entry) can never accidentally
+decode one parameter's bytes as the other's struct shape — the compiler
+resolves the return type from the field itself, with
 no independently-chosen type left for a mismatch to hide in. This is the
 identical safety property [Hook State](state.md)'s `#[state(...)]` fields
 give the key/value side; see [Typed Data with Derives](typed-data.md) for

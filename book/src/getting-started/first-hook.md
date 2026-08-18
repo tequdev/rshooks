@@ -11,8 +11,10 @@ Before the code, two concepts this whole book builds on:
 - **The struct is a declaration vessel, not a runtime instance.** A
   `#[hooks]` struct never gets constructed and never holds real data at
   runtime — it exists so a name, its fields, and the Hook entries that use
-  them can all be declared in one place. There is no `self`, and no object
-  to build.
+  them can all be declared in one place. `AcceptAll` declares no fields, so
+  its entry has nothing to receive and takes no receiver at all — later
+  chapters, once a chain has declared fields worth reading, show the `&self`
+  form an entry uses to reach them.
 - **Every Hook entry has an explicit index.** The index is this crate's
   Hook's position in the account's `Hooks` array (the one a `SetHook`
   transaction installs into) — position `0`, `1`, and so on, up to `9`.
@@ -92,9 +94,10 @@ declares one Hook entry:
   Attributes](../build/metadata.md) for what that means.
 
 The annotated function itself is a plain, argument-less associated function
-returning `i64` — not a method (there's no `self` to take; see the
-declaration-vessel note above). `#[hooks]` expands it into the wasm export
-the Hook host requires:
+returning `i64`. `AcceptAll` declares no fields, so there's nothing for a
+receiver to reach — omitting it entirely is the natural, minimal form for a
+Hook like this one. `#[hooks]` expands it into the wasm export the Hook
+host requires:
 
 ```rust,ignore
 #[unsafe(no_mangle)]
@@ -104,13 +107,13 @@ pub extern "C" fn hook(_reserved: u32) -> i64 {
 ```
 
 The function's own name (`main` here) is just a convention; what matters is
-the `hook` export it produces for this entry's build. A hook entry taking
-`self`, arguments, or returning anything but `i64` is rejected at compile
-time with a pointed error rather than a malformed export — including a
-dedicated diagnostic ("Hook entrypoints are stateless associated
-functions") if you accidentally write `&self`. Use `#[cbak(0)]` the same
-way, on the same index, to declare the optional settlement callback for
-this entry.
+the `hook` export it produces for this entry's build. A hook entry may
+optionally take `&self` — the one receiver form `#[hooks]` accepts, covered
+once a chain has fields worth reaching in [Hook State](../data/state.md) —
+but any other receiver shape (`self`, `mut self`, `&mut self`, `self: T`)
+or a non-`i64` return type is rejected at compile time with a pointed error
+rather than a malformed export. Use `#[cbak(0)]` the same way, on the same
+index, to declare the optional settlement callback for this entry.
 
 ### `accept!()`
 

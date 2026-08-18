@@ -21,16 +21,16 @@ pub struct StateCounter {
 impl StateCounter {
     /// Increments the persistent counter and accepts with the new count.
     #[hook(0, on = [Invoke])]
-    fn main() -> i64 {
+    fn main(&self) -> i64 {
         // Deliberately masks a decode/host-read failure too, matching this
         // example's original `hook_state!`-based behavior
         // (`.unwrap_or(Some(0)).unwrap_or(0)`) of falling back to 0 on
         // *any* read failure — not just absence. See example 12's
         // `config()` helper for the identical masking precedent.
-        let count = StateCounter.counter.get().unwrap_or(Some(0)).unwrap_or(0);
+        let count = self.counter.get().unwrap_or(Some(0)).unwrap_or(0);
 
         let next = count.wrapping_add(1);
-        if StateCounter.counter.set(&next).is_err() {
+        if self.counter.set(&next).is_err() {
             rollback!(
                 b"state-counter: state_set failed",
                 StateCounterError::StateSetFailed

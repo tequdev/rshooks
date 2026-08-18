@@ -35,15 +35,15 @@ pub struct StateForeign {
 #[hooks]
 impl StateForeign {
     #[hook(0, on = [Invoke])]
-    fn main() -> i64 {
-        let Ok(target) = StateForeign.acct.get_required() else {
+    fn main(&self) -> i64 {
+        let Ok(target) = self.acct.get_required() else {
             rollback!(
                 b"state-foreign: ACCT parameter not configured",
                 StateForeignError::AcctNotConfigured
             )
         };
 
-        let flag = match StateForeign
+        let flag = match self
             .enabled
             .get_foreign(None, Some(target.as_ref()))
         {

@@ -10,7 +10,7 @@ by a separate "registry"/"oracle" account.
 ## Code walkthrough
 
 ```rust
-match StateForeign.enabled.get_foreign(None, Some(target.as_ref())) {
+match self.enabled.get_foreign(None, Some(target.as_ref())) {
     Ok(Some(v)) => v,
     Ok(None) => rollback!(b"...", StateForeignError::NotConfiguredOnTarget),
     Err(_) => rollback!(b"...", StateForeignError::ReadFailed),
@@ -32,7 +32,7 @@ scope for this minimal example).
 
 `target` itself comes from a required Hook parameter (`ACCT`), declared as
 `#[hook_param(name = b"ACCT", required)] acct: HookParam<AccountId>` and
-read with `StateForeign.acct.get_required()` — the same "config via
+read with `self.acct.get_required()` — the same "config via
 `hook_param`" idiom as `examples/03_hook-params`, just requiring the
 result to be exactly `AccountId`'s length (20 bytes, enforced by
 `AccountId`'s `FixedRead` impl, no turbofish) instead of manually checking

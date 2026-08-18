@@ -17,9 +17,16 @@ pub struct StateCounter {
     counter: State<u64>,
 }
 
-let count = StateCounter.counter.get().unwrap_or(Some(0)).unwrap_or(0);
-let next = count.wrapping_add(1);
-StateCounter.counter.set(&next);
+#[hooks]
+impl StateCounter {
+    #[hook(0, on = [Invoke])]
+    fn main(&self) -> i64 {
+        let count = self.counter.get().unwrap_or(Some(0)).unwrap_or(0);
+        let next = count.wrapping_add(1);
+        self.counter.set(&next);
+        // ...
+    }
+}
 ```
 
 `#[state(key = <expr>)]` is the **constant-key** form: `<expr>` is any
@@ -35,16 +42,21 @@ implemented for `[u8; N]`. The struct macro expands this into:
 - the field's type rewritten to `State<u64, __marker>` behind the scenes
   (the `State<u64>` you write is sugar over that),
 - a `static StateCounter: StateCounter` value binding (the struct's field
-  values are all zero-sized, so this is free), which is why
-  `StateCounter.counter.get()` above reads as a value access even though
-  `StateCounter` is also the struct's type name — type and value names live
-  in separate namespaces.
+  values are all zero-sized, so this is free). Inside the `#[hooks] impl`,
+  an entry declares a `&self` receiver and that same static is passed in,
+  so `self.counter` and `StateCounter.counter` name the identical value —
+  `self.` is just the ordinary Rust spelling for "the receiver a method was
+  called on." `&self` measures byte-identical wasm to the no-receiver form
+  (it's a reference to a zero-sized value, so it optimizes away entirely).
+  Code *outside* the `impl` — a free function, another module — has no
+  `self` to borrow, and reaches the same static by its struct name instead:
+  `StateCounter.counter`.
 
 Because this field's `KeyArgs` is `()` (a constant key, not a per-instance
 one), `.get()`/`.set()`/`.update()`/`.delete()` are available directly on
-`StateCounter.counter` — no `.at(key)` call needed. See
-`examples/12_typed-data` for the keyed form (`#[state(key_by = SomeKey)]`),
-which does need `.at(key)`.
+`self.counter` — no `.at(key)` call needed. See `examples/12_typed-data`
+for the keyed form (`#[state(key_by = SomeKey)]`), which does need
+`.at(key)`.
 
 ## Same slot as before: real-length encoding, host left-pads
 

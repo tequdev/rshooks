@@ -66,23 +66,49 @@ named-field struct whose fields carry `#[state]`/`#[hook_param]`/
 to the other is exactly "replace the trailing `;` with a field block";
 nothing else about the declaration changes.
 
-### The struct has no runtime instance
+### The struct has no runtime instance — but entries may borrow it
 
 This is worth stating plainly, because Rust's struct/`impl` syntax normally
-implies an object with methods that take `self`. Here it doesn't: a
-`#[hooks]` struct is never constructed at runtime, and its entry functions
-never take `self` — they're **stateless associated functions**, called the
-same way `String::new()` is. Writing `&self` on an entry is a compile
-error with a dedicated message ("Hook entrypoints are stateless associated
-functions") rather than a type mismatch, since the honest complaint isn't
-about types — it's that there's no instance to borrow.
+implies an object with methods that take `self`. Here, *you* never
+construct one: a `#[hooks]` struct is never built by your own code. Instead
+the macro generates its own single, zero-sized instance for you — a
+`static` named the same as the struct (`static AcceptAll: AcceptAll`),
+existing purely so its fields' declared state/parameters have something to
+hang accessor methods off. `AcceptAll` declares no fields, so there's
+nothing on it worth reaching, which is why its entry above takes no
+receiver at all.
 
-What the struct's fields *do* give you, when it has any, is a single
-`static` value (named the same as the struct) whose fields you call
-accessor methods on — `AcceptAll.some_field.get()`, for instance. Those
-accessors read and write real on-ledger state or parameters; the struct
-value itself is a zero-sized handle with nothing to initialize, not a
-cache or a session object.
+Once a chain *does* declare fields (see [Hook State](../data/state.md)), an
+entry can declare `&self` to receive that one static by shared reference,
+and read its fields as `self.some_field` — the canonical style whenever an
+entry, or a helper function inside the same `impl`, touches a declared
+field:
+
+```rust,ignore
+#[hooks]
+impl StateCounter {
+    #[hook(0, on = [Invoke])]
+    fn main(&self) -> i64 {
+        let count = self.counter.get().unwrap_or(Some(0)).unwrap_or(0);
+        // ...
+    }
+}
+```
+
+Code *outside* the impl — a free function, another module — has no `self`
+to borrow, so it reaches the identical static by the struct's own name
+instead: `StateCounter.counter.get()`. Both spellings name the same
+zero-sized value and measure byte-identical wasm — `&self` is a reference
+to a zero-sized value, so it optimizes away completely, even across an
+`#[inline(never)]` boundary. Neither form is "the real one"; use `&self`
+inside the annotated `impl` and the struct-name static everywhere else.
+
+The one receiver `#[hooks]` accepts is bare `&self` — no lifetime, not
+`mut`. Every other self-receiver shape (`self`, `mut self`, `&mut self`,
+`self: T`) is a compile error with a dedicated diagnostic rather than a
+type mismatch: chain handles are zero-sized and immutable, so there is
+nothing to own or write through — only to read through a shared
+reference.
 
 ## Entry functions: `#[hook(<index>, ...)]` and `#[cbak(<index>)]`
 
@@ -116,8 +142,9 @@ pub extern "C" fn __rshooks_hook_sel_0(_reserved: u32) -> i64 {
 The macro enforces the annotated item's shape exactly, and reports any
 violation as a `compile_error!` at the offending token rather than a panic:
 
-- no arguments, and a return type of exactly `-> i64`;
-- no `self` (see above), no `async`/`unsafe`/`const`/`extern` modifiers;
+- an optional bare `&self` receiver (see above) and otherwise no arguments,
+  plus a return type of exactly `-> i64`;
+- no `async`/`unsafe`/`const`/`extern` modifiers;
 - no generics, no `where` clause.
 
 The annotated function's own name is arbitrary — `main` is just a

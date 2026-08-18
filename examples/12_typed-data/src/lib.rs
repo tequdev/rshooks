@@ -172,7 +172,7 @@ const EMPTY_DEPOSIT: DepositValue = DepositValue {
 impl TypedData {
     /// Hook entry point. See the module doc comment for the full behavior.
     #[hook(0, on = [Invoke])]
-    fn main() -> i64 {
+    fn main(&self) -> i64 {
         let Ok(owner) = otxn_field_typed(sfAccount) else {
             rollback!(
                 b"typed-data: sfAccount missing from the originating transaction",
@@ -180,14 +180,14 @@ impl TypedData {
             )
         };
 
-        let Ok(instruction) = TypedData.instruction.get_required() else {
+        let Ok(instruction) = self.instruction.get_required() else {
             rollback!(
                 b"typed-data: INS parameter missing or malformed",
                 TypedDataError::InstructionMissing
             )
         };
 
-        let deposit = TypedData.deposits.at(DepositKey {
+        let deposit = self.deposits.at(DepositKey {
             tag: DEPOSIT_TAG,
             owner,
         });

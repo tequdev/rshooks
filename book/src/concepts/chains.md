@@ -87,17 +87,22 @@ pub struct Governance {
 #[hooks]
 impl Governance {
     #[hook(0, name = "govern", on = [Invoke], can_emit = [Invoke, SetHook])]
-    fn govern() -> i64 { /* ... reads and writes Governance.reward_rate/reward_delay */ }
+    fn govern(&self) -> i64 { /* ... reads and writes self.reward_rate/self.reward_delay */ }
 
     #[hook(1, name = "reward", on = [Invoke, ClaimReward], can_emit = [GenesisMint])]
-    fn reward() -> i64 { /* ... reads Governance.reward_rate/reward_delay */ }
+    fn reward(&self) -> i64 { /* ... reads self.reward_rate/self.reward_delay */ }
 }
 ```
 
-Both entries reference `Governance.reward_rate`/`Governance.reward_delay`
-directly — there is exactly one Rust type for that state entry, so
-`govern`'s write and `reward`'s read can never silently disagree about the
-key's shape or the value's layout.
+Both entries declare a `&self` receiver and reference
+`self.reward_rate`/`self.reward_delay` directly — there is exactly one Rust
+type for that state entry, so `govern`'s write and `reward`'s read can
+never silently disagree about the key's shape or the value's layout. (The
+real `examples/80_governance` crate's dense `govern`/setup path writes
+`reward_rate`/`reward_delay` through the raw API instead — see "A real
+limit," below, for why — while `reward`'s own two reads still go through
+the typed `self.reward_rate`/`self.reward_delay` accessors shown here; this
+sketch shows the model at its cleanest.)
 
 One nuance worth being precise about: **the struct shares the schema, not
 the values.** Both entries read/write the identical on-ledger state key —

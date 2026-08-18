@@ -1,6 +1,7 @@
 # `#[hooks]` エントリの `&self` レシーバ設計検討
 
-Status: design draft(実装なし・設計のみ)
+Status: adopted & implemented (v0.2) — macro support (§3〜§6) landed; book/examples
+の正典スタイル移行(§9 S1/S2、本設計 O2 の採用)も完了。
 
 Target: rshooks v0.2.x(採用する場合。§8 の導入タイミング判断を参照)
 
@@ -249,14 +250,14 @@ O3(必須化)を推奨しない決め手は 2 つ:
   (マージ後では 2 度目の破壊的変更になる)。この場合は examples 16 クレートの
   再書き換えが発生する。
 
-## 9. 未決事項
+## 9. 未決事項(→ 決定事項)
 
-| ID | 論点 | 推奨 |
-|---|---|---|
-| S1 | examples を `&self` 正典スタイルへ一括移行するか、新規ページのみ `&self` にするか | 一括移行(book と examples の乖離を作らない) |
-| S2 | `Vault.` static 直アクセスを book でどう位置づけるか | 「impl 外からのアクセス手段」として 1 箇所で説明 |
-| S3 | ヘルパーの `&mut self` を将来許すか(ZST なので無害ではある) | 拒否を維持(可変性の誤解に対する教育的一線) |
-| S4 | clippy 相当の style lint(self なしエントリへの nudge)を build 側 info 診断で出すか | 出さない(両形式とも正当。うるさい lint は DX を下げる) |
+| ID | 論点 | 推奨 | 状態 |
+|---|---|---|---|
+| S1 | examples を `&self` 正典スタイルへ一括移行するか、新規ページのみ `&self` にするか | 一括移行(book と examples の乖離を作らない) | **決定・実施済み**: 宣言フィールドを直接使う entry(02/09/12/80_governance の `reward`)を `&self`/`self.field` に移行。宣言なし entry(01/03/04/05/06/07/08/10/13/14/15、および 80_governance の `govern`)はフィールドを直接使わない(free fn 経由)ため §7 のルール通り no-receiver のまま。WCE/サイズ/ネストは全例で移行前後バイト一致(実測、02/12/80_governance で確認)。 |
+| S2 | `Vault.` static 直アクセスを book でどう位置づけるか | 「impl 外からのアクセス手段」として 1 箇所で説明 | **決定・実施済み**: `concepts/anatomy.md` §"The struct has no runtime instance — but entries may borrow it" に一本化して説明し、`data/state.md`/`data/parameters.md`/`reference/macros.md` から相互参照。 |
+| S3 | ヘルパーの `&mut self` を将来許すか(ZST なので無害ではある) | 拒否を維持(可変性の誤解に対する教育的一線) | 未変更(本移行のスコープ外) |
+| S4 | clippy 相当の style lint(self なしエントリへの nudge)を build 側 info 診断で出すか | 出さない(両形式とも正当。うるさい lint は DX を下げる) | 未変更(本移行のスコープ外) |
 
 ## 10. 参照
 
