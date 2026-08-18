@@ -289,8 +289,17 @@ pub struct NativeEntry {
     /// index.
     pub cbak: Option<fn(u32) -> i64>,
     /// The transaction types this entry's `#[hook(.., can_emit = [..])]`
-    /// declares it may emit. Empty when `can_emit` is absent.
-    pub can_emit: &'static [crate::tx_type::TxType],
+    /// declares it may emit — the on-chain `HookCanEmit` semantics,
+    /// preserved through the three-state distinction: `None` means no
+    /// `can_emit` was declared at all (unrestricted — matches an absent
+    /// on-chain `HookCanEmit`, which imposes no restriction), while
+    /// `Some(&[])` means `can_emit = []` was declared explicitly (deny-all:
+    /// this entry may emit nothing). `Some(&[Tx, ..])` is the ordinary
+    /// declared-list case. Never conflate `None` with `Some(&[])` — a
+    /// downstream strict-mode check (`rshooks-testenv`'s
+    /// `TestEnv::strict_can_emit`) relies on this distinction to tell
+    /// "unrestricted" apart from "declared to emit nothing".
+    pub can_emit: Option<&'static [crate::tx_type::TxType]>,
 }
 
 /// Implemented by generated code on a `#[hooks]`-annotated chain struct:

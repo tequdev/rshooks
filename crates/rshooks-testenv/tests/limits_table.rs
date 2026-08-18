@@ -193,9 +193,19 @@ fn emit_beyond_reserve_is_too_many_emitted_txn() {
 
 #[test]
 fn burden_overflow_is_fee_too_large() {
-    let env = TestEnv::new().otxn_emitted(u64::MAX, 0);
+    // `otxn_emitted` validates its burden fits in an i64 (the Hook API's
+    // `otxn_burden` return type), so the largest legal seed is `i64::MAX` —
+    // reserved(2) still multiplies it past `i64::MAX`, so `etxn_burden()`
+    // must still report `FEE_TOO_LARGE`.
+    let env = TestEnv::new().otxn_emitted(i64::MAX as u64, 0);
     let exit = env.invoke::<Limits>(5);
     assert_eq!(exit.code, rshooks_core::FEE_TOO_LARGE);
+}
+
+#[test]
+#[should_panic(expected = "burden must fit in an i64")]
+fn otxn_emitted_rejects_a_burden_that_does_not_fit_in_i64() {
+    let _ = TestEnv::new().otxn_emitted(u64::MAX, 0);
 }
 
 #[test]

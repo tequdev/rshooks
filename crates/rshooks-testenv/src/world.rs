@@ -3,7 +3,7 @@
 //! the originating transaction, hook parameters, ledger fields, grants, and
 //! every committed emission/attempt/trace so far).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::vec::Vec;
 
 use crate::grant::Grant;
@@ -115,6 +115,14 @@ pub(crate) struct World {
     /// [`crate::TestEnv::own_namespace`].
     pub(crate) own_namespace: [u8; 32],
     pub(crate) state: HashMap<StateAddr, Vec<u8>>,
+    /// The normalized keys of every entry seeded via
+    /// [`crate::TestEnv::state_entry`] (own account, own namespace at
+    /// *some* point — not necessarily the current one). [`Self::rekey_own_seeds`]
+    /// consults this set to know which `state` entries a later
+    /// `hook_account`/`own_namespace` builder call must follow to their new
+    /// address; a `foreign_state_entry` seed is never added here, so it is
+    /// never re-keyed even if it happens to land at the same address.
+    pub(crate) own_seeded_keys: HashSet<[u8; 32]>,
     pub(crate) grants: HashMap<([u8; 20], [u8; 32]), Vec<Grant>>,
     pub(crate) ledger_seq: u32,
     pub(crate) ledger_time: i64,
@@ -140,6 +148,7 @@ impl World {
             otxn_emitted: None,
             own_namespace: [0u8; 32],
             state: HashMap::new(),
+            own_seeded_keys: HashSet::new(),
             grants: HashMap::new(),
             ledger_seq: 1,
             ledger_time: 0,
@@ -156,6 +165,25 @@ impl World {
     /// [`crate::TestEnv::hook_hash`].
     pub(crate) fn current_hook_hash(&self) -> Option<[u8; 32]> {
         self.hook_hashes.get(&(self.hook_pos as i32)).copied()
+    }
+
+    /// Moves every recorded own-seed entry (see [`Self::own_seeded_keys`])
+    /// from `old` (account, namespace) to `new`, so a `state_entry` seed
+    /// keeps being readable at whatever address `hook_account`/
+    /// `own_namespace` currently name — regardless of which builder call
+    /// came first. A no-op if `old == new`. A `foreign_state_entry` seed
+    /// that happens to sit at `old` is never touched: only normalized keys
+    /// in `own_seeded_keys` are candidates for the move.
+    pub(crate) fn rekey_own_seeds(&mut self, old: ([u8; 20], [u8; 32]), new: ([u8; 20], [u8; 32])) {
+        if old == new {
+            return;
+        }
+        let keys: Vec<[u8; 32]> = self.own_seeded_keys.iter().copied().collect();
+        for key in keys {
+            if let Some(value) = self.state.remove(&(old.0, old.1, key)) {
+                self.state.insert((new.0, new.1, key), value);
+            }
+        }
     }
 
     /// Snapshot of every field a rolled-back/restored invocation must undo:

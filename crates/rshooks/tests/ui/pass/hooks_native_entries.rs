@@ -38,10 +38,13 @@ fn main() {
     let e0 = entries.iter().find(|e| e.index == 0).expect("index 0");
     assert_eq!(e0.name, "main");
     assert!(e0.cbak.is_some());
-    assert_eq!(e0.can_emit, &[TxType::Payment]);
+    // Declared (`can_emit = [Payment]`): `Some(&[..])`, never `None`.
+    assert_eq!(e0.can_emit, Some([TxType::Payment].as_slice()));
 
     let e1 = entries.iter().find(|e| e.index == 1).expect("index 1");
     assert_eq!(e1.name, "second");
     assert!(e1.cbak.is_none());
-    assert!(e1.can_emit.is_empty());
+    // `can_emit` never declared on this entry: `None` (unrestricted),
+    // distinct from a declared-but-empty `Some(&[])`.
+    assert_eq!(e1.can_emit, None);
 }

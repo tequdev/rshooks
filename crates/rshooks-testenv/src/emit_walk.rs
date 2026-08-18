@@ -215,6 +215,12 @@ fn walk_object_body(data: &[u8], pos: &mut usize, depth: u32) -> Result<Vec<Fiel
     walk_fields(data, pos, depth, true)
 }
 
+/// The STI_OBJECT type code — every STArray element's field header must
+/// decode to this type (rippled's real STArray deserialization requires
+/// each element to be an STObject field, e.g. `sfMemo`/`sfSigner`; nothing
+/// else is a legal array element).
+const STI_OBJECT: u32 = 14;
+
 fn walk_array_body(data: &[u8], pos: &mut usize, depth: u32) -> Result<(), ()> {
     loop {
         match data.get(*pos) {
@@ -226,6 +232,9 @@ fn walk_array_body(data: &[u8], pos: &mut usize, depth: u32) -> Result<(), ()> {
             _ => {}
         }
         let (ty, _field) = decode_header(data, pos)?;
+        if ty != STI_OBJECT {
+            return Err(());
+        }
         dispatch_value(data, pos, ty, depth)?;
     }
 }
@@ -473,6 +482,28 @@ mod tests {
         let d = details();
         let mut blob = minimal_payment(&d);
         blob.extend_from_slice(depth_violation);
+        assert!(validate_emit_blob(&blob, Some(&d)).is_err());
+    }
+
+    #[test]
+    fn accepts_an_array_field_of_object_elements() {
+        let d = details();
+        let mut blob = minimal_payment(&d);
+        blob.push(0xFF); // array field: (type 15, field 15)
+        blob.push(0xE2); // element header: (type 14, field 2) -- STObject
+        blob.push(OBJECT_END_MARKER); // empty object body
+        blob.push(ARRAY_END_MARKER);
+        assert!(validate_emit_blob(&blob, Some(&d)).is_ok());
+    }
+
+    #[test]
+    fn rejects_an_array_element_that_is_not_an_object() {
+        let d = details();
+        let mut blob = minimal_payment(&d);
+        blob.push(0xFF); // array field: (type 15, field 15)
+        blob.push(0x21); // element header: (type 2, field 1) -- UInt32, not STObject
+        blob.extend_from_slice(&[0, 0, 0, 1]);
+        blob.push(ARRAY_END_MARKER);
         assert!(validate_emit_blob(&blob, Some(&d)).is_err());
     }
 

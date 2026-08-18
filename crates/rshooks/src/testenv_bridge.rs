@@ -8,7 +8,9 @@
 //! buffer contract (`.claude/design/TESTENV_DESIGN.md` §5.2): a
 //! destination shorter than the value returns
 //! [`HookError::TooSmall`](crate::error::HookError::TooSmall) — it never
-//! truncates.
+//! truncates. [`write_bytes_truncate`]/[`write_bytes_truncate_code`] are the
+//! sole, deliberate exception, mirroring xahaud's own `hook_param`
+//! asymmetry — see their doc comments.
 //!
 //! `pub(crate)`, gated identical to the interception blocks that call it
 //! (`#[cfg(all(not(target_arch = "wasm32"), feature = "testenv"))]`, applied
@@ -62,6 +64,46 @@ pub(crate) fn write_array<const N: usize>(
             None => Err(HookError::TooSmall),
         },
         Err(code) => res(code).map(|v| v as usize),
+    }
+}
+
+/// Truncating counterpart to [`write_bytes`], for `hook_param` only: xahaud's
+/// `hook_param` goes straight to `WRITE_WASM_MEMORY_AND_RETURN`, which writes
+/// `min(src_len, dst_len)` bytes and reports that truncated length — unlike
+/// `otxn_param` (and every other byte-returning call this bridge otherwise
+/// handles), which checks the destination first and returns `TOO_SMALL`.
+/// This asymmetry is xahaud's own behavior, not a design choice made here —
+/// see `hook_param`'s interception block in `api/hook_ctx.rs`, the only
+/// call site that should ever reach for this instead of [`write_bytes`].
+/// Success returns the number of bytes actually copied (`min(out.len,
+/// value.len)`), never the value's full length when it was truncated.
+#[inline(always)]
+pub(crate) fn write_bytes_truncate(out: &mut [u8], r: BackendResult<Vec<u8>>) -> HookResult<usize> {
+    match r {
+        Ok(value) => {
+            let n = out.len().min(value.len());
+            if let (Some(dst), Some(src)) = (out.get_mut(..n), value.get(..n)) {
+                dst.copy_from_slice(src);
+            }
+            Ok(n)
+        }
+        Err(code) => res(code).map(|v| v as usize),
+    }
+}
+
+/// Raw-code counterpart to [`write_bytes_truncate`] — same truncating
+/// contract, undecoded `i64` result. Backs `hook_param_raw_code`.
+#[inline(always)]
+pub(crate) fn write_bytes_truncate_code(out: &mut [u8], r: BackendResult<Vec<u8>>) -> i64 {
+    match r {
+        Ok(value) => {
+            let n = out.len().min(value.len());
+            if let (Some(dst), Some(src)) = (out.get_mut(..n), value.get(..n)) {
+                dst.copy_from_slice(src);
+            }
+            n as i64
+        }
+        Err(code) => code,
     }
 }
 

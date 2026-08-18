@@ -80,10 +80,19 @@ impl TestEnv {
         }
     }
 
-    /// Sets this hook's own account (`hook_account`).
+    /// Sets this hook's own account (`hook_account`). Order-independent
+    /// with [`Self::state_entry`]: any entry already seeded under this
+    /// hook's own account/namespace follows to the new account, whether
+    /// [`Self::state_entry`] or this method was called first (see
+    /// [`crate::world::World::rekey_own_seeds`]).
     #[must_use]
     pub fn hook_account(self, acc: [u8; 20]) -> Self {
-        self.world.borrow_mut().hook_account = acc;
+        let mut w = self.world.borrow_mut();
+        let old = (w.hook_account, w.own_namespace);
+        w.hook_account = acc;
+        let new = (w.hook_account, w.own_namespace);
+        w.rekey_own_seeds(old, new);
+        drop(w);
         self
     }
 
@@ -95,8 +104,21 @@ impl TestEnv {
     }
 
     /// Sets this hook's position in its chain (`hook_pos`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `pos > 9` — a chain holds at most 10 hooks
+    /// (`vendor/xahaud/Enum.h`'s `maxHookChainLength()`), so a larger
+    /// position is a test-author error, not a value a real hook could ever
+    /// observe.
     #[must_use]
+    #[allow(clippy::panic)] // documented API: an out-of-range position is a test-author error
     pub fn hook_pos(self, pos: u32) -> Self {
+        assert!(
+            pos <= 9,
+            "rshooks_testenv::TestEnv::hook_pos: pos must be <= 9 (a chain holds at most 10 \
+             hooks), got {pos}"
+        );
         self.world.borrow_mut().hook_pos = pos;
         self
     }
@@ -127,6 +149,11 @@ impl TestEnv {
         let mut w = self.world.borrow_mut();
         let addr = (w.hook_account, w.own_namespace, norm);
         w.state.insert(addr, value.to_vec());
+        // Recorded so a later `hook_account`/`own_namespace` call re-keys
+        // this seed to the new address instead of orphaning it — see
+        // `World::rekey_own_seeds`. Invocation-time state writes must never
+        // reach this: only this builder records an own-seed.
+        w.own_seeded_keys.insert(norm);
         drop(w);
         self
     }
@@ -182,8 +209,20 @@ impl TestEnv {
     /// `otxn_burden`/`otxn_generation`. Absent, the otxn models an ordinary
     /// (non-emitted) transaction (`otxn_burden() == 1`,
     /// `otxn_generation() == 0`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `burden > i64::MAX` — `otxn_burden` reports this value as
+    /// an `i64` (the Hook API's return type), so a larger value could never
+    /// be observed on-chain and is a test-author error here.
     #[must_use]
+    #[allow(clippy::panic)] // documented API: an out-of-range burden is a test-author error
     pub fn otxn_emitted(self, burden: u64, generation: u32) -> Self {
+        assert!(
+            burden <= i64::MAX as u64,
+            "rshooks_testenv::TestEnv::otxn_emitted: burden must fit in an i64 (Hook API's \
+             `otxn_burden` return type), got {burden}"
+        );
         self.world.borrow_mut().otxn_emitted = Some((burden, generation));
         self
     }
@@ -192,10 +231,16 @@ impl TestEnv {
     /// never called). Extension beyond the exact design §2.4 surface, added
     /// because the design explicitly calls for a configurable own
     /// namespace (see `.claude/design/TESTENV_IMPLEMENTATION.md`'s Stage 4
-    /// world-model note).
+    /// world-model note). Order-independent with [`Self::state_entry`], the
+    /// same way [`Self::hook_account`] is — see that method's doc comment.
     #[must_use]
     pub fn own_namespace(self, ns: [u8; 32]) -> Self {
-        self.world.borrow_mut().own_namespace = ns;
+        let mut w = self.world.borrow_mut();
+        let old = (w.hook_account, w.own_namespace);
+        w.own_namespace = ns;
+        let new = (w.hook_account, w.own_namespace);
+        w.rekey_own_seeds(old, new);
+        drop(w);
         self
     }
 
@@ -212,8 +257,20 @@ impl TestEnv {
     /// Overrides the per-drop base fee the `etxn_fee_base`/`fee_base`
     /// approximation multiplies by (default 10 drops — design §4's
     /// documented fee approximation).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `drops > i64::MAX` — `fee_base` reports this value as an
+    /// `i64` (the Hook API's return type), so a larger value could never be
+    /// observed on-chain and is a test-author error here.
     #[must_use]
+    #[allow(clippy::panic)] // documented API: an out-of-range fee is a test-author error
     pub fn base_fee_drops(self, drops: u64) -> Self {
+        assert!(
+            drops <= i64::MAX as u64,
+            "rshooks_testenv::TestEnv::base_fee_drops: drops must fit in an i64 (Hook API's \
+             `fee_base` return type), got {drops}"
+        );
         self.world.borrow_mut().base_fee_drops = drops;
         self
     }
@@ -329,14 +386,22 @@ impl TestEnv {
 
     #[allow(clippy::panic)] // documented API: a `strict_can_emit` violation is a test-author assertion (design §5.6)
     fn assert_can_emit(&self, entry: &rshooks::decl::NativeEntry, pending: &[EmittedTxn]) {
+        // `None` (no `can_emit` declaration at all) is unrestricted — matches
+        // an absent on-chain `HookCanEmit`, which imposes no restriction.
+        // Only a declared list (`Some(&[..])`, empty slice included)
+        // constrains what this entry may emit — see `NativeEntry::can_emit`'s
+        // doc comment for the full three-state contract.
+        let Some(allowed_list) = entry.can_emit else {
+            return;
+        };
         for txn in pending {
             let ty = txn.tx_type();
-            let allowed = ty.is_some_and(|t| entry.can_emit.contains(&t));
+            let allowed = ty.is_some_and(|t| allowed_list.contains(&t));
             assert!(
                 allowed,
                 "rshooks_testenv::TestEnv::invoke: entry {:?} emitted a transaction of type {:?}, \
                  not declared in its `can_emit` list {:?} (strict_can_emit is enabled)",
-                entry.name, ty, entry.can_emit
+                entry.name, ty, allowed_list
             );
         }
     }
@@ -429,21 +494,21 @@ mod tests {
                 name: "accept",
                 hook: accepting_hook,
                 cbak: None,
-                can_emit: &[],
+                can_emit: None,
             },
             NativeEntry {
                 index: 1,
                 name: "rollback",
                 hook: rolling_back_hook,
                 cbak: None,
-                can_emit: &[],
+                can_emit: None,
             },
             NativeEntry {
                 index: 2,
                 name: "return",
                 hook: returning_hook,
                 cbak: None,
-                can_emit: &[],
+                can_emit: None,
             },
         ];
     }

@@ -1587,10 +1587,13 @@ fn render_entry_body_and_wrappers(
 /// Renders one entry's row in the native `HookChainEntries::ENTRIES` table
 /// (design §2.3): `hook` always points at the entry body function emitted
 /// by [`render_entry_body_and_wrappers`]; `cbak` is `Some(..)` pointing at
-/// the paired cbak body when one was declared, `None` otherwise;
-/// `can_emit` renders the declared `#[hook(.., can_emit = [..])]` list as
-/// `::rshooks::tx_type::TxType::` paths, or an empty slice when absent.
-/// Span-free — see [`render_entry_body_and_wrappers`]'s doc comment.
+/// the paired cbak body when one was declared, `None` otherwise; `can_emit`
+/// preserves [`rshooks::decl::NativeEntry::can_emit`]'s three-state
+/// distinction — `None` when `#[hook(.., can_emit = [..])]` was never
+/// declared on this entry (unrestricted), `Some(&[..])` (an empty slice
+/// included) when it was, rendering each transaction type as an
+/// `::rshooks::tx_type::TxType::` path. Span-free — see
+/// [`render_entry_body_and_wrappers`]'s doc comment.
 fn render_native_entry_row(entry: &EntryJson) -> String {
     let i = entry.index;
     let cbak_expr = if entry.cbak_fn.is_some() {
@@ -1598,21 +1601,24 @@ fn render_native_entry_row(entry: &EntryJson) -> String {
     } else {
         "None".to_string()
     };
-    let can_emit_items: String = entry
-        .hook_can_emit
-        .as_deref()
-        .unwrap_or_default()
-        .iter()
-        .map(|n| format!("::rshooks::tx_type::TxType::{n}"))
-        .collect::<Vec<_>>()
-        .join(", ");
+    let can_emit_expr = match &entry.hook_can_emit {
+        None => "None".to_string(),
+        Some(list) => {
+            let items: String = list
+                .iter()
+                .map(|n| format!("::rshooks::tx_type::TxType::{n}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("Some(&[{items}])")
+        }
+    };
     format!(
         "::rshooks::decl::NativeEntry {{\n\
              index: {i},\n\
              name: \"{}\",\n\
              hook: __rshooks_entry_body_{i},\n\
              cbak: {cbak_expr},\n\
-             can_emit: &[{can_emit_items}],\n\
+             can_emit: {can_emit_expr},\n\
          }},\n",
         entry.hook_fn
     )
@@ -2129,16 +2135,20 @@ mod tests {
         assert!(row.contains("name: \"deposit\","));
         assert!(row.contains("hook: __rshooks_entry_body_0,"));
         assert!(row.contains("cbak: None,"));
-        assert!(row.contains("can_emit: &[],"));
+        // `can_emit` omitted entirely (never declared) renders `None` —
+        // unrestricted, distinct from a declared-empty list.
+        assert!(row.contains("can_emit: None,"));
     }
 
     #[test]
-    fn native_entry_row_declared_empty_can_emit_is_also_empty_slice() {
-        // `can_emit = []` (declared, but empty) renders identically to
-        // `can_emit` being absent altogether — both are "may emit nothing".
+    fn native_entry_row_declared_empty_can_emit_renders_some_empty_slice() {
+        // `can_emit = []` (declared, but empty) is deny-all, and must
+        // render distinctly from `can_emit` being absent altogether — see
+        // `NativeEntry::can_emit`'s doc comment for the three-state
+        // contract this pins.
         let entry = sample(); // hook_can_emit: Some(vec![])
         let row = render_native_entry_row(&entry);
-        assert!(row.contains("can_emit: &[],"));
+        assert!(row.contains("can_emit: Some(&[]),"));
     }
 
     #[test]
@@ -2149,8 +2159,8 @@ mod tests {
         let row = render_native_entry_row(&entry);
         assert!(row.contains("cbak: Some(__rshooks_cbak_body_0),"));
         assert!(row.contains(
-            "can_emit: &[::rshooks::tx_type::TxType::Payment, \
-             ::rshooks::tx_type::TxType::Invoke],"
+            "can_emit: Some(&[::rshooks::tx_type::TxType::Payment, \
+             ::rshooks::tx_type::TxType::Invoke]),"
         ));
     }
 

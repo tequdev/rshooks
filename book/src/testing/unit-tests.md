@@ -271,6 +271,9 @@ count, emit reserve, nonce budget, and so on) resets per call.
   asserts every transaction type this invocation committed to `emitted()`
   is one the invoked entry's `#[hook(.., can_emit = [..])]` list declares.
   A violation panics — a test-author assertion, not a Hook API error path.
+  An entry with **no** `can_emit` declaration is unrestricted (no check),
+  while a declared-empty `can_emit = []` rejects every emission — the same
+  three-state distinction the SetHook metadata carries on-chain.
 
 ## Direct-entry invocation: no `HookOn` filtering
 
@@ -294,7 +297,7 @@ function keeps returning `NOT_IMPLEMENTED`, the same as any other native
 |---|---|
 | State | `state`, `state_set`, `state_foreign`, `state_foreign_set`, and every as-int64 variant (`state_u64`, `state_foreign_u64`, ...) |
 | Originating transaction | `otxn_field`, `otxn_type`, `otxn_id`, `otxn_param`, `otxn_burden`, `otxn_generation` |
-| Hook identity | `hook_param`, `hook_account`, `hook_hash(hook_no)`, `hook_pos` |
+| Hook identity | `hook_param`, `hook_account`, `hook_hash(hook_no)`, `hook_pos` — `hook_param` silently truncates into a too-short buffer and reports the truncated length, mirroring xahaud's own asymmetry with `otxn_param` (which returns `TooSmall`) |
 | Ledger | `ledger_seq`, `ledger_last_time`, `ledger_last_hash`, `ledger_nonce` |
 | Fees | `fee_base` (constant) |
 | Emission | `etxn_reserve`, `etxn_fee_base`, `etxn_details`, `etxn_burden`, `etxn_generation`, `etxn_nonce`, `emit` |

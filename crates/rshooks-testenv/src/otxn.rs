@@ -5,21 +5,7 @@ use std::collections::HashMap;
 use std::vec::Vec;
 
 use rshooks::tx_type::TxType;
-
-/// Encodes `drops` as an 8-byte native (XRP/XAH) amount: big-endian, with
-/// the native-amount control bit (`0x40`) set on the leading byte — the
-/// same wire shape [`rshooks::txn::codec::encode_native_amount_const`]
-/// produces. Deliberately infallible (unlike that function): this is a test
-/// builder, not host-facing encoding, so an out-of-range `drops` value is a
-/// test-author bug to fix, not something worth threading a `Result` through
-/// every chainable `Otxn` method for.
-pub(crate) fn encode_native_amount(drops: u64) -> [u8; 8] {
-    let mut bytes = drops.to_be_bytes();
-    if let Some(top) = bytes.get_mut(0) {
-        *top |= 0x40;
-    }
-    bytes
-}
+use rshooks::txn::codec::encode_native_amount_const;
 
 /// The originating transaction a [`crate::TestEnv`] seeds its invocations
 /// with — backs `otxn_field`/`otxn_type`/`otxn_id`/`otxn_param`. Every field
@@ -64,11 +50,18 @@ impl Otxn {
     }
 
     /// Sets `sfAmount` to a native (XRP/XAH) amount of `drops`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `drops >=`[`rshooks::txn::codec::MAX_NATIVE_DROPS`] (via
+    /// [`encode_native_amount_const`]) — a test-author bug to fix, not
+    /// something worth threading a `Result` through every chainable `Otxn`
+    /// method for.
     #[must_use]
     pub fn amount_drops(mut self, drops: u64) -> Self {
         self.fields.insert(
             rshooks::sfield::sfAmount.code(),
-            encode_native_amount(drops).to_vec(),
+            encode_native_amount_const(drops).to_vec(),
         );
         self
     }
@@ -135,5 +128,11 @@ mod tests {
         let otxn = Otxn::new(TxType::Payment).param(b"K", b"V").id([9u8; 32]);
         assert_eq!(otxn.params.get(b"K".as_slice()), Some(&b"V".to_vec()));
         assert_eq!(otxn.id, [9u8; 32]);
+    }
+
+    #[test]
+    #[should_panic(expected = "native_amount default does not fit in 62 bits")]
+    fn amount_drops_panics_at_or_above_max_native_drops() {
+        let _ = Otxn::new(TxType::Payment).amount_drops(1u64 << 62);
     }
 }

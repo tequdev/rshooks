@@ -209,9 +209,13 @@ impl HostBackend for Backend {
             .ok_or(rshooks_core::DOESNT_EXIST)
     }
 
+    #[allow(clippy::expect_used)] // documented API: `TestEnv::otxn_emitted` validates burden fits in i64 before it ever reaches `World`
     fn otxn_burden(&self) -> i64 {
         match self.world.borrow().otxn_emitted {
-            Some((b, _)) => b as i64,
+            Some((b, _)) => i64::try_from(b).expect(
+                "rshooks_testenv::Backend::otxn_burden: TestEnv::otxn_emitted validates \
+                 burden fits in i64",
+            ),
             None => 1,
         }
     }
@@ -267,8 +271,12 @@ impl HostBackend for Backend {
         self.ctx.borrow_mut().next_nonce()
     }
 
+    #[allow(clippy::expect_used)] // documented API: `TestEnv::base_fee_drops` validates drops fits in i64 before it ever reaches `World`
     fn fee_base(&self) -> i64 {
-        self.world.borrow().base_fee_drops as i64
+        i64::try_from(self.world.borrow().base_fee_drops).expect(
+            "rshooks_testenv::Backend::fee_base: TestEnv::base_fee_drops validates drops \
+             fits in i64",
+        )
     }
 
     fn etxn_reserve(&self, count: u32) -> i64 {
@@ -288,8 +296,8 @@ impl HostBackend for Backend {
             Err(e) => return e,
         };
         let base = self.world.borrow().base_fee_drops;
-        match base.checked_mul(burden) {
-            Some(v) => v as i64,
+        match base.checked_mul(burden).and_then(|v| i64::try_from(v).ok()) {
+            Some(v) => v,
             None => rshooks_core::FEE_TOO_LARGE,
         }
     }
@@ -324,7 +332,7 @@ impl HostBackend for Backend {
             Err(e) => return e,
         };
         match self.compute_etxn_burden(reserved) {
-            Ok(b) => b as i64,
+            Ok(b) => i64::try_from(b).unwrap_or(rshooks_core::FEE_TOO_LARGE),
             Err(e) => e,
         }
     }
@@ -422,5 +430,73 @@ impl HostBackend for Backend {
 
     fn static_take_allowed(&self, cell_addr: usize) -> bool {
         self.ctx.borrow_mut().static_take_allowed(cell_addr)
+    }
+}
+
+/// Boundary tests for the checked `u64` → `i64` conversions this file
+/// applies to protocol values (design review FIX 7): values guaranteed
+/// valid by [`crate::TestEnv`]'s now-validating builders (`otxn_emitted`,
+/// `base_fee_drops`) pass through unchanged at the `i64::MAX` boundary, and
+/// a burden/reserve product that still overflows past `i64::MAX` (despite
+/// fitting in `u64`) reports `FEE_TOO_LARGE` rather than wrapping. White-box
+/// (constructs `Backend` directly over a fresh `World`/`InvocationContext`)
+/// so `reserved` can be pinned precisely, independent of any one `#[hooks]`
+/// chain's hardcoded `etxn_reserve` call.
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
+
+    use super::*;
+
+    fn fresh() -> (Rc<RefCell<World>>, Rc<RefCell<InvocationContext>>, Backend) {
+        let world = Rc::new(RefCell::new(World::new()));
+        let ctx = Rc::new(RefCell::new(InvocationContext::new(0)));
+        let backend = Backend::new(Rc::clone(&world), Rc::clone(&ctx));
+        (world, ctx, backend)
+    }
+
+    #[test]
+    fn otxn_burden_at_i64_max_passes_through() {
+        let (world, _ctx, backend) = fresh();
+        world.borrow_mut().otxn_emitted = Some((i64::MAX as u64, 0));
+        assert_eq!(backend.otxn_burden(), i64::MAX);
+    }
+
+    #[test]
+    fn fee_base_at_i64_max_passes_through() {
+        let (world, _ctx, backend) = fresh();
+        world.borrow_mut().base_fee_drops = i64::MAX as u64;
+        assert_eq!(backend.fee_base(), i64::MAX);
+    }
+
+    #[test]
+    fn etxn_burden_exact_i64_max_passes_through() {
+        let (world, ctx, backend) = fresh();
+        world.borrow_mut().otxn_emitted = Some((i64::MAX as u64, 0));
+        ctx.borrow_mut().reserve(1).unwrap();
+        assert_eq!(backend.etxn_burden(), i64::MAX);
+    }
+
+    #[test]
+    fn etxn_burden_product_past_i64_max_is_fee_too_large() {
+        // `i64::MAX * 2` fits in `u64` (so the `checked_mul` inside
+        // `compute_etxn_burden` never fires), but exceeds `i64::MAX` — the
+        // case the added `i64::try_from` cast exists to catch.
+        let (world, ctx, backend) = fresh();
+        world.borrow_mut().otxn_emitted = Some((i64::MAX as u64, 0));
+        ctx.borrow_mut().reserve(2).unwrap();
+        assert_eq!(backend.etxn_burden(), rshooks_core::FEE_TOO_LARGE);
+    }
+
+    #[test]
+    fn etxn_fee_base_product_past_i64_max_is_fee_too_large() {
+        let (world, ctx, backend) = fresh();
+        {
+            let mut w = world.borrow_mut();
+            w.otxn_emitted = Some((i64::MAX as u64, 0));
+            w.base_fee_drops = 2;
+        }
+        ctx.borrow_mut().reserve(1).unwrap();
+        assert_eq!(backend.etxn_fee_base(&[]), rshooks_core::FEE_TOO_LARGE);
     }
 }
