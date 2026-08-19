@@ -87,22 +87,22 @@ mod invocation;
 mod otxn;
 mod world;
 
-pub use env::TestEnv;
+pub use env::{CbakOutcome, TestEnv};
 pub use exit::{ExitType, HookExit};
 pub use grant::Grant;
 pub use otxn::Otxn;
 pub use world::{EmitAttempt, EmitFailureReason, EmittedTxn, TraceLine};
 
 /// Common imports for hook tests: `use rshooks_testenv::prelude::*;` pulls
-/// in [`TestEnv`], [`HookExit`]/[`ExitType`], [`Otxn`], [`Grant`],
-/// [`EmittedTxn`]/[`EmitAttempt`]/[`TraceLine`], and
+/// in [`TestEnv`], [`CbakOutcome`], [`HookExit`]/[`ExitType`], [`Otxn`],
+/// [`Grant`], [`EmittedTxn`]/[`EmitAttempt`]/[`TraceLine`], and
 /// [`rshooks::decl::HookChainEntries`] (the trait `invoke`'s `C` type
 /// parameter is bound by — implemented automatically by every `#[hooks]`
 /// impl block on a non-wasm target).
 pub mod prelude {
     pub use crate::{
-        EmitAttempt, EmitFailureReason, EmittedTxn, ExitType, Grant, HookExit, Otxn, TestEnv,
-        TraceLine,
+        CbakOutcome, EmitAttempt, EmitFailureReason, EmittedTxn, ExitType, Grant, HookExit, Otxn,
+        TestEnv, TraceLine,
     };
     pub use rshooks::decl::HookChainEntries;
     pub use rshooks::tx_type::TxType;

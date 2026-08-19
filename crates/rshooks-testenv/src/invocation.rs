@@ -5,10 +5,16 @@
 //! committed emissions) are applied by [`crate::env::TestEnv::invoke`]
 //! itself once the outcome is known.
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::vec::Vec;
 
 use crate::world::{EmitAttempt, EmittedTxn};
+
+/// `hook_api::max_params` (vendored `Enum.h:401`): `hook_param_set`'s
+/// per-invocation override-count budget (`TOO_MANY_PARAMS` past this).
+/// `pub(crate)`: `crate::host::control::hook_param_set` is the one caller.
+pub(crate) const MAX_PARAM_OVERRIDES: u32 = 16;
 
 /// `etxn_reserve`'s upper bound (design §4: `n > 255` → `TOO_BIG`).
 const MAX_RESERVE: u32 = 255;
@@ -127,15 +133,34 @@ pub(crate) struct InvocationContext {
     /// slots).
     pub(crate) slots: std::boxed::Box<[Option<SlotEntry>; 256]>,
     /// Whether `hook_again` was called this invocation (design §4:
-    /// `ALREADY_SET` on a second call within the same invocation).
-    #[allow(dead_code)] // scaffolding (P2-A): read/written once hook_again lands (P2-E)
+    /// `ALREADY_SET` on a second call within the same invocation). Merged
+    /// into [`crate::world::World::hook_again_requested`] by
+    /// `crate::env::TestEnv`'s `run_entry` helper only on `accept!` (P2-E —
+    /// mirrors `pending_emissions`/`committed_emissions`'s stage-then-merge
+    /// pattern, not a live world write).
     pub(crate) hook_again_called: bool,
-    /// `hook_skip` directives recorded this invocation, to be moved onto
-    /// [`crate::world::World::skip_directives`] once P2-E implements the
-    /// commit rule (design §4 records them "verbatim"; exact commit-on-exit
-    /// semantics are not yet pinned as of this scaffolding).
-    #[allow(dead_code)] // scaffolding (P2-A): read/written once hook_skip lands (P2-E)
+    /// `hook_skip` directives recorded this invocation, in call order,
+    /// **only the ones that succeeded** (upstream never records a rejected
+    /// call — `HookAPI::hook_skip`, `Xahau/xahaud` branch `dev`,
+    /// `src/xrpld/app/hook/detail/HookAPI.cpp:1745-1782`, only mutates
+    /// `hookCtx.result.hookSkips` on a code path that returns success).
+    /// Extended onto [`crate::world::World::skip_directives`] on `accept!`
+    /// (P2-E — same stage-then-merge pattern as `hook_again_called` above).
     pub(crate) skip_directives: Vec<([u8; 32], u32)>,
+    /// This invocation's own `hook_param_set` writes — `(hook_hash, name)
+    /// -> value` — merged into
+    /// [`crate::world::World::hook_param_overrides`] on `accept!` (P2-E;
+    /// design §4 "control leftovers": "committed only on accept, like
+    /// state"). A `HashMap`, not a `Vec` of calls: later calls in the same
+    /// invocation overwrite earlier ones for the same `(hash, name)` key,
+    /// matching upstream's own `overrides[hash][name] = value` assignment
+    /// (`HookAPI.cpp:1713-1744`) — there is no "undo" of an in-invocation
+    /// overwrite, only the final value per key survives to merge.
+    pub(crate) pending_param_overrides: HashMap<([u8; 32], Vec<u8>), Vec<u8>>,
+    /// `hook_param_set`'s own per-invocation call budget (`overrideCount`,
+    /// `HookAPI.cpp:1727-1728`) — counts every *call* (not distinct keys),
+    /// fresh each invocation (upstream: fresh per `HookResult`).
+    pub(crate) param_override_count: u32,
 }
 
 impl InvocationContext {
@@ -156,6 +181,8 @@ impl InvocationContext {
             slots: std::boxed::Box::new(core::array::from_fn(|_| None)),
             hook_again_called: false,
             skip_directives: Vec::new(),
+            pending_param_overrides: HashMap::new(),
+            param_override_count: 0,
         }
     }
 

@@ -33,3 +33,49 @@ fn each_invocation_emits_its_own_payment() {
     env.invoke::<EmitTxn>(0);
     assert_eq!(env.emitted().len(), 2);
 }
+
+// -- invoke_cbak (P2-E — `.claude/design/TESTENV_PHASE2_DESIGN.md` §4 "cbak
+// execution"). `EmitTxn`'s `#[cbak(0)]` body (`src/lib.rs`) is
+// `fn cbak(&self) -> i64 { accept!() }` — it unconditionally accepts,
+// reading neither the wasm argument nor the callback otxn. Its real
+// behavior to assert is exactly that: `invoke_cbak` reaches `Accept`
+// regardless of `CbakOutcome::Success`/`Failure`, and leaves the
+// surrounding `TestEnv` usable afterward (the callback's otxn swap is
+// invocation-scoped and must not leak into a later `invoke`).
+
+#[test]
+fn invoke_cbak_success_reaches_the_real_accept_path() {
+    let env = env();
+    let exit = env.invoke::<EmitTxn>(0);
+    assert_eq!(exit.exit, ExitType::Accept, "{exit:?}");
+    let txn = env.emitted()[0].clone();
+
+    let cbak_exit = env.invoke_cbak::<EmitTxn>(0, CbakOutcome::Success(txn));
+    assert_eq!(cbak_exit.exit, ExitType::Accept, "{cbak_exit:?}");
+}
+
+#[test]
+fn invoke_cbak_failure_still_accepts_because_the_cbak_body_ignores_the_outcome() {
+    let env = env();
+    let _ = env.invoke::<EmitTxn>(0);
+    let txn = env.emitted()[0].clone();
+
+    let cbak_exit = env.invoke_cbak::<EmitTxn>(0, CbakOutcome::Failure(txn));
+    assert_eq!(cbak_exit.exit, ExitType::Accept, "{cbak_exit:?}");
+}
+
+#[test]
+fn invoke_cbak_restores_the_original_otxn_for_a_later_invoke() {
+    let env = env();
+    let _ = env.invoke::<EmitTxn>(0);
+    let txn = env.emitted()[0].clone();
+
+    let _ = env.invoke_cbak::<EmitTxn>(0, CbakOutcome::Success(txn));
+
+    // The seeded otxn (an Invoke transaction from [2u8; 20]) must still be
+    // in effect for an ordinary invoke after the callback — not the
+    // Payment the callback ran against.
+    let exit = env.invoke::<EmitTxn>(0);
+    assert_eq!(exit.exit, ExitType::Accept, "{exit:?}");
+    assert_eq!(env.emitted().len(), 2);
+}

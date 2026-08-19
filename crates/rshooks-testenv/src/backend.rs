@@ -227,10 +227,38 @@ impl HostBackend for Backend {
         }
     }
 
+    // Ported against `HookAPI::hook_param` (`Xahau/xahaud`, branch `dev`,
+    // `src/xrpld/app/hook/detail/HookAPI.cpp:1672-1698`, fetched for P2-E):
+    // overrides for the *currently invoked* position's hook hash are
+    // checked first — an entry present there (even an empty one) answers
+    // the call outright, `DOESNT_EXIST` for an empty value ("allow
+    // overrides to 'delete' parameters", matching upstream's own comment)
+    // and never falling through to the seeded `hook_params` below. This
+    // reduces xahaud's real chain-forward semantics (any *later* hook in
+    // the same chain execution sees a param override set by an *earlier*
+    // one, keyed by the setting hook's own `hookHash` argument) to this
+    // harness's explicit-invocation model: there is no chain, so "the
+    // currently invoked position's hash" (`World::current_hook_hash`,
+    // i.e. `world.hook_hashes[world.hook_pos]` when seeded) stands in for
+    // "the hook whose params these are" — an override only takes effect on
+    // a *later, separate* `TestEnv::invoke` call seeded with the same
+    // `hook_pos`/`hook_hash`, never within the invocation that set it (see
+    // `crate::host::control`'s module doc comment for the commit-on-accept
+    // timing this implies). No `current_hook_hash()` at all (position never
+    // seeded a hash) skips the override lookup entirely, per this method's
+    // own "absent -> no override lookup" contract.
     fn hook_param(&self, name: &[u8]) -> Result<Vec<u8>, i64> {
-        self.world
-            .borrow()
-            .hook_params
+        let w = self.world.borrow();
+        if let Some(hash) = w.current_hook_hash() {
+            if let Some(value) = w.hook_param_overrides.get(&(hash, name.to_vec())) {
+                return if value.is_empty() {
+                    Err(rshooks_core::DOESNT_EXIST)
+                } else {
+                    Ok(value.clone())
+                };
+            }
+        }
+        w.hook_params
             .get(name)
             .cloned()
             .ok_or(rshooks_core::DOESNT_EXIST)
@@ -701,6 +729,24 @@ impl HostBackend for Backend {
 
     fn sto_erase(&self, source: &[u8], field_id: u32) -> Result<Vec<u8>, i64> {
         crate::host::sto::sto_erase(source, field_id)
+    }
+
+    // -- control leftovers (P2-E — design §4 "control leftovers"). Pure
+    // `InvocationContext` mutation, no `World` access needed; delegated to
+    // `crate::host::control`. See that module's own doc comment for the
+    // upstream citations and the accept-only commit timing
+    // `crate::env::TestEnv::run_entry` implements.
+
+    fn hook_again(&self) -> i64 {
+        crate::host::control::hook_again(&mut self.ctx.borrow_mut())
+    }
+
+    fn hook_skip(&self, hash: &[u8], flags: u32) -> i64 {
+        crate::host::control::hook_skip(&mut self.ctx.borrow_mut(), hash, flags)
+    }
+
+    fn hook_param_set(&self, value: &[u8], name: &[u8], hook_hash: &[u8]) -> i64 {
+        crate::host::control::hook_param_set(&mut self.ctx.borrow_mut(), value, name, hook_hash)
     }
 
     // -- prepare (P2-D — design §4 "prepare"). Needs `World` (hook account,

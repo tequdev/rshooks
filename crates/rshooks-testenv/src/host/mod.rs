@@ -5,14 +5,11 @@
 //! Each submodule here is where its family's `HostBackend` overrides land
 //! in a later stage (P2-B..P2-E): `float.rs` (P2-B, landed), `util.rs`/
 //! `keylet.rs` (P2-C, landed), `slots.rs`/`sto.rs` (P2-D, landed),
-//! `control.rs` (P2-E). A landed family gains free functions the
+//! `control.rs` (P2-E, landed). A landed family gains free functions the
 //! `impl HostBackend for Backend` block in `backend.rs` delegates to in one
 //! line each (see that file's own module doc comment for why the
 //! delegating block itself must stay thin) and its submodule here is
-//! `pub(crate)` so `backend.rs` can reach it; an unlanded family stays
-//! private and empty (module doc comment only, `impl HostBackend for
-//! Backend` keeps returning the trait's own `NOT_IMPLEMENTED` default for
-//! its methods) — no dead-code warnings either way. `ledger_keylet`/
+//! `pub(crate)` so `backend.rs` can reach it. `ledger_keylet`/
 //! `trace_float`/`prepare`/`otxn_slot`/`meta_slot`/`xpop_slot`/`slot_set`
 //! land directly in `backend.rs` itself, not (only) a submodule here — see
 //! `host::keylet`/`host::control`/`host::slots`' own module doc comments
@@ -22,9 +19,12 @@
 //! part of one cohesive family alongside its `World`-free functions —
 //! `prepare` alone needs both `World` *and* other `Backend` methods
 //! (`etxn_details`/`etxn_fee_base`), which only `backend.rs` itself has in
-//! scope).
+//! scope). `host::control`'s own functions (`hook_again`/`hook_skip`/
+//! `hook_param_set`) need only `InvocationContext` — the merge into
+//! `World` on `accept!` is `crate::env::TestEnv`'s job (mirroring
+//! `pending_emissions`/`committed_emissions`), not this module's.
 
-mod control;
+pub(crate) mod control;
 pub(crate) mod float;
 pub(crate) mod keylet;
 pub(crate) mod slots;

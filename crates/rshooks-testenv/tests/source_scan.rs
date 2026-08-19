@@ -2,7 +2,8 @@
 //! `crates/rshooks/testenv-call-sites.txt` (bridged + unbridged sections
 //! together) and a fresh grep of every direct `rshooks_core::<fn>(` call
 //! site in the bridged families under `crates/rshooks/src/api/*.rs`, plus
-//! `crates/rshooks/src/xfl.rs` and `api/keylet.rs`'s `util_keylet_buf(`
+//! `crates/rshooks/src/xfl.rs`/`xfl_unchecked.rs` and `api/keylet.rs`'s
+//! `util_keylet_buf(`
 //! calls (see [`find_raw_call_in_keylet`]'s doc comment and the inventory
 //! file's own header for why those two need different matching than the
 //! rest). Keeps the committed inventory honest — a newly added raw call
@@ -182,23 +183,27 @@ fn grep_raw_call_sites(api_dir: &Path) -> BTreeSet<Row> {
             }
         }
     }
-    // `xfl.rs` (crate root, not under `api/`) has its own raw call sites —
-    // see the inventory file's own trailing section for why.
-    let xfl_path = api_dir.parent().unwrap_or(api_dir).join("xfl.rs");
-    let content = std::fs::read_to_string(&xfl_path)
-        .unwrap_or_else(|e| panic!("failed to read {}: {e}", xfl_path.display()));
-    let mut current_fn: Option<String> = None;
-    for line in content.lines() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("#[cfg(") && contains_word(trimmed, "test") {
-            break;
-        }
-        if let Some(name) = find_fn_name(trimmed) {
-            current_fn = Some(name);
-        }
-        if let Some(raw) = find_raw_call(line) {
-            if let Some(f) = &current_fn {
-                set.insert(("xfl.rs".to_string(), f.clone(), raw));
+    // `xfl.rs`/`xfl_unchecked.rs` (crate root, not under `api/`) each have
+    // their own raw call sites — see the inventory file's own trailing
+    // sections for why both are scanned as honorary members of the "float"
+    // bridged family.
+    for file_name in ["xfl.rs", "xfl_unchecked.rs"] {
+        let path = api_dir.parent().unwrap_or(api_dir).join(file_name);
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+        let mut current_fn: Option<String> = None;
+        for line in content.lines() {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("#[cfg(") && contains_word(trimmed, "test") {
+                break;
+            }
+            if let Some(name) = find_fn_name(trimmed) {
+                current_fn = Some(name);
+            }
+            if let Some(raw) = find_raw_call(line) {
+                if let Some(f) = &current_fn {
+                    set.insert((file_name.to_string(), f.clone(), raw));
+                }
             }
         }
     }

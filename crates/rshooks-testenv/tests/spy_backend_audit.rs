@@ -626,3 +626,44 @@ fn every_phase2_backend_method_is_reached() {
         );
     }
 }
+
+/// Drives `rshooks::xfl_unchecked::XFLUnchecked`'s operators specifically
+/// (P2-E — `crates/rshooks/testenv-call-sites.txt`'s "xfl_unchecked.rs"
+/// section), independent of [`every_phase2_backend_method_is_reached`]'s
+/// `XFL` (checked) exercise above: `XFL`'s operators already prove
+/// `float_negate`/`float_sum`/`float_multiply`/`float_divide` are
+/// *reachable* through `xfl.rs`'s own bridging, but that alone would not
+/// catch a regression that broke `xfl_unchecked.rs`'s separate raw call
+/// sites specifically (P2-D found exactly this: those sites called
+/// `rshooks_core::float_*` directly, unconditionally, bypassing any
+/// installed backend — see the inventory file's own note on why
+/// `xfl_unchecked.rs` is scanned at all).
+#[test]
+fn xfl_unchecked_operators_reach_the_backend() {
+    use rshooks::xfl::XFL;
+
+    let spy = Rc::new(SpyBackend::default());
+    let guard = install(Rc::clone(&spy) as Rc<dyn HostBackend>);
+
+    let one = XFL::one().unchecked();
+    let _ = -one;
+    let _ = one + one;
+    let _ = one * one;
+    let _ = one / one;
+    let _ = one.validate();
+
+    drop(guard);
+
+    let hit = spy.hit.borrow();
+    for name in [
+        "float_negate",
+        "float_sum",
+        "float_multiply",
+        "float_divide",
+    ] {
+        assert!(
+            hit.contains(name),
+            "backend method `{name}` was never reached via XFLUnchecked"
+        );
+    }
+}

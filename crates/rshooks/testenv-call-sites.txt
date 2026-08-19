@@ -151,6 +151,29 @@ xfl.rs::root -> float_root
 xfl.rs::sign -> float_sign
 xfl.rs::to_int -> float_int
 
+# --- xfl_unchecked.rs: XFLUnchecked's own raw float_* call sites (P2-E) ---
+#
+# `XFLUnchecked` (`crate::xfl_unchecked`) exists specifically to defer
+# validation across a chain of hot-path XFL arithmetic (see its own module
+# doc comment): `Neg`/`Add`/`Mul`/`Div` and `validate` each call
+# `rshooks_core::float_*` directly, exactly like `xfl.rs`'s operators above
+# (`Sub` is the one exception — implemented as `self + (-rhs)`, dispatching
+# to this same file's own `Add`/`Neg` impls, so it has no raw call site of
+# its own, matching `xfl.rs::sub`'s identical absence from the list above).
+# `TESTENV_PHASE2_DESIGN.md` §4's original file list only mentions
+# `api/*.rs`/`xfl.rs`; this file is scanned as a second honorary member of
+# the "float" bridged family for the same reason `xfl.rs` is (deviating from
+# the literal file list), discovered when P2-D found `examples/07`'s real
+# accept path structurally unreachable because these sites were unbridged —
+# a hook using `XFLUnchecked` silently fell back to the raw
+# `NOT_IMPLEMENTED` host stub under `testenv` even with a backend installed.
+
+xfl_unchecked.rs::add -> float_sum
+xfl_unchecked.rs::div -> float_divide
+xfl_unchecked.rs::mul -> float_multiply
+xfl_unchecked.rs::neg -> float_negate
+xfl_unchecked.rs::validate -> float_sum
+
 # --- unbridged (Phase 2) ---
 #
 # (empty — every entry formerly here is now bridged above.)

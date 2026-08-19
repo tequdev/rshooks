@@ -57,6 +57,10 @@ impl XFLUnchecked {
     /// — correctly, since it was already canonical.
     #[inline(always)]
     pub fn validate(self) -> Result<XFL> {
+        #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+        if let Some(v) = rshooks_core::backend::with_backend(|b| b.float_sum(self.0, 0)) {
+            return res(v).map(XFL::from_raw_bits);
+        }
         res(unsafe { rshooks_core::float_sum(self.0, 0) }).map(XFL::from_raw_bits)
     }
 }
@@ -85,6 +89,10 @@ impl core::ops::Neg for XFLUnchecked {
     /// propagating.
     #[inline(always)]
     fn neg(self) -> XFLUnchecked {
+        #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+        if let Some(v) = rshooks_core::backend::with_backend(|b| b.float_negate(self.0)) {
+            return XFLUnchecked(v);
+        }
         XFLUnchecked(unsafe { rshooks_core::float_negate(self.0) })
     }
 }
@@ -96,6 +104,10 @@ impl core::ops::Add for XFLUnchecked {
     /// either operand — see the module doc comment.
     #[inline(always)]
     fn add(self, rhs: XFLUnchecked) -> XFLUnchecked {
+        #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+        if let Some(v) = rshooks_core::backend::with_backend(|b| b.float_sum(self.0, rhs.0)) {
+            return XFLUnchecked(v);
+        }
         XFLUnchecked(unsafe { rshooks_core::float_sum(self.0, rhs.0) })
     }
 }
@@ -125,6 +137,10 @@ impl core::ops::Mul for XFLUnchecked {
     /// either operand — see the module doc comment.
     #[inline(always)]
     fn mul(self, rhs: XFLUnchecked) -> XFLUnchecked {
+        #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+        if let Some(v) = rshooks_core::backend::with_backend(|b| b.float_multiply(self.0, rhs.0)) {
+            return XFLUnchecked(v);
+        }
         XFLUnchecked(unsafe { rshooks_core::float_multiply(self.0, rhs.0) })
     }
 }
@@ -136,6 +152,10 @@ impl core::ops::Div for XFLUnchecked {
     /// either operand — see the module doc comment.
     #[inline(always)]
     fn div(self, rhs: XFLUnchecked) -> XFLUnchecked {
+        #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+        if let Some(v) = rshooks_core::backend::with_backend(|b| b.float_divide(self.0, rhs.0)) {
+            return XFLUnchecked(v);
+        }
         XFLUnchecked(unsafe { rshooks_core::float_divide(self.0, rhs.0) })
     }
 }

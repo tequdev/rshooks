@@ -39,6 +39,14 @@ mechanism. WCE/zero-cost impact is verified by `scripts/probe-testenv-parity.sh`
 example twice at the same commit — pristine vs. test-wired — and asserts
 byte-for-byte identity of the shipped `.wasm` artifacts.
 
+`.claude/design/TESTENV_PHASE2_DESIGN.md` (stages P2-A..P2-E) then extended
+the mock backend from that initial subset to the entire `extern.h` Hook API
+surface a hook can call (`_g` excepted), including `float_*`/`slot_*`/
+`sto_*`/`util_*`/`keylet_*`, `hook_again`/`hook_skip`/`hook_param_set`, and
+`TestEnv::invoke_cbak` for running a `#[cbak]` body directly — see the book
+chapter's coverage table for the current, honest list of what remains
+unmodeled.
+
 ## 2. Typed `Result`-based entry return values (priority 2)
 
 Entries currently return `i64` and exit through `accept!`/`rollback!`. A typed

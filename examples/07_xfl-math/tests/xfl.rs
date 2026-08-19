@@ -2,43 +2,33 @@
 //! `TestEnv::invoke` against the real `XflMath` chain — no wasm build, no
 //! node.
 //!
-//! # What P2-D changed, and what it did not
+//! # What P2-D changed, and what P2-E finished
 //!
 //! `XflMath::main` (`src/lib.rs`) reaches its `Amount` via
 //! `SlotObject::from_otxn()`, i.e. the numbered-slot host API
 //! (`otxn_slot`/`slot_subfield`/`slot_float`). That family landed in
 //! `.claude/design/TESTENV_PHASE2_DESIGN.md`'s stage P2-D, so — unlike when
 //! this file was first written in P2-B (float-only) and pinned a
-//! deterministic `otxn_slot`-not-implemented rollback — the hook now
-//! genuinely runs `mulratio`/`XFL::new`/comparisons through
-//! `rshooks-testenv`'s real host implementation, all the way up through
-//! computing `share`, checking it against the minimum, and computing
-//! `remaining`.
+//! deterministic `otxn_slot`-not-implemented rollback — the hook already
+//! ran `mulratio`/`XFL::new`/comparisons through `rshooks-testenv`'s real
+//! host implementation as of P2-D, all the way up through computing
+//! `share`, checking it against the minimum, and computing `remaining`.
 //!
-//! It does **not**, however, reach `accept!()` for any input, and this is
-//! not a P2-D gap: `src/lib.rs`'s compounding step —
-//! `share.unchecked() * growth.unchecked() * growth.unchecked() *
-//! growth.unchecked()`, then `.validate()` — goes through
-//! [`rshooks::xfl_unchecked::XFLUnchecked`]'s operators, and *every one of
-//! those* (`Mul`/`Add`/`Sub`/`Neg`/`validate`) calls `rshooks_core::float_*`
-//! **directly** (`unsafe { rshooks_core::float_multiply(..) }`, etc. —
-//! confirmed by reading `crates/rshooks/src/xfl_unchecked.rs`), bypassing
-//! `rshooks::api::float`'s `#[cfg(testenv)]` bridging block entirely. This
-//! is exactly the pre-existing, already-documented "raw `rshooks_core` call
-//! escape hatch" `rshooks-testenv`'s own `lib.rs` module doc comment calls
-//! out ("a hook that calls `rshooks_core` directly keeps hitting the real
-//! `NOT_IMPLEMENTED` host stubs under `testenv`") — it just wasn't
-//! previously *reachable* in this example, because `otxn_slot` used to fail
-//! first. Under `testenv`'s native (non-wasm) build, every raw
-//! `rshooks_core::float_*` call returns `NOT_IMPLEMENTED` (`-14`)
-//! regardless of its arguments, so `compounded_raw.validate()` always fails
-//! and the hook always rolls back at `CompoundValidationFailed` — for
-//! *every* amount that survives the earlier, properly-bridged checks. No
-//! seeded input reaches `accept!()` through this harness; that remains
-//! e2e-only territory for this specific hook (confirmed by manual tracing:
-//! a throwaway diagnostic entry recorded `compounded_raw`'s raw bits as
-//! `NOT_IMPLEMENTED`'s bit pattern immediately after the first `unchecked()`
-//! multiply).
+//! It did **not**, however, reach `accept!()` for any input as of P2-D:
+//! `src/lib.rs`'s compounding step — `share.unchecked() *
+//! growth.unchecked() * growth.unchecked() * growth.unchecked()`, then
+//! `.validate()` — goes through [`rshooks::xfl_unchecked::XFLUnchecked`]'s
+//! operators, and P2-D found that *every one of those*
+//! (`Mul`/`Add`/`Sub`/`Neg`/`validate`) called `rshooks_core::float_*`
+//! **directly**, with no `#[cfg(testenv)]` interception block at all
+//! (`crates/rshooks/src/xfl_unchecked.rs` before this stage) — bypassing
+//! the mock backend entirely, unlike `rshooks::xfl::XFL`'s own operators.
+//! P2-E bridged those five call sites (`Neg`/`Add`/`Mul`/`Div`/`validate`,
+//! see `crates/rshooks/testenv-call-sites.txt`'s "xfl_unchecked.rs"
+//! section), so `compounded_raw.validate()` now genuinely runs through
+//! `rshooks-testenv`'s real `float_multiply`/`float_sum` implementation —
+//! and, for a reasonably sized amount, this hook now reaches its real
+//! `accept!()` path end-to-end, verified below.
 //!
 //! `as_xfl()` on a native `Amount` yields **XAH units, not drops** (see
 //! `~/.claude/skills/hook-api/references/slot.md`'s documented native/XFL
@@ -60,23 +50,26 @@ fn env_with_drops(drops: u64) -> TestEnv {
 }
 
 #[test]
-fn rolls_back_at_compound_validation_for_a_reasonably_sized_amount() {
+fn accepts_for_a_reasonably_sized_amount() {
     // 1000 XAH: 1% share = 10, well above the 1e-6 minimum, so the hook
-    // runs all the way through `mulratio`/comparisons/`remaining` — all
-    // real, bridged host calls — before hitting the `XFLUnchecked`
-    // escape hatch documented in this file's module doc comment.
+    // runs all the way through `mulratio`/comparisons/`remaining`, then
+    // through the `XFLUnchecked`-based compounding step (now bridged,
+    // P2-E — see this file's module doc comment) and every comparison
+    // after it, reaching its real `accept!()` path: compounding a 10 XAH
+    // share by 1% three times (~10.303) stays far below the ~990 XAH
+    // `remaining`, so neither `CompoundNotIncreasing` nor
+    // `CompoundExceedsRemaining` fires.
     let exit = env_with_drops(1_000_000_000).invoke::<XflMath>(0);
-    assert_eq!(exit.exit, ExitType::Rollback);
-    assert_eq!(exit.code, XflMathError::CompoundValidationFailed.code());
-    assert_eq!(exit.msg, b"xfl-math: compounded share failed to validate");
+    assert_eq!(exit.exit, ExitType::Accept, "{exit:?}");
+    assert!(exit.is_success());
 }
 
 #[test]
-fn rollback_leaves_no_trace_or_state_side_effects() {
+fn accept_leaves_no_trace_side_effects() {
     let e = env_with_drops(1_000_000_000);
-    let _ = e.invoke::<XflMath>(0);
+    let exit = e.invoke::<XflMath>(0);
+    assert_eq!(exit.exit, ExitType::Accept, "{exit:?}");
     assert!(e.traces().is_empty());
-    assert_eq!(e.state_typed::<u64>(b"counter"), None);
 }
 
 #[test]

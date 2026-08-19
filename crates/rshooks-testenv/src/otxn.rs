@@ -179,7 +179,6 @@ fn write_vl_len(out: &mut Vec<u8>, len: usize) {
 /// (design §4 "cbak execution") is this function's only planned caller,
 /// reconstructing an `Otxn`-shaped field map for the emitted transaction
 /// passed into a callback.
-#[allow(dead_code)] // exported for P2-E's `invoke_cbak` (design §4), not yet called
 pub(crate) fn deserialize(bytes: &[u8]) -> Option<std::collections::HashMap<u32, Vec<u8>>> {
     let fields = crate::emit_walk::walk_top_level_fields(bytes).ok()?;
     let mut map = std::collections::HashMap::new();
@@ -189,6 +188,60 @@ pub(crate) fn deserialize(bytes: &[u8]) -> Option<std::collections::HashMap<u32,
         map.insert(f.code as u32, value);
     }
     Some(map)
+}
+
+/// Reconstructs the originating-transaction view a `#[cbak]` execution sees
+/// (P2-E — design §4 "cbak execution"): `blob` (an emitted transaction —
+/// already validated by the emission walker before it ever became an
+/// [`crate::world::EmittedTxn`]) becomes the callback's otxn, and its
+/// `EmitDetails.EmitGeneration`/`EmitBurden` fields become the
+/// `(burden, generation)` pair `crate::env::TestEnv::invoke_cbak` seeds
+/// `World::otxn_emitted` with — matching `HookAPI::otxn_burden`/
+/// `HookAPI::otxn_generation` (`Xahau/xahaud`, branch `dev`,
+/// `src/xrpld/app/hook/detail/HookAPI.cpp:1465-1520`, fetched for this
+/// stage), which read those two `EmitDetails` fields directly off
+/// `hookCtx.applyCtx.tx` — the transaction currently being applied, which
+/// during `Transactor::doHookCallback` (`src/xrpld/app/tx/detail/Transactor.cpp:1483-1614`)
+/// *is* the emitted transaction itself — rather than incrementing anything,
+/// unlike `etxn_burden`/`etxn_generation`'s own `× reserved`/`+ 1`
+/// derivation for the *next* emission (`crate::backend::Backend::compute_etxn_burden`/
+/// `compute_etxn_generation`, unchanged by this function).
+///
+/// `id(hash)` is set to `hash` (the emit-returned hash) — `otxn_id` during a
+/// real callback returns `getTransactionID()` by default (`HookAPI.cpp:1545-1551`),
+/// i.e. the emitted transaction's own real hash, exactly what `emit`
+/// returned for it.
+///
+/// `None` on any parse failure (malformed field sequence, missing
+/// `TransactionType`, missing/malformed `EmitDetails` or its
+/// `EmitGeneration`/`EmitBurden` sub-fields) — a caller maps that to a clear
+/// panic; it should not occur for any blob obtained from
+/// `crate::TestEnv::emitted()`, since every one of those already passed the
+/// emission walker's own `EmitDetails` well-formedness checks
+/// ([`crate::emit_walk::validate_emit_blob`]).
+pub(crate) fn from_emitted(blob: &[u8], hash: [u8; 32]) -> Option<(Otxn, u64, u32)> {
+    let map = deserialize(blob)?;
+
+    let tt_bytes = map.get(&rshooks::sfield::sfTransactionType.code())?;
+    let tt_code = u16::from_be_bytes(tt_bytes.as_slice().try_into().ok()?);
+    let mut otxn = Otxn::new(TxType::from(tt_code)).id(hash);
+    for (code, value) in &map {
+        otxn = otxn.field_raw(*code, value);
+    }
+
+    let ed_bytes = map.get(&rshooks::sfield::sfEmitDetails.code())?;
+    let ed_fields = crate::emit_walk::walk_top_level_fields_or_object(ed_bytes, true).ok()?;
+
+    let generation_code = u64::from(rshooks::sfield::sfEmitGeneration.code());
+    let burden_code = u64::from(rshooks::sfield::sfEmitBurden.code());
+    let generation_field = ed_fields.iter().find(|f| f.code == generation_code)?;
+    let burden_field = ed_fields.iter().find(|f| f.code == burden_code)?;
+    let (gs, ge) = crate::emit_walk::field_value_payload(ed_bytes, generation_field).ok()?;
+    let (bs, be) = crate::emit_walk::field_value_payload(ed_bytes, burden_field).ok()?;
+    let generation = u32::from_be_bytes(ed_bytes.get(gs..ge)?.try_into().ok()?);
+    let burden = u64::from_be_bytes(ed_bytes.get(bs..be)?.try_into().ok()?);
+
+    Some((otxn, burden, generation))
 }
 
 #[cfg(test)]

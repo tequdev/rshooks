@@ -162,19 +162,21 @@ pub(crate) struct World {
     /// already-`accept!`ed invocation — `(hook_hash, name) -> value` — read
     /// back by `hook_param` when the currently invoked position's hash
     /// matches (P2-E; design §4 "control leftovers"). Committed the same
-    /// way state is: only on `accept!`.
-    #[allow(dead_code)] // scaffolding (P2-A): read/written once hook_param_set lands (P2-E)
+    /// way state is: only on `accept!` — `crate::env::TestEnv`'s
+    /// `run_entry` helper merges `InvocationContext::pending_param_overrides`
+    /// in on that arm; see `crate::host::control`'s module doc comment for
+    /// the upstream citation behind the commit gate.
     pub(crate) hook_param_overrides: HashMap<([u8; 32], Vec<u8>), Vec<u8>>,
-    /// Whether the most recently completed invocation called `hook_again`
-    /// (cleared at the start of each `invoke` — design §4). Read by
-    /// `TestEnv::hook_again_requested()` (P2-E).
-    #[allow(dead_code)] // scaffolding (P2-A): read/written once hook_again lands (P2-E)
+    /// Whether the most recently **accepted** invocation called `hook_again`
+    /// (design §4; see `crate::host::control`'s module doc comment for why
+    /// this harness ties the commit to `accept!` — a documented
+    /// simplification of upstream's own, more involved commit path). Read
+    /// by `TestEnv::hook_again_requested()` (P2-E).
     pub(crate) hook_again_requested: bool,
-    /// Every `hook_skip(hash, flags)` directive recorded across every
+    /// Every `hook_skip(hash, flags)` directive from every **accepted**
     /// invocation so far, verbatim, in call order (design §4: "recorded
     /// verbatim ... no chain model"). Read by `TestEnv::skip_directives()`
     /// (P2-E).
-    #[allow(dead_code)] // scaffolding (P2-A): read/written once hook_skip lands (P2-E)
     pub(crate) skip_directives: Vec<([u8; 32], u32)>,
 }
 
@@ -234,13 +236,25 @@ impl World {
     }
 
     /// Snapshot of every field a rolled-back/restored invocation must undo:
-    /// the state map and the committed-emission list. Everything else
-    /// (params, otxn, ledger fields, grants) is not writable by a hook
-    /// invocation, so it needs no snapshot/restore.
+    /// the state map, the committed-emission list, and (P2-E) the three
+    /// control-leftover commit targets (`hook_param_overrides`/
+    /// `hook_again_requested`/`skip_directives`) — under the current
+    /// stage-then-merge implementation (`crate::env::TestEnv::run_entry`
+    /// only ever writes these three on the `ExitType::Accept` arm, never
+    /// speculatively) a rolled-back invocation never actually mutates them
+    /// in the first place, so restoring is a defensive no-op rather than an
+    /// undo; captured anyway so that invariant does not have to be
+    /// re-verified by hand at every future call site (design §3, deliverable
+    /// 3: "rollback must not leak them"). Everything else (params, otxn,
+    /// ledger fields, grants) is not writable by a hook invocation, so it
+    /// needs no snapshot/restore.
     pub(crate) fn snapshot(&self) -> WorldSnapshot {
         WorldSnapshot {
             state: self.state.clone(),
             committed_emissions_len: self.committed_emissions.len(),
+            hook_param_overrides: self.hook_param_overrides.clone(),
+            hook_again_requested: self.hook_again_requested,
+            skip_directives_len: self.skip_directives.len(),
         }
     }
 
@@ -248,6 +262,9 @@ impl World {
         self.state = snap.state;
         self.committed_emissions
             .truncate(snap.committed_emissions_len);
+        self.hook_param_overrides = snap.hook_param_overrides;
+        self.hook_again_requested = snap.hook_again_requested;
+        self.skip_directives.truncate(snap.skip_directives_len);
     }
 }
 
@@ -255,6 +272,9 @@ impl World {
 pub(crate) struct WorldSnapshot {
     state: HashMap<StateAddr, Vec<u8>>,
     committed_emissions_len: usize,
+    hook_param_overrides: HashMap<([u8; 32], Vec<u8>), Vec<u8>>,
+    hook_again_requested: bool,
+    skip_directives_len: usize,
 }
 
 /// Left-pad-normalizes a hook-state key per design §5.3 / xahaud's own

@@ -1653,6 +1653,20 @@ or restores (`rollback!`, a bare `return`, provisionally) per the outcome.
 The crate `compile_error!`s at `#[cfg(panic = "abort")]`, since the whole
 exit-capture mechanism depends on unwinding across the mock host boundary.
 
+**Full Hook API surface (Phase 2).** `.claude/design/TESTENV_PHASE2_DESIGN.md`
+extended the mechanism above, family by family (`float_*`, `slot_*`/
+`sto_*`/`otxn_slot`/`meta_slot`/`xpop_slot`, `util_*`/`keylet_*`,
+`ledger_keylet`, `hook_again`/`hook_skip`/`hook_param_set`, `prepare`,
+`trace_float`), plus `TestEnv::invoke_cbak` for running a declared
+`#[cbak]` body directly, with the emitted transaction standing in as its
+otxn. Every `extern.h` function a hook can call is now answered by the
+mock backend (`_g` excepted — guard enforcement stays a build-time/e2e
+concern); see the book's ["Off-Chain Unit
+Tests"](../book/src/testing/unit-tests.md) chapter for the full coverage
+table and the honestly-enumerated remaining gaps (fee/reserve economics as
+approximations, statics outside `HookStatic`, no chain/`HookOn` model,
+amendment gates assumed active, and the `rshooks::raw` escape hatch).
+
 **Zero wasm impact.** Every new runtime code path is `testenv`-gated or
 `not(target_arch = "wasm32")`-gated; the touched wrapper functions' wasm
 branches are textually unchanged; `rshooks-core/src/api.rs` (the stub layer)

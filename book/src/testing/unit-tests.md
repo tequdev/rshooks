@@ -185,6 +185,15 @@ interior-mutable, so you never need a `mut` binding, even across multiple
 - **`traces() -> Vec<TraceLine>`** is every `trace`/`trace_num` call this
   env has seen, cumulative, captured rather than printed — inspect it
   explicitly in a test instead of scrolling terminal output.
+- **`hook_again_requested() -> bool`** reflects whether the most recently
+  **accepted** `invoke`/`invoke_cbak` call requested to run again (via
+  `hook_again`) — `false` after a rolled-back or merely-returning
+  invocation, since that call never commits.
+- **`skip_directives() -> Vec<([u8; 32], u32)>`** is every `hook_skip(hash,
+  flags)` call from every accepted invocation so far, verbatim, in call
+  order (`flags == 0` add, `flags == 1` delete) — this harness has no chain
+  model, so nothing actually *acts* on a skip directive; it exists purely
+  for asserting a hook called `hook_skip` with the arguments you expect.
 
 ### Exit types
 
@@ -287,54 +296,93 @@ chain's `HookOn` routing actually dispatch to the entry I expect" is
 end-to-end territory; see [Hook Chains](../concepts/chains.md) for how
 `HookOn` is computed from `on = [..]`.
 
-## Phase 1 coverage
+## Callback (`#[cbak]`) invocation
 
-The mock backend answers exactly this surface — every other Hook API
-function keeps returning `NOT_IMPLEMENTED`, the same as any other native
-(non-testenv) build:
+`invoke_cbak::<C>(index, outcome)` runs the entry's paired `#[cbak(index)]`
+body directly, standing in for xahaud's own post-application callback
+dispatch — `outcome` is `CbakOutcome::Success(txn)` or
+`CbakOutcome::Failure(txn)` for one of `env.emitted()`'s transactions,
+mirroring the `0`/`1` the real wasm `cbak(u32)` argument carries for a
+successfully-applied vs. failed emission. For the duration of the call the
+otxn (`otxn_field`/`otxn_type`/`otxn_id`) is the emitted transaction itself,
+and `otxn_burden`/`otxn_generation` read straight off its own `EmitDetails`
+fields (not incremented, unlike `etxn_burden`/`etxn_generation`'s "next
+emission" derivation) — exactly what a real callback sees. The swap is
+undone as soon as the call returns: a later `invoke` on the same `TestEnv`
+sees the originally seeded otxn again. Everything else about the call
+(fresh `InvocationContext`, world snapshot, `accept!`/`rollback!`/`return`
+mapping) is identical to `invoke`.
+
+```rust,ignore
+let exit = env.invoke::<EmitTxn>(0);
+assert!(exit.is_success());
+let txn = env.emitted()[0].clone();
+
+let cbak_exit = env.invoke_cbak::<EmitTxn>(0, CbakOutcome::Success(txn));
+assert!(cbak_exit.is_success());
+```
+
+Panics if the entry at `index` declares no `#[cbak]` body at all.
+
+## Hook API coverage
+
+As of `.claude/design/TESTENV_PHASE2_DESIGN.md`'s final stage (P2-E), the
+mock backend answers the **entire** `extern.h` Hook API surface a hook can
+call, `_g` (guard enforcement) excepted:
 
 | Family | Covered |
 |---|---|
 | State | `state`, `state_set`, `state_foreign`, `state_foreign_set`, and every as-int64 variant (`state_u64`, `state_foreign_u64`, ...) |
-| Originating transaction | `otxn_field`, `otxn_type`, `otxn_id`, `otxn_param`, `otxn_burden`, `otxn_generation` |
+| Originating transaction | `otxn_field`, `otxn_type`, `otxn_id`, `otxn_param`, `otxn_burden`, `otxn_generation`, `otxn_slot` |
 | Hook identity | `hook_param`, `hook_account`, `hook_hash(hook_no)`, `hook_pos` — `hook_param` silently truncates into a too-short buffer and reports the truncated length, mirroring xahaud's own asymmetry with `otxn_param` (which returns `TooSmall`) |
-| Ledger | `ledger_seq`, `ledger_last_time`, `ledger_last_hash`, `ledger_nonce` |
+| Control leftovers | `hook_again` (once per invocation, `ALREADY_SET` on repeat), `hook_skip` (add/delete directives, no chain model), `hook_param_set` (per-hook-hash overrides, precedence over seeded `hook_param`s — see below) |
+| Ledger | `ledger_seq`, `ledger_last_time`, `ledger_last_hash`, `ledger_nonce`, `ledger_keylet` |
 | Fees | `fee_base` (constant) |
-| Emission | `etxn_reserve`, `etxn_fee_base`, `etxn_details`, `etxn_burden`, `etxn_generation`, `etxn_nonce`, `emit` |
+| Emission | `etxn_reserve`, `etxn_fee_base`, `etxn_details`, `etxn_burden`, `etxn_generation`, `etxn_nonce`, `emit`, `prepare` |
 | Control | `accept`, `rollback` |
-| Tracing | `trace`, `trace_num` |
+| Tracing | `trace`, `trace_num`, `trace_float` |
+| Float (XFL) | the full `float_*` family (`float_set`, arithmetic, comparison, `float_sto`/`float_sto_set`, `float_int`, `float_log`, `float_root`, ...) — see [XFL: Decimal Floating Point](../data/xfl.md) |
+| Slot | the full `slot_*` family plus `otxn_slot`/`meta_slot`/`xpop_slot` — see [Slots and Ledger Objects](../data/slots.md) |
+| STO | `sto_subfield`, `sto_subarray`, `sto_validate`, `sto_emplace`, `sto_erase` |
+| Util / Keylets | `util_sha512h`, `util_accid`, `util_raddr`, `util_verify`, `util_keylet`, and all 26 typed `keylet_*` helpers — see [Keylets](../data/keylets.md) |
+| Callbacks | `invoke_cbak::<C>(index, outcome)` runs a declared `#[cbak(index)]` body directly — see [Callback invocation](#callback-cbak-invocation) above |
 
-Everything below is a documented **Phase 2** gap, not an oversight — it
-always returns `NOT_IMPLEMENTED` under `testenv`, exactly as it does without
-`testenv`:
+`hook_param`'s override precedence (`hook_param_set`, P2-E) reduces
+xahaud's real chain-forward semantics — any *later* hook in the same chain
+execution sees a param override an *earlier* one set — to this harness's
+explicit-invocation model: an override only takes effect on a **separate,
+later** `invoke`/`invoke_cbak` call seeded with the same `hook_pos`/
+`hook_hash` as the call that set it (it commits only on that earlier call's
+`accept!`), never within the same invocation that called `hook_param_set`.
 
-- `float_*` (XFL arithmetic — see [XFL: Decimal Floating Point](../data/xfl.md))
-- `slot_*`/`sto_*`/`otxn_slot` (the Slot API and STO codec — see
-  [Slots and Ledger Objects](../data/slots.md))
-- `util_*` and the `keylet_*` family (see [Keylets](../data/keylets.md))
-- `hook_again`/`hook_skip`
-- cbak flows: `invoke::<C>(index)` only ever runs an entry's `hook` body,
-  never its paired `#[cbak(index)]` — a `#[cbak]`'s function pointer is
-  recorded in the same generated table (`NativeEntry::cbak`) so no macro
-  rework is needed once cbak testing lands, but there is no way to invoke it
-  through this harness yet.
-- chain execution / multi-hook ordering (see [Direct-entry invocation](#direct-entry-invocation-no-hookon-filtering)
-  above)
+See [What this harness does not model](#what-this-harness-does-not-model)
+below for the honest, shrunk list of what is genuinely out of scope even
+now that every family above is implemented.
 
 ## What this harness does not model
 
 Documented, not accidental — each of these stays end-to-end (or
-`rshooks build check`) territory:
+`rshooks build check`) territory, honestly enumerated from the
+implementation as of `.claude/design/TESTENV_PHASE2_DESIGN.md`'s final
+stage (P2-E):
 
-- **`rshooks::raw` (direct `rshooks_core` calls) bypasses the mock
-  entirely.** The backend only intercepts the `rshooks` wrapper layer (the
-  `api::*` functions this book otherwise covers); a hook that reaches past
-  it into `rshooks_core` directly keeps hitting the real `NOT_IMPLEMENTED`
-  host stubs under `testenv`, exactly as on any other native build. This
-  is deliberate — `rshooks_core` is documented elsewhere in this book as
-  the project's own WCE escape hatch, and that hatch stays real on native
-  builds too, rather than silently gaining mock coverage the wasm build
-  doesn't have.
+- **Guard enforcement (`_g`) and `HookOn` chain routing.** `_g` keeps
+  returning `0` natively, with or without `testenv` — guard correctness is
+  `rshooks build check`'s job (see [The `rshooks` CLI](../build/cli.md)) and
+  the end-to-end suite's, not this harness's. Chain execution and `on =
+  [..]` trigger filtering are not evaluated at all — covered above.
+- **`rshooks::raw` (direct `rshooks_core::*` calls) bypasses the mock
+  entirely, for every family** — not just the ones this book's worked
+  examples happen to use. The backend only intercepts the specific call
+  sites listed in `crates/rshooks/testenv-call-sites.txt` (the `rshooks`
+  wrapper layer's `api/*.rs` functions, plus `xfl.rs`/`xfl_unchecked.rs`'s
+  own raw `float_*` operator call sites — both were bridged as of P2-E; a
+  hook or helper crate reaching `rshooks_core` directly anywhere else keeps
+  hitting the real `NOT_IMPLEMENTED` host stubs under `testenv`, exactly as
+  on any other native build). This is deliberate — `rshooks_core` is
+  documented elsewhere in this book as the project's own WCE escape hatch,
+  and that hatch stays real on native builds too, rather than silently
+  gaining mock coverage the wasm build doesn't have.
 - **Statics outside `HookStatic` are not reset between invocations.** An
   ordinary hand-declared `static` keeps its value across every `invoke`
   call in the same process, unlike the fresh-wasm-instance-per-invocation
@@ -347,17 +395,22 @@ Documented, not accidental — each of these stays end-to-end (or
   `HookStatic`'s payload type must implement `Clone` — an unconditional
   requirement of the type, identical on every target, not something that
   only shows up under `testenv`.
-- **No `HookOn` trigger filtering** — covered above.
-- **Fees are an explicit approximation**: `etxn_fee_base`'s default
-  responder is `base_fee_drops × etxn_burden`, not a parse of the actual
-  transaction blob through xahaud's real ledger fee calculator. Override
-  `base_fee_drops` if a test needs a specific number, but don't treat the
-  result as the real on-chain fee.
+- **Fee/reserve economics are explicit approximations.** `etxn_fee_base`'s
+  default responder is `base_fee_drops × etxn_burden`, not a parse of the
+  actual transaction blob through xahaud's real ledger fee calculator, and
+  there is no reserve/owner-count model at all. Override `base_fee_drops`
+  if a test needs a specific number, but don't treat the result as the real
+  on-chain fee.
+- **`slot_set`/`ledger_keylet` only resolve 34-byte keylets.** xahaud also
+  accepts a bare 32-byte transaction hash for some slot operations; this
+  harness treats that shape as `DOESNT_EXIST` rather than modeling a
+  separate transaction-hash lookup table.
+- **Amendment gates are assumed active.** Every Hook API function behaves
+  as if every amendment it depends on is already enabled — there is no
+  per-amendment feature-flag model.
 - **`ExitType::Return` is provisional** — covered above.
-- **Guard enforcement is not native-testable.** `_g` keeps returning `0`
-  natively, with or without `testenv`; guard correctness is
-  `rshooks build check`'s job (see [The `rshooks` CLI](../build/cli.md)) and
-  the end-to-end suite's, not this harness's.
+- **Real reserve/consensus economics and instruction metering are
+  unmodeled entirely.**
 - **Signature verification, real reserve/consensus economics, and instruction
   metering** are unmodeled entirely.
 
