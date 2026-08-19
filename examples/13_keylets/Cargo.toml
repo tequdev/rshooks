@@ -6,14 +6,24 @@ rust-version.workspace = true
 publish.workspace = true
 
 [lib]
-crate-type = ["cdylib"]
-# This crate is no_std with no `test` crate available for wasm32v1-none;
-# disable the (impossible) unit-test harness target rather than let
-# `cargo test`/`--all-targets` fail trying to build one.
+crate-type = ["cdylib", "rlib"]
+# `rlib` lets the `tests/` integration test link this crate as an ordinary
+# dependency. This crate is still no_std with no `test` crate available for
+# wasm32v1-none, so the lib target's own unit-test harness stays disabled
+# (`test = false`) — `tests/` integration tests are a separate target and
+# are unaffected by this setting.
 test = false
 
 [dependencies]
 rshooks = { path = "../../crates/rshooks", features = ["host-panic-handler"] }
+
+[dev-dependencies]
+rshooks = { path = "../../crates/rshooks", features = ["testenv"] }
+rshooks-testenv = { path = "../../crates/rshooks-testenv" }
+# Independent expected-value recomputation in `tests/keylets.rs` (the same
+# `sha512Half(ledgerSpace ++ args)` formula `e2e/test/keylets.test.ts` uses)
+# — kept separate from this hook's own on-chain `rshooks` dependency.
+sha2 = "0.10"
 
 [lints]
 workspace = true

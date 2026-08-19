@@ -28,7 +28,7 @@ from pathlib import Path
 # Examples with known test wiring (Stage 5) and their transform. Extend
 # this set, in lockstep with whichever stage wires a new example, whenever
 # tests/ + a rshooks-testenv dev-dependency are added to it.
-WIRED_EXAMPLES = {"02_state-counter", "10_emit-txn", "07_xfl-math"}
+WIRED_EXAMPLES = {"02_state-counter", "10_emit-txn", "07_xfl-math", "13_keylets"}
 
 
 def strip_cargo_toml(path: Path) -> None:

@@ -505,6 +505,104 @@ impl HostBackend for Backend {
     fn float_root(&self, f1: i64, n: u32) -> i64 {
         crate::host::float::float_root(f1, n)
     }
+
+    // -- util_* (P2-B — `.claude/design/TESTENV_PHASE2_DESIGN.md` §4
+    // "util_* + ledger_keylet"). Pure functions, no `self` access needed;
+    // delegated to `crate::host::util`/`crate::host::keylet` per this
+    // file's module doc comment.
+
+    fn util_sha512h(&self, data: &[u8]) -> Result<[u8; 32], i64> {
+        Ok(crate::host::util::util_sha512h(data))
+    }
+
+    fn util_accid(&self, r_address: &[u8]) -> Result<Vec<u8>, i64> {
+        crate::host::util::util_accid(r_address)
+    }
+
+    fn util_raddr(&self, accid: &[u8]) -> Result<Vec<u8>, i64> {
+        crate::host::util::util_raddr(accid)
+    }
+
+    fn util_verify(&self, data: &[u8], signature: &[u8], public_key: &[u8]) -> i64 {
+        crate::host::util::util_verify(data, signature, public_key)
+    }
+
+    fn util_keylet(
+        &self,
+        keylet_type: u32,
+        args: [rshooks_core::backend::KeyletArg<'_>; 6],
+    ) -> Result<[u8; 34], i64> {
+        crate::host::keylet::util_keylet(keylet_type, args)
+    }
+
+    // `ledger_keylet` needs `World` access (a seeded ledger-object search),
+    // unlike every other P2-C function above — see `host::util`'s module
+    // doc comment for why it stays here rather than in a `host::` submodule
+    // (mirrors the state family's own `self.world.borrow()` pattern).
+    // Search rule: the smallest seeded 34-byte keylet whose 32-byte key is
+    // strictly greater than `low`'s and less-than-or-equal-to `high`'s (the
+    // half-open-below/closed-above range `(low, high]`) — ported from
+    // `HookAPI::ledger_keylet` (`Xahau/xahaud`, branch `dev`,
+    // `src/xrpld/app/hook/detail/HookAPI.cpp`), which calls
+    // `view().succ(klLo.key, klHi.key.next())`: `View::succ` finds the
+    // smallest key strictly greater than its first argument that is less
+    // than its (exclusive) second argument, and passing `klHi.key.next()`
+    // (the immediate successor of `high`) as that exclusive bound makes the
+    // overall range inclusive of `high` itself. This port compares directly
+    // against `high` (`<=`) instead of reproducing `.next()`'s wraparound
+    // arithmetic on an all-`0xFF` key — an intentional simplification for
+    // an edge case unreachable in practice (a real keylet hash landing on
+    // the maximum possible 256-bit value), noted here per this stage's
+    // "state the assumption" policy for details not pinned by a source (1-3
+    // list in the design doc). `low`/`high` must be well-formed 34-byte
+    // keylets and share the same 2-byte type prefix (`DOES_NOT_MATCH`
+    // otherwise, matching `klLo.type != klHi.type`); the output keylet's
+    // type prefix is always taken from `low` (`Keylet kl_out{klLo.type,
+    // *found}` — never looked up from the found object itself, since
+    // `succ()` searches the *global* key space with no type filter).
+    fn ledger_keylet(&self, low: &[u8], high: &[u8]) -> Result<Vec<u8>, i64> {
+        if low.len() != 34 || high.len() != 34 {
+            return Err(rshooks_core::INVALID_ARGUMENT);
+        }
+        let (lo_type, lo_key) = low.split_at(2);
+        let (hi_type, hi_key) = high.split_at(2);
+        if lo_type != hi_type {
+            return Err(rshooks_core::DOES_NOT_MATCH);
+        }
+        let w = self.world.borrow();
+        let found = w
+            .ledger_objects
+            .keys()
+            .map(|k| &k[2..34])
+            .filter(|k| *k > lo_key && *k <= hi_key)
+            .min();
+        match found {
+            Some(key) => {
+                let mut out = Vec::with_capacity(34);
+                out.extend_from_slice(lo_type);
+                out.extend_from_slice(key);
+                Ok(out)
+            }
+            None => Err(rshooks_core::DOESNT_EXIST),
+        }
+    }
+
+    // `trace_float` needs `World` access (captures into `World::traces`),
+    // so — like `trace`/`trace_num` above — it lands directly here rather
+    // than in a `host::` submodule; `host::control`'s module doc comment
+    // notes the same for this function specifically. Stores the message
+    // verbatim and the raw XFL `i64` bit pattern as its big-endian 8-byte
+    // encoding, mirroring `trace_num`'s own convention exactly (a full
+    // xahaud-faithful "Float mantissa*10^(exponent)" text rendering is not
+    // reproduced — design doc §4 marks that as not required, only that the
+    // raw value itself is captured for a test to inspect/decode).
+    fn trace_float(&self, msg: &[u8], value: i64) -> i64 {
+        self.world.borrow_mut().traces.push(crate::world::TraceLine {
+            message: msg.to_vec(),
+            data: value.to_be_bytes().to_vec(),
+        });
+        0
+    }
 }
 
 /// Boundary tests for the checked `u64` → `i64` conversions this file
@@ -518,7 +616,7 @@ impl HostBackend for Backend {
 /// chain's hardcoded `etxn_reserve` call.
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
+    #![allow(clippy::unwrap_used, clippy::indexing_slicing)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
 
     use super::*;
 
@@ -527,6 +625,98 @@ mod tests {
         let ctx = Rc::new(RefCell::new(InvocationContext::new(0)));
         let backend = Backend::new(Rc::clone(&world), Rc::clone(&ctx));
         (world, ctx, backend)
+    }
+
+    // -- ledger_keylet (P2-C: `(low, high]` range search over
+    // `World::ledger_objects`) --
+
+    fn kl(ty: u16, key_byte: u8) -> [u8; 34] {
+        let mut out = [0u8; 34];
+        out[0..2].copy_from_slice(&ty.to_be_bytes());
+        out[33] = key_byte;
+        out
+    }
+
+    #[test]
+    fn ledger_keylet_returns_smallest_key_in_range() {
+        let (world, _ctx, backend) = fresh();
+        {
+            let mut w = world.borrow_mut();
+            w.ledger_objects.insert(kl(0x64, 5), std::vec![]);
+            w.ledger_objects.insert(kl(0x64, 9), std::vec![]);
+            w.ledger_objects.insert(kl(0x64, 20), std::vec![]);
+        }
+        let low = kl(0x64, 3);
+        let high = kl(0x64, 10);
+        assert_eq!(backend.ledger_keylet(&low, &high), Ok(kl(0x64, 5).to_vec()));
+    }
+
+    #[test]
+    fn ledger_keylet_lower_bound_is_exclusive() {
+        let (world, _ctx, backend) = fresh();
+        world.borrow_mut().ledger_objects.insert(kl(0x64, 5), std::vec![]);
+        let low = kl(0x64, 5); // the seeded entry sits exactly at `low`
+        let high = kl(0x64, 10);
+        assert_eq!(
+            backend.ledger_keylet(&low, &high),
+            Err(rshooks_core::DOESNT_EXIST)
+        );
+    }
+
+    #[test]
+    fn ledger_keylet_upper_bound_is_inclusive() {
+        let (world, _ctx, backend) = fresh();
+        world.borrow_mut().ledger_objects.insert(kl(0x64, 10), std::vec![]);
+        let low = kl(0x64, 5);
+        let high = kl(0x64, 10); // the seeded entry sits exactly at `high`
+        assert_eq!(
+            backend.ledger_keylet(&low, &high),
+            Ok(kl(0x64, 10).to_vec())
+        );
+    }
+
+    #[test]
+    fn ledger_keylet_empty_range_is_doesnt_exist() {
+        let (_world, _ctx, backend) = fresh();
+        let low = kl(0x64, 0);
+        let high = kl(0x64, 0xFF);
+        assert_eq!(
+            backend.ledger_keylet(&low, &high),
+            Err(rshooks_core::DOESNT_EXIST)
+        );
+    }
+
+    #[test]
+    fn ledger_keylet_type_mismatch_is_does_not_match() {
+        let (_world, _ctx, backend) = fresh();
+        let low = kl(0x64, 0);
+        let high = kl(0x53, 0xFF); // different ltXXX type prefix
+        assert_eq!(
+            backend.ledger_keylet(&low, &high),
+            Err(rshooks_core::DOES_NOT_MATCH)
+        );
+    }
+
+    #[test]
+    fn ledger_keylet_wrong_length_is_invalid_argument() {
+        let (_world, _ctx, backend) = fresh();
+        assert_eq!(
+            backend.ledger_keylet(&[0u8; 10], &[0u8; 34]),
+            Err(rshooks_core::INVALID_ARGUMENT)
+        );
+    }
+
+    // -- trace_float (P2-C) --
+
+    #[test]
+    fn trace_float_captures_message_and_raw_bits() {
+        let (world, _ctx, backend) = fresh();
+        let bits: i64 = 6_089_866_696_204_910_592; // XFL!(1) — see host::float's FLOAT_ONE
+        assert_eq!(backend.trace_float(b"Amount", bits), 0);
+        let traces = world.borrow().traces.clone();
+        assert_eq!(traces.len(), 1);
+        assert_eq!(traces[0].message, b"Amount".to_vec());
+        assert_eq!(traces[0].data, bits.to_be_bytes().to_vec());
     }
 
     #[test]

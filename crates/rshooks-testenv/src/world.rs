@@ -138,16 +138,17 @@ pub(crate) struct World {
 
     // -- Phase 2 (`.claude/design/TESTENV_PHASE2_DESIGN.md` §3) --
     //
-    // Plain data plumbing as of P2-A: seeded/read by the builders and
-    // accessors below, but nothing in `crate::backend::Backend` yet reads
-    // or writes any of these — every Phase 2 `HostBackend` method still
-    // falls through to its trait default. Semantics land per-family in
-    // P2-B..P2-E.
+    // Plain data plumbing as of P2-A, landing per-family in P2-B..P2-E:
+    // `ledger_objects` is read by `ledger_keylet` as of P2-C (below); the
+    // remaining fields are still seeded/read only by the builders and
+    // accessors below — no `crate::backend::Backend` method reads or writes
+    // them yet, so their own `HostBackend` methods still fall through to
+    // the trait default.
     /// Seeded ledger objects, keyed by their 34-byte keylet — backs
-    /// `slot_set`/`ledger_keylet` (P2-D/P2-C). Builder:
+    /// `slot_set` (P2-D, not yet landed: only this map's *keys* are read so
+    /// far) and `ledger_keylet` (P2-C, landed — `crate::backend::Backend::
+    /// ledger_keylet` searches these keys directly). Builder:
     /// [`crate::TestEnv::ledger_object`].
-    #[allow(dead_code)]
-    // scaffolding (P2-A): read once slot_set/ledger_keylet land (P2-D/P2-C)
     pub(crate) ledger_objects: HashMap<[u8; 34], Vec<u8>>,
     /// The current transaction's metadata, if seeded — backs `meta_slot`
     /// (P2-D). Builder: [`crate::TestEnv::otxn_meta`].
