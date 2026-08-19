@@ -11,6 +11,10 @@ use crate::types::{AccountId, Hash};
 #[inline(always)]
 pub fn hook_account<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
     let out = out.as_mut();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.hook_account()) {
+        return crate::testenv_bridge::write_array(out, r);
+    }
     res(unsafe { rshooks_core::hook_account(out.as_mut_ptr() as u32, out.len() as u32) })
         .map(|v| v as usize)
 }
@@ -29,6 +33,10 @@ pub fn hook_account_buf() -> Result<AccountId> {
 #[inline(always)]
 pub fn hook_hash<B: AsMut<[u8]> + ?Sized>(out: &mut B, hook_no: i32) -> Result<usize> {
     let out = out.as_mut();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.hook_hash(hook_no)) {
+        return crate::testenv_bridge::write_array(out, r);
+    }
     res(unsafe { rshooks_core::hook_hash(out.as_mut_ptr() as u32, out.len() as u32, hook_no) })
         .map(|v| v as usize)
 }
@@ -48,6 +56,10 @@ pub fn hook_hash_buf(hook_no: i32) -> Result<Hash> {
 #[inline(always)]
 pub fn hook_param<B: AsMut<[u8]> + ?Sized>(out: &mut B, name: &[u8]) -> Result<usize> {
     let out = out.as_mut();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.hook_param(name)) {
+        return crate::testenv_bridge::write_bytes_truncate(out, r);
+    }
     res(unsafe {
         rshooks_core::hook_param(
             out.as_mut_ptr() as u32,
@@ -149,6 +161,10 @@ pub fn hook_param_typed<N: TypedParamName>(name: &N) -> Result<N::Value> {
 /// hook, per the measurement noted there).
 #[inline(always)]
 pub(crate) fn hook_param_raw_code(buf: &mut [u8], name: &[u8]) -> i64 {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.hook_param(name)) {
+        return crate::testenv_bridge::write_bytes_truncate_code(buf, r);
+    }
     unsafe {
         rshooks_core::hook_param(
             buf.as_mut_ptr() as u32,
@@ -203,6 +219,12 @@ pub fn hook_param_opt<T: FixedRead>(name: &[u8]) -> Result<Option<T>> {
 /// `hook_hash`. Returns the number of bytes written.
 #[inline(always)]
 pub fn hook_param_set(value: &[u8], name: &[u8], hook_hash: &[u8]) -> Result<usize> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) =
+        rshooks_core::backend::with_backend(|b| b.hook_param_set(value, name, hook_hash))
+    {
+        return res(v).map(|v| v as usize);
+    }
     res(unsafe {
         rshooks_core::hook_param_set(
             value.as_ptr() as u32,
@@ -306,5 +328,57 @@ mod tests {
 
     impl crate::convert::TypedParamName for TestKeyParamName {
         type Value = TestKeyParam;
+    }
+}
+
+/// Proves `hook_param`'s testenv interception truncates rather than
+/// returning `TooSmall` on an undersized destination — the documented
+/// xahaud `hook_param` asymmetry (see [`crate::testenv_bridge::write_bytes_truncate`]'s
+/// doc comment), unlike every other byte-returning call in this crate.
+#[cfg(all(test, feature = "testenv"))]
+mod testenv_tests {
+    #![allow(clippy::unwrap_used, clippy::panic)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
+
+    extern crate std;
+
+    use std::rc::Rc;
+    use std::vec::Vec;
+
+    use super::*;
+    use rshooks_core::backend::{HostBackend, install};
+
+    /// Answers `hook_param` with a fixed byte string regardless of `name`;
+    /// `accept`/`rollback` are unused by these tests and simply panic if
+    /// ever reached.
+    struct FixedBytesBackend(&'static [u8]);
+
+    impl HostBackend for FixedBytesBackend {
+        fn hook_param(&self, _name: &[u8]) -> core::result::Result<Vec<u8>, i64> {
+            Ok(self.0.to_vec())
+        }
+
+        fn accept(&self, _msg: &[u8], _code: i64) -> ! {
+            panic!("FixedBytesBackend::accept unexpectedly called")
+        }
+
+        fn rollback(&self, _msg: &[u8], _code: i64) -> ! {
+            panic!("FixedBytesBackend::rollback unexpectedly called")
+        }
+    }
+
+    #[test]
+    fn hook_param_undersized_destination_truncates_never_too_small() {
+        let _guard = install(Rc::new(FixedBytesBackend(&[1, 2, 3, 4, 5, 6, 7, 8, 9])));
+        let mut out = [0u8; 4]; // shorter than the backend's 9-byte value
+        assert_eq!(hook_param(&mut out, b"x"), Ok(4));
+        assert_eq!(out, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn hook_param_raw_code_undersized_destination_truncates() {
+        let _guard = install(Rc::new(FixedBytesBackend(&[1, 2, 3, 4, 5, 6, 7, 8, 9])));
+        let mut out = [0u8; 4]; // shorter than the backend's 9-byte value
+        assert_eq!(hook_param_raw_code(&mut out, b"x"), 4);
+        assert_eq!(out, [1, 2, 3, 4]);
     }
 }

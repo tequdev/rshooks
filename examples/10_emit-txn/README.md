@@ -42,6 +42,21 @@ exclusivity guaranteed by a take-once flag (sound because hooks are
 single-threaded and every invocation runs in a fresh wasm instance; see
 `rshooks::static_cell`).
 
+## Unit tests
+
+```sh
+cargo test --manifest-path examples/Cargo.toml -p emit-txn
+```
+
+Two equivalent layouts exercise the real `EmitTxn` entry through
+`rshooks_testenv::TestEnv::invoke` — no wasm build, no node: `tests/emit.rs`
+(an integration test against the crate as a library) and an in-crate
+`#[cfg(test)]` module at the bottom of `src/lib.rs` (made possible by
+`#![cfg_attr(not(test), no_std)]` — `std` is only available under the test
+harness, never in the shipped wasm build). Both assert the accept exit and
+inspect the captured emission (`env.emitted()`'s length, transaction type,
+and blob). See `book/src/testing/unit-tests.md` for the full walkthrough.
+
 ## Error codes
 
 `EmitTxnError` (`rshooks::hook_errors!`, see `src/lib.rs`) is the

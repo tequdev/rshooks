@@ -36,6 +36,17 @@ pub fn float_sto<B: AsMut<[u8]> + ?Sized>(
         (None, None) => (0u32, 0u32, 0u32, 0u32),
         _ => return Err(HookError::InvalidArgument),
     };
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| {
+        b.float_sto(
+            currency.map(AsRef::as_ref),
+            issuer.map(AsRef::as_ref),
+            amount.raw_bits(),
+            field_code,
+        )
+    }) {
+        return crate::testenv_bridge::write_bytes(out, r);
+    }
     res(unsafe {
         rshooks_core::float_sto(
             out.as_mut_ptr() as u32,
@@ -54,6 +65,10 @@ pub fn float_sto<B: AsMut<[u8]> + ?Sized>(
 /// Decode a serialized Amount (`buf`) into an [`XFL`].
 #[inline(always)]
 pub fn float_sto_set(buf: &[u8]) -> Result<XFL> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.float_sto_set(buf)) {
+        return res(v).map(XFL::from_raw_bits);
+    }
     res(unsafe { rshooks_core::float_sto_set(buf.as_ptr() as u32, buf.len() as u32) })
         .map(XFL::from_raw_bits)
 }
@@ -61,6 +76,10 @@ pub fn float_sto_set(buf: &[u8]) -> Result<XFL> {
 /// Read the amount held in `slot_no` as an [`XFL`].
 #[inline(always)]
 pub fn slot_float(slot_no: u32) -> Result<XFL> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.slot_float(slot_no)) {
+        return res(v).map(XFL::from_raw_bits);
+    }
     res(unsafe { rshooks_core::slot_float(slot_no) }).map(XFL::from_raw_bits)
 }
 

@@ -56,12 +56,47 @@ use rshooks_core::consts::{
     KEYLET_PAYCHAN, KEYLET_QUALITY, KEYLET_SIGNERS, KEYLET_SKIP, KEYLET_TICKET, KEYLET_UNCHECKED,
 };
 
+#[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+use rshooks_core::backend::KeyletArg;
+
+/// Testenv interception shared by every typed helper below: each of them
+/// still constitutes its own "direct raw call site" for bridging purposes
+/// (see `crates/rshooks/testenv-call-sites.txt`'s header and
+/// [`rshooks_core::backend::KeyletArg`]'s doc comment for why — unlike an
+/// `_exact`/`_typed` composing helper elsewhere in this crate,
+/// `util_keylet_buf` no longer has real slices by the time a typed helper
+/// calls it, so interception has to happen here, one level up, where
+/// `account`/`hash`/... are still real references). This is purely the
+/// interception-side plumbing (mirrors `api::state`'s private `opt_in`/
+/// `foreign_target` helpers) — the wasm/no-backend fallback in every typed
+/// helper below still calls `util_keylet_buf` unchanged.
+#[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+#[inline(always)]
+fn testenv_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Option<Result<Keylet>> {
+    rshooks_core::backend::with_backend(|b| b.util_keylet(keylet_type, args))
+        .map(crate::testenv_bridge::keylet_result)
+}
+
 /// `KEYLET_HOOK` (1): the keylet for `account`'s installed `Hook` ledger
 /// object (the object holding that account's chain of hooks — distinct
 /// from [`keylet_hook_definition`], which keys a single hook's own,
 /// account-independent definition object).
 #[inline(always)]
 pub fn keylet_hook(account: &AccountId) -> Result<Keylet> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = testenv_keylet(
+        KEYLET_HOOK,
+        [
+            KeyletArg::Bytes(account.as_ref()),
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+        ],
+    ) {
+        return r;
+    }
     util_keylet_buf(
         KEYLET_HOOK,
         account.as_ptr() as u32,
@@ -86,6 +121,20 @@ pub fn keylet_hook_state(
     key: &StateKey,
     namespace: &NameSpace,
 ) -> Result<Keylet> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = testenv_keylet(
+        KEYLET_HOOK_STATE,
+        [
+            KeyletArg::Bytes(account.as_ref()),
+            KeyletArg::Bytes(key.as_ref()),
+            KeyletArg::Bytes(namespace.as_ref()),
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+        ],
+    ) {
+        return r;
+    }
     util_keylet_buf(
         KEYLET_HOOK_STATE,
         account.as_ptr() as u32,
@@ -101,6 +150,20 @@ pub fn keylet_hook_state(
 /// ledger object.
 #[inline(always)]
 pub fn keylet_account(account: &AccountId) -> Result<Keylet> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = testenv_keylet(
+        KEYLET_ACCOUNT,
+        [
+            KeyletArg::Bytes(account.as_ref()),
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+        ],
+    ) {
+        return r;
+    }
     util_keylet_buf(
         KEYLET_ACCOUNT,
         account.as_ptr() as u32,
@@ -117,6 +180,20 @@ pub fn keylet_account(account: &AccountId) -> Result<Keylet> {
 /// call itself takes must be `0`.
 #[inline(always)]
 pub fn keylet_amendments() -> Result<Keylet> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = testenv_keylet(
+        KEYLET_AMENDMENTS,
+        [
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+        ],
+    ) {
+        return r;
+    }
     util_keylet_buf(KEYLET_AMENDMENTS, 0, 0, 0, 0, 0, 0)
 }
 
@@ -126,6 +203,20 @@ pub fn keylet_amendments() -> Result<Keylet> {
 /// objects.
 #[inline(always)]
 pub fn keylet_child(parent: &Hash) -> Result<Keylet> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = testenv_keylet(
+        KEYLET_CHILD,
+        [
+            KeyletArg::Bytes(parent.as_ref()),
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+        ],
+    ) {
+        return r;
+    }
     util_keylet_buf(
         KEYLET_CHILD,
         parent.as_ptr() as u32,
@@ -143,6 +234,30 @@ pub fn keylet_child(parent: &Hash) -> Result<Keylet> {
 /// specific historical ledger sequence.
 #[inline(always)]
 pub fn keylet_skip(ledger_index: Option<u32>) -> Result<Keylet> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    {
+        let args = match ledger_index {
+            Some(seq) => [
+                KeyletArg::Value(seq),
+                KeyletArg::Value(1),
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+            ],
+            None => [
+                KeyletArg::Value(0),
+                KeyletArg::Value(0),
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+            ],
+        };
+        if let Some(r) = testenv_keylet(KEYLET_SKIP, args) {
+            return r;
+        }
+    }
     match ledger_index {
         Some(seq) => util_keylet_buf(KEYLET_SKIP, seq, 1, 0, 0, 0, 0),
         None => util_keylet_buf(KEYLET_SKIP, 0, 0, 0, 0, 0, 0),
@@ -154,6 +269,20 @@ pub fn keylet_skip(ledger_index: Option<u32>) -> Result<Keylet> {
 /// takes must be `0`.
 #[inline(always)]
 pub fn keylet_fees() -> Result<Keylet> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = testenv_keylet(
+        KEYLET_FEES,
+        [
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+        ],
+    ) {
+        return r;
+    }
     util_keylet_buf(KEYLET_FEES, 0, 0, 0, 0, 0, 0)
 }
 
@@ -162,6 +291,20 @@ pub fn keylet_fees() -> Result<Keylet> {
 /// call itself takes must be `0`.
 #[inline(always)]
 pub fn keylet_negative_unl() -> Result<Keylet> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = testenv_keylet(
+        KEYLET_NEGATIVE_UNL,
+        [
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+        ],
+    ) {
+        return r;
+    }
     util_keylet_buf(KEYLET_NEGATIVE_UNL, 0, 0, 0, 0, 0, 0)
 }
 
@@ -176,6 +319,20 @@ pub fn keylet_line(
     account_b: &AccountId,
     currency: &CurrencyCode,
 ) -> Result<Keylet> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = testenv_keylet(
+        KEYLET_LINE,
+        [
+            KeyletArg::Bytes(account_a.as_ref()),
+            KeyletArg::Bytes(account_b.as_ref()),
+            KeyletArg::Bytes(currency.as_ref()),
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+        ],
+    ) {
+        return r;
+    }
     util_keylet_buf(
         KEYLET_LINE,
         account_a.as_ptr() as u32,
@@ -192,6 +349,20 @@ pub fn keylet_line(
 /// `Sequence`, or the ticket sequence that authorized it).
 #[inline(always)]
 pub fn keylet_offer(account: &AccountId, seq: u32) -> Result<Keylet> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = testenv_keylet(
+        KEYLET_OFFER,
+        [
+            KeyletArg::Bytes(account.as_ref()),
+            KeyletArg::Value(seq),
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+        ],
+    ) {
+        return r;
+    }
     util_keylet_buf(
         KEYLET_OFFER,
         account.as_ptr() as u32,
@@ -208,6 +379,20 @@ pub fn keylet_offer(account: &AccountId, seq: u32) -> Result<Keylet> {
 /// of the 64-bit quality value), rooted at the order-book directory `dir`.
 #[inline(always)]
 pub fn keylet_quality(dir: &Keylet, quality_high: u32, quality_low: u32) -> Result<Keylet> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = testenv_keylet(
+        KEYLET_QUALITY,
+        [
+            KeyletArg::Bytes(dir.as_ref()),
+            KeyletArg::Value(quality_high),
+            KeyletArg::Value(quality_low),
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+        ],
+    ) {
+        return r;
+    }
     util_keylet_buf(
         KEYLET_QUALITY,
         dir.as_ptr() as u32,
@@ -224,6 +409,20 @@ pub fn keylet_quality(dir: &Keylet, quality_high: u32, quality_low: u32) -> Resu
 /// arguments — every component the host call itself takes must be `0`.
 #[inline(always)]
 pub fn keylet_emitted_dir() -> Result<Keylet> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = testenv_keylet(
+        KEYLET_EMITTED_DIR,
+        [
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+        ],
+    ) {
+        return r;
+    }
     util_keylet_buf(KEYLET_EMITTED_DIR, 0, 0, 0, 0, 0, 0)
 }
 
@@ -248,6 +447,20 @@ pub fn keylet_emitted_dir() -> Result<Keylet> {
 /// reason — see its README's "e2e verification scope" section.
 #[inline(always)]
 pub fn keylet_ticket(account: &AccountId, ticket_seq: u32) -> Result<Keylet> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = testenv_keylet(
+        KEYLET_TICKET,
+        [
+            KeyletArg::Bytes(account.as_ref()),
+            KeyletArg::Value(ticket_seq),
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+        ],
+    ) {
+        return r;
+    }
     util_keylet_buf(
         KEYLET_TICKET,
         account.as_ptr() as u32,
@@ -263,6 +476,20 @@ pub fn keylet_ticket(account: &AccountId, ticket_seq: u32) -> Result<Keylet> {
 /// object.
 #[inline(always)]
 pub fn keylet_signers(account: &AccountId) -> Result<Keylet> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = testenv_keylet(
+        KEYLET_SIGNERS,
+        [
+            KeyletArg::Bytes(account.as_ref()),
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+        ],
+    ) {
+        return r;
+    }
     util_keylet_buf(
         KEYLET_SIGNERS,
         account.as_ptr() as u32,
@@ -278,6 +505,20 @@ pub fn keylet_signers(account: &AccountId) -> Result<Keylet> {
 /// created by the transaction at sequence `seq`.
 #[inline(always)]
 pub fn keylet_check(account: &AccountId, seq: u32) -> Result<Keylet> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = testenv_keylet(
+        KEYLET_CHECK,
+        [
+            KeyletArg::Bytes(account.as_ref()),
+            KeyletArg::Value(seq),
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+        ],
+    ) {
+        return r;
+    }
     util_keylet_buf(
         KEYLET_CHECK,
         account.as_ptr() as u32,
@@ -293,6 +534,20 @@ pub fn keylet_check(account: &AccountId, seq: u32) -> Result<Keylet> {
 /// ledger object recording that `owner` has preauthorized `authorized`.
 #[inline(always)]
 pub fn keylet_deposit_preauth(owner: &AccountId, authorized: &AccountId) -> Result<Keylet> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = testenv_keylet(
+        KEYLET_DEPOSIT_PREAUTH,
+        [
+            KeyletArg::Bytes(owner.as_ref()),
+            KeyletArg::Bytes(authorized.as_ref()),
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+        ],
+    ) {
+        return r;
+    }
     util_keylet_buf(
         KEYLET_DEPOSIT_PREAUTH,
         owner.as_ptr() as u32,
@@ -310,6 +565,20 @@ pub fn keylet_deposit_preauth(owner: &AccountId, authorized: &AccountId) -> Resu
 /// another ledger object's own fields), not a *computed* keylet.
 #[inline(always)]
 pub fn keylet_unchecked(hash: &Hash) -> Result<Keylet> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = testenv_keylet(
+        KEYLET_UNCHECKED,
+        [
+            KeyletArg::Bytes(hash.as_ref()),
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+        ],
+    ) {
+        return r;
+    }
     util_keylet_buf(
         KEYLET_UNCHECKED,
         hash.as_ptr() as u32,
@@ -325,6 +594,20 @@ pub fn keylet_unchecked(hash: &Hash) -> Result<Keylet> {
 /// (the root page listing every ledger object `account` owns).
 #[inline(always)]
 pub fn keylet_owner_dir(account: &AccountId) -> Result<Keylet> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = testenv_keylet(
+        KEYLET_OWNER_DIR,
+        [
+            KeyletArg::Bytes(account.as_ref()),
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+        ],
+    ) {
+        return r;
+    }
     util_keylet_buf(
         KEYLET_OWNER_DIR,
         account.as_ptr() as u32,
@@ -343,6 +626,20 @@ pub fn keylet_owner_dir(account: &AccountId) -> Result<Keylet> {
 /// how to obtain one).
 #[inline(always)]
 pub fn keylet_page(root: &Hash, index_high: u32, index_low: u32) -> Result<Keylet> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = testenv_keylet(
+        KEYLET_PAGE,
+        [
+            KeyletArg::Bytes(root.as_ref()),
+            KeyletArg::Value(index_high),
+            KeyletArg::Value(index_low),
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+        ],
+    ) {
+        return r;
+    }
     util_keylet_buf(
         KEYLET_PAGE,
         root.as_ptr() as u32,
@@ -358,6 +655,20 @@ pub fn keylet_page(root: &Hash, index_high: u32, index_low: u32) -> Result<Keyle
 /// created by the transaction at sequence `seq`.
 #[inline(always)]
 pub fn keylet_escrow(account: &AccountId, seq: u32) -> Result<Keylet> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = testenv_keylet(
+        KEYLET_ESCROW,
+        [
+            KeyletArg::Bytes(account.as_ref()),
+            KeyletArg::Value(seq),
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+        ],
+    ) {
+        return r;
+    }
     util_keylet_buf(
         KEYLET_ESCROW,
         account.as_ptr() as u32,
@@ -373,6 +684,20 @@ pub fn keylet_escrow(account: &AccountId, seq: u32) -> Result<Keylet> {
 /// from `src` to `dst` created by the transaction at sequence `seq`.
 #[inline(always)]
 pub fn keylet_paychan(src: &AccountId, dst: &AccountId, seq: u32) -> Result<Keylet> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = testenv_keylet(
+        KEYLET_PAYCHAN,
+        [
+            KeyletArg::Bytes(src.as_ref()),
+            KeyletArg::Bytes(dst.as_ref()),
+            KeyletArg::Value(seq),
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+        ],
+    ) {
+        return r;
+    }
     util_keylet_buf(
         KEYLET_PAYCHAN,
         src.as_ptr() as u32,
@@ -391,6 +716,20 @@ pub fn keylet_paychan(src: &AccountId, dst: &AccountId, seq: u32) -> Result<Keyl
 /// comment.
 #[inline(always)]
 pub fn keylet_emitted(hash: &Hash) -> Result<Keylet> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = testenv_keylet(
+        KEYLET_EMITTED,
+        [
+            KeyletArg::Bytes(hash.as_ref()),
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+        ],
+    ) {
+        return r;
+    }
     util_keylet_buf(
         KEYLET_EMITTED,
         hash.as_ptr() as u32,
@@ -406,6 +745,20 @@ pub fn keylet_emitted(hash: &Hash) -> Result<Keylet> {
 /// ledger object created by the transaction at sequence `seq`.
 #[inline(always)]
 pub fn keylet_nft_offer(account: &AccountId, seq: u32) -> Result<Keylet> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = testenv_keylet(
+        KEYLET_NFT_OFFER,
+        [
+            KeyletArg::Bytes(account.as_ref()),
+            KeyletArg::Value(seq),
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+        ],
+    ) {
+        return r;
+    }
     util_keylet_buf(
         KEYLET_NFT_OFFER,
         account.as_ptr() as u32,
@@ -424,6 +777,20 @@ pub fn keylet_nft_offer(account: &AccountId, seq: u32) -> Result<Keylet> {
 /// installed hook chain.
 #[inline(always)]
 pub fn keylet_hook_definition(hash: &Hash) -> Result<Keylet> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = testenv_keylet(
+        KEYLET_HOOK_DEFINITION,
+        [
+            KeyletArg::Bytes(hash.as_ref()),
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+        ],
+    ) {
+        return r;
+    }
     util_keylet_buf(
         KEYLET_HOOK_DEFINITION,
         hash.as_ptr() as u32,
@@ -439,6 +806,20 @@ pub fn keylet_hook_definition(hash: &Hash) -> Result<Keylet> {
 /// every hook-state entry `account` has stored under `namespace`.
 #[inline(always)]
 pub fn keylet_hook_state_dir(account: &AccountId, namespace: &NameSpace) -> Result<Keylet> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = testenv_keylet(
+        KEYLET_HOOK_STATE_DIR,
+        [
+            KeyletArg::Bytes(account.as_ref()),
+            KeyletArg::Bytes(namespace.as_ref()),
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+        ],
+    ) {
+        return r;
+    }
     util_keylet_buf(
         KEYLET_HOOK_STATE_DIR,
         account.as_ptr() as u32,
@@ -456,6 +837,20 @@ pub fn keylet_hook_state_dir(account: &AccountId, namespace: &NameSpace) -> Resu
 /// counter, unlike every other `account`-keyed type above).
 #[inline(always)]
 pub fn keylet_cron(account: &AccountId, start_time: u32) -> Result<Keylet> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = testenv_keylet(
+        KEYLET_CRON,
+        [
+            KeyletArg::Bytes(account.as_ref()),
+            KeyletArg::Value(start_time),
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+        ],
+    ) {
+        return r;
+    }
     util_keylet_buf(
         KEYLET_CRON,
         account.as_ptr() as u32,

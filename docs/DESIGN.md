@@ -173,6 +173,7 @@ rshooks/
 │   ├── rshooks-macros/         # std, proc-macro crate (#[hook]/#[cbak], txn_template! internals)
 │   ├── rshooks/            # no_std, idiomatic wrapper (depends: rshooks-core, rshooks-macros)
 │   ├── rshooks-build/          # std, bin+lib CLI (clap, wasmparser, wasm-encoder)
+│   ├── rshooks-testenv/        # std, dev-dependency: off-chain unit-test harness (§7)
 │   └── xtask/                # std, bin CLI: header → rshooks-core codegen
 └── examples/
     ├── Cargo.toml            # SEPARATE workspace (no_std cdylibs)
@@ -1577,7 +1578,109 @@ The metadata schema follows the requested 2..=8 Unicode-character rule for
 xahaud `SetHook` validator's byte-oriented 4..=16 UTF-8-byte constraint;
 `rshooks-build` warns when a declared name falls outside that byte range.
 
-## 7. examples/
+## 7. rshooks-testenv
+
+> **Supersedes:** `rshooks_core::host` (`HookHost`/`Guest`, a generated 1:1
+> mirror trait with no real consumers) is `#[deprecated]` in favor of the
+> mechanism below and will be removed in the next breaking release —
+> `HookHost`'s methods take raw `u32` pointers, so an implementor cannot
+> soundly read a caller's buffer on a 64-bit host and it could never serve
+> as a native test seam.
+
+A mock host lets a `#[hooks]` chain entry run as plain native Rust under
+`cargo test` — no wasm build, no node — with assertions on state, exit
+type, and emitted transactions. Full design rationale, the fidelity rules,
+and the review history live in `.claude/design/TESTENV_DESIGN.md` (internal;
+not shipped); this section is the shipped-mechanism summary. The book's
+["Off-Chain Unit Tests"](../book/src/testing/unit-tests.md) chapter is the
+developer-facing documentation.
+
+**The seam.** `rshooks_core::backend` (`#[cfg(all(not(target_arch =
+"wasm32"), feature = "testenv"))]`, `testenv` a default-off feature on
+`rshooks-core`/`rshooks`) defines `#[doc(hidden)] trait HostBackend`: one
+method per bridged Hook API operation, semantic Rust types instead of FFI
+signatures (owned `Vec<u8>`/fixed arrays, not `u32` pointers), every
+non-control method defaulting to `NOT_IMPLEMENTED` so adding a method later
+never breaks an implementor. `accept`/`rollback` are `-> !` and required — an
+implementor must define how execution terminates. A thread-local
+`RefCell<Option<Rc<dyn HostBackend>>>` holds at most one installed backend;
+`backend::install` returns an RAII guard that restores the previous value on
+drop (including during unwinding) and rejects a second `install` on an
+already-occupied slot (the reentrancy guard — `TestEnv::invoke` called from
+inside a running hook panics through this).
+
+**Wrapper interception.** `rshooks`'s `api/*.rs` wrapper functions are the
+only call sites touched: an inventory of every direct `rshooks_core::*` call
+in the bridged families (state, otxn, hook context, ledger, control, etxn,
+trace) is committed to `crates/rshooks/testenv-call-sites.txt`, and each
+site gets an additive, `testenv`-gated block immediately above its raw call
+that consults `backend::with_backend` first. The wasm branch of every
+touched function is textually unchanged. A helper that only calls another
+wrapper (`_exact`/`_typed`, `state_get`, ...) gets no block of its own — it
+inherits interception from the wrapper it calls; two tests keep the
+inventory honest: a source-scan test asserting set-equality between a fresh
+grep and the committed file, and a spy-backend audit test driving every
+bridged public API and asserting each reaches the backend. `accept`/
+`rollback` diverge via `panic::panic_any` before ever reaching the raw call;
+`TestEnv::invoke` catches the unwind, restoring the state snapshot first for
+any payload that isn't its own exit signal (a genuine test failure is never
+converted into an exit). `HookStatic<T: Clone>` gains a parallel testenv
+claim path: a thread-local per-invocation take-set hands out a freshly
+leaked clone of the pristine static storage once per `invoke` call, never
+touching the process-global take-once flag a plain (non-testenv) `take()`
+uses — a process-global mutex serializes the two paths so the testenv path
+never clones storage a plain `take()` may already hold `&mut` to.
+
+**Native entry table.** `#[hooks]`'s impl macro emits each entry's one-call
+body exactly once, as a plain-Rust-ABI `fn(u32) -> i64`; both the wasm
+`extern "C"` wrapper and a generated, non-wasm-gated (not feature-gated —
+generated code can't see downstream features)
+`impl rshooks::decl::HookChainEntries for <Chain>` forward to that same
+function — the wasm wrapper as a one-line `#[inline(always)]` call, the
+native table (`rshooks::decl::NativeEntry`, one row per declared entry) as a
+direct function pointer. `TestEnv::invoke::<C>(index)` looks the index up in
+`C::ENTRIES` and calls it directly: a direct-entry call with no `HookOn`
+trigger filtering.
+
+**The harness (`crates/rshooks-testenv`).** `TestEnv` owns a persistent
+`World` (state maps, otxn, hook identity, grants, ledger fields, committed
+emissions/traces) plus a fresh `InvocationContext` per `invoke` call (emit
+reserve/count, state-modification/namespace/nonce budgets, the
+`HookStatic` take-set) — everything the design's limits table specifies,
+with boundary tests per row. `invoke` snapshots persistent state, installs
+the backend, runs the entry under `catch_unwind`, then commits (`accept!`)
+or restores (`rollback!`, a bare `return`, provisionally) per the outcome.
+The crate `compile_error!`s at `#[cfg(panic = "abort")]`, since the whole
+exit-capture mechanism depends on unwinding across the mock host boundary.
+
+**Full Hook API surface (Phase 2).** `.claude/design/TESTENV_PHASE2_DESIGN.md`
+extended the mechanism above, family by family (`float_*`, `slot_*`/
+`sto_*`/`otxn_slot`/`meta_slot`/`xpop_slot`, `util_*`/`keylet_*`,
+`ledger_keylet`, `hook_again`/`hook_skip`/`hook_param_set`, `prepare`,
+`trace_float`), plus `TestEnv::invoke_cbak` for running a declared
+`#[cbak]` body directly, with the emitted transaction standing in as its
+otxn. Every `extern.h` function a hook can call is now answered by the
+mock backend (`_g` excepted — guard enforcement stays a build-time/e2e
+concern); see the book's ["Off-Chain Unit
+Tests"](../book/src/testing/unit-tests.md) chapter for the full coverage
+table and the honestly-enumerated remaining gaps (fee/reserve economics as
+approximations, statics outside `HookStatic`, no chain/`HookOn` model,
+amendment gates assumed active, and the `rshooks::raw` escape hatch).
+
+**Zero wasm impact.** Every new runtime code path is `testenv`-gated or
+`not(target_arch = "wasm32")`-gated; the touched wrapper functions' wasm
+branches are textually unchanged; `rshooks-core/src/api.rs` (the stub layer)
+is untouched; `testenv` is default-off and unreachable from `rshooks
+build`'s cargo invocations (dev-dependencies are inactive for a plain
+`cargo build`/`cargo rustc`, and the selected build pins `--crate-type
+cdylib` explicitly, so the `rlib` crate-type a test-wired example adds never
+enters the artifact path). `scripts/probe-testenv-parity.sh` is the
+continuous verification: it builds every example (and a synthetic probe
+matrix) twice at the same commit — pristine vs. test-wired — and asserts
+byte-for-byte identity of every final `.wasm`, every raw selected `cargo
+rustc` artifact, and the sidecar WCE/size/nesting numbers.
+
+## 8. examples/
 
 Own workspace; every crate:
 
@@ -1622,7 +1725,7 @@ arrays and `split_at`-free patterns), no `format!`/`fmt`, loops carry
 zero-initialized buffers live in `static`s (data segment / BSS) rather
 than stack locals (see §6.3's static-buffer idiom).
 
-## 8. Code health
+## 9. Code health
 
 - `rustfmt.toml` (defaults; `edition = "2024"`), formatting enforced.
 - Workspace lints in root `Cargo.toml`, inherited via `[lints] workspace = true`:
@@ -1641,8 +1744,10 @@ than stack locals (see §6.3's static-buffer idiom).
   rshooks` (rshooks-build is a std CLI and must not be built for
   wasm32v1-none), and clippy for the examples workspace uses `--lib`, not
   `--all-targets` — wasm32v1-none has no `test` crate, so the implicit
-  test-profile target can never build (examples also set `[lib] test =
-  false`).
+  test-profile target can never build there regardless of an example's own
+  `[lib] test` setting. Some examples additionally carry host-only `tests/`
+  targets and dev-dependencies (§7) — those are exercised by `cargo test`,
+  not by this wasm32v1-none lint pass.
 - Tests: rshooks-build unit tests on `wat`-authored fixtures (cleaner strips
   exports; guard inserted at loop head byte-exactly; recursion detected;
   float opcode rejected); rshooks-core has a test asserting the whitelist

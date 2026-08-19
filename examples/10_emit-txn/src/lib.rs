@@ -1,4 +1,4 @@
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 
 use rshooks::prelude::*;
 use rshooks::*;
@@ -95,5 +95,36 @@ impl EmitTxn {
     #[cbak(0)]
     fn cbak(&self) -> i64 {
         accept!()
+    }
+}
+
+// In-crate off-chain unit test, driven through `TestEnv::invoke` against
+// the entry declared above — no wasm build, no node. Only reachable via
+// `cargo test` (`--test` implies `cfg(test)`, which is what switches off
+// `no_std` above); never part of the shipped wasm artifact. See
+// `tests/emit.rs` for the equivalent integration-test-style layout, and
+// `book/src/testing/unit-tests.md` for both layouts documented side by
+// side.
+#[cfg(test)]
+mod tests {
+    use rshooks_testenv::prelude::*;
+
+    use super::EmitTxn;
+
+    fn env() -> TestEnv {
+        TestEnv::new()
+            .hook_account([1u8; 20])
+            .otxn(Otxn::new(TxType::Invoke).account([2u8; 20]))
+    }
+
+    #[test]
+    fn emit_accepts_and_records_one_payment() {
+        let env = env();
+        let exit = env.invoke::<EmitTxn>(0);
+        assert_eq!(exit.exit, ExitType::Accept, "{exit:?}");
+        let emitted = env.emitted();
+        assert_eq!(emitted.len(), 1);
+        assert_eq!(emitted[0].tx_type(), Some(TxType::Payment));
+        assert!(!emitted[0].blob().is_empty());
     }
 }

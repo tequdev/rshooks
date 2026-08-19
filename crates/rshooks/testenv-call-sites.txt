@@ -1,0 +1,179 @@
+# Inventory of every direct `rshooks_core::<fn>` call site in the bridged
+# API families (state, otxn, hook_ctx, ledger, control, etxn, trace, float,
+# slot, sto, util, keylet) under `crates/rshooks/src/api/`, plus `xfl.rs`
+# (see the note below the state/otxn/... rows for why that file is included
+# too). One line per bridged call site:
+#
+#   api/<file>.rs::<wrapper_fn> -> <raw_fn>
+#   xfl.rs::<wrapper_fn> -> <raw_fn>
+#
+# A source-scan test asserts set-equality between a fresh grep of these
+# families and this file, so a newly added raw call site that nobody
+# bridged fails CI. See `.claude/design/TESTENV_DESIGN.md` §2.1/§6,
+# `.claude/design/TESTENV_IMPLEMENTATION.md`'s Stage 2 contract, and
+# `.claude/design/TESTENV_PHASE2_DESIGN.md` §7 (P2-A) for the Phase 2
+# families below.
+
+api/control.rs::accept -> accept
+api/control.rs::hook_pos -> hook_pos
+api/control.rs::rollback -> rollback
+api/etxn.rs::emit -> emit
+api/etxn.rs::etxn_burden -> etxn_burden
+api/etxn.rs::etxn_details -> etxn_details
+api/etxn.rs::etxn_fee_base -> etxn_fee_base
+api/etxn.rs::etxn_generation -> etxn_generation
+api/etxn.rs::etxn_nonce -> etxn_nonce
+api/etxn.rs::etxn_reserve -> etxn_reserve
+api/hook_ctx.rs::hook_account -> hook_account
+api/hook_ctx.rs::hook_hash -> hook_hash
+api/hook_ctx.rs::hook_param -> hook_param
+api/hook_ctx.rs::hook_param_raw_code -> hook_param
+api/ledger.rs::fee_base -> fee_base
+api/ledger.rs::ledger_last_hash -> ledger_last_hash
+api/ledger.rs::ledger_last_time -> ledger_last_time
+api/ledger.rs::ledger_nonce -> ledger_nonce
+api/ledger.rs::ledger_seq -> ledger_seq
+api/otxn.rs::otxn_burden -> otxn_burden
+api/otxn.rs::otxn_field -> otxn_field
+api/otxn.rs::otxn_field_u64 -> otxn_field
+api/otxn.rs::otxn_generation -> otxn_generation
+api/otxn.rs::otxn_id -> otxn_id
+api/otxn.rs::otxn_param -> otxn_param
+api/otxn.rs::otxn_param_raw_code -> otxn_param
+api/otxn.rs::otxn_type -> otxn_type
+api/state.rs::state -> state
+api/state.rs::state_foreign -> state_foreign
+api/state.rs::state_foreign_raw_code -> state_foreign
+api/state.rs::state_foreign_set -> state_foreign_set
+api/state.rs::state_foreign_u64 -> state_foreign
+api/state.rs::state_raw_code -> state
+api/state.rs::state_set -> state_set
+api/state.rs::state_u64 -> state
+api/state.rs::state_u64_raw_code -> state
+api/trace.rs::trace -> trace
+api/trace.rs::trace_num -> trace_num
+
+# --- Phase 2 (`.claude/design/TESTENV_PHASE2_DESIGN.md`, stage P2-A) ---
+#
+# float/slot/sto/util/keylet call sites, plus the 7 sites that were
+# unbridged in Phase 1 (moved up from the old "unbridged (Phase 2)"
+# section below, now empty).
+
+api/control.rs::hook_again -> hook_again
+api/control.rs::hook_skip -> hook_skip
+api/etxn.rs::prepare -> prepare
+api/float.rs::float_sto -> float_sto
+api/float.rs::float_sto_set -> float_sto_set
+api/float.rs::slot_float -> slot_float
+api/hook_ctx.rs::hook_param_set -> hook_param_set
+api/keylet.rs::keylet_account -> util_keylet_buf
+api/keylet.rs::keylet_amendments -> util_keylet_buf
+api/keylet.rs::keylet_check -> util_keylet_buf
+api/keylet.rs::keylet_child -> util_keylet_buf
+api/keylet.rs::keylet_cron -> util_keylet_buf
+api/keylet.rs::keylet_deposit_preauth -> util_keylet_buf
+api/keylet.rs::keylet_emitted -> util_keylet_buf
+api/keylet.rs::keylet_emitted_dir -> util_keylet_buf
+api/keylet.rs::keylet_escrow -> util_keylet_buf
+api/keylet.rs::keylet_fees -> util_keylet_buf
+api/keylet.rs::keylet_hook -> util_keylet_buf
+api/keylet.rs::keylet_hook_definition -> util_keylet_buf
+api/keylet.rs::keylet_hook_state -> util_keylet_buf
+api/keylet.rs::keylet_hook_state_dir -> util_keylet_buf
+api/keylet.rs::keylet_line -> util_keylet_buf
+api/keylet.rs::keylet_negative_unl -> util_keylet_buf
+api/keylet.rs::keylet_nft_offer -> util_keylet_buf
+api/keylet.rs::keylet_offer -> util_keylet_buf
+api/keylet.rs::keylet_owner_dir -> util_keylet_buf
+api/keylet.rs::keylet_page -> util_keylet_buf
+api/keylet.rs::keylet_paychan -> util_keylet_buf
+api/keylet.rs::keylet_quality -> util_keylet_buf
+api/keylet.rs::keylet_signers -> util_keylet_buf
+api/keylet.rs::keylet_skip -> util_keylet_buf
+api/keylet.rs::keylet_ticket -> util_keylet_buf
+api/keylet.rs::keylet_unchecked -> util_keylet_buf
+api/ledger.rs::ledger_keylet -> ledger_keylet
+api/otxn.rs::otxn_slot -> otxn_slot
+api/slot.rs::meta_slot -> meta_slot
+api/slot.rs::slot -> slot
+api/slot.rs::slot_clear -> slot_clear
+api/slot.rs::slot_count -> slot_count
+api/slot.rs::slot_set -> slot_set
+api/slot.rs::slot_size -> slot_size
+api/slot.rs::slot_subarray -> slot_subarray
+api/slot.rs::slot_subfield -> slot_subfield
+api/slot.rs::slot_type -> slot_type
+api/slot.rs::slot_u64 -> slot
+api/slot.rs::xpop_slot -> xpop_slot
+api/sto.rs::sto_emplace -> sto_emplace
+api/sto.rs::sto_erase -> sto_erase
+api/sto.rs::sto_subarray -> sto_subarray
+api/sto.rs::sto_subfield -> sto_subfield
+api/sto.rs::sto_validate -> sto_validate
+api/trace.rs::trace_float -> trace_float
+api/util.rs::util_accid -> util_accid
+api/util.rs::util_keylet -> util_keylet
+api/util.rs::util_raddr -> util_raddr
+api/util.rs::util_sha512h -> util_sha512h
+api/util.rs::util_verify -> util_verify
+
+# --- xfl.rs: the float_* raw call sites that live outside api/float.rs ---
+#
+# `float_set`/`float_multiply`/`float_mulratio`/`float_negate`/
+# `float_compare`/`float_sum`/`float_invert`/`float_divide`/`float_one`/
+# `float_mantissa`/`float_sign`/`float_int`/`float_log`/`float_root` are
+# NOT called from `api/float.rs` — that module only wraps `float_sto`/
+# `float_sto_set`/`slot_float` (see its own module doc comment). The other
+# 14 `float_*` functions are called directly from `rshooks::xfl::XFL`'s
+# inherent methods and operator trait impls (`Neg`/`Add`/`Mul`/`Div`), which
+# is where the actual `rshooks_core::float_*` raw call sites live. Bridging
+# only `api/float.rs` (as the family name might suggest) would leave these
+# 14 functions permanently unreachable through the wrapper layer under
+# `testenv` — so `xfl.rs` is scanned as an honorary member of the "float"
+# bridged family, deviating from the literal `api/*.rs`-only file list in
+# `.claude/design/TESTENV_PHASE2_DESIGN.md` §2/§7 for exactly this reason.
+# `float_exponent` has no row here (and needs none): `XFL::exponent`
+# decodes the exponent locally from the bit pattern — there is no
+# `float_exponent` host call to bridge at all.
+
+xfl.rs::add -> float_sum
+xfl.rs::compare -> float_compare
+xfl.rs::div -> float_divide
+xfl.rs::invert -> float_invert
+xfl.rs::log -> float_log
+xfl.rs::mantissa -> float_mantissa
+xfl.rs::mul -> float_multiply
+xfl.rs::mulratio -> float_mulratio
+xfl.rs::neg -> float_negate
+xfl.rs::new -> float_set
+xfl.rs::one -> float_one
+xfl.rs::root -> float_root
+xfl.rs::sign -> float_sign
+xfl.rs::to_int -> float_int
+
+# --- xfl_unchecked.rs: XFLUnchecked's own raw float_* call sites (P2-E) ---
+#
+# `XFLUnchecked` (`crate::xfl_unchecked`) exists specifically to defer
+# validation across a chain of hot-path XFL arithmetic (see its own module
+# doc comment): `Neg`/`Add`/`Mul`/`Div` and `validate` each call
+# `rshooks_core::float_*` directly, exactly like `xfl.rs`'s operators above
+# (`Sub` is the one exception — implemented as `self + (-rhs)`, dispatching
+# to this same file's own `Add`/`Neg` impls, so it has no raw call site of
+# its own, matching `xfl.rs::sub`'s identical absence from the list above).
+# `TESTENV_PHASE2_DESIGN.md` §4's original file list only mentions
+# `api/*.rs`/`xfl.rs`; this file is scanned as a second honorary member of
+# the "float" bridged family for the same reason `xfl.rs` is (deviating from
+# the literal file list), discovered when P2-D found `examples/07`'s real
+# accept path structurally unreachable because these sites were unbridged —
+# a hook using `XFLUnchecked` silently fell back to the raw
+# `NOT_IMPLEMENTED` host stub under `testenv` even with a backend installed.
+
+xfl_unchecked.rs::add -> float_sum
+xfl_unchecked.rs::div -> float_divide
+xfl_unchecked.rs::mul -> float_multiply
+xfl_unchecked.rs::neg -> float_negate
+xfl_unchecked.rs::validate -> float_sum
+
+# --- unbridged (Phase 2) ---
+#
+# (empty — every entry formerly here is now bridged above.)

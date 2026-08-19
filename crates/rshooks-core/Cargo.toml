@@ -10,6 +10,12 @@ description = "Raw no_std FFI bindings and constants for the Xahau Hooks API"
 keywords = ["xahau", "hooks", "wasm", "no-std"]
 categories = ["no-std", "wasm", "api-bindings", "cryptography::cryptocurrencies"]
 
+[features]
+# Native-only mock host seam for off-chain unit tests (`rshooks_core::backend`).
+# Default-off: has zero effect on `target_arch = "wasm32"` builds or on any
+# build that does not explicitly enable it.
+testenv = []
+
 [dev-dependencies]
 sha2 = "0.10"
 

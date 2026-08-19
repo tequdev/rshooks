@@ -20,3 +20,4 @@ out/
 # e2e: xrpld-netgen's standalone-node runtime state (db, docker-compose,
 # downloaded xahaud binary), dropped in the cwd `up:standalone` is run from
 /xahau/
+__pycache__/

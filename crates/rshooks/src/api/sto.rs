@@ -15,6 +15,10 @@ use crate::error::{HookError, Result, res};
 /// Validate the integrity of the STO in `sto`.
 #[inline(always)]
 pub fn sto_validate(sto: &[u8]) -> Result<bool> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.sto_validate(sto)) {
+        return res(v).map(|v| v != 0);
+    }
     res(unsafe { rshooks_core::sto_validate(sto.as_ptr() as u32, sto.len() as u32) })
         .map(|v| v != 0)
 }
@@ -24,6 +28,10 @@ pub fn sto_validate(sto: &[u8]) -> Result<bool> {
 #[inline(always)]
 pub fn sto_subfield(sto: &[u8], field_id: impl Into<u32>) -> Result<i64> {
     let field_id = field_id.into();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.sto_subfield(sto, field_id)) {
+        return res(v);
+    }
     res(unsafe { rshooks_core::sto_subfield(sto.as_ptr() as u32, sto.len() as u32, field_id) })
 }
 
@@ -31,6 +39,10 @@ pub fn sto_subfield(sto: &[u8], field_id: impl Into<u32>) -> Result<i64> {
 /// packed `(offset, length)` value; see the module doc comment.
 #[inline(always)]
 pub fn sto_subarray(array: &[u8], index: u32) -> Result<i64> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.sto_subarray(array, index)) {
+        return res(v);
+    }
     res(unsafe { rshooks_core::sto_subarray(array.as_ptr() as u32, array.len() as u32, index) })
 }
 
@@ -135,6 +147,11 @@ pub fn sto_emplace<B: AsMut<[u8]> + ?Sized>(
 ) -> Result<usize> {
     let field_id = field_id.into();
     let out = out.as_mut();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.sto_emplace(source, field, field_id))
+    {
+        return crate::testenv_bridge::write_bytes(out, r);
+    }
     res(unsafe {
         rshooks_core::sto_emplace(
             out.as_mut_ptr() as u32,
@@ -159,6 +176,10 @@ pub fn sto_erase<B: AsMut<[u8]> + ?Sized>(
 ) -> Result<usize> {
     let field_id = field_id.into();
     let out = out.as_mut();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.sto_erase(source, field_id)) {
+        return crate::testenv_bridge::write_bytes(out, r);
+    }
     res(unsafe {
         rshooks_core::sto_erase(
             out.as_mut_ptr() as u32,

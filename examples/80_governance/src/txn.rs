@@ -50,6 +50,7 @@ const HSF_OVERRIDE: u32 = 1;
 /// A linear cursor-based transaction-bytes writer, shared by both
 /// encoders in this module. See `examples/80_governance/src/mint_txn.rs`'s
 /// `MintTxn` for the identical idiom and rationale.
+#[derive(Clone)]
 struct TxnBuf {
     buf: [u8; 1024],
     len: usize,

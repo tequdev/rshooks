@@ -14,6 +14,10 @@ use crate::types::{Hash, Nonce};
 /// Burden of this hook's own emitted transactions so far.
 #[inline(always)]
 pub fn etxn_burden() -> Result<u64> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.etxn_burden()) {
+        return res(v).map(|v| v as u64);
+    }
     res(unsafe { rshooks_core::etxn_burden() }).map(|v| v as u64)
 }
 
@@ -29,6 +33,10 @@ pub fn etxn_burden() -> Result<u64> {
 #[inline(always)]
 pub fn etxn_details<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
     let out = out.as_mut();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.etxn_details()) {
+        return crate::testenv_bridge::write_bytes(out, r);
+    }
     res(unsafe { rshooks_core::etxn_details(out.as_mut_ptr() as u32, out.len() as u32) })
         .map(|v| v as usize)
 }
@@ -36,6 +44,10 @@ pub fn etxn_details<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
 /// The base fee (in drops) required to emit `tx_blob`.
 #[inline(always)]
 pub fn etxn_fee_base(tx_blob: &[u8]) -> Result<u64> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.etxn_fee_base(tx_blob)) {
+        return res(v).map(|v| v as u64);
+    }
     res(unsafe { rshooks_core::etxn_fee_base(tx_blob.as_ptr() as u32, tx_blob.len() as u32) })
         .map(|v| v as u64)
 }
@@ -44,12 +56,20 @@ pub fn etxn_fee_base(tx_blob: &[u8]) -> Result<u64> {
 /// before [`emit`].
 #[inline(always)]
 pub fn etxn_reserve(count: u32) -> Result<i64> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.etxn_reserve(count)) {
+        return res(v);
+    }
     res(unsafe { rshooks_core::etxn_reserve(count) })
 }
 
 /// The generation of transactions emitted by this hook so far.
 #[inline(always)]
 pub fn etxn_generation() -> u32 {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.etxn_generation()) {
+        return v as u32;
+    }
     unsafe { rshooks_core::etxn_generation() as u32 }
 }
 
@@ -59,6 +79,10 @@ pub fn etxn_generation() -> u32 {
 #[inline(always)]
 pub fn etxn_nonce<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
     let out = out.as_mut();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.etxn_nonce()) {
+        return crate::testenv_bridge::write_array(out, r);
+    }
     res(unsafe { rshooks_core::etxn_nonce(out.as_mut_ptr() as u32, out.len() as u32) })
         .map(|v| v as usize)
 }
@@ -77,6 +101,10 @@ pub fn etxn_nonce_buf() -> Result<Nonce> {
 #[inline(always)]
 pub fn emit<B: AsMut<[u8]> + ?Sized>(out: &mut B, tx_blob: &[u8]) -> Result<usize> {
     let out = out.as_mut();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.emit(tx_blob)) {
+        return crate::testenv_bridge::write_array(out, r);
+    }
     res(unsafe {
         rshooks_core::emit(
             out.as_mut_ptr() as u32,
@@ -102,6 +130,10 @@ pub fn emit_buf(tx_blob: &[u8]) -> Result<Hash> {
 #[inline(always)]
 pub fn prepare<B: AsMut<[u8]> + ?Sized>(out: &mut B, template: &[u8]) -> Result<usize> {
     let out = out.as_mut();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.prepare(template)) {
+        return crate::testenv_bridge::write_bytes(out, r);
+    }
     res(unsafe {
         rshooks_core::prepare(
             out.as_mut_ptr() as u32,

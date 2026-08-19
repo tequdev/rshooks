@@ -40,6 +40,10 @@ use crate::error::{Result, res};
 #[inline(always)]
 pub fn slot<B: AsMut<[u8]> + ?Sized>(out: &mut B, slot_no: u32) -> Result<usize> {
     let out = out.as_mut();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.slot(slot_no)) {
+        return crate::testenv_bridge::write_bytes(out, r);
+    }
     res(unsafe { rshooks_core::slot(out.as_mut_ptr() as u32, out.len() as u32, slot_no) })
         .map(|v| v as usize)
 }
@@ -50,6 +54,10 @@ pub fn slot<B: AsMut<[u8]> + ?Sized>(out: &mut B, slot_no: u32) -> Result<usize>
 /// [`crate::error::HookError::TooBig`] — see `state_u64` for details).
 #[inline(always)]
 pub fn slot_u64(slot_no: u32) -> Result<u64> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.slot(slot_no)) {
+        return res(crate::testenv_bridge::as_int64_code(r)).map(|v| v as u64);
+    }
     res(unsafe { rshooks_core::slot(0, 0, slot_no) }).map(|v| v as u64)
 }
 
@@ -82,6 +90,10 @@ pub fn slot_exact<T: FixedRead>(slot_no: u32) -> Result<T> {
 /// Free `slot_no`, making it available for reuse.
 #[inline(always)]
 pub fn slot_clear(slot_no: u32) -> Result<i64> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.slot_clear(slot_no)) {
+        return res(v);
+    }
     res(unsafe { rshooks_core::slot_clear(slot_no) })
 }
 
@@ -89,6 +101,10 @@ pub fn slot_clear(slot_no: u32) -> Result<i64> {
 /// array).
 #[inline(always)]
 pub fn slot_count(slot_no: u32) -> Result<u32> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.slot_count(slot_no)) {
+        return res(v).map(|v| v as u32);
+    }
     res(unsafe { rshooks_core::slot_count(slot_no) }).map(|v| v as u32)
 }
 
@@ -96,6 +112,10 @@ pub fn slot_count(slot_no: u32) -> Result<u32> {
 /// `slot_into` (`0` auto-assigns). Returns the assigned slot number.
 #[inline(always)]
 pub fn slot_set(data: &[u8], slot_into: u32) -> Result<u32> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.slot_set(data, slot_into)) {
+        return res(v).map(|v| v as u32);
+    }
     res(unsafe { rshooks_core::slot_set(data.as_ptr() as u32, data.len() as u32, slot_into) })
         .map(|v| v as u32)
 }
@@ -103,6 +123,10 @@ pub fn slot_set(data: &[u8], slot_into: u32) -> Result<u32> {
 /// The serialized size, in bytes, of the object held in `slot_no`.
 #[inline(always)]
 pub fn slot_size(slot_no: u32) -> Result<u32> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.slot_size(slot_no)) {
+        return res(v).map(|v| v as u32);
+    }
     res(unsafe { rshooks_core::slot_size(slot_no) }).map(|v| v as u32)
 }
 
@@ -110,6 +134,12 @@ pub fn slot_size(slot_no: u32) -> Result<u32> {
 /// (`0` auto-assigns). Returns the assigned slot number.
 #[inline(always)]
 pub fn slot_subarray(parent_slot: u32, array_id: u32, new_slot: u32) -> Result<u32> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) =
+        rshooks_core::backend::with_backend(|b| b.slot_subarray(parent_slot, array_id, new_slot))
+    {
+        return res(v).map(|v| v as u32);
+    }
     res(unsafe { rshooks_core::slot_subarray(parent_slot, array_id, new_slot) }).map(|v| v as u32)
 }
 
@@ -118,6 +148,12 @@ pub fn slot_subarray(parent_slot: u32, array_id: u32, new_slot: u32) -> Result<u
 #[inline(always)]
 pub fn slot_subfield(parent_slot: u32, field_id: impl Into<u32>, new_slot: u32) -> Result<u32> {
     let field_id = field_id.into();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) =
+        rshooks_core::backend::with_backend(|b| b.slot_subfield(parent_slot, field_id, new_slot))
+    {
+        return res(v).map(|v| v as u32);
+    }
     res(unsafe { rshooks_core::slot_subfield(parent_slot, field_id, new_slot) }).map(|v| v as u32)
 }
 
@@ -125,6 +161,10 @@ pub fn slot_subfield(parent_slot: u32, field_id: impl Into<u32>, new_slot: u32) 
 /// with `flags = 1`, whether it is a native (XRP/XAH) amount.
 #[inline(always)]
 pub fn slot_type(slot_no: u32, flags: u32) -> Result<u32> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.slot_type(slot_no, flags)) {
+        return res(v).map(|v| v as u32);
+    }
     res(unsafe { rshooks_core::slot_type(slot_no, flags) }).map(|v| v as u32)
 }
 
@@ -132,12 +172,21 @@ pub fn slot_type(slot_no: u32, flags: u32) -> Result<u32> {
 /// auto-assigns). Returns the assigned slot number.
 #[inline(always)]
 pub fn meta_slot(slot_into: u32) -> Result<u32> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.meta_slot(slot_into)) {
+        return res(v).map(|v| v as u32);
+    }
     res(unsafe { rshooks_core::meta_slot(slot_into) }).map(|v| v as u32)
 }
 
 /// Load an XPOP's transaction and metadata into the given slots.
 #[inline(always)]
 pub fn xpop_slot(slot_no_tx: u32, slot_no_meta: u32) -> Result<i64> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.xpop_slot(slot_no_tx, slot_no_meta))
+    {
+        return res(v);
+    }
     res(unsafe { rshooks_core::xpop_slot(slot_no_tx, slot_no_meta) })
 }
 

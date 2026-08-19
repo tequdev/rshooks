@@ -1,0 +1,32 @@
+[package]
+name = "rshooks-testenv"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+description = "Off-chain unit-test harness for rshooks Xahau Hooks (mock host, no wasm/node required)"
+keywords = ["xahau", "hooks", "testing", "wasm"]
+categories = ["development-tools::testing"]
+
+[dependencies]
+rshooks = { path = "../rshooks", version = "0.0.1", features = ["testenv"] }
+rshooks-core = { path = "../rshooks-core", version = "0.0.1", features = [
+    "testenv",
+] }
+sha2 = "0.10"
+# util_verify (P2-C): ed25519 / secp256k1 signature verification, matching
+# xahaud's own `ripple::verify` dispatch (see `src/host/util.rs`'s module
+# doc comment for the exact digest-choice citation). Pure-Rust, trimmed to
+# verification-only feature sets — no signing/rand dependency needed.
+ed25519-dalek = { version = "2", default-features = false, features = [
+    "alloc",
+] }
+k256 = { version = "0.13", default-features = false, features = [
+    "ecdsa",
+    "std",
+] }
+
+[lints]
+workspace = true

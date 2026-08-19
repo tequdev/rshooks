@@ -133,6 +133,10 @@ pub fn state<B: AsMut<[u8]> + ?Sized, K: AsRef<[u8]> + ?Sized>(
 ) -> Result<usize> {
     let out = out.as_mut();
     let key = key.as_ref();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.state(key)) {
+        return crate::testenv_bridge::write_bytes(out, r);
+    }
     res(unsafe {
         rshooks_core::state(
             out.as_mut_ptr() as u32,
@@ -169,6 +173,10 @@ pub(crate) fn state_raw_code<B: AsMut<[u8]> + ?Sized, K: AsRef<[u8]> + ?Sized>(
 ) -> i64 {
     let out = out.as_mut();
     let key = key.as_ref();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.state(key)) {
+        return crate::testenv_bridge::write_bytes_code(out, r);
+    }
     unsafe {
         rshooks_core::state(
             out.as_mut_ptr() as u32,
@@ -204,6 +212,10 @@ pub(crate) fn state_raw_code<B: AsMut<[u8]> + ?Sized, K: AsRef<[u8]> + ?Sized>(
 #[inline(always)]
 pub fn state_u64<K: AsRef<[u8]> + ?Sized>(key: &K) -> Result<u64> {
     let key = key.as_ref();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.state(key)) {
+        return res(crate::testenv_bridge::as_int64_code(r)).map(|v| v as u64);
+    }
     res(unsafe { rshooks_core::state(0, 0, key.as_ptr() as u32, key.len() as u32) })
         .map(|v| v as u64)
 }
@@ -218,6 +230,10 @@ pub fn state_u64<K: AsRef<[u8]> + ?Sized>(key: &K) -> Result<u64> {
 #[inline(always)]
 pub(crate) fn state_u64_raw_code<K: AsRef<[u8]> + ?Sized>(key: &K) -> i64 {
     let key = key.as_ref();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.state(key)) {
+        return crate::testenv_bridge::as_int64_code(r);
+    }
     unsafe { rshooks_core::state(0, 0, key.as_ptr() as u32, key.len() as u32) }
 }
 
@@ -459,6 +475,13 @@ pub fn state_update_xfl<K: AsRef<[u8]> + ?Sized>(
 #[inline(always)]
 pub fn state_set<K: AsRef<[u8]> + ?Sized>(data: &[u8], key: &K) -> Result<usize> {
     let key = key.as_ref();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.state_set(key, data)) {
+        let code = match r {
+            Ok(c) | Err(c) => c,
+        };
+        return res(code).map(|v| v as usize);
+    }
     res(unsafe {
         rshooks_core::state_set(
             data.as_ptr() as u32,
@@ -489,8 +512,22 @@ where
 {
     let out = out.as_mut();
     let key = key.as_ref();
-    let (nptr, nlen) = opt_in(namespace.foreign_ref());
-    let (aptr, alen) = opt_in(account.foreign_ref());
+    // `ForeignRef::foreign_ref` takes `self` by value, and the testenv
+    // block below needs the same resolved bytes `opt_in` consumes next —
+    // extracted once here (identical value, identical evaluation point) so
+    // both can use it. See `crates/rshooks/testenv-call-sites.txt`'s notes
+    // for why this extraction, not a restructure, is necessary here.
+    let ns_bytes = namespace.foreign_ref();
+    let acc_bytes = account.foreign_ref();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| {
+        let (ns, acc) = crate::testenv_bridge::foreign_target(ns_bytes, acc_bytes)?;
+        b.state_foreign(key, ns, acc)
+    }) {
+        return crate::testenv_bridge::write_bytes(out, r);
+    }
+    let (nptr, nlen) = opt_in(ns_bytes);
+    let (aptr, alen) = opt_in(acc_bytes);
     res(unsafe {
         rshooks_core::state_foreign(
             out.as_mut_ptr() as u32,
@@ -527,8 +564,20 @@ where
 {
     let out = out.as_mut();
     let key = key.as_ref();
-    let (nptr, nlen) = opt_in(namespace.foreign_ref());
-    let (aptr, alen) = opt_in(account.foreign_ref());
+    // See `state_foreign`'s matching comment: `ns_bytes`/`acc_bytes` are
+    // needed by both the testenv block below and the existing `opt_in`
+    // calls, so they're extracted once here.
+    let ns_bytes = namespace.foreign_ref();
+    let acc_bytes = account.foreign_ref();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| {
+        let (ns, acc) = crate::testenv_bridge::foreign_target(ns_bytes, acc_bytes)?;
+        b.state_foreign(key, ns, acc)
+    }) {
+        return crate::testenv_bridge::write_bytes_code(out, r);
+    }
+    let (nptr, nlen) = opt_in(ns_bytes);
+    let (aptr, alen) = opt_in(acc_bytes);
     unsafe {
         rshooks_core::state_foreign(
             out.as_mut_ptr() as u32,
@@ -559,8 +608,18 @@ where
     A: ForeignRef<'ac>,
 {
     let key = key.as_ref();
-    let (nptr, nlen) = opt_in(namespace.foreign_ref());
-    let (aptr, alen) = opt_in(account.foreign_ref());
+    // See `state_foreign`'s matching comment.
+    let ns_bytes = namespace.foreign_ref();
+    let acc_bytes = account.foreign_ref();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| {
+        let (ns, acc) = crate::testenv_bridge::foreign_target(ns_bytes, acc_bytes)?;
+        b.state_foreign(key, ns, acc)
+    }) {
+        return res(crate::testenv_bridge::as_int64_code(r)).map(|v| v as u64);
+    }
+    let (nptr, nlen) = opt_in(ns_bytes);
+    let (aptr, alen) = opt_in(acc_bytes);
     res(unsafe {
         rshooks_core::state_foreign(
             0,
@@ -610,8 +669,21 @@ where
     A: ForeignRef<'ac>,
 {
     let key = key.as_ref();
-    let (nptr, nlen) = opt_in(namespace.foreign_ref());
-    let (aptr, alen) = opt_in(account.foreign_ref());
+    // See `state_foreign`'s matching comment.
+    let ns_bytes = namespace.foreign_ref();
+    let acc_bytes = account.foreign_ref();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| {
+        let (ns, acc) = crate::testenv_bridge::foreign_target(ns_bytes, acc_bytes)?;
+        b.state_foreign_set(key, data, ns, acc)
+    }) {
+        let code = match r {
+            Ok(c) | Err(c) => c,
+        };
+        return res(code).map(|v| v as usize);
+    }
+    let (nptr, nlen) = opt_in(ns_bytes);
+    let (aptr, alen) = opt_in(acc_bytes);
     res(unsafe {
         rshooks_core::state_foreign_set(
             data.as_ptr() as u32,
@@ -786,5 +858,103 @@ mod tests {
         assert_eq!(u64::from_le_bytes(buf), value);
         // And the typed layer decodes its own encoding back too.
         assert_eq!(u64::read(&buf), Ok(value));
+    }
+}
+
+/// Proves the `testenv` interception blocks in this file actually reach an
+/// installed [`rshooks_core::backend::HostBackend`] and honor the host
+/// buffer contract (design §5.2: `TOO_SMALL` on an undersized destination,
+/// never a truncated copy).
+#[cfg(all(test, feature = "testenv"))]
+mod testenv_tests {
+    #![allow(clippy::unwrap_used, clippy::panic)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
+
+    extern crate std;
+
+    use std::rc::Rc;
+    use std::vec::Vec;
+
+    use super::*;
+    use crate::error::HookError;
+    use rshooks_core::backend::{HostBackend, install};
+
+    /// Answers every read with a fixed byte string; `accept`/`rollback`
+    /// are unused by these tests and simply panic if ever reached.
+    struct FixedBytesBackend(&'static [u8]);
+
+    impl HostBackend for FixedBytesBackend {
+        fn state(&self, _key: &[u8]) -> core::result::Result<Vec<u8>, i64> {
+            Ok(self.0.to_vec())
+        }
+
+        fn state_foreign(
+            &self,
+            _key: &[u8],
+            _ns: Option<&[u8; 32]>,
+            _acc: Option<&[u8; 20]>,
+        ) -> core::result::Result<Vec<u8>, i64> {
+            Ok(self.0.to_vec())
+        }
+
+        fn accept(&self, _msg: &[u8], _code: i64) -> ! {
+            panic!("FixedBytesBackend::accept unexpectedly called")
+        }
+
+        fn rollback(&self, _msg: &[u8], _code: i64) -> ! {
+            panic!("FixedBytesBackend::rollback unexpectedly called")
+        }
+    }
+
+    #[test]
+    fn state_reads_backend_bytes_through_the_public_wrapper() {
+        let _guard = install(Rc::new(FixedBytesBackend(&[0xAA, 0xBB, 0xCC, 0xDD])));
+        let mut out = [0u8; 8];
+        let key = [0u8; 32];
+        let n = state(&mut out, &key).unwrap();
+        assert_eq!(n, 4);
+        assert_eq!(&out[..4], &[0xAA, 0xBB, 0xCC, 0xDD]);
+    }
+
+    #[test]
+    fn state_undersized_destination_yields_too_small_never_truncates() {
+        let _guard = install(Rc::new(FixedBytesBackend(&[1, 2, 3, 4, 5, 6, 7, 8, 9])));
+        let mut out = [0u8; 4]; // shorter than the backend's 9-byte value
+        let key = [0u8; 32];
+        assert_eq!(state(&mut out, &key), Err(HookError::TooSmall));
+        // Never partially written on the `TooSmall` path.
+        assert_eq!(out, [0u8; 4]);
+    }
+
+    #[test]
+    fn state_u64_round_trips_through_the_backend_byte_path() {
+        // 4 bytes, big-endian, matching the as-int64 convention `state_u64`
+        // documents.
+        let _guard = install(Rc::new(FixedBytesBackend(&[0x01, 0x02, 0x03, 0x04])));
+        let key = [0u8; 32];
+        assert_eq!(state_u64(&key), Ok(0x0102_0304));
+    }
+
+    #[test]
+    fn state_foreign_rejects_wrong_length_targets_like_the_host() {
+        // The host validates `nread_len` (0 or 32) and `aread_len` (0 or 20)
+        // before touching state; the testenv path must mirror that instead
+        // of silently treating a malformed target as "this hook's own".
+        let _guard = install(Rc::new(FixedBytesBackend(&[0xEE])));
+        let mut out = [0u8; 8];
+        let key = [0u8; 32];
+        let short_ns: &[u8] = &[0u8; 16];
+        let short_acc: &[u8] = &[0u8; 4];
+        assert_eq!(
+            state_foreign(&mut out, &key, short_ns, None),
+            Err(HookError::InvalidArgument)
+        );
+        assert_eq!(
+            state_foreign(&mut out, &key, None, short_acc),
+            Err(HookError::InvalidAccount)
+        );
+        // Well-formed lengths still reach the backend.
+        let ns = [0u8; 32];
+        let acc = [0u8; 20];
+        assert_eq!(state_foreign(&mut out, &key, &ns, &acc), Ok(1));
     }
 }
