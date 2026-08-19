@@ -67,11 +67,7 @@ fn keylet(ty: u16, key: [u8; 32]) -> Vec<u8> {
 fn env() -> TestEnv {
     TestEnv::new()
         .hook_account([1u8; 20])
-        .otxn(
-            Otxn::new(TxType::Invoke)
-                .account(OWNER)
-                .destination(DEST),
-        )
+        .otxn(Otxn::new(TxType::Invoke).account(OWNER).destination(DEST))
 }
 
 /// `KeyletKey` variant discriminants (`src/lib.rs`'s `state_keys!` order,
@@ -132,11 +128,12 @@ fn signers_matches_independent_recomputation() {
 fn line_matches_independent_recomputation_with_canonical_account_order() {
     let env = env();
     env.invoke::<Keylets>(0);
-    let (lo, hi) = if OWNER <= DEST { (OWNER, DEST) } else { (DEST, OWNER) };
-    let expected = keylet(
-        0x0072,
-        index_hash(b'r' as u16, &[&lo, &hi, &TEST_CURRENCY]),
-    );
+    let (lo, hi) = if OWNER <= DEST {
+        (OWNER, DEST)
+    } else {
+        (DEST, OWNER)
+    };
+    let expected = keylet(0x0072, index_hash(b'r' as u16, &[&lo, &hi, &TEST_CURRENCY]));
     assert_eq!(env.state(&[disc::LINE]), Some(expected));
 }
 
