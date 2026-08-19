@@ -508,6 +508,7 @@ name = "slot-ledger"
 version = "0.0.1"
 dependencies = [
  "rshooks",
+ "rshooks-testenv",
 ]
 
 [[package]]
@@ -515,6 +516,8 @@ name = "slot-objects"
 version = "0.0.1"
 dependencies = [
  "rshooks",
+ "rshooks-testenv",
+ "sha2",
 ]
 
 [[package]]

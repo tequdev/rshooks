@@ -597,12 +597,209 @@ impl HostBackend for Backend {
     // reproduced — design doc §4 marks that as not required, only that the
     // raw value itself is captured for a test to inspect/decode).
     fn trace_float(&self, msg: &[u8], value: i64) -> i64 {
-        self.world.borrow_mut().traces.push(crate::world::TraceLine {
-            message: msg.to_vec(),
-            data: value.to_be_bytes().to_vec(),
-        });
+        self.world
+            .borrow_mut()
+            .traces
+            .push(crate::world::TraceLine {
+                message: msg.to_vec(),
+                data: value.to_be_bytes().to_vec(),
+            });
         0
     }
+
+    // -- slot_* (P2-D — `.claude/design/TESTENV_PHASE2_DESIGN.md` §4 "slot
+    // family"). The `World`-free functions delegate straight into
+    // `crate::host::slots`; `slot_set`/`otxn_slot`/`meta_slot`/`xpop_slot`
+    // need `World` too, so they borrow both — see `host::mod`'s module doc
+    // comment for why those four still live in `host::slots` (one cohesive
+    // family) rather than here.
+
+    fn slot(&self, slot_no: u32) -> Result<Vec<u8>, i64> {
+        crate::host::slots::slot(&self.ctx.borrow(), slot_no)
+    }
+
+    fn slot_clear(&self, slot_no: u32) -> i64 {
+        crate::host::slots::slot_clear(&mut self.ctx.borrow_mut(), slot_no)
+    }
+
+    fn slot_count(&self, slot_no: u32) -> i64 {
+        crate::host::slots::slot_count(&self.ctx.borrow(), slot_no)
+    }
+
+    fn slot_float(&self, slot_no: u32) -> i64 {
+        crate::host::slots::slot_float(&self.ctx.borrow(), slot_no)
+    }
+
+    fn slot_set(&self, data: &[u8], slot_into: u32) -> i64 {
+        let world = self.world.borrow();
+        let mut ctx = self.ctx.borrow_mut();
+        crate::host::slots::slot_set(&mut ctx, &world, data, slot_into)
+    }
+
+    fn slot_size(&self, slot_no: u32) -> i64 {
+        crate::host::slots::slot_size(&self.ctx.borrow(), slot_no)
+    }
+
+    fn slot_subarray(&self, parent_slot: u32, array_id: u32, new_slot: u32) -> i64 {
+        crate::host::slots::slot_subarray(
+            &mut self.ctx.borrow_mut(),
+            parent_slot,
+            array_id,
+            new_slot,
+        )
+    }
+
+    fn slot_subfield(&self, parent_slot: u32, field_id: u32, new_slot: u32) -> i64 {
+        crate::host::slots::slot_subfield(
+            &mut self.ctx.borrow_mut(),
+            parent_slot,
+            field_id,
+            new_slot,
+        )
+    }
+
+    fn slot_type(&self, slot_no: u32, flags: u32) -> i64 {
+        crate::host::slots::slot_type(&self.ctx.borrow(), slot_no, flags)
+    }
+
+    fn otxn_slot(&self, slot_into: u32) -> i64 {
+        let world = self.world.borrow();
+        let mut ctx = self.ctx.borrow_mut();
+        crate::host::slots::otxn_slot(&mut ctx, &world, slot_into)
+    }
+
+    fn meta_slot(&self, slot_into: u32) -> i64 {
+        let world = self.world.borrow();
+        let mut ctx = self.ctx.borrow_mut();
+        crate::host::slots::meta_slot(&mut ctx, &world, slot_into)
+    }
+
+    fn xpop_slot(&self, slot_no_tx: u32, slot_no_meta: u32) -> i64 {
+        let world = self.world.borrow();
+        let mut ctx = self.ctx.borrow_mut();
+        crate::host::slots::xpop_slot(&mut ctx, &world, slot_no_tx, slot_no_meta)
+    }
+
+    // -- sto_* (P2-D — design §4 "sto_*"). Pure functions, no `self`
+    // access needed; delegated to `crate::host::sto`.
+
+    fn sto_subfield(&self, sto: &[u8], field_id: u32) -> i64 {
+        crate::host::sto::sto_subfield(sto, field_id)
+    }
+
+    fn sto_subarray(&self, array: &[u8], index: u32) -> i64 {
+        crate::host::sto::sto_subarray(array, index)
+    }
+
+    fn sto_validate(&self, sto: &[u8]) -> i64 {
+        crate::host::sto::sto_validate(sto)
+    }
+
+    fn sto_emplace(&self, source: &[u8], field: &[u8], field_id: u32) -> Result<Vec<u8>, i64> {
+        crate::host::sto::sto_emplace(source, field, field_id)
+    }
+
+    fn sto_erase(&self, source: &[u8], field_id: u32) -> Result<Vec<u8>, i64> {
+        crate::host::sto::sto_erase(source, field_id)
+    }
+
+    // -- prepare (P2-D — design §4 "prepare"). Needs `World` (hook account,
+    // ledger_seq) *and* this `Backend`'s own `etxn_details`/`etxn_fee_base`
+    // methods, so it lives here rather than in a `host::` submodule (see
+    // `host::mod`'s module doc comment).
+    //
+    // Ported against `Xahau/xahaud`, branch `dev`,
+    // `src/xrpld/app/hook/detail/HookAPI.cpp:382-495`
+    // (`HookAPI::prepare`) — fetched and read directly for this stage:
+    //
+    // - Requires a prior `etxn_reserve` (`PREREQUISITE_NOT_MET` otherwise,
+    //   `HookAPI.cpp:387-388`).
+    // - A template that fails to parse is `INVALID_ARGUMENT`
+    //   (`HookAPI.cpp:393-404`/`463-464`/`483-484` — **not** `PARSE_ERROR`,
+    //   which this function never returns, matching the cited source).
+    // - Always overwritten, unconditionally (`HookAPI.cpp:407-419`):
+    //   `Sequence = 0`, `SigningPubKey` = empty, `Account` = the hook's own
+    //   account (never validated against a pre-existing value — always
+    //   clobbered).
+    // - Filled only if absent (`HookAPI.cpp:421-453`):
+    //   `FirstLedgerSequence = ledger_seq + 1`,
+    //   `LastLedgerSequence = ledger_seq + 5` (inlined literals, no named
+    //   constant upstream — matches this repo's own `txn.rs`
+    //   `prepare_for_emit`, independently pinned the same way),
+    //   `EmitDetails` = this invocation's `etxn_details()` bytes (already
+    //   fully-formed field bytes — `crate::details::build_etxn_details`
+    //   builds header + object + terminator in one call, so no extra
+    //   wrapping is applied here).
+    // - `Fee` = `etxn_fee_base` of the blob *with* `EmitDetails` already
+    //   spliced in but `Fee` not yet set (`HookAPI.cpp:475-479` — `Fee` is
+    //   computed and overwritten last, deliberately after `EmitDetails`,
+    //   since the fee call needs the `EmitDetails`-sized blob).
+    fn prepare(&self, template: &[u8]) -> Result<Vec<u8>, i64> {
+        self.ctx.borrow().require_reserved()?;
+
+        let existing = crate::emit_walk::walk_top_level_fields(template)
+            .map_err(|()| rshooks_core::INVALID_ARGUMENT)?;
+        let has = |code: u32| existing.iter().any(|f| f.code == u64::from(code));
+
+        let (hook_account, ledger_seq) = {
+            let w = self.world.borrow();
+            (w.hook_account, w.ledger_seq)
+        };
+
+        let mut blob = emplace_value(
+            template,
+            rshooks::sfield::sfSequence.code(),
+            &0u32.to_be_bytes(),
+        )?;
+        blob = emplace_value(&blob, rshooks::sfield::sfSigningPubKey.code(), &[])?;
+        blob = emplace_value(&blob, rshooks::sfield::sfAccount.code(), &hook_account)?;
+
+        if !has(rshooks::sfield::sfFirstLedgerSequence.code()) {
+            let fls = ledger_seq.wrapping_add(1);
+            blob = emplace_value(
+                &blob,
+                rshooks::sfield::sfFirstLedgerSequence.code(),
+                &fls.to_be_bytes(),
+            )?;
+        }
+        if !has(rshooks::sfield::sfLastLedgerSequence.code()) {
+            let lls = ledger_seq.wrapping_add(5);
+            blob = emplace_value(
+                &blob,
+                rshooks::sfield::sfLastLedgerSequence.code(),
+                &lls.to_be_bytes(),
+            )?;
+        }
+        if !has(rshooks::sfield::sfEmitDetails.code()) {
+            let details = self.etxn_details()?;
+            blob = crate::host::sto::sto_emplace(
+                &blob,
+                &details,
+                rshooks::sfield::sfEmitDetails.code(),
+            )?;
+        }
+
+        let fee = self.etxn_fee_base(&blob);
+        if fee < 0 {
+            return Err(fee);
+        }
+        let mut fee_bytes = [0u8; 8];
+        rshooks::txn::codec::encode_native_amount(&mut fee_bytes, fee as u64)
+            .map_err(|_| rshooks_core::INVALID_ARGUMENT)?;
+        emplace_value(&blob, rshooks::sfield::sfFee.code(), &fee_bytes)
+    }
+}
+
+/// Builds `code`'s fully-formed field bytes (header + wire value, VL
+/// length-prefix added automatically for `STI_VL`/`STI_ACCOUNT` per
+/// `crate::otxn::write_field`) and splices them into `blob` via
+/// `crate::host::sto::sto_emplace` — [`Backend::prepare`]'s one repeated
+/// step for its six fixed fields (`EmitDetails` is not one of them: its
+/// bytes are already fully-formed, spliced directly).
+fn emplace_value(blob: &[u8], code: u32, value: &[u8]) -> Result<Vec<u8>, i64> {
+    let mut field_bytes = Vec::new();
+    crate::otxn::write_field(&mut field_bytes, code, value);
+    crate::host::sto::sto_emplace(blob, &field_bytes, code)
 }
 
 /// Boundary tests for the checked `u64` → `i64` conversions this file
@@ -654,7 +851,10 @@ mod tests {
     #[test]
     fn ledger_keylet_lower_bound_is_exclusive() {
         let (world, _ctx, backend) = fresh();
-        world.borrow_mut().ledger_objects.insert(kl(0x64, 5), std::vec![]);
+        world
+            .borrow_mut()
+            .ledger_objects
+            .insert(kl(0x64, 5), std::vec![]);
         let low = kl(0x64, 5); // the seeded entry sits exactly at `low`
         let high = kl(0x64, 10);
         assert_eq!(
@@ -666,7 +866,10 @@ mod tests {
     #[test]
     fn ledger_keylet_upper_bound_is_inclusive() {
         let (world, _ctx, backend) = fresh();
-        world.borrow_mut().ledger_objects.insert(kl(0x64, 10), std::vec![]);
+        world
+            .borrow_mut()
+            .ledger_objects
+            .insert(kl(0x64, 10), std::vec![]);
         let low = kl(0x64, 5);
         let high = kl(0x64, 10); // the seeded entry sits exactly at `high`
         assert_eq!(
@@ -762,5 +965,110 @@ mod tests {
         }
         ctx.borrow_mut().reserve(1).unwrap();
         assert_eq!(backend.etxn_fee_base(&[]), rshooks_core::FEE_TOO_LARGE);
+    }
+
+    // -- prepare (P2-D) --
+
+    /// A minimal well-formed template: just `TransactionType = ttPAYMENT`
+    /// (`(1, 2)` -> header `0x12`, value `0`).
+    fn minimal_template() -> Vec<u8> {
+        vec![0x12, 0x00, 0x00]
+    }
+
+    #[test]
+    fn prepare_requires_a_prior_reserve() {
+        let (_world, _ctx, backend) = fresh();
+        assert_eq!(
+            backend.prepare(&minimal_template()),
+            Err(rshooks_core::PREREQUISITE_NOT_MET)
+        );
+    }
+
+    #[test]
+    fn prepare_malformed_template_is_invalid_argument() {
+        let (_world, ctx, backend) = fresh();
+        ctx.borrow_mut().reserve(1).unwrap();
+        assert_eq!(
+            backend.prepare(&[0xE2, 0xE2]),
+            Err(rshooks_core::INVALID_ARGUMENT)
+        );
+    }
+
+    #[test]
+    fn prepare_fills_required_fields_and_the_result_passes_the_emission_walker() {
+        let (world, ctx, backend) = fresh();
+        world.borrow_mut().hook_account = [7u8; 20];
+        world.borrow_mut().ledger_seq = 100;
+        ctx.borrow_mut().reserve(1).unwrap();
+
+        let prepared = backend.prepare(&minimal_template()).unwrap();
+
+        let expected_details = ctx.borrow().last_etxn_details.clone();
+        assert!(
+            crate::emit_walk::validate_emit_blob(&prepared, expected_details.as_deref()).is_ok()
+        );
+
+        // Round-trip: `prepare`'s own output is accepted by `emit`.
+        assert!(backend.emit(&prepared).is_ok());
+
+        // Account is always set to the hook's own account.
+        let fields = crate::emit_walk::walk_top_level_fields(&prepared).unwrap();
+        let account_code = u64::from(rshooks::sfield::sfAccount.code());
+        let account_field = fields.iter().find(|f| f.code == account_code).unwrap();
+        let (start, end) = crate::emit_walk::field_value_payload(&prepared, account_field).unwrap();
+        assert_eq!(&prepared[start..end], &[7u8; 20]);
+
+        // FirstLedgerSequence/LastLedgerSequence follow the +1/+5 window.
+        let fls_code = u64::from(rshooks::sfield::sfFirstLedgerSequence.code());
+        let fls_field = fields.iter().find(|f| f.code == fls_code).unwrap();
+        let (s, e) = crate::emit_walk::field_value_payload(&prepared, fls_field).unwrap();
+        assert_eq!(u32::from_be_bytes(prepared[s..e].try_into().unwrap()), 101);
+        let lls_code = u64::from(rshooks::sfield::sfLastLedgerSequence.code());
+        let lls_field = fields.iter().find(|f| f.code == lls_code).unwrap();
+        let (s, e) = crate::emit_walk::field_value_payload(&prepared, lls_field).unwrap();
+        assert_eq!(u32::from_be_bytes(prepared[s..e].try_into().unwrap()), 105);
+    }
+
+    #[test]
+    fn prepare_does_not_overwrite_an_already_present_ledger_window() {
+        let (world, ctx, backend) = fresh();
+        world.borrow_mut().ledger_seq = 100;
+        ctx.borrow_mut().reserve(1).unwrap();
+
+        let mut template = minimal_template();
+        // sfFirstLedgerSequence (type 2, field 26) -> field >= 16, so a
+        // 2-byte header `[type << 4, field]` = `[0x20, 26]`, explicit
+        // value 999.
+        template.push(0x20);
+        template.push(26);
+        template.extend_from_slice(&999u32.to_be_bytes());
+
+        let prepared = backend.prepare(&template).unwrap();
+        let fields = crate::emit_walk::walk_top_level_fields(&prepared).unwrap();
+        let fls_code = u64::from(rshooks::sfield::sfFirstLedgerSequence.code());
+        let fls_field = fields.iter().find(|f| f.code == fls_code).unwrap();
+        let (s, e) = crate::emit_walk::field_value_payload(&prepared, fls_field).unwrap();
+        assert_eq!(u32::from_be_bytes(prepared[s..e].try_into().unwrap()), 999);
+    }
+
+    #[test]
+    fn prepare_always_overwrites_sequence_even_if_the_template_set_it() {
+        let (_world, ctx, backend) = fresh();
+        ctx.borrow_mut().reserve(1).unwrap();
+
+        let mut template = minimal_template();
+        // sfSequence (2, 4) -> header 0x24, explicit nonzero value.
+        template.push(0x24);
+        template.extend_from_slice(&42u32.to_be_bytes());
+
+        let prepared = backend.prepare(&template).unwrap();
+        let fields = crate::emit_walk::walk_top_level_fields(&prepared).unwrap();
+        let seq_code = u64::from(rshooks::sfield::sfSequence.code());
+        let matches: Vec<_> = fields.iter().filter(|f| f.code == seq_code).collect();
+        // Exactly one Sequence field survives (no duplicate from the
+        // insert-vs-replace logic), and it reads back as 0.
+        assert_eq!(matches.len(), 1);
+        let (s, e) = crate::emit_walk::field_value_payload(&prepared, matches[0]).unwrap();
+        assert_eq!(u32::from_be_bytes(prepared[s..e].try_into().unwrap()), 0);
     }
 }

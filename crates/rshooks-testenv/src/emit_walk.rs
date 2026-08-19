@@ -13,6 +13,20 @@
 //! What this walker does *not* check (documented, design §5.6): fee
 //! sufficiency, ledger-window validity against real ledger progress, and
 //! full STObject codec canonicality beyond the rules above — all e2e-only.
+//!
+//! # P2-D extension: field/array navigation primitives
+//!
+//! `.claude/design/TESTENV_PHASE2_DESIGN.md` §4 ("slot family", "sto_*")
+//! calls for extending this walker with offset exposure rather than forking
+//! a second parser. [`FieldSpan`] (now `pub(crate)` with `pub(crate)`
+//! fields), [`walk_top_level_fields`]/[`walk_object_fields`] (renamed-export
+//! of the existing top-level/nested-object walks), [`walk_array_elements`]
+//! (new — per-element spans, not just a pass/fail skip), and
+//! [`field_value_payload`] (new — the **value-only** payload range a stored
+//! slot or `sto_subfield` reports, VL length-prefix stripped for
+//! VL/AccountID fields) are `crate::host::slots`/`crate::host::sto`'s shared
+//! foundation. See those modules' doc comments for the upstream citations
+//! behind the per-type payload convention `field_value_payload` implements.
 
 use std::vec::Vec;
 
@@ -37,16 +51,24 @@ const fn sfcode(ty: u32, field: u32) -> u64 {
 /// One field found while walking an object (top-level or nested): its
 /// `(type, field)` code, and two byte ranges into the original blob — the
 /// whole field (header + value) and the value alone (after the header).
-struct FieldSpan {
-    code: u64,
-    range: (usize, usize),
-    value_range: (usize, usize),
+///
+/// `value_range` already carries the walker's own inclusion rules: for an
+/// `STI_OBJECT`(14)/`STI_ARRAY`(15) field it includes the nested
+/// terminator (`0xE1`/`0xF1`); for every other type it is exactly the
+/// header-excluded value bytes, VL length-prefix (for `STI_VL`(7)/
+/// `STI_ACCOUNT`(8)) included. [`field_value_payload`] strips that VL
+/// prefix where a "payload" (as opposed to raw wire value) is wanted — see
+/// its own doc comment.
+pub(crate) struct FieldSpan {
+    pub(crate) code: u64,
+    pub(crate) range: (usize, usize),
+    pub(crate) value_range: (usize, usize),
 }
 
 /// Decodes one field header at `*pos`, advancing `*pos` past it. Mirrors
 /// [`rshooks::txn::codec::field_header`]'s encoding rules in reverse (see
 /// that function's doc comment for the four-case grammar).
-fn decode_header(data: &[u8], pos: &mut usize) -> Result<(u32, u32), ()> {
+pub(crate) fn decode_header(data: &[u8], pos: &mut usize) -> Result<(u32, u32), ()> {
     let b0 = *data.get(*pos).ok_or(())?;
     *pos = pos.checked_add(1).ok_or(())?;
     let high = b0 >> 4;
@@ -75,7 +97,7 @@ fn decode_header(data: &[u8], pos: &mut usize) -> Result<(u32, u32), ()> {
 /// ranges are mutually exclusive by construction (a length representable in
 /// fewer bytes has no larger-byte encoding), so any value this accepts is
 /// automatically the canonical encoding for that length.
-fn decode_vl_len(data: &[u8], pos: &mut usize) -> Result<usize, ()> {
+pub(crate) fn decode_vl_len(data: &[u8], pos: &mut usize) -> Result<usize, ()> {
     let b0 = usize::from(*data.get(*pos).ok_or(())?);
     *pos = pos.checked_add(1).ok_or(())?;
     if b0 <= 192 {
@@ -211,7 +233,11 @@ fn walk_fields(
     Ok(fields)
 }
 
-fn walk_object_body(data: &[u8], pos: &mut usize, depth: u32) -> Result<Vec<FieldSpan>, ()> {
+pub(crate) fn walk_object_body(
+    data: &[u8],
+    pos: &mut usize,
+    depth: u32,
+) -> Result<Vec<FieldSpan>, ()> {
     walk_fields(data, pos, depth, true)
 }
 
@@ -220,6 +246,11 @@ fn walk_object_body(data: &[u8], pos: &mut usize, depth: u32) -> Result<Vec<Fiel
 /// each element to be an STObject field, e.g. `sfMemo`/`sfSigner`; nothing
 /// else is a legal array element).
 const STI_OBJECT: u32 = 14;
+
+/// The STI_VL / STI_ACCOUNT type codes — [`field_value_payload`]'s two VL
+/// length-prefix-stripped cases.
+const STI_VL: u32 = 7;
+const STI_ACCOUNT: u32 = 8;
 
 fn walk_array_body(data: &[u8], pos: &mut usize, depth: u32) -> Result<(), ()> {
     loop {
@@ -239,6 +270,73 @@ fn walk_array_body(data: &[u8], pos: &mut usize, depth: u32) -> Result<(), ()> {
     }
 }
 
+/// Walks a **standalone** array body (element bytes ending in the
+/// [`ARRAY_END_MARKER`], with no leading array-type header — the exact
+/// shape a slot's/`sto_subarray`'s array-typed content has, per
+/// `crate::host::slots`'/`crate::host::sto`'s module doc comments) and
+/// returns each element's own `(start, end)` span — header included, footer
+/// (`0xE1`, since every element is itself an `STObject`) included: the
+/// "fully formed" convention `sto_subarray`/`slot_subarray` both use.
+/// Requires the whole buffer to parse as element spans with nothing left
+/// over; any parse failure — including a buffer that doesn't end in
+/// [`ARRAY_END_MARKER`] — is `Err(())`, matching [`walk_top_level_fields`]'s
+/// own full-consumption contract for the top-level case.
+pub(crate) fn walk_array_elements(data: &[u8]) -> Result<Vec<(usize, usize)>, ()> {
+    let mut pos = 0usize;
+    let mut spans = Vec::new();
+    loop {
+        match data.get(pos) {
+            Some(&ARRAY_END_MARKER) => {
+                pos = pos.checked_add(1).ok_or(())?;
+                return if pos == data.len() {
+                    Ok(spans)
+                } else {
+                    Err(())
+                };
+            }
+            None => return Err(()),
+            _ => {}
+        }
+        let start = pos;
+        let (ty, _field) = decode_header(data, &mut pos)?;
+        if ty != STI_OBJECT {
+            return Err(());
+        }
+        dispatch_value(data, &mut pos, ty, 0)?;
+        spans.push((start, pos));
+    }
+}
+
+/// Walks a top-level field sequence (a whole transaction, ledger object, or
+/// root slot's content — no wrapping header or terminator), returning every
+/// field found. Requires full consumption of `data`; any parse failure is
+/// `Err(())`. `pub(crate)`-exported for `crate::host::slots`/
+/// `crate::host::sto`'s navigation (P2-D) in addition to this module's own
+/// [`validate_emit_blob`].
+pub(crate) fn walk_top_level_fields(data: &[u8]) -> Result<Vec<FieldSpan>, ()> {
+    walk_top_level(data)
+}
+
+/// [`walk_top_level_fields`] when `in_object` is `false`, or
+/// [`walk_object_body`] (depth `0`, a fresh budget — see `crate::host::slots`'
+/// module doc comment for why each slot's own content is parsed with its
+/// own fresh depth budget rather than one shared across slot hops) when
+/// `true`. `crate::host::slots::slot_subfield`'s one call site: a
+/// [`crate::invocation::SlotKind::Root`] parent has no wrapping terminator
+/// (`in_object = false`); a [`crate::invocation::SlotKind::Object`] parent's
+/// stored bytes already end in `0xE1` (`in_object = true`).
+pub(crate) fn walk_top_level_fields_or_object(
+    data: &[u8],
+    in_object: bool,
+) -> Result<Vec<FieldSpan>, ()> {
+    if in_object {
+        let mut pos = 0usize;
+        walk_object_body(data, &mut pos, 0)
+    } else {
+        walk_top_level_fields(data)
+    }
+}
+
 fn walk_top_level(data: &[u8]) -> Result<Vec<FieldSpan>, ()> {
     let mut pos = 0usize;
     walk_fields(data, &mut pos, 0, false)
@@ -246,6 +344,40 @@ fn walk_top_level(data: &[u8]) -> Result<Vec<FieldSpan>, ()> {
 
 fn field_bytes(data: &[u8], range: (usize, usize)) -> Option<&[u8]> {
     data.get(range.0..range.1)
+}
+
+/// The **value-only** payload range a stored slot / `sto_subfield` reports
+/// for `field` within `data` — [`FieldSpan::value_range`] as-is for every
+/// type except `STI_VL`(7)/`STI_ACCOUNT`(8), where the VL length-prefix
+/// (present in `value_range`, since real wire bytes carry it) is stripped:
+/// a slot's content is exactly what the host's `entry->add(s)` reports for
+/// that field's own value alone (`crate::host::slots`' module doc comment
+/// cites `otxn_field`'s identically-shaped documented behavior — a
+/// `sfAccount` field reads back as exactly its 20 raw bytes, matching
+/// `examples/15_slot-objects`' e2e-pinned `check_account_walk`), and
+/// `sto_subfield`'s own "payload" convention strips the same prefix
+/// (`HookAPI::get_stobject_length`'s `payload_start`/`payload_length` are
+/// computed *after* decoding a VL type's own length prefix — see
+/// `crate::host::sto`'s module doc comment for the citation).
+///
+/// Does **not** special-case `STI_ARRAY`(15) into the "fully formed"
+/// (header-included) shape `sto_subfield` itself uses for arrays — callers
+/// that need that (only `sto_subfield`) special-case it themselves using
+/// `field.range` directly; every other caller (slot content, `sto_subarray`
+/// element payloads never call this for VL types at all) wants the uniform
+/// value-only meaning this function gives.
+pub(crate) fn field_value_payload(data: &[u8], field: &FieldSpan) -> Result<(usize, usize), ()> {
+    let ty = (field.code >> 16) as u32;
+    if ty == STI_VL || ty == STI_ACCOUNT {
+        let mut p = field.value_range.0;
+        let len = decode_vl_len(data, &mut p)?;
+        let end = p.checked_add(len).ok_or(())?;
+        if end > field.value_range.1 {
+            return Err(());
+        }
+        return Ok((p, end));
+    }
+    Ok(field.value_range)
 }
 
 /// Validates `blob` against the emission grammar. `expected_emit_details`
@@ -318,6 +450,8 @@ pub(crate) fn top_level_transaction_type(blob: &[u8]) -> Option<TxType> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::indexing_slicing)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
+
     use super::*;
     use crate::details::{EmitDetailsInputs, build_etxn_details};
 
@@ -512,5 +646,83 @@ mod tests {
         let d = details();
         let blob = minimal_payment(&d);
         assert_eq!(top_level_transaction_type(&blob), Some(TxType::Payment));
+    }
+
+    // -- P2-D navigation primitives --
+
+    #[test]
+    fn walk_array_elements_returns_each_elements_full_span() {
+        // Two empty-body STObject elements: (type 14, field 2) then
+        // (type 14, field 3), each immediately closed, then the array
+        // terminator.
+        let data: &[u8] = &[
+            0xE2,
+            OBJECT_END_MARKER,
+            0xE3,
+            OBJECT_END_MARKER,
+            ARRAY_END_MARKER,
+        ];
+        let spans = walk_array_elements(data).unwrap();
+        assert_eq!(spans, vec![(0, 2), (2, 4)]);
+    }
+
+    #[test]
+    fn walk_array_elements_rejects_a_non_object_element() {
+        let data: &[u8] = &[0x21, 0, 0, 0, 1, ARRAY_END_MARKER]; // UInt32, not STObject
+        assert!(walk_array_elements(data).is_err());
+    }
+
+    #[test]
+    fn walk_array_elements_rejects_trailing_bytes_after_the_terminator() {
+        let data: &[u8] = &[0xE2, OBJECT_END_MARKER, ARRAY_END_MARKER, 0xFF];
+        assert!(walk_array_elements(data).is_err());
+    }
+
+    #[test]
+    fn walk_array_elements_rejects_a_missing_terminator() {
+        let data: &[u8] = &[0xE2, OBJECT_END_MARKER];
+        assert!(walk_array_elements(data).is_err());
+    }
+
+    #[test]
+    fn field_value_payload_strips_vl_prefix_for_account_and_blob_fields() {
+        // sfAccount (type 8, field 1) = 0x81, VL-prefixed 20-byte payload.
+        let mut data = vec![0x81, 20];
+        data.extend_from_slice(&[7u8; 20]);
+        let fields = walk_top_level_fields(&data).unwrap();
+        assert_eq!(fields.len(), 1);
+        let (start, end) = field_value_payload(&data, &fields[0]).unwrap();
+        assert_eq!((start, end), (2, 22));
+        assert_eq!(data.get(start..end).unwrap(), &[7u8; 20]);
+    }
+
+    #[test]
+    fn field_value_payload_leaves_amount_and_object_fields_untouched() {
+        // sfFee (type 6, field 8) = 0x68, native amount, 8 raw bytes, no VL.
+        let data: &[u8] = &[0x68, 0x40, 0, 0, 0, 0, 0, 0, 5];
+        let fields = walk_top_level_fields(data).unwrap();
+        let (start, end) = field_value_payload(data, &fields[0]).unwrap();
+        assert_eq!((start, end), (1, 9));
+
+        // A nested object field: (type 14, field 2) = 0xE2, empty body,
+        // 0xE1 terminator — the terminator stays part of the "value".
+        let obj: &[u8] = &[0xE2, OBJECT_END_MARKER];
+        let of = walk_top_level_fields(obj).unwrap();
+        let (ostart, oend) = field_value_payload(obj, &of[0]).unwrap();
+        assert_eq!((ostart, oend), (1, 2));
+    }
+
+    #[test]
+    fn walk_top_level_fields_or_object_dispatches_on_in_object() {
+        let root: &[u8] = &[0x68, 0x40, 0, 0, 0, 0, 0, 0, 5]; // sfFee, no wrapping
+        assert_eq!(
+            walk_top_level_fields_or_object(root, false).unwrap().len(),
+            1
+        );
+        let nested: &[u8] = &[0x24, 0, 0, 0, 1, OBJECT_END_MARKER]; // sfSequence then 0xE1
+        assert_eq!(
+            walk_top_level_fields_or_object(nested, true).unwrap().len(),
+            1
+        );
     }
 }

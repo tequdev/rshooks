@@ -24,27 +24,67 @@ const MAX_NONCES: u32 = 256;
 // "auto-assign" to the Hook API, not a real slot). No named constant yet:
 // nothing enforces this budget until `slot_*` semantics land in P2-D.
 
-/// The kind of content held in a numbered slot (design §3, "slot family").
-/// Scaffolding only as of P2-A — the real leaf-type taxonomy
-/// (STObject/STArray/scalar/...) lands with `slot_*` semantics in P2-D;
-/// nothing constructs a [`SlotEntry`] yet, so only a placeholder variant
-/// exists so the type is nameable now.
+/// The kind of content held in a numbered slot (design §3/§4 "slot
+/// family", landed P2-D). Governs which `slot_*` operations a slot accepts:
+/// `slot_subfield` needs [`Root`](SlotKind::Root)/[`Object`](SlotKind::Object);
+/// `slot_subarray`/`slot_count` need [`Array`](SlotKind::Array);
+/// `slot_float`/`slot_type(no, 1)` need [`Amount`](SlotKind::Amount).
+/// `slot`/`slot_size`/`slot_type(no, 0)`/`slot_clear` work on every kind.
+///
+/// This mirrors xahaud's own distinction between the STBase entry a slot
+/// points at (whose runtime `getSType()` decides `slot_type`/`slot_count`/
+/// `slot_subarray`/`slot_subfield`'s behavior, per `HookAPI.cpp`'s
+/// `slot_type`/`slot_count`/`slot_subarray`/`slot_subfield`/`slot_float`
+/// implementations — see `crate::host::slots`' module doc comment) and a
+/// synthesized root/field code for `slot_type(no, 0)`, tracked here as
+/// [`SlotEntry::reported_code`] rather than recomputed from the bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // scaffolding (P2-A): a real variant is constructed once slot_* semantics land (P2-D)
-pub(crate) enum SlotType {
-    /// Placeholder — no `slot_*` semantics populate a real variant yet.
-    Unknown,
+pub(crate) enum SlotKind {
+    /// A whole transaction / ledger object / metadata / XPOP half — a bare
+    /// canonical field sequence with no wrapping header or terminator
+    /// (`otxn_slot`/`meta_slot`/`xpop_slot`/`slot_set`).
+    Root,
+    /// A nested `STObject` field's value, as produced by `slot_subfield`
+    /// (or an array element, via `slot_subarray`): field-sequence bytes
+    /// ending in the `0xE1` object-end marker (included in
+    /// [`SlotEntry::bytes`]).
+    Object,
+    /// A nested `STArray` field's value, as produced by `slot_subfield`:
+    /// element bytes ending in the `0xF1` array-end marker (included in
+    /// [`SlotEntry::bytes`]).
+    Array,
+    /// A serialized `Amount` value (8 native / 48 IOU bytes), no header.
+    Amount,
+    /// Any other field's raw value bytes (VL length-prefix stripped for
+    /// VL/AccountID fields — see `crate::emit_walk::field_value_payload`),
+    /// no header.
+    Scalar,
 }
 
 /// One numbered slot's content: the serialized field/object bytes the
 /// numbered slot APIs (`slot`, `slot_subfield`, `slot_subarray`, ...) read
-/// (design §3). Scaffolding only as of P2-A — see [`SlotType`]'s doc
-/// comment.
+/// (design §3), an owned, independent copy — deriving a child slot via
+/// `slot_subfield`/`slot_subarray` copies bytes out of the parent rather
+/// than aliasing it, so clearing the parent afterward cannot affect a child
+/// (the PR #27 read-contract fact `examples/15_slot-objects`' `check_parent_clear`
+/// pins, and `rshooks::slot_path!`'s own doc comment relies on: "the host
+/// copies the parent's storage into the child slot").
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // scaffolding (P2-A): fields are read once slot_* semantics land (P2-D)
 pub(crate) struct SlotEntry {
     pub(crate) bytes: Vec<u8>,
-    pub(crate) leaf_type: SlotType,
+    pub(crate) kind: SlotKind,
+    /// The value `slot_type(no, 0)` reports: an ordinary field code
+    /// (`(sti << 16) | field`, matching `rshooks::sfield::sfXxx.code()`'s
+    /// own encoding) for anything from `slot_subfield`/`slot_subarray`, or
+    /// a synthesized root object code for a root slot — `crate::host::slots`'
+    /// `ROOT_TRANSACTION`/`ROOT_LEDGER_ENTRY`/`ROOT_METADATA` constants,
+    /// whose high 16 bits are rippled's real `STI_TRANSACTION`(10001)/
+    /// `STI_LEDGERENTRY`(10002)/`STI_METADATA`(10004) (`XRPLF/rippled`,
+    /// `include/xrpl/protocol/SField.h`), matching
+    /// `rshooks::slot_obj`'s `ROOT_OBJECT_CODE_MIN..=ROOT_OBJECT_CODE_MAX`
+    /// (10001..=10004) contract that `examples/15_slot-objects`'
+    /// `check_root_cast` pins.
+    pub(crate) reported_code: u32,
 }
 
 /// Per-invocation state the design §4 table specifies. See each field's
@@ -85,7 +125,6 @@ pub(crate) struct InvocationContext {
     /// 256-element array of `Option<SlotEntry>` doesn't bloat every
     /// `InvocationContext` (most invocations use zero or a handful of
     /// slots).
-    #[allow(dead_code)] // scaffolding (P2-A): read/written once slot_* semantics land (P2-D)
     pub(crate) slots: std::boxed::Box<[Option<SlotEntry>; 256]>,
     /// Whether `hook_again` was called this invocation (design §4:
     /// `ALREADY_SET` on a second call within the same invocation).
@@ -258,6 +297,61 @@ impl InvocationContext {
     /// `false` on every later ask.
     pub(crate) fn static_take_allowed(&mut self, cell_addr: usize) -> bool {
         self.static_take_set.insert(cell_addr)
+    }
+
+    /// Reads slot `no`, if occupied (`None` for `0`, an out-of-range
+    /// number, or an empty slot alike — callers map to `DOESNT_EXIST`).
+    pub(crate) fn slot_entry(&self, no: u32) -> Option<&SlotEntry> {
+        self.slots.get(no as usize).and_then(Option::as_ref)
+    }
+
+    /// Occupies slot `no` with `entry`. A no-op if `no` is out of range —
+    /// unreachable via any real caller, since every `host::slots` call site
+    /// only ever passes a number [`Self::resolve_slot`] itself returned
+    /// (`.get_mut`, not direct indexing, so that invariant doesn't have to
+    /// be re-proven to the panic-freedom lints at each of the eight write
+    /// sites).
+    pub(crate) fn set_slot(&mut self, no: usize, entry: SlotEntry) {
+        if let Some(slot) = self.slots.get_mut(no) {
+            *slot = Some(entry);
+        }
+    }
+
+    /// Frees slot `no` unconditionally (no `DOESNT_EXIST` reporting — that
+    /// belongs to `host::slots::slot_clear`, the hook-facing entry point;
+    /// this is the same `.get_mut`-based write [`Self::set_slot`] uses,
+    /// for a cleanup path that doesn't care whether the slot was occupied).
+    pub(crate) fn clear_slot(&mut self, no: usize) {
+        if let Some(slot) = self.slots.get_mut(no) {
+            *slot = None;
+        }
+    }
+
+    /// Resolves a `slot_into`/`new_slot` argument to a concrete slot
+    /// number: the design's own simplification of xahaud's FIFO-then-
+    /// monotonic-counter allocator (`.claude/design/TESTENV_PHASE2_DESIGN.md`
+    /// §4 "slot family"; upstream's actual `HookAPI::get_free_slot`
+    /// algorithm — a freed-slot FIFO queue, falling back to a
+    /// never-rewinding counter that permanently exhausts once it passes
+    /// `max_slots` — is ported nowhere in this harness): `0` picks the
+    /// lowest-numbered free slot in `1..=255` (`NO_FREE_SLOTS` if none are
+    /// free); an explicit `1..=255` is returned as-is, silently overwriting
+    /// whatever previously occupied it (matching xahaud's own unconditional
+    /// `hookCtx.slot[new_slot] = ...` assignment); anything `> 255` is
+    /// `INVALID_ARGUMENT`.
+    pub(crate) fn resolve_slot(&self, requested: u32) -> Result<usize, i64> {
+        if requested == 0 {
+            for i in 1..=255usize {
+                if self.slots.get(i).is_some_and(Option::is_none) {
+                    return Ok(i);
+                }
+            }
+            return Err(rshooks_core::NO_FREE_SLOTS);
+        }
+        if requested > 255 {
+            return Err(rshooks_core::INVALID_ARGUMENT);
+        }
+        Ok(requested as usize)
     }
 }
 

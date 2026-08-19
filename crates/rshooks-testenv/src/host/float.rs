@@ -1055,6 +1055,68 @@ pub(crate) fn float_sto_set(sto: &[u8]) -> i64 {
     }
 }
 
+/// `HookAPI::slot_float` (P2-D — `Xahau/xahaud`, branch `dev`,
+/// `src/xrpld/app/hook/detail/HookAPI.cpp:2315-2368`): converts a slot's
+/// serialized `Amount` value bytes (8 native / 48 IOU, no header, matching
+/// `crate::host::slots`' slot-content convention) to an XFL bit pattern.
+///
+/// Deliberately **not** [`float_sto_set`]'s decode, despite superficially
+/// overlapping input shapes: `float_sto_set` documents its own
+/// byte-0-skipping quirk for the native case (an upstream oddity specific
+/// to *that* function), whereas `slot_float`'s real native path uses the
+/// *full* 62-bit drops magnitude — `st_amt.xrp().drops()` in the cited
+/// source — with mantissa = drops, exponent = -6, then
+/// [`normalize_xfl`]. The IOU path decodes the wire mantissa/exponent (same
+/// bit layout `float_sto_set` decodes) but, unlike `float_sto_set`, does
+/// **not** renormalize: a well-formed on-ledger IOU amount is already
+/// canonical, mirroring the cited source's `st_amt.iou()` →
+/// `make_float(IOUAmount)` (a distinct, non-renormalizing overload from the
+/// byte-triple [`make_float`] this module otherwise uses only for
+/// already-in-range constructions).
+///
+/// `bytes.len()` not 8 or 48 is defensive-only: `crate::host::slots` only
+/// ever constructs a `SlotKind::Amount` entry from
+/// `crate::slot_obj::classify_amount`-shaped content (8 or 48 bytes), so
+/// this arm is unreachable via any real slot navigation path.
+#[allow(clippy::indexing_slicing)] // every index below is reached only after the `bytes.len() == 8`/`== 48` match arm guard establishes it in-bounds — same pattern as `float_sto_set` above
+pub(crate) fn slot_amount_to_xfl(bytes: &[u8]) -> i64 {
+    match bytes.len() {
+        8 => {
+            let is_negative = bytes[0] & 0b0100_0000 == 0;
+            let mut v = [0u8; 8];
+            v.copy_from_slice(bytes);
+            v[0] &= 0x3F; // clear the native/sign control bits, keep the full 62-bit magnitude
+            let drops = u64::from_be_bytes(v);
+            match normalize_xfl(drops, -6, is_negative) {
+                Normalized::Value(bits) => bits,
+                Normalized::Overflow => XFL_OVERFLOW,
+            }
+        }
+        48 => {
+            let is_negative = bytes[0] & 0b0100_0000 == 0;
+            let exponent =
+                (((i32::from(bytes[0]) & 0x3F) << 2) + (i32::from(bytes[1]) >> 6)) - EXPONENT_BIAS;
+            let mut mantissa: u64 = (u64::from(bytes[1]) & 0x3F) << 48;
+            mantissa += u64::from(bytes[2]) << 40;
+            mantissa += u64::from(bytes[3]) << 32;
+            mantissa += u64::from(bytes[4]) << 24;
+            mantissa += u64::from(bytes[5]) << 16;
+            mantissa += u64::from(bytes[6]) << 8;
+            mantissa += u64::from(bytes[7]);
+            if mantissa == 0 {
+                return 0;
+            }
+            match make_float(mantissa, exponent, is_negative) {
+                Ok(bits) => bits,
+                // Defensive: a well-formed ledger IOU amount's wire
+                // mantissa/exponent are always already in XFL range.
+                Err(_) => rshooks_core::NOT_AN_AMOUNT,
+            }
+        }
+        _ => rshooks_core::NOT_AN_AMOUNT,
+    }
+}
+
 /// `HookAPI::float_invert`.
 pub(crate) fn float_invert(f1: i64) -> i64 {
     if !is_valid(f1) {

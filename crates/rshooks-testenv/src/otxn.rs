@@ -91,6 +91,106 @@ impl Otxn {
     }
 }
 
+/// The `STI_VL`/`STI_ACCOUNT` type codes — [`serialize`]'s VL length-prefix
+/// insertion cases, matching `crate::emit_walk::field_value_payload`'s own
+/// stripping rule in reverse.
+const STI_VL: u32 = 7;
+const STI_ACCOUNT: u32 = 8;
+
+/// Builds the canonical serialized field sequence [`crate::host::slots::otxn_slot`]
+/// loads into a root slot (P2-D — `.claude/design/TESTENV_PHASE2_DESIGN.md`
+/// §4 "slot family"): every seeded field in `otxn.fields`, plus a
+/// synthesized `sfTransactionType` derived from `otxn.tx_type` (unless the
+/// field map already has an explicit override — the `field_raw` escape
+/// hatch can set one directly), in canonical `(type, field)` order with
+/// correct wire framing — a VL length-prefix is added for `STI_VL`(7)/
+/// `STI_ACCOUNT`(8) fields, since [`Otxn::fields`] stores value-only bytes
+/// (this struct's own doc comment); every other type is written as-is
+/// (self-describing `Amount`, or a plain fixed-width value). No wrapping
+/// header or terminator — a root object's own shape (see
+/// `crate::host::slots`' module doc comment). [`deserialize`] is the
+/// inverse.
+pub(crate) fn serialize(otxn: &Otxn) -> Vec<u8> {
+    let mut all: Vec<(u32, Vec<u8>)> = otxn.fields.iter().map(|(k, v)| (*k, v.clone())).collect();
+    let tt_code = rshooks::sfield::sfTransactionType.code();
+    if !otxn.fields.contains_key(&tt_code) {
+        all.push((tt_code, otxn.tx_type.code().to_be_bytes().to_vec()));
+    }
+    all.sort_by_key(|(code, _)| *code);
+
+    let mut out = Vec::new();
+    for (code, value) in all {
+        write_field(&mut out, code, &value);
+    }
+    out
+}
+
+/// Writes one field's header (see `rshooks::txn::codec::field_header`'s
+/// documented 4-case grammar, duplicated here since that function requires
+/// a typed `SField<T>` and this serializer works from raw stored codes)
+/// plus its wire value. `pub(crate)`: also reused by
+/// `crate::backend::Backend::prepare` (P2-D) to build the fully-formed
+/// field bytes `crate::host::sto::sto_emplace` needs for `Sequence`/
+/// `SigningPubKey`/`Account`/`FirstLedgerSequence`/`LastLedgerSequence`/
+/// `Fee`.
+pub(crate) fn write_field(out: &mut Vec<u8>, code: u32, value: &[u8]) {
+    let ty = code >> 16;
+    let field = code & 0xFFFF;
+    if ty < 16 && field < 16 {
+        out.push(((ty << 4) | field) as u8);
+    } else if ty < 16 {
+        out.push((ty << 4) as u8);
+        out.push(field as u8);
+    } else if field < 16 {
+        out.push((field << 4) as u8);
+        out.push(ty as u8);
+    } else {
+        out.push(0);
+        out.push(ty as u8);
+        out.push(field as u8);
+    }
+    if ty == STI_VL || ty == STI_ACCOUNT {
+        write_vl_len(out, value.len());
+    }
+    out.extend_from_slice(value);
+}
+
+/// Encodes a VL length prefix — the inverse of
+/// `crate::emit_walk::decode_vl_len`'s three-case grammar.
+fn write_vl_len(out: &mut Vec<u8>, len: usize) {
+    if len <= 192 {
+        out.push(len as u8);
+    } else if len <= 12480 {
+        let adj = len.wrapping_sub(193);
+        out.push(193usize.wrapping_add(adj / 256) as u8);
+        out.push((adj % 256) as u8);
+    } else {
+        let adj = len.wrapping_sub(12481);
+        out.push(241usize.wrapping_add(adj / 65536) as u8);
+        out.push(((adj / 256) % 256) as u8);
+        out.push((adj % 256) as u8);
+    }
+}
+
+/// Parses a canonical root field sequence (as [`serialize`] produces, or
+/// any other well-formed root slot's content) back into a field map — the
+/// inverse of [`serialize`]. `None` on any parse failure. `pub(crate)`
+/// rather than a `crate::otxn::Otxn` constructor: P2-E's `cbak` harness
+/// (design §4 "cbak execution") is this function's only planned caller,
+/// reconstructing an `Otxn`-shaped field map for the emitted transaction
+/// passed into a callback.
+#[allow(dead_code)] // exported for P2-E's `invoke_cbak` (design §4), not yet called
+pub(crate) fn deserialize(bytes: &[u8]) -> Option<std::collections::HashMap<u32, Vec<u8>>> {
+    let fields = crate::emit_walk::walk_top_level_fields(bytes).ok()?;
+    let mut map = std::collections::HashMap::new();
+    for f in &fields {
+        let (start, end) = crate::emit_walk::field_value_payload(bytes, f).ok()?;
+        let value = bytes.get(start..end)?.to_vec();
+        map.insert(f.code as u32, value);
+    }
+    Some(map)
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
@@ -134,5 +234,100 @@ mod tests {
     #[should_panic(expected = "native_amount default does not fit in 62 bits")]
     fn amount_drops_panics_at_or_above_max_native_drops() {
         let _ = Otxn::new(TxType::Payment).amount_drops(1u64 << 62);
+    }
+
+    // -- serialize/deserialize (P2-D) --
+
+    #[test]
+    fn serialize_is_a_bare_canonical_field_sequence() {
+        let otxn = Otxn::new(TxType::Payment)
+            .account([2u8; 20])
+            .destination([1u8; 20])
+            .amount_drops(1_000_000);
+        let bytes = serialize(&otxn);
+        // No wrapping header/terminator: walkable as a top-level field
+        // sequence, and the walk must consume every byte.
+        let fields = crate::emit_walk::walk_top_level_fields(&bytes).unwrap();
+        // TransactionType (synthesized) + Amount + Account + Destination.
+        assert_eq!(fields.len(), 4);
+        // Canonical (type, field) order: TransactionType(1,2) < Amount(6,1)
+        // < Account(8,1) < Destination(8,3).
+        let codes: Vec<u64> = fields.iter().map(|f| f.code).collect();
+        let mut sorted = codes.clone();
+        sorted.sort_unstable();
+        assert_eq!(codes, sorted);
+        assert!(codes.is_sorted());
+    }
+
+    #[test]
+    fn serialize_synthesizes_transaction_type_unless_overridden() {
+        let otxn = Otxn::new(TxType::Payment);
+        let bytes = serialize(&otxn);
+        let map = deserialize(&bytes).unwrap();
+        let tt = map.get(&rshooks::sfield::sfTransactionType.code()).unwrap();
+        assert_eq!(tt, &TxType::Payment.code().to_be_bytes().to_vec());
+
+        // An explicit `field_raw` override wins over the synthesized value.
+        let overridden = Otxn::new(TxType::Payment)
+            .field_raw(rshooks::sfield::sfTransactionType.code(), &[0, 8]);
+        let bytes2 = serialize(&overridden);
+        let map2 = deserialize(&bytes2).unwrap();
+        assert_eq!(
+            map2.get(&rshooks::sfield::sfTransactionType.code()),
+            Some(&vec![0u8, 8])
+        );
+    }
+
+    #[test]
+    fn serialize_then_deserialize_round_trips_every_seeded_field() {
+        let otxn = Otxn::new(TxType::Payment)
+            .account([2u8; 20])
+            .destination([1u8; 20])
+            .amount_drops(42);
+        let bytes = serialize(&otxn);
+        let map = deserialize(&bytes).unwrap();
+
+        assert_eq!(
+            map.get(&rshooks::sfield::sfAccount.code()),
+            Some(&vec![2u8; 20])
+        );
+        assert_eq!(
+            map.get(&rshooks::sfield::sfDestination.code()),
+            Some(&vec![1u8; 20])
+        );
+        assert_eq!(
+            map.get(&rshooks::sfield::sfAmount.code()),
+            otxn.fields.get(&rshooks::sfield::sfAmount.code())
+        );
+    }
+
+    #[test]
+    fn serialize_vl_field_round_trips_through_field_raw() {
+        // A VL-typed field (sfSigningPubKey, type 7) seeded with 3 raw
+        // value bytes must come back with the VL length-prefix added on
+        // the wire, then stripped again by `deserialize`.
+        let otxn = Otxn::new(TxType::Payment)
+            .field_raw(rshooks::sfield::sfSigningPubKey.code(), &[9, 9, 9]);
+        let bytes = serialize(&otxn);
+        // The field's own value bytes on the wire are `<len=3><9,9,9>`.
+        let fields = crate::emit_walk::walk_top_level_fields(&bytes).unwrap();
+        let spk = fields
+            .iter()
+            .find(|f| f.code == u64::from(rshooks::sfield::sfSigningPubKey.code()))
+            .unwrap();
+        assert_eq!(
+            bytes.get(spk.value_range.0..spk.value_range.1).unwrap(),
+            &[3, 9, 9, 9]
+        );
+        let map = deserialize(&bytes).unwrap();
+        assert_eq!(
+            map.get(&rshooks::sfield::sfSigningPubKey.code()),
+            Some(&vec![9u8, 9, 9])
+        );
+    }
+
+    #[test]
+    fn deserialize_rejects_malformed_bytes() {
+        assert_eq!(deserialize(&[0xE2]), None); // truncated
     }
 }
