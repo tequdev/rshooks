@@ -1,13 +1,18 @@
 # Inventory of every direct `rshooks_core::<fn>` call site in the bridged
-# API families (state, otxn, hook_ctx, ledger, control, etxn, trace) under
-# `crates/rshooks/src/api/`. One line per bridged call site:
+# API families (state, otxn, hook_ctx, ledger, control, etxn, trace, float,
+# slot, sto, util, keylet) under `crates/rshooks/src/api/`, plus `xfl.rs`
+# (see the note below the state/otxn/... rows for why that file is included
+# too). One line per bridged call site:
 #
 #   api/<file>.rs::<wrapper_fn> -> <raw_fn>
+#   xfl.rs::<wrapper_fn> -> <raw_fn>
 #
 # A source-scan test asserts set-equality between a fresh grep of these
 # families and this file, so a newly added raw call site that nobody
-# bridged fails CI. See `.claude/design/TESTENV_DESIGN.md` §2.1/§6 and
-# `.claude/design/TESTENV_IMPLEMENTATION.md`'s Stage 2 contract.
+# bridged fails CI. See `.claude/design/TESTENV_DESIGN.md` §2.1/§6,
+# `.claude/design/TESTENV_IMPLEMENTATION.md`'s Stage 2 contract, and
+# `.claude/design/TESTENV_PHASE2_DESIGN.md` §7 (P2-A) for the Phase 2
+# families below.
 
 api/control.rs::accept -> accept
 api/control.rs::hook_pos -> hook_pos
@@ -48,16 +53,104 @@ api/state.rs::state_u64_raw_code -> state
 api/trace.rs::trace -> trace
 api/trace.rs::trace_num -> trace_num
 
+# --- Phase 2 (`.claude/design/TESTENV_PHASE2_DESIGN.md`, stage P2-A) ---
+#
+# float/slot/sto/util/keylet call sites, plus the 7 sites that were
+# unbridged in Phase 1 (moved up from the old "unbridged (Phase 2)"
+# section below, now empty).
+
+api/control.rs::hook_again -> hook_again
+api/control.rs::hook_skip -> hook_skip
+api/etxn.rs::prepare -> prepare
+api/float.rs::float_sto -> float_sto
+api/float.rs::float_sto_set -> float_sto_set
+api/float.rs::slot_float -> slot_float
+api/hook_ctx.rs::hook_param_set -> hook_param_set
+api/keylet.rs::keylet_account -> util_keylet_buf
+api/keylet.rs::keylet_amendments -> util_keylet_buf
+api/keylet.rs::keylet_check -> util_keylet_buf
+api/keylet.rs::keylet_child -> util_keylet_buf
+api/keylet.rs::keylet_cron -> util_keylet_buf
+api/keylet.rs::keylet_deposit_preauth -> util_keylet_buf
+api/keylet.rs::keylet_emitted -> util_keylet_buf
+api/keylet.rs::keylet_emitted_dir -> util_keylet_buf
+api/keylet.rs::keylet_escrow -> util_keylet_buf
+api/keylet.rs::keylet_fees -> util_keylet_buf
+api/keylet.rs::keylet_hook -> util_keylet_buf
+api/keylet.rs::keylet_hook_definition -> util_keylet_buf
+api/keylet.rs::keylet_hook_state -> util_keylet_buf
+api/keylet.rs::keylet_hook_state_dir -> util_keylet_buf
+api/keylet.rs::keylet_line -> util_keylet_buf
+api/keylet.rs::keylet_negative_unl -> util_keylet_buf
+api/keylet.rs::keylet_nft_offer -> util_keylet_buf
+api/keylet.rs::keylet_offer -> util_keylet_buf
+api/keylet.rs::keylet_owner_dir -> util_keylet_buf
+api/keylet.rs::keylet_page -> util_keylet_buf
+api/keylet.rs::keylet_paychan -> util_keylet_buf
+api/keylet.rs::keylet_quality -> util_keylet_buf
+api/keylet.rs::keylet_signers -> util_keylet_buf
+api/keylet.rs::keylet_skip -> util_keylet_buf
+api/keylet.rs::keylet_ticket -> util_keylet_buf
+api/keylet.rs::keylet_unchecked -> util_keylet_buf
+api/ledger.rs::ledger_keylet -> ledger_keylet
+api/otxn.rs::otxn_slot -> otxn_slot
+api/slot.rs::meta_slot -> meta_slot
+api/slot.rs::slot -> slot
+api/slot.rs::slot_clear -> slot_clear
+api/slot.rs::slot_count -> slot_count
+api/slot.rs::slot_set -> slot_set
+api/slot.rs::slot_size -> slot_size
+api/slot.rs::slot_subarray -> slot_subarray
+api/slot.rs::slot_subfield -> slot_subfield
+api/slot.rs::slot_type -> slot_type
+api/slot.rs::slot_u64 -> slot
+api/slot.rs::xpop_slot -> xpop_slot
+api/sto.rs::sto_emplace -> sto_emplace
+api/sto.rs::sto_erase -> sto_erase
+api/sto.rs::sto_subarray -> sto_subarray
+api/sto.rs::sto_subfield -> sto_subfield
+api/sto.rs::sto_validate -> sto_validate
+api/trace.rs::trace_float -> trace_float
+api/util.rs::util_accid -> util_accid
+api/util.rs::util_keylet -> util_keylet
+api/util.rs::util_raddr -> util_raddr
+api/util.rs::util_sha512h -> util_sha512h
+api/util.rs::util_verify -> util_verify
+
+# --- xfl.rs: the float_* raw call sites that live outside api/float.rs ---
+#
+# `float_set`/`float_multiply`/`float_mulratio`/`float_negate`/
+# `float_compare`/`float_sum`/`float_invert`/`float_divide`/`float_one`/
+# `float_mantissa`/`float_sign`/`float_int`/`float_log`/`float_root` are
+# NOT called from `api/float.rs` — that module only wraps `float_sto`/
+# `float_sto_set`/`slot_float` (see its own module doc comment). The other
+# 14 `float_*` functions are called directly from `rshooks::xfl::XFL`'s
+# inherent methods and operator trait impls (`Neg`/`Add`/`Mul`/`Div`), which
+# is where the actual `rshooks_core::float_*` raw call sites live. Bridging
+# only `api/float.rs` (as the family name might suggest) would leave these
+# 14 functions permanently unreachable through the wrapper layer under
+# `testenv` — so `xfl.rs` is scanned as an honorary member of the "float"
+# bridged family, deviating from the literal `api/*.rs`-only file list in
+# `.claude/design/TESTENV_PHASE2_DESIGN.md` §2/§7 for exactly this reason.
+# `float_exponent` has no row here (and needs none): `XFL::exponent`
+# decodes the exponent locally from the bit pattern — there is no
+# `float_exponent` host call to bridge at all.
+
+xfl.rs::add -> float_sum
+xfl.rs::compare -> float_compare
+xfl.rs::div -> float_divide
+xfl.rs::invert -> float_invert
+xfl.rs::log -> float_log
+xfl.rs::mantissa -> float_mantissa
+xfl.rs::mul -> float_multiply
+xfl.rs::mulratio -> float_mulratio
+xfl.rs::neg -> float_negate
+xfl.rs::new -> float_set
+xfl.rs::one -> float_one
+xfl.rs::root -> float_root
+xfl.rs::sign -> float_sign
+xfl.rs::to_int -> float_int
+
 # --- unbridged (Phase 2) ---
 #
-# Direct raw call sites in a bridged family with no corresponding
-# `HostBackend` method — Phase 2 per `.claude/design/TESTENV_DESIGN.md` §6.
-# These still hit the `NOT_IMPLEMENTED` host stub under testenv.
-
-api/control.rs::hook_again -> hook_again  # no HostBackend method (chain-execution reinvocation; Phase 2)
-api/control.rs::hook_skip -> hook_skip  # no HostBackend method (chain-execution skip; Phase 2)
-api/etxn.rs::prepare -> prepare  # no HostBackend method (template preparation; Phase 2)
-api/hook_ctx.rs::hook_param_set -> hook_param_set  # no HostBackend method (writes another hook's parameter; Phase 2)
-api/ledger.rs::ledger_keylet -> ledger_keylet  # no HostBackend method (keylets; Phase 2 per design §6)
-api/otxn.rs::otxn_slot -> otxn_slot  # no HostBackend method (slot/STO codec; Phase 2 per design §6)
-api/trace.rs::trace_float -> trace_float  # no HostBackend method (float ops; Phase 2 per design §6)
+# (empty — every entry formerly here is now bridged above.)

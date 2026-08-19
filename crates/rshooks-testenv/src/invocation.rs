@@ -19,6 +19,33 @@ const MAX_NAMESPACES: usize = 256;
 /// One past `max_nonce` (vendored `Enum.h:399`, `max_nonce = 255`): the
 /// 256th nonce call this invocation (`nonce_count == 256`) is refused.
 const MAX_NONCES: u32 = 256;
+// `max_slots` (xahau `Enum.h`) = 255: numbered slots `1..=255` — index `0`
+// of `InvocationContext::slots` is never assigned (slot number `0` means
+// "auto-assign" to the Hook API, not a real slot). No named constant yet:
+// nothing enforces this budget until `slot_*` semantics land in P2-D.
+
+/// The kind of content held in a numbered slot (design §3, "slot family").
+/// Scaffolding only as of P2-A — the real leaf-type taxonomy
+/// (STObject/STArray/scalar/...) lands with `slot_*` semantics in P2-D;
+/// nothing constructs a [`SlotEntry`] yet, so only a placeholder variant
+/// exists so the type is nameable now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // scaffolding (P2-A): a real variant is constructed once slot_* semantics land (P2-D)
+pub(crate) enum SlotType {
+    /// Placeholder — no `slot_*` semantics populate a real variant yet.
+    Unknown,
+}
+
+/// One numbered slot's content: the serialized field/object bytes the
+/// numbered slot APIs (`slot`, `slot_subfield`, `slot_subarray`, ...) read
+/// (design §3). Scaffolding only as of P2-A — see [`SlotType`]'s doc
+/// comment.
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // scaffolding (P2-A): fields are read once slot_* semantics land (P2-D)
+pub(crate) struct SlotEntry {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) leaf_type: SlotType,
+}
 
 /// Per-invocation state the design §4 table specifies. See each field's
 /// accompanying method for the exact default/increment/error semantics.
@@ -46,6 +73,30 @@ pub(crate) struct InvocationContext {
     /// exits (design §2.4: `emit_attempts()` is cumulative and includes
     /// rolled-back invocations).
     pub(crate) emit_attempts: Vec<EmitAttempt>,
+
+    // -- Phase 2 (`.claude/design/TESTENV_PHASE2_DESIGN.md` §3) --
+    //
+    // Plain data plumbing as of P2-A — see `world.rs`'s matching Phase 2
+    // block for why nothing here is populated or read yet.
+    /// Numbered slots `1..=255` (index `0` unused — slot number `0` means
+    /// "auto-assign" to the Hook API, not a real slot; xahau's `max_slots`
+    /// is 255). Invocation-scoped: a fresh, all-`None` array every `invoke` call,
+    /// matching a fresh wasm instance on-chain (design §3). Boxed so a
+    /// 256-element array of `Option<SlotEntry>` doesn't bloat every
+    /// `InvocationContext` (most invocations use zero or a handful of
+    /// slots).
+    #[allow(dead_code)] // scaffolding (P2-A): read/written once slot_* semantics land (P2-D)
+    pub(crate) slots: std::boxed::Box<[Option<SlotEntry>; 256]>,
+    /// Whether `hook_again` was called this invocation (design §4:
+    /// `ALREADY_SET` on a second call within the same invocation).
+    #[allow(dead_code)] // scaffolding (P2-A): read/written once hook_again lands (P2-E)
+    pub(crate) hook_again_called: bool,
+    /// `hook_skip` directives recorded this invocation, to be moved onto
+    /// [`crate::world::World::skip_directives`] once P2-E implements the
+    /// commit rule (design §4 records them "verbatim"; exact commit-on-exit
+    /// semantics are not yet pinned as of this scaffolding).
+    #[allow(dead_code)] // scaffolding (P2-A): read/written once hook_skip lands (P2-E)
+    pub(crate) skip_directives: Vec<([u8; 32], u32)>,
 }
 
 impl InvocationContext {
@@ -63,6 +114,9 @@ impl InvocationContext {
             last_etxn_details: None,
             pending_emissions: Vec::new(),
             emit_attempts: Vec::new(),
+            slots: std::boxed::Box::new(core::array::from_fn(|_| None)),
+            hook_again_called: false,
+            skip_directives: Vec::new(),
         }
     }
 

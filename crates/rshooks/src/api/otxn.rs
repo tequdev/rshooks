@@ -311,6 +311,10 @@ pub fn otxn_type() -> TxType {
 /// a slot. Returns the assigned slot number.
 #[inline(always)]
 pub fn otxn_slot(slot_into: u32) -> Result<u32> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.otxn_slot(slot_into)) {
+        return res(v).map(|v| v as u32);
+    }
     res(unsafe { rshooks_core::otxn_slot(slot_into) }).map(|v| v as u32)
 }
 

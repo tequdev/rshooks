@@ -219,6 +219,12 @@ pub fn hook_param_opt<T: FixedRead>(name: &[u8]) -> Result<Option<T>> {
 /// `hook_hash`. Returns the number of bytes written.
 #[inline(always)]
 pub fn hook_param_set(value: &[u8], name: &[u8], hook_hash: &[u8]) -> Result<usize> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) =
+        rshooks_core::backend::with_backend(|b| b.hook_param_set(value, name, hook_hash))
+    {
+        return res(v).map(|v| v as usize);
+    }
     res(unsafe {
         rshooks_core::hook_param_set(
             value.as_ptr() as u32,

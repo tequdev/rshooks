@@ -40,6 +40,10 @@ pub fn trace_num(msg: &[u8], number: i64) -> Result<i64> {
 /// Emit a trace message (`msg`) followed by an XFL `value`.
 #[inline(always)]
 pub fn trace_float(msg: &[u8], value: XFL) -> Result<i64> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.trace_float(msg, value.raw_bits())) {
+        return res(v);
+    }
     res(unsafe {
         rshooks_core::trace_float(msg.as_ptr() as u32, msg.len() as u32, value.raw_bits())
     })

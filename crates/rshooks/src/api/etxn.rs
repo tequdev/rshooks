@@ -130,6 +130,10 @@ pub fn emit_buf(tx_blob: &[u8]) -> Result<Hash> {
 #[inline(always)]
 pub fn prepare<B: AsMut<[u8]> + ?Sized>(out: &mut B, template: &[u8]) -> Result<usize> {
     let out = out.as_mut();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.prepare(template)) {
+        return crate::testenv_bridge::write_bytes(out, r);
+    }
     res(unsafe {
         rshooks_core::prepare(
             out.as_mut_ptr() as u32,

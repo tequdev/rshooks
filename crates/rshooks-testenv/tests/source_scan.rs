@@ -1,9 +1,13 @@
 //! Source-scan test (design §2.1): asserts set-equality between
 //! `crates/rshooks/testenv-call-sites.txt` (bridged + unbridged sections
 //! together) and a fresh grep of every direct `rshooks_core::<fn>(` call
-//! site in the bridged families under `crates/rshooks/src/api/*.rs`. Keeps
-//! the committed inventory honest — a newly added raw call site that
-//! nobody bridged (or removed from the inventory) fails this test.
+//! site in the bridged families under `crates/rshooks/src/api/*.rs`, plus
+//! `crates/rshooks/src/xfl.rs` and `api/keylet.rs`'s `util_keylet_buf(`
+//! calls (see [`find_raw_call_in_keylet`]'s doc comment and the inventory
+//! file's own header for why those two need different matching than the
+//! rest). Keeps the committed inventory honest — a newly added raw call
+//! site that nobody bridged (or removed from the inventory) fails this
+//! test.
 
 #![allow(
     clippy::panic,
@@ -26,6 +30,11 @@ const BRIDGED_FAMILY_FILES: &[&str] = &[
     "control.rs",
     "etxn.rs",
     "trace.rs",
+    "float.rs",
+    "slot.rs",
+    "sto.rs",
+    "util.rs",
+    "keylet.rs",
 ];
 
 fn rshooks_crate_dir() -> std::path::PathBuf {
@@ -129,6 +138,23 @@ fn find_raw_call(line: &str) -> Option<String> {
     }
 }
 
+/// `api/keylet.rs`'s 26 typed helpers each intercept the backend with their
+/// own real slices *before* falling through to `util_keylet_buf` (a
+/// crate-local composing call, not a bare `rshooks_core::<fn>(` one — see
+/// `crates/rshooks/testenv-call-sites.txt`'s header and
+/// [`rshooks_core::backend::KeyletArg`]'s doc comment for the full
+/// rationale). [`find_raw_call`]'s `"rshooks_core::"` needle never matches
+/// those calls, so this file's own raw-call marker is
+/// `util_keylet_buf(` instead.
+fn find_raw_call_in_keylet(line: &str) -> Option<String> {
+    const NEEDLE: &str = "util_keylet_buf(";
+    if line.contains(NEEDLE) {
+        Some("util_keylet_buf".to_string())
+    } else {
+        None
+    }
+}
+
 fn grep_raw_call_sites(api_dir: &Path) -> BTreeSet<Row> {
     let mut set = BTreeSet::new();
     for file_name in BRIDGED_FAMILY_FILES {
@@ -144,10 +170,35 @@ fn grep_raw_call_sites(api_dir: &Path) -> BTreeSet<Row> {
             if let Some(name) = find_fn_name(trimmed) {
                 current_fn = Some(name);
             }
-            if let Some(raw) = find_raw_call(line) {
+            let raw = if *file_name == "keylet.rs" {
+                find_raw_call_in_keylet(line)
+            } else {
+                find_raw_call(line)
+            };
+            if let Some(raw) = raw {
                 if let Some(f) = &current_fn {
                     set.insert((format!("api/{file_name}"), f.clone(), raw));
                 }
+            }
+        }
+    }
+    // `xfl.rs` (crate root, not under `api/`) has its own raw call sites —
+    // see the inventory file's own trailing section for why.
+    let xfl_path = api_dir.parent().unwrap_or(api_dir).join("xfl.rs");
+    let content = std::fs::read_to_string(&xfl_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", xfl_path.display()));
+    let mut current_fn: Option<String> = None;
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("#[cfg(") && contains_word(trimmed, "test") {
+            break;
+        }
+        if let Some(name) = find_fn_name(trimmed) {
+            current_fn = Some(name);
+        }
+        if let Some(raw) = find_raw_call(line) {
+            if let Some(f) = &current_fn {
+                set.insert(("xfl.rs".to_string(), f.clone(), raw));
             }
         }
     }

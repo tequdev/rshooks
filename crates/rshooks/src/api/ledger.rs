@@ -92,6 +92,10 @@ pub fn ledger_keylet<B: AsMut<[u8]> + ?Sized>(
     high: &[u8],
 ) -> Result<usize> {
     let out = out.as_mut();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.ledger_keylet(low, high)) {
+        return crate::testenv_bridge::write_bytes(out, r);
+    }
     res(unsafe {
         rshooks_core::ledger_keylet(
             out.as_mut_ptr() as u32,

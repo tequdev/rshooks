@@ -51,21 +51,17 @@ impl Seeded {
     #[hook(1, on = [Invoke])]
     fn read_foreign_seed(&self) -> i64 {
         let mut out = [0u8; 8];
-        let code = match rshooks::api::state::state_foreign(
-            &mut out,
-            b"F",
-            &FOREIGN_NS,
-            &FOREIGN_ACC,
-        ) {
-            Ok(_) => {
-                let v = u64::from_le_bytes(out);
-                if self.seen.set(&v).is_err() {
-                    rollback!(b"store failed", 1);
+        let code =
+            match rshooks::api::state::state_foreign(&mut out, b"F", &FOREIGN_NS, &FOREIGN_ACC) {
+                Ok(_) => {
+                    let v = u64::from_le_bytes(out);
+                    if self.seen.set(&v).is_err() {
+                        rollback!(b"store failed", 1);
+                    }
+                    0
                 }
-                0
-            }
-            Err(e) => e.code(),
-        };
+                Err(e) => e.code(),
+            };
         accept!(b"", code)
     }
 }

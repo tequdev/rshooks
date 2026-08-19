@@ -135,6 +135,46 @@ pub(crate) struct World {
     /// deterministic nonce this world hands out (design §4: `H(invocation_counter
     /// ‖ call_counter)`).
     pub(crate) invocation_counter: u64,
+
+    // -- Phase 2 (`.claude/design/TESTENV_PHASE2_DESIGN.md` §3) --
+    //
+    // Plain data plumbing as of P2-A: seeded/read by the builders and
+    // accessors below, but nothing in `crate::backend::Backend` yet reads
+    // or writes any of these — every Phase 2 `HostBackend` method still
+    // falls through to its trait default. Semantics land per-family in
+    // P2-B..P2-E.
+    /// Seeded ledger objects, keyed by their 34-byte keylet — backs
+    /// `slot_set`/`ledger_keylet` (P2-D/P2-C). Builder:
+    /// [`crate::TestEnv::ledger_object`].
+    #[allow(dead_code)]
+    // scaffolding (P2-A): read once slot_set/ledger_keylet land (P2-D/P2-C)
+    pub(crate) ledger_objects: HashMap<[u8; 34], Vec<u8>>,
+    /// The current transaction's metadata, if seeded — backs `meta_slot`
+    /// (P2-D). Builder: [`crate::TestEnv::otxn_meta`].
+    #[allow(dead_code)] // scaffolding (P2-A): read once meta_slot lands (P2-D)
+    pub(crate) otxn_meta: Option<Vec<u8>>,
+    /// An XPOP's `(transaction, metadata)` pair, if seeded — backs
+    /// `xpop_slot` (P2-D). Builder: [`crate::TestEnv::xpop`].
+    #[allow(dead_code)] // scaffolding (P2-A): read once xpop_slot lands (P2-D)
+    pub(crate) xpop: Option<(Vec<u8>, Vec<u8>)>,
+    /// Parameters written by `hook_param_set` during a *previous*,
+    /// already-`accept!`ed invocation — `(hook_hash, name) -> value` — read
+    /// back by `hook_param` when the currently invoked position's hash
+    /// matches (P2-E; design §4 "control leftovers"). Committed the same
+    /// way state is: only on `accept!`.
+    #[allow(dead_code)] // scaffolding (P2-A): read/written once hook_param_set lands (P2-E)
+    pub(crate) hook_param_overrides: HashMap<([u8; 32], Vec<u8>), Vec<u8>>,
+    /// Whether the most recently completed invocation called `hook_again`
+    /// (cleared at the start of each `invoke` — design §4). Read by
+    /// `TestEnv::hook_again_requested()` (P2-E).
+    #[allow(dead_code)] // scaffolding (P2-A): read/written once hook_again lands (P2-E)
+    pub(crate) hook_again_requested: bool,
+    /// Every `hook_skip(hash, flags)` directive recorded across every
+    /// invocation so far, verbatim, in call order (design §4: "recorded
+    /// verbatim ... no chain model"). Read by `TestEnv::skip_directives()`
+    /// (P2-E).
+    #[allow(dead_code)] // scaffolding (P2-A): read/written once hook_skip lands (P2-E)
+    pub(crate) skip_directives: Vec<([u8; 32], u32)>,
 }
 
 impl World {
@@ -158,6 +198,12 @@ impl World {
             emit_attempts: Vec::new(),
             traces: Vec::new(),
             invocation_counter: 0,
+            ledger_objects: HashMap::new(),
+            otxn_meta: None,
+            xpop: None,
+            hook_param_overrides: HashMap::new(),
+            hook_again_requested: false,
+            skip_directives: Vec::new(),
         }
     }
 

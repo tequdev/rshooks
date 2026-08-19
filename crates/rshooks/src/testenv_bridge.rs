@@ -21,6 +21,7 @@ extern crate std;
 use std::vec::Vec;
 
 use crate::error::{HookError, Result as HookResult, res};
+use crate::types::Keylet;
 
 /// Alias for `HostBackend`'s own error-code convention (`Err` is the raw
 /// negative `i64`, not yet decoded into a [`HookError`]) — distinct from
@@ -187,5 +188,18 @@ pub(crate) fn as_int64_code(r: BackendResult<Vec<u8>>) -> i64 {
             }
         }
         Err(code) => code,
+    }
+}
+
+/// Converts a `HostBackend::util_keylet` result (always exactly 34 bytes —
+/// a keylet has no variable-length form) into the decoded [`Keylet`]
+/// [`HookResult`] every `crate::api::keylet` typed helper returns. No
+/// buffer contract to honor here (unlike [`write_array`]): the return type
+/// itself, not a caller-supplied `out`, is the destination.
+#[inline(always)]
+pub(crate) fn keylet_result(r: BackendResult<[u8; 34]>) -> HookResult<Keylet> {
+    match r {
+        Ok(bytes) => Ok(Keylet::from(bytes)),
+        Err(code) => Err(HookError::from(code)),
     }
 }

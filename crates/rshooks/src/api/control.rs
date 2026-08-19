@@ -86,6 +86,10 @@ pub fn rollback(msg: &[u8], code: i64) -> ! {
 /// ```
 #[inline(always)]
 pub fn hook_again() -> Result<i64> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.hook_again()) {
+        return res(v);
+    }
     res(unsafe { rshooks_core::hook_again() })
 }
 
@@ -93,6 +97,10 @@ pub fn hook_again() -> Result<i64> {
 /// subsequent invocations, according to `flags`.
 #[inline(always)]
 pub fn hook_skip(hash: &[u8], flags: u32) -> Result<i64> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.hook_skip(hash, flags)) {
+        return res(v);
+    }
     res(unsafe { rshooks_core::hook_skip(hash.as_ptr() as u32, hash.len() as u32, flags) })
 }
 

@@ -275,6 +275,40 @@ impl TestEnv {
         self
     }
 
+    // -- Phase 2 (`.claude/design/TESTENV_PHASE2_DESIGN.md` §3) --
+    //
+    // Plain data plumbing as of P2-A: these seed `World` fields nothing yet
+    // reads (`crate::backend::Backend` does not override `slot_set`/
+    // `meta_slot`/`xpop_slot` — every Phase 2 `HostBackend` method still
+    // falls through to its trait default). Semantics land per-family in
+    // P2-C/P2-D.
+    /// Seeds a ledger object at `keylet` (its 34-byte index), serialized as
+    /// `sto` — will back `slot_set`/`ledger_keylet` once P2-D/P2-C land.
+    #[must_use]
+    pub fn ledger_object(self, keylet: [u8; 34], sto: &[u8]) -> Self {
+        self.world
+            .borrow_mut()
+            .ledger_objects
+            .insert(keylet, sto.to_vec());
+        self
+    }
+
+    /// Seeds the current transaction's metadata — will back `meta_slot`
+    /// once P2-D lands.
+    #[must_use]
+    pub fn otxn_meta(self, sto: &[u8]) -> Self {
+        self.world.borrow_mut().otxn_meta = Some(sto.to_vec());
+        self
+    }
+
+    /// Seeds an XPOP's `(transaction, metadata)` pair — will back
+    /// `xpop_slot` once P2-D lands.
+    #[must_use]
+    pub fn xpop(self, tx: &[u8], meta: &[u8]) -> Self {
+        self.world.borrow_mut().xpop = Some((tx.to_vec(), meta.to_vec()));
+        self
+    }
+
     /// Opts into asserting that every transaction type this invocation
     /// commits to [`Self::emitted`] is one the invoked entry's
     /// `#[hook(.., can_emit = [..])]` declaration allows. Off by default.

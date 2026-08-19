@@ -82,6 +82,7 @@ mod emit_walk;
 mod env;
 mod exit;
 mod grant;
+mod host;
 mod invocation;
 mod otxn;
 mod world;
