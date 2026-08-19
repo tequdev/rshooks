@@ -1756,3 +1756,51 @@ than stack locals (see §6.3's static-buffer idiom).
 - `.gitignore`: `/target`, `/examples/target`, `/examples/**/out`, `out/`,
   `*.wasm` outside fixtures, `.DS_Store`. Binary test fixtures live in
   `crates/rshooks-build/tests/fixtures/` and are exempted.
+
+## 10. Typed entry return values (post-0.2 addendum)
+
+`docs/TODO.md` item 2, designed and probed in
+`.claude/design/TYPED_ENTRY_RESULTS_DESIGN.md` (full grammar, adoption
+decisions D1–D5, and every measured number — this section only summarizes
+the shipped, normative shape).
+
+A `#[hook]`/`#[cbak]` entry may return `rshooks::exit::HookResult`
+(`Result<Accept, Rollback>`) instead of `i64`. Both forms are first-class
+and coexist freely in the same `#[hooks] impl` block:
+
+- **New module, `rshooks::exit`**: `Accept`/`Rollback` (private `{ msg:
+  &'static [u8], code: i64 }`, `::new(msg, code)`/`::code(code)`
+  constructors), `HookResult = Result<Accept, Rollback>`, and the sealed
+  `EntryReturn` trait (`#[doc(hidden)]`, implemented for exactly `i64` and
+  `HookResult`).
+- **Macro widening**: `#[hooks]`'s entry-signature check no longer requires
+  `-> i64` — any return type is accepted syntactically, and the generated
+  body wraps every call unconditionally:
+  `::rshooks::exit::EntryReturn::finish(<Struct>::<fn>(&<Struct>))`. A
+  return type implementing neither `i64` nor `HookResult` fails to compile
+  with an ordinary trait-bound diagnostic naming `EntryReturn` — the macro
+  performs no bespoke return-type validation of its own.
+- **`hook_errors!` message clause**: `Variant = <code> => b"msg"` (optional,
+  per variant, backward compatible with the clause-less form) additionally
+  generates `impl From<Enum> for Rollback`, so `?` propagates a
+  `hook_errors!` variant — code and message both — straight into a typed
+  entry's `Err` side.
+- **Deliberately no `From<HookError> for Rollback`.** `HookError::code()` is
+  a 45-arm re-encode match; a `?`-propagated two-hop conversion measured
+  3.1x the worst-case instructions and +67% the size of a raw-code-check
+  twin (design doc §5, probe P5). The supported pattern is
+  `.map_err(|_| MyError::X)?`, discarding the decoded `HookError`.
+- **Zero cost on the `i64` path, confirmed two ways**: (1) `EntryReturn`'s
+  `i64` impl is the identity function, `#[inline(always)]`, inside an
+  already-`#[inline(always)]` generated body, so it compiles away — every
+  pre-existing example's shipped wasm stays byte-for-byte identical
+  (`mise run probe:testenv-parity`, and the T-1/T-3 verification tables in
+  the design doc). (2) The typed (`HookResult`) path itself measured
+  competitive with, or better than, its hand-written `accept!`/`rollback!`
+  twin at every probed density (small entry, dense 15-site entry), provided
+  every `?`-called helper is `#[inline(always)]` (D4) — see
+  `examples/16_typed-results` for a shipped worked example and its
+  `README.md` for the exact numbers.
+
+Book: [Accept, Rollback, and Errors §"Typed entry returns:
+`HookResult`"](../book/src/concepts/errors.md#typed-entry-returns-hookresult).

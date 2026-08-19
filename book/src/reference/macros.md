@@ -12,8 +12,8 @@ the tutorial chapter that covers it, or the macro's own rustdoc in
 |---|---|---|
 | `#[hooks(description = "...")]` on a struct | Declares this crate's Hook chain — a container for shared `#[state]`/`#[hook_param]`/`#[otxn_param]` fields, no runtime instance. Exactly one per crate. | `#[hooks] pub struct MyHook;` |
 | `#[hooks]` on an inherent `impl` | Declares this chain's entry points. Exactly one per `#[hooks]` struct, in the same module. | `#[hooks] impl MyHook { .. }` |
-| `#[hook(<index>, ...)]` | Inside a `#[hooks]` impl: declares one Hook entry at the given chain position (`0..=9`, required). Turns `fn name(&self) -> i64` into that index's `hook` export. Named args: `name`, `on`/`on_incoming`+`on_outgoing`, `can_emit`, `description`. | `#[hook(0, name = "accept", on = [Invoke])] fn main(&self) -> i64 { accept!() }` |
-| `#[cbak(<index>)]` | Pairs with a `#[hook]` at the same index; exports `cbak` for that index — the optional callback invoked when a transaction this entry emitted later settles. Index only, no other arguments. | `#[cbak(0)] fn my_cbak(&self) -> i64 { accept!() }` |
+| `#[hook(<index>, ...)]` | Inside a `#[hooks]` impl: declares one Hook entry at the given chain position (`0..=9`, required). The fn returns either `i64` (paired with `accept!`/`rollback!`) or `HookResult` (paired with `?` — see [Accept, Rollback, and Errors](../concepts/errors.md#typed-entry-returns-hookresult)); any other return type is a compile error naming the sealed `EntryReturn` trait. Named args: `name`, `on`/`on_incoming`+`on_outgoing`, `can_emit`, `description`. | `#[hook(0, name = "accept", on = [Invoke])] fn main(&self) -> i64 { accept!() }` |
+| `#[cbak(<index>)]` | Pairs with a `#[hook]` at the same index; exports `cbak` for that index — the optional callback invoked when a transaction this entry emitted later settles. Index only, no other arguments. Same `i64`/`HookResult` return-type choice as `#[hook]`. | `#[cbak(0)] fn my_cbak(&self) -> i64 { accept!() }` |
 
 ### Receivers on `#[hook]`/`#[cbak]` entries and impl helpers
 
@@ -47,8 +47,9 @@ Transactions](../emit/emitting.md).
 | `rollback!` | Terminate with failure, rolling back state changes. | `rollback!(b"blocked", FirewallError::BlockedAccount)` |
 | `guard!` | Bound a loop's iteration count for the host's static guard check. | `loop { guard!(10); .. }` |
 | `guard_m!` | Like `guard!`, for multiple loops sharing one source line (`$n` disambiguates). | `guard_m!(10, 0);` |
-| `hook_errors!` | Declare a `#[repr(i64)]` error enum usable directly as a `rollback!`/`accept!` code. | `hook_errors! { pub enum E { BlockedAccount = 1 } }` |
+| `hook_errors!` | Declare a `#[repr(i64)]` error enum usable directly as a `rollback!`/`accept!` code, and `?`-convertible into `rshooks::exit::Rollback`; an optional per-variant `=> b"msg"` clause supplies that conversion's message. | `hook_errors! { pub enum E { BlockedAccount = 1 => b"blocked" } }` |
 | `exit_on_err!` | Unwrap a `Result<T, E: Into<i64>>`, rolling back on `Err`. | `let v = exit_on_err!(b"failed", check());` |
+| `rshooks::exit::{Accept, Rollback, HookResult}` | Typed entry-return types (not macros): `HookResult` is `Result<Accept, Rollback>`; `Accept::new`/`Rollback::new` take a message and code (`::code(code)` for an empty message). | `Ok(Accept::new(b"ok", 0))` / `Err(Rollback::new(b"no", 1))` |
 
 See [Accept, Rollback, and Errors](../concepts/errors.md) and [Guards and
 Loops](../concepts/guards.md).

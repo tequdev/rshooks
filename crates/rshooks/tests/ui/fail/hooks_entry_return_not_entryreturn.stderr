@@ -1,0 +1,8 @@
+error[E0277]: the trait bound `u32: EntryReturn` is not satisfied
+  --> tests/ui/fail/hooks_entry_return_not_entryreturn.rs:13:1
+   |
+13 | #[hooks]
+   | ^^^^^^^^ the trait `EntryReturn` is not implemented for `u32`
+   |
+   = help: the trait `EntryReturn` is implemented for `i64`
+   = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)

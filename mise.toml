@@ -46,6 +46,12 @@ for dir in \
   cargo run -p rshooks-build -- check "examples/${dir}/out/current/0.main.wasm"
 done
 
+# 16_typed-results declares two hooks in one chain: `0.deposit` and
+# `1.reset`.
+cargo run -p rshooks-build -- build --manifest-path examples/16_typed-results/Cargo.toml --out examples/16_typed-results/out
+cargo run -p rshooks-build -- check examples/16_typed-results/out/current/0.deposit.wasm
+cargo run -p rshooks-build -- check examples/16_typed-results/out/current/1.reset.wasm
+
 # 80_governance declares two hooks in one chain: `0.govern` and `1.reward`.
 cargo run -p rshooks-build -- build --manifest-path examples/80_governance/Cargo.toml --out examples/80_governance/out
 cargo run -p rshooks-build -- check examples/80_governance/out/current/0.govern.wasm

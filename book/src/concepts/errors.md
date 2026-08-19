@@ -219,6 +219,119 @@ boundary" shape `accept!`/`rollback!` already use for their own `code`
 argument — ordinary helper functions stay in `Result`-land, and only the
 call site that actually needs to end the hook touches `rollback!` directly.
 
+## Typed entry returns: `HookResult`
+
+Everything above uses the entry signature every earlier chapter has shown:
+`fn main(&self) -> i64`, ending every path with `accept!`/`rollback!`. A
+`#[hook]`/`#[cbak]` entry may instead return `rshooks::exit::HookResult` — a
+`Result<Accept, Rollback>` alias — and use ordinary `?` to propagate
+failures out of helper functions, in place of a hand-written `accept!`/
+`rollback!` call at every failure point:
+
+```rust,ignore
+use rshooks::exit::{Accept, HookResult};
+
+hook_errors! {
+    pub enum DepositError {
+        BadAmount = 1 => b"deposit: bad amount",
+        StateSetFailed = 2 => b"deposit: state_set failed",
+    }
+}
+
+#[inline(always)]
+fn read_amount(t: &Vault) -> Result<u64, DepositError> {
+    let bytes = t.amount.get_required().map_err(|_| DepositError::BadAmount)?;
+    Ok(u64::from_be_bytes(bytes))
+}
+
+#[hook(0, on = [Invoke])]
+fn deposit(&self) -> HookResult {
+    let amount = read_amount(self)?;
+    // ... more `?`-propagated steps ...
+    Ok(Accept::new(b"deposit: ok", amount as i64))
+}
+```
+
+`#[hooks]` accepts either return shape on any entry or callback, and a
+chain can freely mix them — the `i64` form and the `HookResult` form
+coexist in the same `#[hooks] impl` block (`examples/16_typed-results` does
+exactly this: a typed `deposit` entry alongside a legacy `reset` entry).
+Internally, the generated wrapper calls a sealed
+`::rshooks::exit::EntryReturn::finish(..)` on whatever the entry returns:
+the identity function for `i64`, or a two-arm `match` calling `accept`/
+`rollback` for `HookResult`. Returning any other type is a compile error
+naming that trait, not a bespoke macro diagnostic.
+
+### `Accept`, `Rollback`, and the `hook_errors!` message clause
+
+`Accept::new(msg, code)`/`Rollback::new(msg, code)` mirror `accept!`/
+`rollback!`'s own arguments; `Accept::code(code)`/`Rollback::code(code)` are
+the empty-message shorthand. `?` converts into `Rollback` from two sources:
+
+- **A raw `i64`** — `From<i64> for Rollback` (empty message).
+- **Any `hook_errors!` enum** — every enum gets `impl From<Enum> for
+  Rollback` unconditionally, and `hook_errors!` now accepts an *optional*
+  per-variant message clause that feeds it:
+
+  ```rust
+  use rshooks::hook_errors;
+
+  hook_errors! {
+      pub enum DepositError {
+          /// Message clause: this variant's `Rollback` carries it.
+          BadAmount = 1 => b"deposit: bad amount",
+          /// No clause: this variant's `Rollback` gets an empty message.
+          StateSetFailed = 2,
+      }
+  }
+  ```
+
+  The clause is per-variant — some variants may carry one and others not,
+  in the same enum — and an enum with no clause anywhere still gets the
+  `From<Enum> for Rollback` impl, with every message empty, so `?` works
+  uniformly whether or not any variant bothers with a message.
+
+### The `#[inline(always)]` helper convention
+
+Every helper function called on a `?` path inside a typed entry should be
+`#[inline(always)]`, as `read_amount` is above. Measured
+(`.claude/design/TYPED_ENTRY_RESULTS_DESIGN.md` §5's `p2fix` probe): the
+same logic through a plain (not force-inlined) `Result`-returning helper
+costs a handful of extra worst-case instructions — an un-inlined
+call-boundary cost, not a `?`/`Result` cost — while force-inlined, the
+identical typed code measured *below* its hand-written `accept!`/
+`rollback!` twin. `examples/16_typed-results` follows this convention
+throughout.
+
+### The one hard rule: never `?` a raw `HookError` into `Rollback`
+
+There is **no** `From<HookError> for Rollback` impl, and none is planned.
+[`HookError::code`](../../crates/rshooks/src/error.rs) is a 45-arm
+re-encode match — decoding the negative Hook API return code back into an
+enum variant, then re-encoding that variant back into the same `i64` it
+came from — and measurement (design doc §5, probe P5) showed a
+`?`-propagated two-hop `HookError` → `Rollback` conversion costs **3.1x**
+the worst-case instruction count and **+67%** the size of the equivalent
+raw-code-check twin. That is exactly the class of regression
+`docs/TODO.md`'s item 2 flagged as this feature's biggest risk, and it is
+why this crate does not offer the convenient-looking blanket conversion at
+all.
+
+The supported pattern for a fallible Hook API call inside a typed entry is
+`.map_err(..)`, discarding the decoded `HookError` and keeping only "some
+call failed":
+
+```rust,ignore
+let value = some_hook_api_call().map_err(|_| MyError::SomeCallFailed)?;
+```
+
+— exactly what `read_amount`/`bump_counter` do above. Fall back to
+`accept!`/`rollback!` directly (the raw escape hatch, unchanged and always
+available) when a computed, non-`'static` message is needed, or when a
+match on the specific `HookError` variant is genuinely required (see this
+page's `HookError` section above for why matching a specific variant has
+its own, larger measured cost).
+
 ## Where to go next
 
 - [Guards and Loops](guards.md) covers the other hard constraint every hook
@@ -227,3 +340,7 @@ call site that actually needs to end the hook touches `rollback!` directly.
   `otxn_field_*` calls used in the worked example above.
 - [Macro Reference](../reference/macros.md) is the full grammar listing for
   every macro this page uses.
+- `examples/16_typed-results` is the full worked example for
+  ["Typed entry returns: `HookResult`"](#typed-entry-returns-hookresult)
+  above, with `rshooks build`/`check` numbers in its `README.md` and
+  off-chain unit tests covering both the accept and `?`-rollback paths.

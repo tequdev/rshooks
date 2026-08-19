@@ -2,8 +2,11 @@
 //!
 //! [`hook_errors!`] expands a C-like enum declaration into a `#[repr(i64)]`
 //! enum plus the small amount of boilerplate needed to use it as an exit
-//! code: `impl From<Enum> for i64` and an inherent `code(self) -> i64`
-//! method. Paired with [`exit_on_err!`] and the `i64::from`-based
+//! code: `impl From<Enum> for i64`, an inherent `code(self) -> i64` method,
+//! and `impl From<Enum> for `[`Rollback`](crate::exit::Rollback) (so `?`
+//! propagates a variant straight into a typed `#[hook]`/`#[cbak]` entry's
+//! [`HookResult`](crate::exit::HookResult) — see [`crate::exit`]'s module
+//! doc comment). Paired with [`exit_on_err!`] and the `i64::from`-based
 //! `code`/`msg` argument of [`rollback!`](crate::rollback) /
 //! [`accept!`](crate::accept), this gives a small `Result`-based idiom for
 //! hook logic — write ordinary helper functions returning
@@ -18,7 +21,12 @@
 ///
 /// Each variant requires an explicit `i64`-valued discriminant — the
 /// macro's grammar itself enforces this, there is no separate check — and
-/// the macro expands to:
+/// an optional trailing `=> b"message"` clause, e.g.
+/// `BlockedAccount = 1 => b"firewall: blocked"`. The clause is per-variant
+/// (some variants may carry one and others not, in the same enum) and feeds
+/// only the `From<EnumName> for Rollback` impl below — every other output
+/// (the enum itself, `code()`, `From<EnumName> for i64`) is unaffected by
+/// whether any variant declares one. The macro expands to:
 ///
 /// - a `#[repr(i64)]`, `Debug + Clone + Copy + PartialEq + Eq` enum with the
 ///   given variants and discriminants (doc comments on the enum and on each
@@ -26,7 +34,15 @@
 ///   the same way it would be for a hand-written enum);
 /// - `impl From<EnumName> for i64`;
 /// - an inherent `fn code(self) -> i64` — the same conversion, as a method,
-///   for call sites that prefer `err.code()` over `i64::from(err)`.
+///   for call sites that prefer `err.code()` over `i64::from(err)`;
+/// - `impl From<EnumName> for `[`rshooks::exit::Rollback`](crate::exit::Rollback)
+///   — the code side is always `self as i64` (a free cast — the same
+///   conversion `code()`/`From<EnumName> for i64` already use); the message
+///   is the variant's `=> b"msg"` clause where declared, or an empty slice
+///   otherwise. This impl is generated unconditionally, even when no
+///   variant declares a message clause, so `?` propagates any
+///   `hook_errors!` enum into a [`HookResult`](crate::exit::HookResult)
+///   uniformly.
 ///
 /// # Examples
 ///
@@ -63,14 +79,42 @@
 /// assert_eq!(Negative::First.code(), -1);
 /// assert_eq!(i64::from(Negative::Second), -2);
 /// ```
+///
+/// A per-variant `=> b"msg"` clause feeds `From<EnumName> for Rollback` —
+/// declared variants carry their message, undeclared ones fall back to an
+/// empty message, in the same enum:
+///
+/// ```
+/// use rshooks::exit::Rollback;
+/// use rshooks::hook_errors;
+///
+/// hook_errors! {
+///     pub enum DepositError {
+///         BadAmount = 1 => b"deposit: bad amount",
+///         StateSetFailed = 2,
+///     }
+/// }
+///
+/// let with_msg: Rollback = DepositError::BadAmount.into();
+/// assert_eq!(with_msg, Rollback::new(b"deposit: bad amount", 1));
+///
+/// let without_msg: Rollback = DepositError::StateSetFailed.into();
+/// assert_eq!(without_msg, Rollback::code(2));
+/// ```
 #[macro_export]
 macro_rules! hook_errors {
+    (@__msg) => {
+        b""
+    };
+    (@__msg $msg:expr) => {
+        $msg
+    };
     (
         $(#[$enum_meta:meta])*
         $vis:vis enum $name:ident {
             $(
                 $(#[$variant_meta:meta])*
-                $variant:ident = $code:expr
+                $variant:ident = $code:expr $(=> $msg:expr)?
             ),+ $(,)?
         }
     ) => {
@@ -95,6 +139,17 @@ macro_rules! hook_errors {
         impl ::core::convert::From<$name> for i64 {
             fn from(value: $name) -> i64 {
                 value as i64
+            }
+        }
+
+        impl ::core::convert::From<$name> for $crate::exit::Rollback {
+            fn from(value: $name) -> $crate::exit::Rollback {
+                let msg: &'static [u8] = match value {
+                    $(
+                        $name::$variant => $crate::hook_errors!(@__msg $($msg)?),
+                    )+
+                };
+                $crate::exit::Rollback::new(msg, value as i64)
             }
         }
     };
@@ -179,6 +234,8 @@ macro_rules! exit_on_err {
 
 #[cfg(test)]
 mod tests {
+    use crate::exit::Rollback;
+
     hook_errors! {
         /// Test error enum exercising positive discriminants.
         pub enum SampleError {
@@ -196,6 +253,15 @@ mod tests {
             First = -1,
             /// Second variant.
             Second = -2,
+        }
+    }
+
+    hook_errors! {
+        /// Test error enum exercising a mix of clause and clause-less
+        /// variants, for the `From<Enum> for Rollback` msg lookup.
+        enum MixedMsgError {
+            WithMsg = 1 => b"mixed: with message",
+            WithoutMsg = 2,
         }
     }
 
@@ -234,5 +300,28 @@ mod tests {
         let result: Result<u32, SampleError> = Ok(7);
         let value = exit_on_err!(b"unused", result);
         assert_eq!(value, 7);
+    }
+
+    #[test]
+    fn clause_less_enum_still_converts_to_rollback_with_empty_msg() {
+        // Backward compatibility (D2): an enum with no `=> b"msg"` clause
+        // anywhere still gets `From<Enum> for Rollback`, msg always empty.
+        let r: Rollback = SampleError::First.into();
+        assert_eq!(r, Rollback::code(1));
+        let r: Rollback = NegativeError::Second.into();
+        assert_eq!(r, Rollback::code(-2));
+    }
+
+    #[test]
+    fn msg_clause_feeds_rollback_message() {
+        assert_eq!(MixedMsgError::WithMsg.code(), 1);
+        let r: Rollback = MixedMsgError::WithMsg.into();
+        assert_eq!(r, Rollback::new(b"mixed: with message", 1));
+    }
+
+    #[test]
+    fn variant_without_msg_clause_falls_back_to_empty_in_a_mixed_enum() {
+        let r: Rollback = MixedMsgError::WithoutMsg.into();
+        assert_eq!(r, Rollback::code(2));
     }
 }

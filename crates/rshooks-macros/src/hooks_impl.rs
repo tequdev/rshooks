@@ -403,16 +403,18 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
                         "#[hooks]: entry functions must take no arguments other than `&self`",
                     ));
                 }
-                let ret_ok = matches!(
-                    scanned.return_tokens.as_slice(),
-                    [TokenTree::Ident(rid)] if rid.to_string() == "i64"
-                );
-                if !ret_ok {
-                    return Err(err(
-                        scanned.return_span,
-                        "#[hooks]: entry functions must return `i64` (expected `-> i64`)",
-                    ));
-                }
+                // The return type itself is deliberately unchecked here: an
+                // entry may return `i64` (the legacy identity form) or
+                // anything implementing `::rshooks::exit::EntryReturn`
+                // (currently also `HookResult` — see
+                // `.claude/design/TYPED_ENTRY_RESULTS_DESIGN.md` §1.3/§3).
+                // The generated body wraps the call in
+                // `EntryReturn::finish(..)` (see
+                // `render_entry_body_and_wrappers`), so a return type that
+                // implements neither fails to compile there with an
+                // ordinary trait-bound diagnostic naming `EntryReturn` —
+                // there is no separate check to keep in sync with that
+                // trait's impl set.
             } else {
                 // Non-attributed helper (§3.3): `&self` passes through
                 // untouched, `&mut self`/other self shapes are rejected with
@@ -630,8 +632,6 @@ struct ScannedFn {
     /// which may take any further parameters.
     extra_args: Vec<TokenTree>,
     args_group: Group,
-    return_tokens: Vec<TokenTree>,
-    return_span: Span,
     next: usize,
 }
 
@@ -700,14 +700,14 @@ fn scan_fn_item(tokens: &[TokenTree], start: usize) -> Result<ScannedFn, TokenSt
         }
     }
 
-    let mut return_tokens: Vec<TokenTree> = Vec::new();
-    let mut return_span = name.span();
+    // The return type's own tokens are re-emitted verbatim but otherwise
+    // unexamined — see the entry-fn shape check's comment in
+    // `parse_impl_body` for why: any type implementing
+    // `::rshooks::exit::EntryReturn` is accepted, and the macro leaves
+    // enforcing that to the generated body's own trait bound.
     if matches!(tokens.get(i), Some(tt) if is_punct(tt, '-'))
         && matches!(tokens.get(i.wrapping_add(1)), Some(tt) if is_punct(tt, '>'))
     {
-        if let Some(arrow) = tokens.get(i) {
-            return_span = arrow.span();
-        }
         collected.extend_from_slice(tokens.get(i..i.wrapping_add(2)).unwrap_or_default());
         i = i.wrapping_add(2);
         let ret_start = i;
@@ -719,7 +719,6 @@ fn scan_fn_item(tokens: &[TokenTree], start: usize) -> Result<ScannedFn, TokenSt
             }
             i = i.wrapping_add(1);
         }
-        return_tokens = tokens.get(ret_start..i).unwrap_or_default().to_vec();
         collected.extend_from_slice(tokens.get(ret_start..i).unwrap_or_default());
     }
 
@@ -750,8 +749,6 @@ fn scan_fn_item(tokens: &[TokenTree], start: usize) -> Result<ScannedFn, TokenSt
         receiver,
         extra_args,
         args_group,
-        return_tokens,
-        return_span,
         next: i,
     })
 }
@@ -1551,7 +1548,16 @@ fn render_entry_body_and_wrappers(
     // (HOOKS_SELF_RECEIVER_DESIGN.md §3.2): a named-field struct's
     // generated same-named static, or a unit struct's constructor value —
     // no extra static is ever needed.
-    let hook_call = format!("{struct_name}::{}(&{struct_name})", entry.hook_fn);
+    //
+    // The call is wrapped in `EntryReturn::finish` unconditionally
+    // (TYPED_ENTRY_RESULTS_DESIGN.md §1.3): the legacy `i64` return type's
+    // identity impl makes this byte-invisible once inlined (this body fn is
+    // itself `#[inline(always)]`), and it is what makes a `HookResult`
+    // return type legal here at all.
+    let hook_call = format!(
+        "::rshooks::exit::EntryReturn::finish({struct_name}::{}(&{struct_name}))",
+        entry.hook_fn
+    );
     let mut out = format!(
         "#[inline(always)]\n\
          #[doc(hidden)]\n\
@@ -1566,7 +1572,9 @@ fn render_entry_body_and_wrappers(
              __rshooks_entry_body_{i}(_reserved) }}\n"
     );
     if let Some(cbak_fn) = &entry.cbak_fn {
-        let cbak_call = format!("{struct_name}::{cbak_fn}(&{struct_name})");
+        let cbak_call = format!(
+            "::rshooks::exit::EntryReturn::finish({struct_name}::{cbak_fn}(&{struct_name}))"
+        );
         out.push_str(&format!(
             "#[inline(always)]\n\
              #[doc(hidden)]\n\
