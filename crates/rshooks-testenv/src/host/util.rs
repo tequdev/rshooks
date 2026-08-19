@@ -117,7 +117,10 @@ fn base58_decode(s: &str) -> Option<Vec<u8>> {
 
     num.reverse();
 
-    let leading_zeros = s.chars().take_while(|&ch| ch == ALPHABET[0] as char).count();
+    let leading_zeros = s
+        .chars()
+        .take_while(|&ch| ch == ALPHABET[0] as char)
+        .count();
     let mut decoded = std::vec![0u8; leading_zeros];
     decoded.extend_from_slice(&num);
     Some(decoded)
@@ -345,7 +348,10 @@ mod tests {
 
     #[test]
     fn util_accid_genesis_account() {
-        assert_eq!(util_accid(GENESIS_RADDR.as_bytes()), Ok(GENESIS_ACCID.to_vec()));
+        assert_eq!(
+            util_accid(GENESIS_RADDR.as_bytes()),
+            Ok(GENESIS_ACCID.to_vec())
+        );
     }
 
     #[test]

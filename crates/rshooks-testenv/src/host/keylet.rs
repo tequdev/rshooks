@@ -196,7 +196,8 @@ fn seq_or_hash_bytes(arg: &KeyletArg<'_>) -> Result<Vec<u8>, i64> {
 /// in the same numeric order as that module and `rshooks::api::keylet`'s 26
 /// typed wrappers, each annotated with the typed helper whose `KeyletArg`
 /// shape it expects.
-#[allow(clippy::too_many_lines)] // one mechanical arm per KEYLET_* type, each already factored to a single index_hash/keylet call — splitting further would only relocate, not reduce, the switch
+#[allow(clippy::too_many_lines)]
+// one mechanical arm per KEYLET_* type, each already factored to a single index_hash/keylet call — splitting further would only relocate, not reduce, the switch
 #[allow(clippy::indexing_slicing)] // the only indexing/slicing in this function is `dir[0]`/`dir[1]`/`&dir[2..34]` in the QUALITY arm, reached only after `bytes_exact(&args[0], 34)?` has already established `dir.len() == 34`
 pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<[u8; 34], i64> {
     match keylet_type {
@@ -865,7 +866,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(&got[0..26], &dir[0..26]); // type + first 24 key bytes unchanged
-        assert_eq!(&got[26..34], &[0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88]);
+        assert_eq!(
+            &got[26..34],
+            &[0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88]
+        );
     }
 
     #[test]
