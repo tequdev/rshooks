@@ -431,6 +431,80 @@ impl HostBackend for Backend {
     fn static_take_allowed(&self, cell_addr: usize) -> bool {
         self.ctx.borrow_mut().static_take_allowed(cell_addr)
     }
+
+    // -- float_* (P2-B — `.claude/design/TESTENV_PHASE2_DESIGN.md` §4
+    // "float_*"). Pure functions, no `self` access needed; delegated to
+    // `crate::host::float` per this file's module doc comment.
+
+    fn float_set(&self, exponent: i32, mantissa: i64) -> i64 {
+        crate::host::float::float_set(exponent, mantissa)
+    }
+
+    fn float_multiply(&self, f1: i64, f2: i64) -> i64 {
+        crate::host::float::float_multiply(f1, f2)
+    }
+
+    fn float_mulratio(&self, f1: i64, round_up: u32, numerator: u32, denominator: u32) -> i64 {
+        crate::host::float::float_mulratio(f1, round_up, numerator, denominator)
+    }
+
+    fn float_negate(&self, f1: i64) -> i64 {
+        crate::host::float::float_negate(f1)
+    }
+
+    fn float_compare(&self, f1: i64, f2: i64, mode: u32) -> i64 {
+        crate::host::float::float_compare(f1, f2, mode)
+    }
+
+    fn float_sum(&self, f1: i64, f2: i64) -> i64 {
+        crate::host::float::float_sum(f1, f2)
+    }
+
+    fn float_sto(
+        &self,
+        currency: Option<&[u8]>,
+        issuer: Option<&[u8]>,
+        amount: i64,
+        field_code: u32,
+    ) -> Result<Vec<u8>, i64> {
+        crate::host::float::float_sto(currency, issuer, amount, field_code)
+    }
+
+    fn float_sto_set(&self, sto: &[u8]) -> i64 {
+        crate::host::float::float_sto_set(sto)
+    }
+
+    fn float_invert(&self, f1: i64) -> i64 {
+        crate::host::float::float_invert(f1)
+    }
+
+    fn float_divide(&self, f1: i64, f2: i64) -> i64 {
+        crate::host::float::float_divide(f1, f2)
+    }
+
+    fn float_one(&self) -> i64 {
+        crate::host::float::float_one()
+    }
+
+    fn float_mantissa(&self, f1: i64) -> i64 {
+        crate::host::float::float_mantissa(f1)
+    }
+
+    fn float_sign(&self, f1: i64) -> i64 {
+        crate::host::float::float_sign(f1)
+    }
+
+    fn float_int(&self, f1: i64, decimal_places: u32, absolute: u32) -> i64 {
+        crate::host::float::float_int(f1, decimal_places, absolute)
+    }
+
+    fn float_log(&self, f1: i64) -> i64 {
+        crate::host::float::float_log(f1)
+    }
+
+    fn float_root(&self, f1: i64, n: u32) -> i64 {
+        crate::host::float::float_root(f1, n)
+    }
 }
 
 /// Boundary tests for the checked `u64` → `i64` conversions this file

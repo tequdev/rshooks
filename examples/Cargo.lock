@@ -308,6 +308,7 @@ name = "xfl-math"
 version = "0.0.1"
 dependencies = [
  "rshooks",
+ "rshooks-testenv",
 ]
 
 [[package]]
