@@ -290,9 +290,7 @@ impl HostBackend for Backend {
     }
 
     fn ledger_last_hash(&self) -> Result<[u8; 32], i64> {
-        // Not independently seedable in Phase 1 (design §2.4 has no
-        // builder for it) — a fixed, documented zero value.
-        Ok([0u8; 32])
+        Ok(self.world.borrow().ledger_last_hash)
     }
 
     fn ledger_nonce(&self) -> Result<[u8; 32], i64> {
@@ -340,8 +338,13 @@ impl HostBackend for Backend {
             (w.otxn.id, w.current_hook_hash().unwrap_or([0u8; 32]))
         };
         let nonce = self.ctx.borrow_mut().next_details_nonce();
-        // cbak flows are Phase 2 (design §6) — this harness never
-        // populates `EmitCallback`.
+        // This harness never populates `EmitCallback` — every emitted blob
+        // is built with `callback: None`, regardless of whether the
+        // currently invoked entry declares a `#[cbak]` body. This is a
+        // real, permanent limitation (not a landed-later gap): an
+        // `invoke_cbak` context built from such a blob therefore always
+        // differs from a genuine on-chain callback in that one field — see
+        // the book's "what this harness does not model" list.
         let details = build_etxn_details(&EmitDetailsInputs {
             generation,
             burden,
@@ -583,14 +586,21 @@ impl HostBackend for Backend {
     // the maximum possible 256-bit value), noted here per this stage's
     // "state the assumption" policy for details not pinned by a source (1-3
     // list in the design doc). `low`/`high` must be well-formed 34-byte
-    // keylets and share the same 2-byte type prefix (`DOES_NOT_MATCH`
-    // otherwise, matching `klLo.type != klHi.type`); the output keylet's
-    // type prefix is always taken from `low` (`Keylet kl_out{klLo.type,
-    // *found}` — never looked up from the found object itself, since
-    // `succ()` searches the *global* key space with no type filter).
+    // keylets — a length `< 34` is `TOO_SMALL`, `> 34` is `TOO_BIG`
+    // (upstream's own wasm-wrapper gate, `applyHook.cpp:2841-2844`: `<`
+    // checked for `lread_len`/`hread_len`/`write_len` together before `>`
+    // is checked for all three) — and share the same 2-byte type prefix
+    // (`DOES_NOT_MATCH` otherwise, matching `klLo.type != klHi.type`); the
+    // output keylet's type prefix is always taken from `low` (`Keylet
+    // kl_out{klLo.type, *found}` — never looked up from the found object
+    // itself, since `succ()` searches the *global* key space with no type
+    // filter).
     fn ledger_keylet(&self, low: &[u8], high: &[u8]) -> Result<Vec<u8>, i64> {
-        if low.len() != 34 || high.len() != 34 {
-            return Err(rshooks_core::INVALID_ARGUMENT);
+        if low.len() < 34 || high.len() < 34 {
+            return Err(rshooks_core::TOO_SMALL);
+        }
+        if low.len() > 34 || high.len() > 34 {
+            return Err(rshooks_core::TOO_BIG);
         }
         let (lo_type, lo_key) = low.split_at(2);
         let (hi_type, hi_key) = high.split_at(2);
@@ -947,12 +957,29 @@ mod tests {
     }
 
     #[test]
-    fn ledger_keylet_wrong_length_is_invalid_argument() {
+    fn ledger_keylet_too_short_is_too_small() {
         let (_world, _ctx, backend) = fresh();
         assert_eq!(
             backend.ledger_keylet(&[0u8; 10], &[0u8; 34]),
-            Err(rshooks_core::INVALID_ARGUMENT)
+            Err(rshooks_core::TOO_SMALL)
         );
+    }
+
+    #[test]
+    fn ledger_keylet_too_long_is_too_big() {
+        let (_world, _ctx, backend) = fresh();
+        assert_eq!(
+            backend.ledger_keylet(&[0u8; 40], &[0u8; 34]),
+            Err(rshooks_core::TOO_BIG)
+        );
+    }
+
+    #[test]
+    fn ledger_last_hash_defaults_to_zero_and_is_seedable() {
+        let (world, _ctx, backend) = fresh();
+        assert_eq!(backend.ledger_last_hash(), Ok([0u8; 32]));
+        world.borrow_mut().ledger_last_hash = [7u8; 32];
+        assert_eq!(backend.ledger_last_hash(), Ok([7u8; 32]));
     }
 
     // -- trace_float (P2-C) --

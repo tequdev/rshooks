@@ -49,11 +49,13 @@
 //! (`XRPLF/rippled`, `include/xrpl/protocol/SField.h`) — which is exactly
 //! the range `rshooks::slot_obj`'s `ROOT_OBJECT_CODE_MIN..=ROOT_OBJECT_CODE_MAX`
 //! and `examples/15_slot-objects`' `check_root_cast` already assume. This
-//! module synthesizes `(STI_TRANSACTION << 16) | 1`/`(STI_LEDGERENTRY << 16) | 1`/
-//! `(STI_METADATA << 16) | 1` (field number `1`, an arbitrary but
-//! consistent placeholder — no test observes it beyond the `>> 16` check)
-//! for `otxn_slot`/`slot_set`/`meta_slot` (and `xpop_slot`'s two halves)
-//! respectively.
+//! module synthesizes `(STI_TRANSACTION << 16) | 257`/`(STI_LEDGERENTRY << 16) | 257`/
+//! `(STI_METADATA << 16) | 257` for `otxn_slot`/`slot_set`/`meta_slot` (and
+//! `xpop_slot`'s two halves) respectively — field number `257`, matching
+//! upstream's actual root `SField`s (`sfLedgerEntry`/`sfTransaction`/
+//! `sfMetadata`, all field number `257`: `XRPLF/rippled`,
+//! `include/xrpl/protocol/detail/sfields.macro`), pinned by this module's
+//! own tests (not an arbitrary placeholder).
 //!
 //! # Slot allocation
 //!
@@ -74,15 +76,17 @@ use crate::invocation::{InvocationContext, SlotEntry, SlotKind};
 use crate::world::World;
 
 /// `slot_type(no, 0)`'s root-slot value for `otxn_slot`/`xpop_slot`'s tx
-/// half: `STI_TRANSACTION`(10001) `<< 16` `| 1` — see this module's doc
-/// comment.
-const ROOT_TRANSACTION: u32 = (10001 << 16) | 1;
+/// half: `STI_TRANSACTION`(10001) `<< 16` `| 257` (`sfTransaction`'s real
+/// field number) — see this module's doc comment.
+const ROOT_TRANSACTION: u32 = (10001 << 16) | 257;
 /// `slot_type(no, 0)`'s root-slot value for `slot_set` (a seeded ledger
-/// object): `STI_LEDGERENTRY`(10002) `<< 16` `| 1`.
-const ROOT_LEDGER_ENTRY: u32 = (10002 << 16) | 1;
+/// object): `STI_LEDGERENTRY`(10002) `<< 16` `| 257` (`sfLedgerEntry`'s real
+/// field number).
+const ROOT_LEDGER_ENTRY: u32 = (10002 << 16) | 257;
 /// `slot_type(no, 0)`'s root-slot value for `meta_slot`/`xpop_slot`'s meta
-/// half: `STI_METADATA`(10004) `<< 16` `| 1`.
-const ROOT_METADATA: u32 = (10004 << 16) | 1;
+/// half: `STI_METADATA`(10004) `<< 16` `| 257` (`sfMetadata`'s real field
+/// number).
+const ROOT_METADATA: u32 = (10004 << 16) | 257;
 
 /// `STI_AMOUNT`'s wire byte 0, bit 7 clear = native (XAH). Shared by
 /// `slot_type(no, 1)` and `slot_float` — see `~/.claude/skills/hook-api/
@@ -207,6 +211,15 @@ pub(crate) fn slot_set(
     if slot_into > 255 {
         return INVALID_ARGUMENT;
     }
+    // Upstream (`HookAPI.cpp:2086-2088`) checks slot availability *before*
+    // ever attempting the keylet/tx-hash lookup: `slot_into == 0`
+    // (auto-assign) with every slot already occupied fails `NO_FREE_SLOTS`
+    // even for input that would otherwise resolve to `DOESNT_EXIST`.
+    if slot_into == 0 {
+        if let Err(e) = ctx.resolve_slot(0) {
+            return e;
+        }
+    }
     if data.len() == 32 {
         return DOESNT_EXIST;
     }
@@ -233,10 +246,15 @@ pub(crate) fn slot_set(
 /// `HookAPI::otxn_slot` (`HookAPI.cpp:1565-1593`): loads the canonical
 /// serialization of the seeded originating transaction
 /// (`crate::otxn::serialize`) as a root slot. Upstream also special-cases
-/// `hookCtx.emitFailure` (a `cbak`-failure context loading the emitted tx
-/// instead of the applying one); that context does not exist in this
-/// harness's invocation model as of P2-D (it lands with `invoke_cbak` in
-/// P2-E), so it is not modeled here.
+/// `hookCtx.emitFailure` (a `cbak`-failure context loading the emitted tx's
+/// real fields instead of the synthetic `ttEMIT_FAILURE`-rewritten applying
+/// tx). This function needs no separate case for that: `crate::env::TestEnv::invoke_cbak`
+/// already swaps `World::otxn` to the emitted transaction's own fields for
+/// the whole call, for both `CbakOutcome::Success`/`CbakOutcome::Failure`
+/// alike (this harness never models the `ttEMIT_FAILURE` rewrite at all) —
+/// so reading `world.otxn` here, exactly like every other call, already
+/// reports the same real emitted-tx fields upstream's `emitFailure` special
+/// case exists to preserve.
 pub(crate) fn otxn_slot(ctx: &mut InvocationContext, world: &World, slot_into: u32) -> i64 {
     if slot_into > 255 {
         return INVALID_ARGUMENT;
@@ -573,6 +591,24 @@ mod tests {
         );
     }
 
+    #[test]
+    fn slot_set_no_free_slots_is_checked_before_the_keylet_lookup() {
+        // Every slot occupied *and* a missing keylet: upstream
+        // (`HookAPI.cpp:2086-2088`) reports `NO_FREE_SLOTS`, not
+        // `DOESNT_EXIST`, since the free-slot check runs first.
+        let mut ctx = fresh_ctx();
+        let kl = keylet(1);
+        let world = seeded_world(kl, &account_root_bytes(1, 1, [0u8; 20]));
+        for n in 1..=255u32 {
+            assert_eq!(slot_set(&mut ctx, &world, &kl, n), n as i64);
+        }
+        let missing_kl = keylet(9); // not seeded in `world`
+        assert_eq!(
+            slot_set(&mut ctx, &world, &missing_kl, 0),
+            rshooks_core::NO_FREE_SLOTS
+        );
+    }
+
     // -- slot / slot_clear / slot_size --
 
     #[test]
@@ -808,6 +844,19 @@ mod tests {
         assert_eq!(slot_type(&ctx, no, 0), i64::from(ROOT_TRANSACTION));
         let acc = slot_subfield(&mut ctx, no, SF_ACCOUNT, 0) as u32;
         assert_eq!(slot(&ctx, acc), Ok(vec![2u8; 20]));
+    }
+
+    #[test]
+    fn otxn_slot_root_type_matches_upstream_sftransaction_field_code() {
+        // Pins the literal upstream value directly (not via the
+        // `ROOT_TRANSACTION` constant under test): `STI_TRANSACTION`(10001)
+        // `<< 16` `| 257`, `sfTransaction`'s real field number
+        // (`XRPLF/rippled`, `include/xrpl/protocol/detail/sfields.macro`) —
+        // see this module's doc comment.
+        let mut ctx = fresh_ctx();
+        let world = World::new();
+        let no = otxn_slot(&mut ctx, &world, 0) as u32;
+        assert_eq!(slot_type(&ctx, no, 0), (10001i64 << 16) | 257);
     }
 
     #[test]

@@ -278,6 +278,14 @@ impl TestEnv {
         self
     }
 
+    /// Sets the previous ledger's hash (`ledger_last_hash`) — `[0u8; 32]`
+    /// unless called.
+    #[must_use]
+    pub fn ledger_last_hash(self, hash: [u8; 32]) -> Self {
+        self.world.borrow_mut().ledger_last_hash = hash;
+        self
+    }
+
     /// Marks the seeded otxn as itself an emitted transaction, seeding
     /// `otxn_burden`/`otxn_generation`. Absent, the otxn models an ordinary
     /// (non-emitted) transaction (`otxn_burden() == 1`,
@@ -730,6 +738,11 @@ mod tests {
         42
     }
 
+    fn hook_again_then_accept_hook(_r: u32) -> i64 {
+        let _ = rshooks::api::control::hook_again();
+        rshooks::api::control::accept(b"ok", 0);
+    }
+
     struct OneEntry;
     impl HookChainEntries for OneEntry {
         const ENTRIES: &'static [NativeEntry] = &[
@@ -751,6 +764,13 @@ mod tests {
                 index: 2,
                 name: "return",
                 hook: returning_hook,
+                cbak: None,
+                can_emit: None,
+            },
+            NativeEntry {
+                index: 3,
+                name: "hook_again_then_accept",
+                hook: hook_again_then_accept_hook,
                 cbak: None,
                 can_emit: None,
             },
@@ -807,6 +827,25 @@ mod tests {
     fn state_typed_decodes_present_value() {
         let env = TestEnv::new().state_entry(b"K", &1u32.to_le_bytes());
         assert_eq!(env.state_typed::<u32>(b"K"), Some(1u32));
+    }
+
+    #[test]
+    fn hook_again_requested_survives_a_later_rollback_uncleared() {
+        let env = TestEnv::new();
+        assert!(!env.hook_again_requested());
+
+        // Commits `hook_again_requested() == true`.
+        let exit = env.invoke::<OneEntry>(3);
+        assert!(exit.is_success());
+        assert!(env.hook_again_requested());
+
+        // A later rolled-back invocation (that never itself calls
+        // `hook_again`) never commits, so it leaves the accessor exactly as
+        // the prior accepted invocation left it — still `true`, not reset
+        // to `false`.
+        let exit = env.invoke::<OneEntry>(1);
+        assert!(!exit.is_success());
+        assert!(env.hook_again_requested());
     }
 
     #[test]

@@ -13,15 +13,16 @@ exits, and emitted transactions.
 
 `cargo test` against `rshooks-testenv` answers one question fast: *is my
 hook's logic right*, in milliseconds, iterating faster than a wasm build
-lets you. It is not a substitute for the end-to-end suite. Fee and reserve
-economics, real instruction counting, real guard enforcement, ledger
-objects/keylets/slots, XFL float operations, signature verification, and
-multi-hook chain execution (including `HookOn` trigger routing) are all out
-of scope here — see [What this harness does not model](#what-this-harness-does-not-model)
-below for the complete list. Treat the two suites as complementary: reach
-for `rshooks-testenv` while you're writing and refactoring hook logic, and
-rely on the end-to-end suite to confirm the compiled artifact behaves the
-same way on a real ledger.
+lets you. It is not a substitute for the end-to-end suite. Ledger
+objects/keylets/slots, XFL float operations, and signature verification are
+all in scope and modeled (see [Hook API coverage](#hook-api-coverage)
+below); fee/reserve economics (explicit approximations), real instruction
+metering, guard enforcement, `HookOn` chain routing/execution, and consensus
+stay out of scope — see [What this harness does not model](#what-this-harness-does-not-model)
+below for the complete, honest list. Treat the two suites as complementary:
+reach for `rshooks-testenv` while you're writing and refactoring hook logic,
+and rely on the end-to-end suite to confirm the compiled artifact behaves
+the same way on a real ledger.
 
 ## Setup
 
@@ -186,9 +187,12 @@ interior-mutable, so you never need a `mut` binding, even across multiple
   env has seen, cumulative, captured rather than printed — inspect it
   explicitly in a test instead of scrolling terminal output.
 - **`hook_again_requested() -> bool`** reflects whether the most recently
-  **accepted** `invoke`/`invoke_cbak` call requested to run again (via
-  `hook_again`) — `false` after a rolled-back or merely-returning
-  invocation, since that call never commits.
+  **committed** `invoke`/`invoke_cbak` call requested to run again (via
+  `hook_again`). A rolled-back or merely-returning invocation never commits,
+  so it leaves this accessor exactly as it was *before* that invocation ran
+  — it is **not** reset to `false`: if an earlier accepted invocation had
+  set it `true`, a later rolled-back invocation (whether or not that one
+  itself called `hook_again`) still reads `true` afterward.
 - **`skip_directives() -> Vec<([u8; 32], u32)>`** is every `hook_skip(hash,
   flags)` call from every accepted invocation so far, verbatim, in call
   order (`flags == 0` add, `flags == 1` delete) — this harness has no chain
@@ -263,9 +267,11 @@ count, emit reserve, nonce budget, and so on) resets per call.
   gate a write into *another* account's namespace, exactly like the real
   Hook API. Matching is presence-only (no signature verification); anything
   deeper stays end-to-end territory.
-- **`ledger_seq(seq)`** / **`ledger_time(t)`** — the current ledger
-  sequence and the previous ledger's close time, read back by `ledger_seq()`
-  / `ledger_last_time()`.
+- **`ledger_seq(seq)`** / **`ledger_time(t)`** / **`ledger_last_hash(hash)`**
+  — the current ledger sequence, the previous ledger's close time, and the
+  previous ledger's hash, read back by `ledger_seq()` / `ledger_last_time()`
+  / `ledger_last_hash()`. `ledger_last_hash` defaults to `[0u8; 32]` unless
+  called.
 - **`own_namespace(ns)`** — overrides this hook's own default state
   namespace (`[0u8; 32]` unless called).
 - **`max_state_value_len(n)`** — overrides the cap (bytes, default 256,
@@ -276,6 +282,13 @@ count, emit reserve, nonce budget, and so on) resets per call.
 - **`base_fee_drops(drops)`** — overrides the per-drop base fee the
   `etxn_fee_base`/`fee_base` approximation multiplies by (default 10 drops;
   see [Fees are an explicit approximation](#what-this-harness-does-not-model)).
+- **`ledger_object(keylet, sto)`** — seeds a ledger object at its 34-byte
+  keylet, serialized as `sto` — backs `slot_set`/`ledger_keylet` (see
+  [Slots and Ledger Objects](../data/slots.md)).
+- **`otxn_meta(sto)`** — seeds the current transaction's metadata — backs
+  `meta_slot`.
+- **`xpop(tx, meta)`** — seeds an XPOP's `(transaction, metadata)` byte pair
+  — backs `xpop_slot`.
 - **`strict_can_emit(true)`** — opt-in (default off): after `invoke`,
   asserts every transaction type this invocation committed to `emitted()`
   is one the invoked entry's `#[hook(.., can_emit = [..])]` list declares.
@@ -333,14 +346,14 @@ call, `_g` (guard enforcement) excepted:
 | Family | Covered |
 |---|---|
 | State | `state`, `state_set`, `state_foreign`, `state_foreign_set`, and every as-int64 variant (`state_u64`, `state_foreign_u64`, ...) |
-| Originating transaction | `otxn_field`, `otxn_type`, `otxn_id`, `otxn_param`, `otxn_burden`, `otxn_generation`, `otxn_slot` |
+| Originating transaction | `otxn_field`, `otxn_type`, `otxn_id` (its `flags` argument is accepted but ignored — the seeded `Otxn::id` is always returned as-is), `otxn_param`, `otxn_burden`, `otxn_generation`, `otxn_slot` |
 | Hook identity | `hook_param`, `hook_account`, `hook_hash(hook_no)`, `hook_pos` — `hook_param` silently truncates into a too-short buffer and reports the truncated length, mirroring xahaud's own asymmetry with `otxn_param` (which returns `TooSmall`) |
 | Control leftovers | `hook_again` (once per invocation, `ALREADY_SET` on repeat), `hook_skip` (add/delete directives, no chain model), `hook_param_set` (per-hook-hash overrides, precedence over seeded `hook_param`s — see below) |
 | Ledger | `ledger_seq`, `ledger_last_time`, `ledger_last_hash`, `ledger_nonce`, `ledger_keylet` |
 | Fees | `fee_base` (constant) |
 | Emission | `etxn_reserve`, `etxn_fee_base`, `etxn_details`, `etxn_burden`, `etxn_generation`, `etxn_nonce`, `emit`, `prepare` |
 | Control | `accept`, `rollback` |
-| Tracing | `trace`, `trace_num`, `trace_float` |
+| Tracing | `trace`, `trace_num`, `trace_float` (captures the raw XFL `i64` bit pattern as its 8-byte big-endian encoding, the same convention `trace_num` uses — **not** a decimal "mantissa*10^exponent" rendering; decode it yourself from `TraceLine::data` if a test needs the human-readable value) |
 | Float (XFL) | the full `float_*` family (`float_set`, arithmetic, comparison, `float_sto`/`float_sto_set`, `float_int`, `float_log`, `float_root`, ...) — see [XFL: Decimal Floating Point](../data/xfl.md) |
 | Slot | the full `slot_*` family plus `otxn_slot`/`meta_slot`/`xpop_slot` — see [Slots and Ledger Objects](../data/slots.md) |
 | STO | `sto_subfield`, `sto_subarray`, `sto_validate`, `sto_emplace`, `sto_erase` |
@@ -405,14 +418,19 @@ stage (P2-E):
   accepts a bare 32-byte transaction hash for some slot operations; this
   harness treats that shape as `DOESNT_EXIST` rather than modeling a
   separate transaction-hash lookup table.
+- **Emitted blobs never carry `EmitCallback`.** `etxn_details` (and
+  therefore `prepare`) always builds `EmitDetails` with `callback: None`,
+  regardless of whether the currently invoked entry declares a `#[cbak]`
+  body. A later `invoke_cbak` call built from such a blob therefore differs
+  from a genuine on-chain callback invocation in that one `EmitDetails`
+  field — a permanent simplification, not a gap that later Phase 2 work
+  closes.
 - **Amendment gates are assumed active.** Every Hook API function behaves
   as if every amendment it depends on is already enabled — there is no
   per-amendment feature-flag model.
 - **`ExitType::Return` is provisional** — covered above.
 - **Real reserve/consensus economics and instruction metering are
   unmodeled entirely.**
-- **Signature verification, real reserve/consensus economics, and instruction
-  metering** are unmodeled entirely.
 
 ## Where to go next
 

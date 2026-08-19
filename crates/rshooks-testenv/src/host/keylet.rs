@@ -462,9 +462,20 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
         }
 
         // `keylet_paychan`: [Bytes(src:20), Bytes(dst:20), Value(seq), Unused x3].
+        // Upstream (`applyHook.cpp:2512`, the `PAYCHAN` switch arm) rejects
+        // a zero `e` (the raw seq slot) unconditionally, before even
+        // branching on whether it's a scalar or a 32-byte-hash pointer —
+        // reproduced here for the scalar form, the only one any typed
+        // `rshooks::api::keylet` caller ever constructs (see
+        // `seq_or_hash_bytes`'s own doc comment). `OFFER`/`CHECK`/`ESCROW`/
+        // `NFT_OFFER` below have no such check in their own upstream arms —
+        // a zero seq is legal there, so this rejection is PAYCHAN-specific.
         KEYLET_PAYCHAN => {
             let src = bytes_exact(&args[0], 20)?;
             let dst = bytes_exact(&args[1], 20)?;
+            if matches!(args[2], KeyletArg::Value(0)) {
+                return Err(INVALID_ARGUMENT);
+            }
             let seq = seq_or_hash_bytes(&args[2])?;
             for a in &args[3..6] {
                 require_unused(a)?;
@@ -952,6 +963,47 @@ mod tests {
     }
 
     #[test]
+    fn paychan_rejects_a_zero_seq() {
+        assert_eq!(
+            util_keylet(
+                KEYLET_PAYCHAN,
+                [
+                    KeyletArg::Bytes(&OWNER),
+                    KeyletArg::Bytes(&[0x22u8; 20]),
+                    KeyletArg::Value(0),
+                    KeyletArg::Unused,
+                    KeyletArg::Unused,
+                    KeyletArg::Unused,
+                ],
+            ),
+            Err(INVALID_ARGUMENT)
+        );
+    }
+
+    #[test]
+    fn offer_check_escrow_nft_offer_accept_a_zero_seq() {
+        // Unlike PAYCHAN, these four have no zero-seq rejection in their own
+        // upstream `util_keylet` arms — a zero seq is legal.
+        for ty in [KEYLET_OFFER, KEYLET_CHECK, KEYLET_ESCROW, KEYLET_NFT_OFFER] {
+            assert!(
+                util_keylet(
+                    ty,
+                    [
+                        KeyletArg::Bytes(&OWNER),
+                        KeyletArg::Value(0),
+                        KeyletArg::Unused,
+                        KeyletArg::Unused,
+                        KeyletArg::Unused,
+                        KeyletArg::Unused,
+                    ],
+                )
+                .is_ok(),
+                "keylet type {ty} unexpectedly rejected a zero seq"
+            );
+        }
+    }
+
+    #[test]
     fn ticket_is_always_invalid_argument() {
         assert_eq!(
             util_keylet(
@@ -1026,6 +1078,227 @@ mod tests {
             buf
         });
         assert_eq!(got, expect(0x0053, expected_index));
+    }
+
+    #[test]
+    fn hook_matches_index_hash_formula() {
+        let got = util_keylet(
+            KEYLET_HOOK,
+            [
+                KeyletArg::Bytes(&OWNER),
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+            ],
+        )
+        .unwrap();
+        let expected_index = sha512_half(&{
+            let mut buf = (b'H' as u16).to_be_bytes().to_vec();
+            buf.extend_from_slice(&OWNER);
+            buf
+        });
+        assert_eq!(got, expect(0x0048, expected_index));
+    }
+
+    #[test]
+    fn hook_state_matches_index_hash_formula() {
+        let key = [0x33u8; 32];
+        let ns = [0x44u8; 32];
+        let got = util_keylet(
+            KEYLET_HOOK_STATE,
+            [
+                KeyletArg::Bytes(&OWNER),
+                KeyletArg::Bytes(&key),
+                KeyletArg::Bytes(&ns),
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+            ],
+        )
+        .unwrap();
+        let expected_index = sha512_half(&{
+            let mut buf = (b'v' as u16).to_be_bytes().to_vec();
+            buf.extend_from_slice(&OWNER);
+            buf.extend_from_slice(&key);
+            buf.extend_from_slice(&ns);
+            buf
+        });
+        assert_eq!(got, expect(0x0076, expected_index));
+    }
+
+    #[test]
+    fn hook_definition_matches_index_hash_formula() {
+        let got = util_keylet(
+            KEYLET_HOOK_DEFINITION,
+            [
+                KeyletArg::Bytes(&TEST_HASH),
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+            ],
+        )
+        .unwrap();
+        let expected_index = sha512_half(&{
+            let mut buf = (b'D' as u16).to_be_bytes().to_vec();
+            buf.extend_from_slice(&TEST_HASH);
+            buf
+        });
+        assert_eq!(got, expect(0x0044, expected_index));
+    }
+
+    #[test]
+    fn hook_state_dir_matches_index_hash_formula() {
+        let ns = [0x55u8; 32];
+        let got = util_keylet(
+            KEYLET_HOOK_STATE_DIR,
+            [
+                KeyletArg::Bytes(&OWNER),
+                KeyletArg::Bytes(&ns),
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+            ],
+        )
+        .unwrap();
+        let expected_index = sha512_half(&{
+            let mut buf = (b'J' as u16).to_be_bytes().to_vec();
+            buf.extend_from_slice(&OWNER);
+            buf.extend_from_slice(&ns);
+            buf
+        });
+        // `ltDIR_NODE` (0x0064), not hash-space 'J' — directory-shaped type.
+        assert_eq!(got, expect(0x0064, expected_index));
+    }
+
+    #[test]
+    fn emitted_matches_index_hash_formula() {
+        let got = util_keylet(
+            KEYLET_EMITTED,
+            [
+                KeyletArg::Bytes(&TEST_HASH),
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+            ],
+        )
+        .unwrap();
+        let expected_index = sha512_half(&{
+            let mut buf = (b'E' as u16).to_be_bytes().to_vec();
+            buf.extend_from_slice(&TEST_HASH);
+            buf
+        });
+        assert_eq!(got, expect(0x0045, expected_index));
+    }
+
+    #[test]
+    fn nft_offer_matches_index_hash_formula_and_type_code_differs_from_hash_space() {
+        let seq: u32 = 6;
+        let got = util_keylet(
+            KEYLET_NFT_OFFER,
+            [
+                KeyletArg::Bytes(&OWNER),
+                KeyletArg::Value(seq),
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+            ],
+        )
+        .unwrap();
+        let expected_index = sha512_half(&{
+            let mut buf = (b'q' as u16).to_be_bytes().to_vec();
+            buf.extend_from_slice(&OWNER);
+            buf.extend_from_slice(&seq.to_be_bytes());
+            buf
+        });
+        // `ltNFTOKEN_OFFER` (0x0037) happens to differ from hash-space 'q'
+        // only in numeric value, not in kind (both are single bytes here),
+        // but pinned explicitly per this module's own doc comment.
+        assert_eq!(got, expect(0x0037, expected_index));
+    }
+
+    #[test]
+    fn skip_flag_zero_hashes_no_args() {
+        let got = util_keylet(
+            KEYLET_SKIP,
+            [
+                KeyletArg::Value(0),
+                KeyletArg::Value(0),
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+            ],
+        )
+        .unwrap();
+        let expected_index = sha512_half(&(b's' as u16).to_be_bytes());
+        assert_eq!(got, expect(0x0068, expected_index)); // ltLEDGER_HASHES
+    }
+
+    #[test]
+    fn skip_flag_one_hashes_ledger_shifted_right_16() {
+        let ledger: u32 = 0x1234_5678;
+        let got = util_keylet(
+            KEYLET_SKIP,
+            [
+                KeyletArg::Value(ledger),
+                KeyletArg::Value(1),
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+            ],
+        )
+        .unwrap();
+        let expected_index = sha512_half(&{
+            let mut buf = (b's' as u16).to_be_bytes().to_vec();
+            buf.extend_from_slice(&(ledger >> 16).to_be_bytes());
+            buf
+        });
+        assert_eq!(got, expect(0x0068, expected_index));
+    }
+
+    #[test]
+    fn skip_bad_flag_is_invalid_argument() {
+        assert_eq!(
+            util_keylet(
+                KEYLET_SKIP,
+                [
+                    KeyletArg::Value(0),
+                    KeyletArg::Value(2),
+                    KeyletArg::Unused,
+                    KeyletArg::Unused,
+                    KeyletArg::Unused,
+                    KeyletArg::Unused,
+                ],
+            ),
+            Err(INVALID_ARGUMENT)
+        );
+    }
+
+    #[test]
+    fn negative_unl_matches_index_hash_formula() {
+        let got = util_keylet(
+            KEYLET_NEGATIVE_UNL,
+            [
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+            ],
+        )
+        .unwrap();
+        let expected_index = sha512_half(&(b'N' as u16).to_be_bytes());
+        assert_eq!(got, expect(0x004e, expected_index));
     }
 
     #[test]

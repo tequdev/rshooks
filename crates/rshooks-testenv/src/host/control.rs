@@ -130,13 +130,16 @@ fn skip_currently_active(directives: &[([u8; 32], u32)], hash: &[u8; 32]) -> boo
 
 /// `hook_param_set(hash, name, value)`: ported from `HookAPI::hook_param_set`
 /// (`HookAPI.cpp:1712-1744`) plus its wasm wrapper's own redundant checks
-/// (`applyHook.cpp:3841-3857`, "those checks are also done in the HookAPI
+/// (`applyHook.cpp:3844-3858`, "those checks are also done in the HookAPI
 /// but we need to check them here too for backwards compatibility" —
 /// including `hread_len != 32` -> `INVALID_ARGUMENT`, reproduced here for
-/// the same reason as [`hook_skip`]'s fixed-length gate above):
+/// the same reason as [`hook_skip`]'s fixed-length gate above). The wrapper's
+/// own check order (reproduced exactly here, `hook_hash` length checked
+/// after the name checks but *before* the value-size check):
 ///
 /// - `name` empty -> `TOO_SMALL`; `name.len() > 32` (`hook::maxHookParameterKeySize()`,
 ///   vendored `Enum.h:60-64`) -> `TOO_BIG`.
+/// - `hook_hash` must be exactly 32 bytes -> `INVALID_ARGUMENT` otherwise.
 /// - `value.len() > 256` (`hook::maxHookParameterValueSize()`, vendored
 ///   `Enum.h:66-70`) -> `TOO_BIG`. An empty `value` is **not** special-cased
 ///   at write time — it is stored as-is (upstream: `overrides[hash][name] =
@@ -145,7 +148,6 @@ fn skip_currently_active(directives: &[([u8; 32], u32)], hash: &[u8; 32]) -> boo
 ///   `HookAPI::hook_param`'s own `if (param.size() == 0) return
 ///   Unexpected(DOESNT_EXIST);` (`HookAPI.cpp:1685-1687`) — see that
 ///   method's own doc comment in `crate::backend`.
-/// - `hook_hash` must be exactly 32 bytes -> `INVALID_ARGUMENT` otherwise.
 /// - `overrideCount >= hook_api::max_params` (16, vendored `Enum.h:401`) ->
 ///   `TOO_MANY_PARAMS`, counted per call (not per distinct key), fresh each
 ///   invocation.
@@ -166,12 +168,12 @@ pub(crate) fn hook_param_set(
     if name.len() > 32 {
         return rshooks_core::TOO_BIG;
     }
-    if value.len() > 256 {
-        return rshooks_core::TOO_BIG;
-    }
     let Ok(hash32) = <[u8; 32]>::try_from(hook_hash) else {
         return rshooks_core::INVALID_ARGUMENT;
     };
+    if value.len() > 256 {
+        return rshooks_core::TOO_BIG;
+    }
     if ctx.param_override_count >= MAX_PARAM_OVERRIDES {
         return rshooks_core::TOO_MANY_PARAMS;
     }
@@ -262,6 +264,20 @@ mod tests {
         );
         assert_eq!(
             hook_param_set(&mut c, b"v", b"n", &[0u8; 10]),
+            rshooks_core::INVALID_ARGUMENT
+        );
+    }
+
+    #[test]
+    fn hook_param_set_checks_hash_length_before_value_size() {
+        // A bad-length hash with an over-limit value (normal-sized name):
+        // upstream (`applyHook.cpp:3844-3858`) checks `hread_len != 32`
+        // before the value-size check, so this reports `INVALID_ARGUMENT`,
+        // not `TOO_BIG`.
+        let mut c = ctx();
+        let long_value = vec![b'v'; 257];
+        assert_eq!(
+            hook_param_set(&mut c, &long_value, b"n", &[0u8; 10]),
             rshooks_core::INVALID_ARGUMENT
         );
     }

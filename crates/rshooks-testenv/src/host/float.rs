@@ -990,16 +990,25 @@ fn write_field_header(out: &mut Vec<u8>, field: u16, ty: u16) {
 
 /// `HookAPI::float_sto_set`. For a native (`is_xrp`) amount, xahaud's real
 /// implementation skips the first byte entirely (rather than folding its
-/// low 6 bits into the mantissa) and reinterprets bytes `1..8` as a bare
-/// integer at exponent `0`, then renormalizes. For any drops count
-/// produced by [`float_sto`] itself this is a lossless round trip in
-/// practice (`float_sto`'s own encode never emits a drops value at or
-/// above `2^54`, since `drops <= mantissa <= MAX_MANTISSA < 2^54` always —
-/// see `native_amount_round_trip_via_drops`'s test), but a native amount
-/// blob from elsewhere (e.g. a real ledger `Amount` field with mainnet-
-/// scale drops, which *can* exceed `2^54`) would silently lose byte 0's low
-/// 6 bits — see `native_amount_with_large_drops_loses_byte0_low_bits`'s
-/// test for a hand-constructed demonstration. Ported byte-for-byte
+/// low 6 magnitude bits into the mantissa) and reinterprets bytes `1..8` as
+/// a bare integer at exponent `0`, then renormalizes — and that
+/// reinterpretation itself masks the new first byte (wire byte 1) with
+/// `0x3F` (see the shared `mantissa_bytes[0] & 0x3F` step below, the same
+/// masking upstream applies), dropping its own top 2 bits too. So the full
+/// native-amount decode loses 8 magnitude bits total (byte 0's low 6 plus
+/// byte 1's top 2), not just byte 0's 6. For any drops count produced by
+/// [`float_sto`] itself this is a lossless round trip in practice
+/// (`float_sto`'s own encode never emits a drops value at or above `2^54`,
+/// since `drops <= mantissa <= MAX_MANTISSA < 2^54` always — see
+/// `native_amount_round_trip_via_drops`'s test), but a native amount blob
+/// from elsewhere (e.g. a real ledger `Amount` field with mainnet-scale
+/// drops, which *can* exceed `2^54`) would silently lose those 8 bits — see
+/// `native_amount_with_large_drops_loses_byte0_low_bits`'s test for a
+/// hand-constructed demonstration (its `drops & ((1u64 << 54) - 1)` expected
+/// value already reflects the combined 8-bit loss: clearing a 64-bit
+/// magnitude's top 10 bits leaves only 8 magnitude-eligible bits actually
+/// cleared, since the topmost 2 of those 10 are the always-zero
+/// native/sign control-bit positions, never magnitude). Ported byte-for-byte
 /// regardless, because that really is what the host returns.
 #[allow(clippy::indexing_slicing)] // every index/slice below is reached only after an explicit `len()` guard immediately before it (`upto.len() > 8`/`< 11`/`< 10`/`< 8`) that establishes enough remaining bytes
 pub(crate) fn float_sto_set(sto: &[u8]) -> i64 {

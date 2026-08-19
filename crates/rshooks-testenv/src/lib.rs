@@ -12,13 +12,14 @@
 //! # Positioning
 //!
 //! `cargo test` against this crate answers "is my hook's logic right" in
-//! milliseconds. It is **not** a fidelity oracle: fee/reserve economics,
-//! instruction counting, guard enforcement, ledger objects/keylets/slots,
-//! float ops, signature verification, and multi-hook chain auto-execution
+//! milliseconds. It is **not** a fidelity oracle: ledger objects/keylets/
+//! slots, float ops, and signature verification are in scope and modeled;
+//! fee/reserve economics (explicit approximations), real instruction
+//! metering, guard enforcement, and multi-hook chain auto-execution
 //! (`HookOn` trigger filtering included — every `invoke` is a direct,
-//! explicit entry call) are all out of scope here and remain e2e-only
-//! territory. See `.claude/design/TESTENV_DESIGN.md` §5/§6 for the complete,
-//! normative list of what is and is not modeled.
+//! explicit entry call) stay out of scope and remain e2e-only territory. See
+//! `.claude/design/TESTENV_DESIGN.md` §5/§6 for the complete, normative list
+//! of what is and is not modeled.
 //!
 //! # Getting started
 //!

@@ -126,6 +126,9 @@ pub(crate) struct World {
     pub(crate) grants: HashMap<([u8; 20], [u8; 32]), Vec<Grant>>,
     pub(crate) ledger_seq: u32,
     pub(crate) ledger_time: i64,
+    /// The previous ledger's hash (`ledger_last_hash`) — `[0u8; 32]` unless
+    /// overridden via [`crate::TestEnv::ledger_last_hash`].
+    pub(crate) ledger_last_hash: [u8; 32],
     pub(crate) max_state_value_len: usize,
     pub(crate) base_fee_drops: u64,
     pub(crate) committed_emissions: Vec<EmittedTxn>,
@@ -195,6 +198,7 @@ impl World {
             grants: HashMap::new(),
             ledger_seq: 1,
             ledger_time: 0,
+            ledger_last_hash: [0u8; 32],
             max_state_value_len: DEFAULT_MAX_STATE_VALUE_LEN,
             base_fee_drops: 10,
             committed_emissions: Vec::new(),
