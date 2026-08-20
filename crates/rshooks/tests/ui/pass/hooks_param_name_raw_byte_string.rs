@@ -2,6 +2,7 @@
 //! anywhere a plain `b"..."` literal is for `#[hook_param(name = ..)]` /
 //! `#[otxn_param(name = ..)]`.
 
+use rshooks::exit::{Accept, HookResult};
 use rshooks::hooks;
 
 #[hooks]
@@ -16,8 +17,8 @@ struct Vault {
 #[hooks]
 impl Vault {
     #[hook(0, on = [Invoke])]
-    fn main(&self) -> i64 {
-        0
+    fn main(&self) -> HookResult {
+        Ok(Accept::from_code(0))
     }
 }
 

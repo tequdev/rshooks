@@ -2,13 +2,17 @@
 //! the sealed [`EntryReturn`] conversion the `#[hooks]` macro's generated
 //! entry body calls into.
 //!
-//! A `#[hook]`/`#[cbak]` entry may return either the legacy `i64` (paired
-//! with [`crate::accept`]/[`crate::rollback`], unchanged) or [`HookResult`]
-//! (paired with `?` and this module's types) — both compile through the
-//! same generated wrapper, `::rshooks::exit::EntryReturn::finish(<call>)`.
-//! See `docs/DESIGN.md`'s "Typed entry return values" section and
+//! Every `#[hook]`/`#[cbak]` entry returns [`HookResult`] — `Ok(Accept)`
+//! exits via [`crate::accept`], `Err(Rollback)` via [`crate::rollback`],
+//! both through the same generated wrapper,
+//! `::rshooks::exit::EntryReturn::finish(<call>)`. [`crate::accept`] and
+//! [`crate::rollback`] (the `accept!`/`rollback!` macros) remain public and
+//! usable *inside* a typed entry's body — both diverge (`-> !`), so they
+//! coerce to `HookResult` at any point in the body, and they stay the
+//! escape hatch for computed (non-`'static`) messages or WCE-critical raw
+//! bodies. See `docs/DESIGN.md`'s "Typed entry return values" section and
 //! `.claude/design/TYPED_ENTRY_RESULTS_DESIGN.md` for the design rationale
-//! and the probe numbers behind this specific shape (§1/§5).
+//! and the probe numbers behind this shape (§1/§5/§7 D6).
 
 use crate::api::control::{accept, rollback};
 
@@ -135,12 +139,11 @@ pub type HookResult = ::core::result::Result<Accept, Rollback>;
 
 /// Sealing module for [`EntryReturn`] — see that trait's doc comment.
 mod private {
-    /// Implemented only for the two return shapes [`super::EntryReturn`]
-    /// accepts: `i64` and [`super::HookResult`].
+    /// Implemented only for the one return shape [`super::EntryReturn`]
+    /// accepts: [`super::HookResult`].
     pub trait Sealed {}
 }
 
-impl private::Sealed for i64 {}
 impl private::Sealed for HookResult {}
 
 /// Converts a `#[hook]`/`#[cbak]` entry's return value into the terminal
@@ -152,29 +155,21 @@ impl private::Sealed for HookResult {}
 /// is exactly one call site per entry (design §1.3), so the conversion cost
 /// is a single 2-arm `match`, never duplicated per `?`.
 ///
-/// **Sealed** — implemented for exactly `i64` (the legacy identity form,
-/// paired with `accept!`/`rollback!`) and [`HookResult`] (the typed form).
-/// An entry returning any other type fails to compile with an ordinary
+/// **Sealed** — implemented for exactly [`HookResult`]. An entry returning
+/// any other type (including `i64`) fails to compile with an ordinary
 /// trait-bound diagnostic naming this trait (see
-/// `tests/ui/fail/hooks_entry_return_not_entryreturn.rs`).
+/// `tests/ui/fail/hooks_entry_return_not_entryreturn.rs`, which also pins
+/// the `-> i64` migration case).
 ///
 /// `#[doc(hidden)]`: a hook author never names this trait directly — only
 /// generated code calls it, at the fully qualified path
 /// `::rshooks::exit::EntryReturn::finish`.
 #[doc(hidden)]
 pub trait EntryReturn: private::Sealed {
-    /// Converts `self` into the `i64` the wasm export returns. For
-    /// [`HookResult`] this calls [`crate::api::control::accept`]/
-    /// [`crate::api::control::rollback`], both of which diverge (`-> !`) on
-    /// the real wasm host; for `i64` it is the identity function.
+    /// Converts `self` into the `i64` the wasm export returns, by calling
+    /// [`crate::api::control::accept`]/[`crate::api::control::rollback`],
+    /// both of which diverge (`-> !`) on the real wasm host.
     fn finish(self) -> i64;
-}
-
-impl EntryReturn for i64 {
-    #[inline(always)]
-    fn finish(self) -> i64 {
-        self
-    }
 }
 
 impl EntryReturn for HookResult {
@@ -224,11 +219,5 @@ mod tests {
         let r: Rollback = 42i64.into();
         assert_eq!(r.msg(), b"");
         assert_eq!(r.code(), 42);
-    }
-
-    #[test]
-    fn i64_finish_is_identity() {
-        assert_eq!(EntryReturn::finish(0i64), 0);
-        assert_eq!(EntryReturn::finish(-7i64), -7);
     }
 }

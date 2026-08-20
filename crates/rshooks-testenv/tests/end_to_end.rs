@@ -44,7 +44,7 @@ impl Payments {
     /// Increments the counter and accepts with the new count — rolls back
     /// if the store itself fails.
     #[hook(0, on = [Payment])]
-    fn on_payment(&self) -> i64 {
+    fn on_payment(&self) -> HookResult {
         let count = self.counter.get().unwrap_or(None).unwrap_or(0);
         let next = count.wrapping_add(1);
         if self.counter.set(&next).is_err() {
@@ -56,14 +56,14 @@ impl Payments {
     /// Writes the counter, then unconditionally rolls back — proves the
     /// state write is undone (design §5's "rollback reverts state" rule).
     #[hook(1, on = [Invoke])]
-    fn write_then_force_rollback(&self) -> i64 {
+    fn write_then_force_rollback(&self) -> HookResult {
         let _ = self.counter.set(&999u64);
         rollback!(b"forced rollback", 42)
     }
 
     /// Reserves one emission slot and emits a single Payment.
     #[hook(2, on = [Invoke], can_emit = [Payment])]
-    fn payout(&self) -> i64 {
+    fn payout(&self) -> HookResult {
         if etxn_reserve(1).is_err() {
             rollback!(b"reserve failed", 1);
         }

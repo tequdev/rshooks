@@ -176,7 +176,7 @@ reaches it as `self.deposits`:
 
 ```rust,ignore
 #[hook(0, on = [Invoke])]
-fn main(&self) -> i64 {
+fn main(&self) -> HookResult {
     let deposit = self.deposits.at(DepositKey { tag: DEPOSIT_TAG, owner });
     let current = deposit.get()?;
     deposit.set(&next)?;
@@ -224,7 +224,7 @@ pub struct StateCounter {
 #[hooks]
 impl StateCounter {
     #[hook(0, on = [Invoke])]
-    fn main(&self) -> i64 {
+    fn main(&self) -> HookResult {
         let count = self.counter.get().unwrap_or(Some(0)).unwrap_or(0);
 
         let next = count.wrapping_add(1);
@@ -235,7 +235,7 @@ impl StateCounter {
             );
         }
 
-        accept!(b"state-counter: incremented", next as i64)
+        Ok(Accept::new(b"state-counter: incremented", next as i64))
     }
 }
 ```
@@ -302,7 +302,7 @@ pub struct StateForeign {
 #[hooks]
 impl StateForeign {
     #[hook(0, on = [Invoke])]
-    fn main(&self) -> i64 {
+    fn main(&self) -> HookResult {
         let Ok(target) = self.acct.get_required() else {
             rollback!(
                 b"state-foreign: ACCT parameter not configured",
@@ -332,7 +332,7 @@ impl StateForeign {
             );
         }
 
-        accept!()
+        Ok(Accept::from_code(0))
     }
 }
 ```

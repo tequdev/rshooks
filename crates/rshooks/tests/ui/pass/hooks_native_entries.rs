@@ -7,6 +7,7 @@
 //! rather than return.
 
 use rshooks::decl::HookChainEntries;
+use rshooks::exit::{Accept, HookResult};
 use rshooks::hooks;
 use rshooks::tx_type::TxType;
 
@@ -16,18 +17,18 @@ struct Vault;
 #[hooks]
 impl Vault {
     #[hook(0, on = [Invoke], can_emit = [Payment])]
-    fn main(&self) -> i64 {
-        0
+    fn main(&self) -> HookResult {
+        Ok(Accept::from_code(0))
     }
 
     #[cbak(0)]
-    fn main_cbak(&self) -> i64 {
-        0
+    fn main_cbak(&self) -> HookResult {
+        Ok(Accept::from_code(0))
     }
 
     #[hook(1, on = [Invoke])]
-    fn second(&self) -> i64 {
-        0
+    fn second(&self) -> HookResult {
+        Ok(Accept::from_code(0))
     }
 }
 

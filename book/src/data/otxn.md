@@ -176,7 +176,7 @@ configured blocklist, and roll back on a match:
 #[hooks]
 impl Firewall {
     #[hook(0, on = [Payment])]
-    fn main(&self) -> i64 {
+    fn main(&self) -> HookResult {
         let Ok(sender) = otxn_field_typed(sfAccount) else {
             rollback!(
                 b"firewall: could not read otxn sender",

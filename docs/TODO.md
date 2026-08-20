@@ -47,17 +47,21 @@ surface a hook can call (`_g` excepted), including `float_*`/`slot_*`/
 chapter's coverage table for the current, honest list of what remains
 unmodeled.
 
-## 2. Typed `Result`-based entry return values (priority 2) — IMPLEMENTED
+## 2. Typed `Result`-based entry return values (priority 2) — IMPLEMENTED (breaking, typed-only)
 
-A `#[hook]`/`#[cbak]` entry may now return `rshooks::exit::HookResult`
-(`Result<Accept, Rollback>`) instead of `i64`, using `?` to propagate
-failures — including `hook_errors!` enums, via an optional per-variant
-`=> b"msg"` clause. Both forms coexist in the same `#[hooks] impl` block; the
-`i64` form remains unchanged and canonical. See `docs/DESIGN.md` §10 for the
-shipped mechanism, the book's [Accept, Rollback, and Errors §"Typed entry
-returns: `HookResult`"](../book/src/concepts/errors.md#typed-entry-returns-hookresult)
-for the developer-facing walkthrough, and
-`examples/16_typed-results` for a worked example with measured numbers.
+A `#[hook]`/`#[cbak]` entry returns `rshooks::exit::HookResult`
+(`Result<Accept, Rollback>`) — the sole return type the sealed
+`EntryReturn` trait implements; the earlier `i64` identity impl has been
+removed (D6 in the design doc's §7). `?` propagates failures, including
+`hook_errors!` enums via an optional per-variant `=> b"msg"` clause.
+`accept!`/`rollback!` remain public and usable inside a typed entry's body
+— they diverge, so they coerce to `HookResult` — documented as the in-body
+escape hatch for a computed, non-`'static` message or a raw,
+zero-indirection body. See `docs/DESIGN.md` §10 for the shipped mechanism,
+the book's [Accept, Rollback, and Errors §"Typed entry returns:
+`HookResult`"](../book/src/concepts/errors.md#typed-entry-returns-hookresult)
+for the developer-facing walkthrough, and `examples/16_typed-results` for a
+worked example with measured numbers.
 
 The risk this item flagged (raw-`i64` error codes, avoiding wide
 enum-variant matches) is exactly what the design settled on:
@@ -68,9 +72,12 @@ below their hand-written `accept!`/`rollback!` twins — provided every
 `?`-propagated `HookError` → `Rollback` conversion (going through
 `HookError::code()`'s 46-arm re-encode match) is the one shape that *does*
 regress (3.1x WCE), which is why that specific conversion is not offered at
-all (`.map_err(..)` is the supported pattern instead). It ships as a
-default-available, co-equal form, not opt-in — the probe found no case where
-it needed to be gated behind a feature flag.
+all (`.map_err(..)` is the supported pattern instead). Every in-repo chain
+— examples 01–16, `80_governance`, trybuild fixtures, testenv test chains,
+book snippets, doctests — is migrated to the typed form; `80_governance`
+migrates signature-only, keeping its raw internals, since its nesting/WCE
+budgets are the binding constraint there. This is a breaking change on the
+0.x line (D6): a `-> i64` entry no longer compiles.
 
 ## 3. Typed entry arguments (dispatch layer) (priority 3)
 

@@ -233,7 +233,7 @@ impl Governance {
     /// Governance entry point (`Hooks[0]` on the real genesis account).
     /// See the crate module doc comment for the full behavior.
     #[hook(0, on = [Invoke], can_emit = [Invoke, SetHook])]
-    fn govern(&self) -> i64 {
+    fn govern(&self) -> HookResult {
         if etxn_reserve(1).is_err() {
             GovernError::EmitFailed.nope(b"govern: etxn_reserve failed");
         }
@@ -446,7 +446,7 @@ impl Governance {
     /// Reward entry point (`Hooks[1]` on the real genesis account). See
     /// the crate module doc comment for the full behavior.
     #[hook(1, on = [Invoke, ClaimReward], can_emit = [GenesisMint])]
-    fn reward(&self) -> i64 {
+    fn reward(&self) -> HookResult {
         if etxn_reserve(1).is_err() {
             RewardError::EmitFailed.rollback(b"reward: etxn_reserve failed");
         }

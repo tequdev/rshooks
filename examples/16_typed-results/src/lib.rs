@@ -13,7 +13,7 @@ hook_errors! {
     }
 }
 
-#[hooks(description = "Typed deposit (HookResult) plus a legacy-style reset, one chain.")]
+#[hooks(description = "Two typed (HookResult) entries, one chain: idiomatic `?` vs. raw accept!/rollback!.")]
 pub struct TypedResults {
     /// Persistent running total, shared by both entries below.
     #[state(key = b"counter")]
@@ -67,12 +67,13 @@ impl TypedResults {
         Ok(Accept::new(b"typed-results: deposited", next as i64))
     }
 
-    /// Legacy entry, in the same chain as the typed one above — proves the
-    /// two forms coexist in one `#[hooks]` struct/impl pair. Resets the
-    /// counter to zero via `accept!`/`rollback!` directly, exactly like
-    /// `examples/02_state-counter`.
+    /// Raw-style typed entry, in the same chain as `deposit` above —
+    /// demonstrates that the `accept!`/`rollback!` escape hatch stays
+    /// first-class inside a `HookResult`-returning entry. Resets the
+    /// counter to zero, exactly like `examples/02_state-counter`, but now
+    /// declared `-> HookResult` like every other entry.
     #[hook(1, name = "reset", on = [Invoke])]
-    fn reset(&self) -> i64 {
+    fn reset(&self) -> HookResult {
         if self.counter.set(&0u64).is_err() {
             rollback!(b"typed-results: reset failed", DepositError::StateSetFailed);
         }

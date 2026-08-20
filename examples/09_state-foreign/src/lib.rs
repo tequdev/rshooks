@@ -35,7 +35,7 @@ pub struct StateForeign {
 #[hooks]
 impl StateForeign {
     #[hook(0, on = [Invoke])]
-    fn main(&self) -> i64 {
+    fn main(&self) -> HookResult {
         let Ok(target) = self.acct.get_required() else {
             rollback!(
                 b"state-foreign: ACCT parameter not configured",
@@ -62,6 +62,6 @@ impl StateForeign {
             );
         }
 
-        accept!()
+        Ok(Accept::from_code(0))
     }
 }

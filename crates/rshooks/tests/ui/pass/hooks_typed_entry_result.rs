@@ -1,8 +1,8 @@
 //! `#[hook]`/`#[cbak]` entries returning `HookResult` (the typed exit form,
-//! `.claude/design/TYPED_ENTRY_RESULTS_DESIGN.md`) compile through the same
-//! `#[hooks]` macro as the legacy `i64` form — including a `?`-propagated
-//! `hook_errors!` enum with a message clause — and the generated
-//! `HookChainEntries::ENTRIES` table is unaffected by the return type.
+//! `.claude/design/TYPED_ENTRY_RESULTS_DESIGN.md`) — including a
+//! `?`-propagated `hook_errors!` enum with a message clause on one entry —
+//! and the generated `HookChainEntries::ENTRIES` table is unaffected by
+//! which entry in the chain does the propagating.
 //! Never invokes an entry: see `hooks_native_entries.rs`'s doc comment for
 //! why (reaching `accept!`/`rollback!` — or, for `HookResult`, the `Ok`/
 //! `Err` arms `EntryReturn::finish` calls them from — without an installed
@@ -42,10 +42,10 @@ impl Vault {
         Ok(Accept::from_code(0))
     }
 
-    /// Legacy entry, in the same chain as the typed one above.
+    /// A second entry in the same chain, without a `#[cbak]`.
     #[hook(1, on = [Invoke])]
-    fn legacy(&self) -> i64 {
-        0
+    fn second(&self) -> HookResult {
+        Ok(Accept::from_code(0))
     }
 }
 

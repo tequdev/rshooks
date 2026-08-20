@@ -1757,29 +1757,34 @@ than stack locals (see §6.3's static-buffer idiom).
   `*.wasm` outside fixtures, `.DS_Store`. Binary test fixtures live in
   `crates/rshooks-build/tests/fixtures/` and are exempted.
 
-## 10. Typed entry return values (post-0.2 addendum)
+## 10. Typed entry return values (breaking change: typed-only)
 
 `docs/TODO.md` item 2, designed and probed in
 `.claude/design/TYPED_ENTRY_RESULTS_DESIGN.md` (full grammar, adoption
-decisions D1–D5, and every measured number — this section only summarizes
+decisions D1–D6, and every measured number — this section only summarizes
 the shipped, normative shape).
 
-A `#[hook]`/`#[cbak]` entry may return `rshooks::exit::HookResult`
-(`Result<Accept, Rollback>`) instead of `i64`. Both forms are first-class
-and coexist freely in the same `#[hooks] impl` block:
+A `#[hook]`/`#[cbak]` entry returns `rshooks::exit::HookResult`
+(`Result<Accept, Rollback>`) — the only return type the sealed
+`EntryReturn` trait implements (D6): the previous `i64` identity impl has
+been removed. `accept!`/`rollback!` remain public and usable inside a
+typed entry's body — they diverge, so they coerce to `HookResult` — and are
+documented as the in-body escape hatch for a computed, non-`'static`
+message, or a raw, zero-indirection body.
 
-- **New module, `rshooks::exit`**: `Accept`/`Rollback` (private `{ msg:
-  &'static [u8], code: i64 }`, `::new(msg, code)`/`::code(code)`
+- **`rshooks::exit` module**: `Accept`/`Rollback` (private `{ msg:
+  &'static [u8], code: i64 }`, `::new(msg, code)`/`::from_code(code)`
   constructors), `HookResult = Result<Accept, Rollback>`, and the sealed
-  `EntryReturn` trait (`#[doc(hidden)]`, implemented for exactly `i64` and
+  `EntryReturn` trait (`#[doc(hidden)]`, implemented for exactly
   `HookResult`).
-- **Macro widening**: `#[hooks]`'s entry-signature check no longer requires
-  `-> i64` — any return type is accepted syntactically, and the generated
-  body wraps every call unconditionally:
+- **Macro requirement**: `#[hooks]`'s entry-signature check requires a
+  return type implementing `EntryReturn` — in practice, `HookResult` only —
+  and the generated body wraps every call unconditionally:
   `::rshooks::exit::EntryReturn::finish(<Struct>::<fn>(&<Struct>))`. A
-  return type implementing neither `i64` nor `HookResult` fails to compile
-  with an ordinary trait-bound diagnostic naming `EntryReturn` — the macro
-  performs no bespoke return-type validation of its own.
+  non-conforming return type (`-> i64`, or anything else) fails to compile
+  with an ordinary trait-bound diagnostic naming `EntryReturn` on the
+  entry's own `-> Ty` span — the macro performs no bespoke return-type
+  validation of its own.
 - **`hook_errors!` message clause**: `Variant = <code> => b"msg"` (optional,
   per variant, backward compatible with the clause-less form) additionally
   generates `impl From<Enum> for Rollback`, so `?` propagates a
@@ -1790,17 +1795,19 @@ and coexist freely in the same `#[hooks] impl` block:
   3.1x the worst-case instructions and +67% the size of a raw-code-check
   twin (design doc §5, probe P5). The supported pattern is
   `.map_err(|_| MyError::X)?`, discarding the decoded `HookError`.
-- **Zero cost on the `i64` path, confirmed two ways**: (1) `EntryReturn`'s
-  `i64` impl is the identity function, `#[inline(always)]`, inside an
-  already-`#[inline(always)]` generated body, so it compiles away — every
-  pre-existing example's shipped wasm stays byte-for-byte identical
-  (`mise run probe:testenv-parity`, and the T-1/T-3 verification tables in
-  the design doc). (2) The typed (`HookResult`) path itself measured
-  competitive with, or better than, its hand-written `accept!`/`rollback!`
-  twin at every probed density (small entry, dense 15-site entry), provided
-  every `?`-called helper is `#[inline(always)]` (D4) — see
-  `examples/16_typed-results` for a shipped worked example and its
-  `README.md` for the exact numbers.
+- **Migration cost, measured**: `EntryReturn::finish`'s match is dead code
+  on any path that always diverges through `accept!`/`rollback!`, so a
+  signature-only migration (keeping an entry's raw internals, as
+  `examples/80_governance`'s `govern`/`reward` do) measures near-neutral; a
+  rewrite to idiomatic `Ok`/`Err`/`?` measured competitive with, or better
+  than, its hand-written `accept!`/`rollback!` twin at every probed density
+  (small entry, dense 15-site entry), provided every `?`-called helper is
+  `#[inline(always)]` (D4) — see design doc §5–§7 and
+  `examples/16_typed-results`'s/`examples/80_governance`'s `README.md`s for
+  the exact per-example deltas. Every in-repo chain (examples 01–16,
+  `80_governance`, trybuild fixtures, testenv test chains, book snippets,
+  doctests) is migrated; artifact bytes are allowed to change as part of
+  this breaking release.
 
 Book: [Accept, Rollback, and Errors §"Typed entry returns:
 `HookResult`"](../book/src/concepts/errors.md#typed-entry-returns-hookresult).

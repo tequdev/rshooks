@@ -12,10 +12,10 @@ the tutorial chapter that covers it, or the macro's own rustdoc in
 |---|---|---|
 | `#[hooks(description = "...")]` on a struct | Declares this crate's Hook chain — a container for shared `#[state]`/`#[hook_param]`/`#[otxn_param]` fields, no runtime instance. Exactly one per crate. | `#[hooks] pub struct MyHook;` |
 | `#[hooks]` on an inherent `impl` | Declares this chain's entry points. Exactly one per `#[hooks]` struct, in the same module. | `#[hooks] impl MyHook { .. }` |
-| `#[hook(<index>, ...)]` | Inside a `#[hooks]` impl: declares one Hook entry at the given chain position (`0..=9`, required). The fn returns either `i64` (paired with `accept!`/`rollback!`) or `HookResult` (paired with `?` — see [Accept, Rollback, and Errors](../concepts/errors.md#typed-entry-returns-hookresult)); any other return type is a compile error naming the sealed `EntryReturn` trait. Named args: `name`, `on`/`on_incoming`+`on_outgoing`, `can_emit`, `description`. | `#[hook(0, name = "accept", on = [Invoke])] fn main(&self) -> i64 { accept!() }` |
-| `#[cbak(<index>)]` | Pairs with a `#[hook]` at the same index; exports `cbak` for that index — the optional callback invoked when a transaction this entry emitted later settles. Index only, no other arguments. Same `i64`/`HookResult` return-type choice as `#[hook]`. | `#[cbak(0)] fn my_cbak(&self) -> i64 { accept!() }` |
+| `#[hook(<index>, ...)]` | Inside a `#[hooks]` impl: declares one Hook entry at the given chain position (`0..=9`, required). The fn must return a type implementing the sealed `EntryReturn` trait — currently, only `HookResult` (paired with `?` — see [Accept, Rollback, and Errors](../concepts/errors.md#typed-entry-returns-hookresult)), with `accept!`/`rollback!` still usable in the body as an escape hatch (they diverge, coercing to `HookResult`). Any other return type is a compile error naming `EntryReturn`. Named args: `name`, `on`/`on_incoming`+`on_outgoing`, `can_emit`, `description`. | `#[hook(0, name = "accept", on = [Invoke])] fn main(&self) -> HookResult { accept!() }` |
+| `#[cbak(<index>)]` | Pairs with a `#[hook]` at the same index; exports `cbak` for that index — the optional callback invoked when a transaction this entry emitted later settles. Index only, no other arguments. Same `EntryReturn`-bound return type as `#[hook]`. | `#[cbak(0)] fn my_cbak(&self) -> HookResult { accept!() }` |
 
-An entry's return-type error (not `i64`/`HookResult`) is reported on that entry fn's own `-> Ty`, even in a chain with several entries — not on the `#[hooks]` attribute.
+An entry's return-type error (a return type that doesn't implement `EntryReturn`) is reported on that entry fn's own `-> Ty`, even in a chain with several entries — not on the `#[hooks]` attribute.
 
 ### Receivers on `#[hook]`/`#[cbak]` entries and impl helpers
 
@@ -27,7 +27,7 @@ inside the same `#[hooks] impl` accepts either no receiver or `&self`.
 | receiver | entry (`#[hook]`/`#[cbak]`) | impl helper |
 |---|---|---|
 | none (`fn helper() -> ...`) | **no** — diagnostic: "hook entry functions take `&self` — the chain declaration is passed by shared reference (it is zero-sized)" | yes |
-| `&self` (`fn main(&self) -> i64`) | yes — receives the chain's single zero-sized static by shared reference; reach its fields as `self.<field>` | yes |
+| `&self` (`fn main(&self) -> HookResult`) | yes — receives the chain's single zero-sized static by shared reference; reach its fields as `self.<field>` | yes |
 | `self` / `mut self` / `&'a self` / `self: T` | **no** — diagnostic: "use `&self` — hook entrypoints receive the chain declaration by shared reference (it is zero-sized)" | **no** — same diagnostic |
 | `&mut self` / `&'a mut self` | **no** — diagnostic: "chain handles are zero-sized and immutable; ledger state is accessed through the handles, not by mutating the struct — use `&self`" | **no** — same diagnostic |
 

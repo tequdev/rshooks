@@ -4,6 +4,7 @@
 //! They may also take `&self` (HOOKS_SELF_RECEIVER_DESIGN.md §3.3),
 //! including combined with a qualifier where that's syntactically valid.
 
+use rshooks::exit::{Accept, HookResult};
 use rshooks::hooks;
 
 #[hooks]
@@ -12,13 +13,15 @@ struct Vault;
 #[hooks]
 impl Vault {
     #[hook(0, on = [Invoke])]
-    fn main(&self) -> i64 {
+    fn main(&self) -> HookResult {
         let a = Self::helper_const();
         let b = unsafe { Self::helper_unsafe() };
         let c = Self::helper_extern();
         let d = Vault.helper_self_ref();
         let e = unsafe { Vault.helper_self_ref_unsafe() };
-        i64::from(a) + i64::from(b) + i64::from(c) + i64::from(d) + i64::from(e)
+        Ok(Accept::from_code(
+            i64::from(a) + i64::from(b) + i64::from(c) + i64::from(d) + i64::from(e),
+        ))
     }
 
     const fn helper_const() -> u8 {

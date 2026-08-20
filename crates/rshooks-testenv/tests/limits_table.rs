@@ -40,7 +40,7 @@ pub struct Limits {
 #[hooks]
 impl Limits {
     #[hook(0, on = [Invoke])]
-    fn details_without_reserve(&self) -> i64 {
+    fn details_without_reserve(&self) -> HookResult {
         let mut buf = [0u8; EMIT_DETAILS_MAX_LEN];
         let code = match etxn_details(&mut buf) {
             Ok(_) => 0,
@@ -50,7 +50,7 @@ impl Limits {
     }
 
     #[hook(1, on = [Invoke])]
-    fn fee_base_without_reserve(&self) -> i64 {
+    fn fee_base_without_reserve(&self) -> HookResult {
         let code = match etxn_fee_base(&[]) {
             Ok(_) => 0,
             Err(e) => e.code(),
@@ -59,7 +59,7 @@ impl Limits {
     }
 
     #[hook(2, on = [Invoke])]
-    fn burden_without_reserve(&self) -> i64 {
+    fn burden_without_reserve(&self) -> HookResult {
         let code = match etxn_burden() {
             Ok(_) => 0,
             Err(e) => e.code(),
@@ -68,7 +68,7 @@ impl Limits {
     }
 
     #[hook(3, on = [Invoke], can_emit = [Payment])]
-    fn emit_without_reserve(&self) -> i64 {
+    fn emit_without_reserve(&self) -> HookResult {
         let mut out = [0u8; 32];
         let code = match emit(&mut out, &[0u8; 4]) {
             Ok(_) => 0,
@@ -78,7 +78,7 @@ impl Limits {
     }
 
     #[hook(4, on = [Invoke], can_emit = [Payment])]
-    fn reserve_then_emit_twice(&self) -> i64 {
+    fn reserve_then_emit_twice(&self) -> HookResult {
         if etxn_reserve(1).is_err() {
             rollback!(b"reserve", 1);
         }
@@ -102,7 +102,7 @@ impl Limits {
     }
 
     #[hook(5, on = [Invoke])]
-    fn burden_overflow(&self) -> i64 {
+    fn burden_overflow(&self) -> HookResult {
         if etxn_reserve(2).is_err() {
             rollback!(b"reserve", 1);
         }
@@ -114,7 +114,7 @@ impl Limits {
     }
 
     #[hook(6, on = [Invoke])]
-    fn hook_param_absent(&self) -> i64 {
+    fn hook_param_absent(&self) -> HookResult {
         let code = match hook_param_exact::<[u8; 4]>(b"missing") {
             Ok(_) => 0,
             Err(e) => e.code(),
@@ -123,7 +123,7 @@ impl Limits {
     }
 
     #[hook(7, on = [Invoke])]
-    fn read_hook_hash(&self) -> i64 {
+    fn read_hook_hash(&self) -> HookResult {
         match hook_hash_buf(0) {
             Ok(h) => {
                 let n = u64::from(h[0]);
@@ -137,14 +137,14 @@ impl Limits {
     }
 
     #[hook(8, on = [Invoke])]
-    fn emit_a_trace(&self) -> i64 {
+    fn emit_a_trace(&self) -> HookResult {
         let _ = rshooks::api::trace::trace(b"hello", b"world", false);
         let _ = rshooks::api::trace::trace_num(b"num", 7);
         accept!(b"", 0)
     }
 
     #[hook(9, on = [Invoke])]
-    fn too_small_buffer(&self) -> i64 {
+    fn too_small_buffer(&self) -> HookResult {
         let mut out = [0u8; 4];
         let code = match rshooks::api::state::state(&mut out, b"K") {
             Ok(_) => 0,

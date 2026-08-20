@@ -52,7 +52,7 @@ impl XflMath {
     // XFL operators delegate to checked Hook API calls.
     #[allow(clippy::arithmetic_side_effects)]
     #[hook(0, on = [Payment])]
-    fn main(&self) -> i64 {
+    fn main(&self) -> HookResult {
         let Ok(txn) = SlotObject::from_otxn() else {
             rollback!(b"xfl-math: otxn_slot failed", XflMathError::OtxnSlotFailed)
         };

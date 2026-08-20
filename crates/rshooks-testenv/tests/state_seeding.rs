@@ -13,6 +13,7 @@
     missing_docs
 )]
 
+use rshooks::exit::HookResult;
 use rshooks::*;
 use rshooks_testenv::prelude::*;
 
@@ -33,7 +34,7 @@ impl Seeded {
     /// test can confirm the seed is visible from *inside* an invocation
     /// (not just via `TestEnv::state`).
     #[hook(0, on = [Invoke])]
-    fn read_own_seed(&self) -> i64 {
+    fn read_own_seed(&self) -> HookResult {
         match self.seeded.get() {
             Ok(Some(v)) => {
                 if self.seen.set(&v).is_err() {
@@ -49,7 +50,7 @@ impl Seeded {
     /// Reads a foreign seed at a fixed (account, namespace) unrelated to
     /// this hook's own — proves `hook_account` changes never touch it.
     #[hook(1, on = [Invoke])]
-    fn read_foreign_seed(&self) -> i64 {
+    fn read_foreign_seed(&self) -> HookResult {
         let mut out = [0u8; 8];
         let code =
             match rshooks::api::state::state_foreign(&mut out, b"F", &FOREIGN_NS, &FOREIGN_ACC) {

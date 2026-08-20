@@ -3,13 +3,14 @@
 ## What you'll learn
 
 The typed entry-return form (`.claude/design/TYPED_ENTRY_RESULTS_DESIGN.md`):
-a `#[hook]`/`#[cbak]` entry may return `HookResult` (a
-`Result<Accept, Rollback>` alias) instead of the legacy `i64`, and use `?`
-to propagate failures out of ordinary helper functions — in place of a
-hand-written `accept!`/`rollback!` call at every failure point. This crate
-declares one chain with both forms side by side: `deposit` (typed) and
-`reset` (legacy), proving they coexist in the same `#[hooks]` struct/impl
-pair.
+every `#[hook]`/`#[cbak]` entry returns `HookResult` (a
+`Result<Accept, Rollback>` alias), and `?` can propagate failures out of
+ordinary helper functions — in place of a hand-written `accept!`/`rollback!`
+call at every failure point. This crate declares one chain with both styles
+side by side, both `-> HookResult`: `deposit` uses the idiomatic `?`/`Ok`
+form, and `reset` uses the raw `accept!`/`rollback!` escape hatch directly
+inside its `HookResult`-returning body — proving that style stays
+first-class within the typed signature, not just the `?`-based one.
 
 ## Code walkthrough
 
@@ -40,8 +41,10 @@ one on every variant) generates `impl From<DepositError> for Rollback`,
 whose message comes from the clause — so `?` alone carries both the code
 and the message all the way out to the host `rollback` call, with no
 `rollback!(msg, code)` written anywhere in `deposit`. `reset` shows the
-alternative: an entry that still returns plain `i64` and calls
-`accept!`/`rollback!` directly, exactly like `examples/02_state-counter`.
+alternative style: still `-> HookResult`, but calling `accept!`/`rollback!`
+directly in the body — both macros diverge (`-> !`), so they coerce to
+`HookResult` with no `Ok(..)`/`Err(..)` wrapping needed, exactly like
+`examples/02_state-counter`.
 
 Two rules this example follows deliberately, both measured in
 `.claude/design/TYPED_ENTRY_RESULTS_DESIGN.md`'s T-1 probe (§5):
@@ -104,8 +107,8 @@ profile):
 
 | entry | form | worst-case instructions | size | max nesting depth |
 |---|---|---:|---:|---:|
-| `deposit` (index 0) | typed (`HookResult`, `?`, msg-clause `hook_errors!`) | 326 | 944 bytes | 1 |
-| `reset` (index 1) | legacy (`i64`, `accept!`/`rollback!`) | 131 | 465 bytes | 1 |
+| `deposit` (index 0) | typed, idiomatic (`HookResult`, `?`, msg-clause `hook_errors!`) | 326 | 944 bytes | 1 |
+| `reset` (index 1) | typed, raw (`HookResult`, `accept!`/`rollback!`) | 131 | 465 bytes | 1 |
 
 Both are well within the 32-level nesting budget and the 65,535-byte
 SetHook size limit — `deposit`'s higher numbers versus `reset` reflect it

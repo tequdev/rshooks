@@ -414,10 +414,10 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
                     ));
                 }
                 // The return type itself is deliberately unchecked here: an
-                // entry may return `i64` (the legacy identity form) or
-                // anything implementing `::rshooks::exit::EntryReturn`
-                // (currently also `HookResult` — see
-                // `.claude/design/TYPED_ENTRY_RESULTS_DESIGN.md` §1.3/§3).
+                // entry must return a type implementing
+                // `::rshooks::exit::EntryReturn` (currently sealed to
+                // `HookResult` only — see
+                // `.claude/design/TYPED_ENTRY_RESULTS_DESIGN.md` §1.3/§3/§7).
                 // The generated body wraps the call in
                 // `EntryReturn::finish(..)` (see
                 // `render_entry_body_and_wrappers`), so a return type that
@@ -725,9 +725,10 @@ fn scan_fn_item(tokens: &[TokenTree], start: usize) -> Result<ScannedFn, TokenSt
 
     // The return type's own tokens are re-emitted verbatim but otherwise
     // unexamined here — see the entry-fn shape check's comment in
-    // `parse_impl_body` for why: any type implementing
-    // `::rshooks::exit::EntryReturn` is accepted, and the macro leaves
-    // enforcing that to the generated body's own trait bound. They are
+    // `parse_impl_body` for why: only a type implementing
+    // `::rshooks::exit::EntryReturn` (sealed to `HookResult`) is accepted,
+    // and the macro leaves enforcing that to the generated body's own trait
+    // bound. They are
     // *captured* (`return_tokens`/`return_span` below), though — not to
     // examine, but so [`build_entry_return_assertion`] can re-emit them
     // with their original spans intact, for a diagnostic that lands on the
@@ -1675,10 +1676,10 @@ fn render_entry_body_and_wrappers(
     // no extra static is ever needed.
     //
     // The call is wrapped in `EntryReturn::finish` unconditionally
-    // (TYPED_ENTRY_RESULTS_DESIGN.md §1.3): the legacy `i64` return type's
-    // identity impl makes this byte-invisible once inlined (this body fn is
-    // itself `#[inline(always)]`), and it is what makes a `HookResult`
-    // return type legal here at all.
+    // (TYPED_ENTRY_RESULTS_DESIGN.md §1.3/§7): it is what makes a
+    // `HookResult` return type legal here at all, and a diverging body
+    // (every call ends in `accept!`/`rollback!`) makes the match dead code
+    // once inlined (this body fn is itself `#[inline(always)]`).
     let hook_call = format!(
         "::rshooks::exit::EntryReturn::finish({struct_name}::{}(&{struct_name}))",
         entry.hook_fn

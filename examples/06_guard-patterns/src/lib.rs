@@ -33,7 +33,7 @@ impl GuardPatterns {
     #[hook(0, on = [Invoke])]
     // Keep the loops on one line to demonstrate `guard_m!` disambiguators.
     #[rustfmt::skip]
-    fn main(&self) -> i64 {
+    fn main(&self) -> HookResult {
         let sender: AccountId = match otxn_field_exact(sfAccount) {
             Ok(s) => s,
             Err(_) => rollback!(
