@@ -36,7 +36,7 @@ fn each_invocation_emits_its_own_payment() {
 
 // -- invoke_cbak (P2-E — `.claude/design/TESTENV_PHASE2_DESIGN.md` §4 "cbak
 // execution"). `EmitTxn`'s `#[cbak(0)]` body (`src/lib.rs`) is
-// `fn cbak(&self) -> i64 { accept!() }` — it unconditionally accepts,
+// `fn cbak(&self) -> HookResult { Ok(Accept::from_code(0)) }` — it unconditionally accepts,
 // reading neither the wasm argument nor the callback otxn. Its real
 // behavior to assert is exactly that: `invoke_cbak` reaches `Accept`
 // regardless of `CbakOutcome::Success`/`Failure`, and leaves the

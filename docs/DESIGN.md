@@ -1804,7 +1804,7 @@ message, or a raw, zero-indirection body.
   (small entry, dense 15-site entry), provided every `?`-called helper is
   `#[inline(always)]` (D4) — see design doc §5–§7 and
   `examples/16_typed-results`'s/`examples/80_governance`'s `README.md`s for
-  the exact per-example deltas. Every in-repo chain (examples 01–16,
+  the exact per-example deltas. Every in-repo chain and snippet (examples 01–16 incl. their READMEs and the root/examples READMEs,
   `80_governance`, trybuild fixtures, testenv test chains, book snippets,
   doctests) is migrated; artifact bytes are allowed to change as part of
   this breaking release.

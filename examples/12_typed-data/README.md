@@ -82,7 +82,7 @@ no manual byte packing anywhere:
 
 ```rust
 #[hook(0, on = [Invoke])]
-fn main(&self) -> i64 {
+fn main(&self) -> HookResult {
     let deposit = self.deposits.at(DepositKey { tag: DEPOSIT_TAG, owner });
     let current = deposit.get()?.unwrap_or(EMPTY_DEPOSIT);
     // ...

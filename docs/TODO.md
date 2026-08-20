@@ -73,7 +73,7 @@ below their hand-written `accept!`/`rollback!` twins — provided every
 `HookError::code()`'s 46-arm re-encode match) is the one shape that *does*
 regress (3.1x WCE), which is why that specific conversion is not offered at
 all (`.map_err(..)` is the supported pattern instead). Every in-repo chain
-— examples 01–16, `80_governance`, trybuild fixtures, testenv test chains,
+— examples 01–16 incl. their READMEs and the root/examples READMEs, `80_governance`, trybuild fixtures, testenv test chains,
 book snippets, doctests — is migrated to the typed form; `80_governance`
 migrates signature-only, keeping its raw internals, since its nesting/WCE
 budgets are the binding constraint there. This is a breaking change on the

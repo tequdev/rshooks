@@ -70,7 +70,7 @@ impl TypedResults {
     /// Raw-style typed entry, in the same chain as `deposit` above —
     /// demonstrates that the `accept!`/`rollback!` escape hatch stays
     /// first-class inside a `HookResult`-returning entry. Resets the
-    /// counter to zero, exactly like `examples/02_state-counter`, but now
+    /// counter to zero with a raw accept!/rollback! body, and is
     /// declared `-> HookResult` like every other entry.
     #[hook(1, name = "reset", on = [Invoke])]
     fn reset(&self) -> HookResult {

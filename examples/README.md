@@ -77,7 +77,7 @@ struct MyHook;
 #[hooks]
 impl MyHook {
     #[hook(0, on = [Invoke])]
-    fn main() -> i64 {
+    fn main(&self) -> HookResult {
         // ...
     }
 }

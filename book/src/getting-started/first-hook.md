@@ -44,6 +44,12 @@ impl AcceptAll {
 }
 ```
 
+This first hook exits through `accept!()` — the simplest thing that works
+before `Ok`/`Accept` are introduced. The idiomatic typed exit
+(`Ok(Accept::from_code(0))` and `?`-propagated errors) is covered in
+[Accept, Rollback, and Errors](../concepts/errors.md#typed-entry-returns-hookresult);
+both compile to the same wasm here.
+
 To see the `trace!` line actually run, enable the `trace` feature in
 `Cargo.toml` alongside `rshooks`:
 

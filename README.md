@@ -82,8 +82,8 @@ pub struct AcceptAll;
 #[hooks]
 impl AcceptAll {
     #[hook(0, name = "accept", on = [Invoke])]
-    fn main() -> i64 {
-        accept!()
+    fn main(&self) -> HookResult {
+        Ok(Accept::from_code(0))
     }
 }
 ```

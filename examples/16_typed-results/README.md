@@ -43,8 +43,7 @@ and the message all the way out to the host `rollback` call, with no
 `rollback!(msg, code)` written anywhere in `deposit`. `reset` shows the
 alternative style: still `-> HookResult`, but calling `accept!`/`rollback!`
 directly in the body — both macros diverge (`-> !`), so they coerce to
-`HookResult` with no `Ok(..)`/`Err(..)` wrapping needed, exactly like
-`examples/02_state-counter`.
+`HookResult` with no `Ok(..)`/`Err(..)` wrapping needed.
 
 Two rules this example follows deliberately, both measured in
 `.claude/design/TYPED_ENTRY_RESULTS_DESIGN.md`'s T-1 probe (§5):
