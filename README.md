@@ -60,6 +60,7 @@ Numbered in suggested reading order — see
 | 13 | [`keylets`](examples/13_keylets) | typed `keylet_xxx` helpers, one per `KEYLET_*` constant, in place of the single untyped `util_keylet` |
 | 14 | [`account-id-macro`](examples/14_account-id-macro) | `rshooks::account_id!`: compile-time r-address → `AccountId` decode |
 | 15 | [`slot-objects`](examples/15_slot-objects) | the typed slot layer's live acceptance harness: account-root walk, native-amount round-trip, parent-clear/child-read |
+| 16 | [`typed-results`](examples/16_typed-results) | typed entry returns (`HookResult`): an idiomatic `?`/`Ok` entry with a `hook_errors!` message clause, alongside a raw `accept!`/`rollback!`-style entry in the same chain |
 | 80 | [`governance`](examples/80_governance) | a two-entry `#[hooks]` **chain** (`govern` + `reward`) porting xahaud's genesis governance hooks, sharing one state schema |
 
 ```sh

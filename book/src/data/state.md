@@ -178,11 +178,29 @@ reaches it as `self.deposits`:
 #[hook(0, on = [Invoke])]
 fn main(&self) -> HookResult {
     let deposit = self.deposits.at(DepositKey { tag: DEPOSIT_TAG, owner });
-    let current = deposit.get()?;
-    deposit.set(&next)?;
+    let current = match deposit.get() {
+        Ok(existing) => existing.unwrap_or(EMPTY_DEPOSIT),
+        Err(_) => rollback!(
+            b"typed-data: state read failed",
+            TypedDataError::StateReadFailed
+        ),
+    };
     // ...
+    if deposit.set(&next).is_err() {
+        rollback!(
+            b"typed-data: state_set failed",
+            TypedDataError::StateSetFailed
+        );
+    }
 }
 ```
+
+`.get()`/`.set()` return `rshooks::error::Result` (`HookError`); there is
+no `From<HookError> for Rollback`, so `?` on those calls inside a
+`-> HookResult` entry does not compile. Convert with `match`/`rollback!`
+as above, or see [Accept, Rollback, and
+Errors](../concepts/errors.md) for the `?` + `hook_errors!` +
+`.map_err(|_| MyError::…)` pattern.
 
 `DepositKey` here is any type that already implements `StateKeyEncode` —
 most often a `#[derive(HookKey)]` struct (see [Typed Data with

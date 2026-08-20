@@ -39,14 +39,17 @@
 ///   — the code side is always `self as i64` (a free cast — the same
 ///   conversion `code()`/`From<EnumName> for i64` already use); the message
 ///   is the variant's `=> b"msg"` clause where declared, or an empty slice
-///   otherwise. This impl is generated unconditionally, even when no
-///   variant declares a message clause, so `?` propagates any
-///   `hook_errors!` enum into a [`HookResult`](crate::exit::HookResult)
-///   uniformly.
+///   otherwise. Generated unconditionally so `?` propagates any
+///   `hook_errors!` enum into a [`HookResult`](crate::exit::HookResult).
+///   When no variant declares a clause, this is [`Rollback::from_code`]
+///   (no match); otherwise a match picks the slice.
+///
+/// [`Rollback::from_code`]: crate::exit::Rollback::from_code
 ///
 /// # Examples
 ///
 /// ```
+/// use rshooks::exit::Rollback;
 /// use rshooks::hook_errors;
 ///
 /// hook_errors! {
@@ -61,6 +64,9 @@
 ///
 /// assert_eq!(FirewallError::BlockedAccount.code(), 1);
 /// assert_eq!(i64::from(FirewallError::MissingParam), 2);
+///
+/// let r: Rollback = FirewallError::BlockedAccount.into();
+/// assert_eq!(r, Rollback::from_code(1));
 /// ```
 ///
 /// Negative discriminants work the same way (the expression after `=` is
@@ -109,6 +115,30 @@ macro_rules! hook_errors {
     (@__msg $msg:expr) => {
         $msg
     };
+    // No `=> b"msg"` on any variant: `from_code` is a free cast (no match).
+    // `#[inline(always)]`: this `From` is on every `?` of a `hook_errors!` enum.
+    (@__from_rollback $name:ident; $($variant:ident =>);+) => {
+        impl ::core::convert::From<$name> for $crate::exit::Rollback {
+            #[inline(always)]
+            fn from(value: $name) -> $crate::exit::Rollback {
+                $crate::exit::Rollback::from_code(value as i64)
+            }
+        }
+    };
+    // At least one message clause: match to pick the slice.
+    (@__from_rollback $name:ident; $($variant:ident => $($msg:expr)?);+) => {
+        impl ::core::convert::From<$name> for $crate::exit::Rollback {
+            #[inline(always)]
+            fn from(value: $name) -> $crate::exit::Rollback {
+                let msg: &'static [u8] = match value {
+                    $(
+                        $name::$variant => $crate::hook_errors!(@__msg $($msg)?),
+                    )+
+                };
+                $crate::exit::Rollback::new(msg, value as i64)
+            }
+        }
+    };
     (
         $(#[$enum_meta:meta])*
         $vis:vis enum $name:ident {
@@ -142,17 +172,7 @@ macro_rules! hook_errors {
             }
         }
 
-        impl ::core::convert::From<$name> for $crate::exit::Rollback {
-            #[inline]
-            fn from(value: $name) -> $crate::exit::Rollback {
-                let msg: &'static [u8] = match value {
-                    $(
-                        $name::$variant => $crate::hook_errors!(@__msg $($msg)?),
-                    )+
-                };
-                $crate::exit::Rollback::new(msg, value as i64)
-            }
-        }
+        $crate::hook_errors! { @__from_rollback $name; $($variant => $($msg)?);+ }
     };
 }
 

@@ -37,9 +37,9 @@ gaps where an example was retired.
 
 ## 80+: production hooks in Rust
 
-Unlike `01`–`15` (one concept each, in suggested reading order), the `80`+
+Unlike `01`–`16` (one concept each, in suggested reading order), the `80`+
 series are behavior-equivalent Rust ports of real, deployed xahaud C hooks —
-read them after `01`–`15`, not instead of them. Each has its own README with
+read them after `01`–`16`, not instead of them. Each has its own README with
 a full behavior-equivalence table against its C source and a differences
 table for any intentional deviation.
 

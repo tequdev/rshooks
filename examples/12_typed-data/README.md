@@ -84,9 +84,20 @@ no manual byte packing anywhere:
 #[hook(0, on = [Invoke])]
 fn main(&self) -> HookResult {
     let deposit = self.deposits.at(DepositKey { tag: DEPOSIT_TAG, owner });
-    let current = deposit.get()?.unwrap_or(EMPTY_DEPOSIT);
+    let current = match deposit.get() {
+        Ok(existing) => existing.unwrap_or(EMPTY_DEPOSIT),
+        Err(_) => rollback!(
+            b"typed-data: state read failed",
+            TypedDataError::StateReadFailed
+        ),
+    };
     // ...
-    deposit.set(&next)?;
+    if deposit.set(&next).is_err() {
+        rollback!(
+            b"typed-data: state_set failed",
+            TypedDataError::StateSetFailed
+        );
+    }
 }
 ```
 

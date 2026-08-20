@@ -121,9 +121,16 @@ impl Rollback {
     }
 }
 
-/// Converts a raw `i64` into a [`Rollback`] with an empty message — lets `?`
-/// propagate a raw error code (`some_call().map_err(|e| e.code())?` and
-/// similar) straight into a typed entry's failure side.
+/// Converts a raw `i64` into a [`Rollback`] with an empty message — a code
+/// the caller already holds (`Err(-5i64)?`, or a discriminant /
+/// [`hook_errors!`] `code()`). Do not write
+/// `some_hook_api_call().map_err(|e| e.code())?`: [`HookError::code`] is a
+/// 46-arm re-encode, the 3.1× WCE path this crate forbids. Map the call
+/// instead (`.map_err(|_| MyError::SomeCallFailed)?`) as documented on
+/// [`Rollback`].
+///
+/// [`HookError::code`]: crate::error::HookError::code
+/// [`hook_errors!`]: crate::hook_errors
 impl ::core::convert::From<i64> for Rollback {
     #[inline(always)]
     fn from(code: i64) -> Self {

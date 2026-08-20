@@ -141,11 +141,13 @@ pub extern "C" fn __rshooks_hook_sel_0(_reserved: u32) -> i64 {
 }
 ```
 
-The macro enforces the annotated item's shape exactly, and reports any
-violation as a `compile_error!` at the offending token rather than a panic:
+The macro enforces the annotated item's shape exactly. Receiver, modifier,
+and generic violations are a `compile_error!` at the offending token rather
+than a panic; a return type that does not implement the sealed
+`EntryReturn` trait is an ordinary `E0277` naming `EntryReturn`:
 
-- exactly one argument, a bare `&self` receiver (see above), and a return
-  type implementing the sealed `EntryReturn` trait (currently, only
+- exactly one argument, a bare `&self` receiver (see above);
+- a return type implementing the sealed `EntryReturn` trait (currently, only
   `rshooks::exit::HookResult`);
 - no `async`/`unsafe`/`const`/`extern` modifiers;
 - no generics, no `where` clause.

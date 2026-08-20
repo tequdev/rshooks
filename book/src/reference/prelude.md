@@ -86,8 +86,8 @@ Errors](../concepts/errors.md).
 ## `Accept`/`Rollback`/`HookResult`
 
 `crate::exit::{Accept, Rollback, HookResult}` — the typed entry-return
-types: `HookResult` is `Result<Accept, Rollback>`, the return type a
-`#[hook]`/`#[cbak]` entry may declare instead of `i64`. The sealed
+types: `HookResult` is `Result<Accept, Rollback>`, the only return type a
+`#[hook]`/`#[cbak]` entry may declare (`-> i64` does not compile). The sealed
 `EntryReturn` conversion trait those types compile through is not in the
 prelude (or nameable at all outside its fully qualified path) — a hook
 author never calls it directly. See ["Typed entry returns:

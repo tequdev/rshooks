@@ -15,7 +15,7 @@ the tutorial chapter that covers it, or the macro's own rustdoc in
 | `#[hook(<index>, ...)]` | Inside a `#[hooks]` impl: declares one Hook entry at the given chain position (`0..=9`, required). The fn must return a type implementing the sealed `EntryReturn` trait — currently, only `HookResult` (paired with `?` — see [Accept, Rollback, and Errors](../concepts/errors.md#typed-entry-returns-hookresult)), with `accept!`/`rollback!` still usable in the body as an escape hatch (they diverge, coercing to `HookResult`). Any other return type is a compile error naming `EntryReturn`. Named args: `name`, `on`/`on_incoming`+`on_outgoing`, `can_emit`, `description`. | `#[hook(0, name = "accept", on = [Invoke])] fn main(&self) -> HookResult { accept!() }` |
 | `#[cbak(<index>)]` | Pairs with a `#[hook]` at the same index; exports `cbak` for that index — the optional callback invoked when a transaction this entry emitted later settles. Index only, no other arguments. Same `EntryReturn`-bound return type as `#[hook]`. | `#[cbak(0)] fn my_cbak(&self) -> HookResult { accept!() }` |
 
-An entry's return-type error (a return type that doesn't implement `EntryReturn`) is reported on that entry fn's own `-> Ty`, even in a chain with several entries — not on the `#[hooks]` attribute.
+An entry's return-type error (a return type that doesn't implement `EntryReturn`) is reported twice per bad entry: once on that entry fn's own `-> Ty` (or the fn name when the return type is omitted), and once on the `#[hooks]` attribute from the generated wrapper body. In a chain with several entries, each bad entry still gets its own pair.
 
 ### Receivers on `#[hook]`/`#[cbak]` entries and impl helpers
 
@@ -51,7 +51,7 @@ Transactions](../emit/emitting.md).
 | `guard_m!` | Like `guard!`, for multiple loops sharing one source line (`$n` disambiguates). | `guard_m!(10, 0);` |
 | `hook_errors!` | Declare a `#[repr(i64)]` error enum usable directly as a `rollback!`/`accept!` code, and `?`-convertible into `rshooks::exit::Rollback`; an optional per-variant `=> b"msg"` clause supplies that conversion's message. | `hook_errors! { pub enum E { BlockedAccount = 1 => b"blocked" } }` |
 | `exit_on_err!` | Unwrap a `Result<T, E: Into<i64>>`, rolling back on `Err`. | `let v = exit_on_err!(b"failed", check());` |
-| `rshooks::exit::{Accept, Rollback, HookResult}` | Typed entry-return types (not macros): `HookResult` is `Result<Accept, Rollback>`; `Accept::new`/`Rollback::new` take a message and code (`::code(code)` for an empty message). | `Ok(Accept::new(b"ok", 0))` / `Err(Rollback::new(b"no", 1))` |
+| `rshooks::exit::{Accept, Rollback, HookResult}` | Typed entry-return types (not macros): `HookResult` is `Result<Accept, Rollback>`; `Accept::new`/`Rollback::new` take a message and code (`Accept::from_code(code)` / `Rollback::from_code(code)` for an empty message). | `Ok(Accept::new(b"ok", 0))` / `Err(Rollback::new(b"no", 1))` |
 
 See [Accept, Rollback, and Errors](../concepts/errors.md) and [Guards and
 Loops](../concepts/guards.md).
