@@ -1786,7 +1786,7 @@ and coexist freely in the same `#[hooks] impl` block:
   `hook_errors!` variant — code and message both — straight into a typed
   entry's `Err` side.
 - **Deliberately no `From<HookError> for Rollback`.** `HookError::code()` is
-  a 45-arm re-encode match; a `?`-propagated two-hop conversion measured
+  a 46-arm re-encode match; a `?`-propagated two-hop conversion measured
   3.1x the worst-case instructions and +67% the size of a raw-code-check
   twin (design doc §5, probe P5). The supported pattern is
   `.map_err(|_| MyError::X)?`, discarding the decoded `HookError`.

@@ -39,7 +39,7 @@ impl Vault {
 
     #[cbak(0)]
     fn main_cbak(&self) -> HookResult {
-        Ok(Accept::code(0))
+        Ok(Accept::from_code(0))
     }
 
     /// Legacy entry, in the same chain as the typed one above.

@@ -32,7 +32,7 @@ pub struct TypedResults {
 // hand-written `accept!`/`rollback!` baseline). Both convert their failure
 // with `.map_err(..)`, never `?` on the raw `HookError` a Hook API call
 // returns directly — see [`rshooks::exit::Rollback`]'s doc comment (D3):
-// `HookError::code()` is a 45-arm re-encode match that measurably does not
+// `HookError::code()` is a 46-arm re-encode match that measurably does not
 // optimize away through a two-hop `?`.
 #[inline(always)]
 fn read_amount(t: &TypedResults) -> Result<u64, DepositError> {

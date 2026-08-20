@@ -265,8 +265,10 @@ naming that trait, not a bespoke macro diagnostic.
 ### `Accept`, `Rollback`, and the `hook_errors!` message clause
 
 `Accept::new(msg, code)`/`Rollback::new(msg, code)` mirror `accept!`/
-`rollback!`'s own arguments; `Accept::code(code)`/`Rollback::code(code)` are
-the empty-message shorthand. `?` converts into `Rollback` from two sources:
+`rollback!`'s own arguments; `Accept::from_code(code)`/
+`Rollback::from_code(code)` are the empty-message shorthand, and
+`.msg()`/`.code()` read either type's fields back. `?` converts into
+`Rollback` from two sources:
 
 - **A raw `i64`** — `From<i64> for Rollback` (empty message).
 - **Any `hook_errors!` enum** — every enum gets `impl From<Enum> for
@@ -306,7 +308,7 @@ throughout.
 ### The one hard rule: never `?` a raw `HookError` into `Rollback`
 
 There is **no** `From<HookError> for Rollback` impl, and none is planned.
-[`HookError::code`](../../crates/rshooks/src/error.rs) is a 45-arm
+`HookError::code` (see the `HookError` section above) is a 46-arm
 re-encode match — decoding the negative Hook API return code back into an
 enum variant, then re-encoding that variant back into the same `i64` it
 came from — and measurement (design doc §5, probe P5) showed a

@@ -99,7 +99,7 @@
 /// assert_eq!(with_msg, Rollback::new(b"deposit: bad amount", 1));
 ///
 /// let without_msg: Rollback = DepositError::StateSetFailed.into();
-/// assert_eq!(without_msg, Rollback::code(2));
+/// assert_eq!(without_msg, Rollback::from_code(2));
 /// ```
 #[macro_export]
 macro_rules! hook_errors {
@@ -143,6 +143,7 @@ macro_rules! hook_errors {
         }
 
         impl ::core::convert::From<$name> for $crate::exit::Rollback {
+            #[inline]
             fn from(value: $name) -> $crate::exit::Rollback {
                 let msg: &'static [u8] = match value {
                     $(
@@ -307,9 +308,9 @@ mod tests {
         // Backward compatibility (D2): an enum with no `=> b"msg"` clause
         // anywhere still gets `From<Enum> for Rollback`, msg always empty.
         let r: Rollback = SampleError::First.into();
-        assert_eq!(r, Rollback::code(1));
+        assert_eq!(r, Rollback::from_code(1));
         let r: Rollback = NegativeError::Second.into();
-        assert_eq!(r, Rollback::code(-2));
+        assert_eq!(r, Rollback::from_code(-2));
     }
 
     #[test]
@@ -322,6 +323,6 @@ mod tests {
     #[test]
     fn variant_without_msg_clause_falls_back_to_empty_in_a_mixed_enum() {
         let r: Rollback = MixedMsgError::WithoutMsg.into();
-        assert_eq!(r, Rollback::code(2));
+        assert_eq!(r, Rollback::from_code(2));
     }
 }

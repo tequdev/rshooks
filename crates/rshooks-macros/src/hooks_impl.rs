@@ -23,7 +23,7 @@
 
 use std::collections::BTreeSet;
 
-use proc_macro::{Delimiter, Group, Ident, Span, TokenStream, TokenTree};
+use proc_macro::{Delimiter, Group, Ident, Punct, Spacing, Span, TokenStream, TokenTree};
 
 use crate::hooks_shared::{
     AttrEntry, is_punct, parse_attr_entries, parse_balanced_angle, parse_string_value,
@@ -231,12 +231,22 @@ struct HookEntry {
     index_span: Span,
     fn_name: String,
     attr: HookAttrData,
+    /// The entry fn's own `-> Ty` tokens, span-carrying and unexamined —
+    /// see [`build_entry_return_assertion`], which is the only consumer.
+    return_tokens: Vec<TokenTree>,
+    /// Fallback span for an implicit `-> ()` (`return_tokens` empty): the
+    /// fn's own name, so the diagnostic still names the function.
+    return_span: Span,
 }
 
 struct CbakEntry {
     index: u8,
     index_span: Span,
     fn_name: String,
+    /// See [`HookEntry::return_tokens`].
+    return_tokens: Vec<TokenTree>,
+    /// See [`HookEntry::return_span`].
+    return_span: Span,
 }
 
 struct HookAttrData {
@@ -437,12 +447,16 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
                     index_span,
                     fn_name,
                     attr: data,
+                    return_tokens: scanned.return_tokens.clone(),
+                    return_span: scanned.return_span,
                 });
             } else if let Some((index, index_span)) = cbak_attr {
                 cbaks.push(CbakEntry {
                     index,
                     index_span,
                     fn_name,
+                    return_tokens: scanned.return_tokens.clone(),
+                    return_span: scanned.return_span,
                 });
             }
 
@@ -632,6 +646,15 @@ struct ScannedFn {
     /// which may take any further parameters.
     extra_args: Vec<TokenTree>,
     args_group: Group,
+    /// The `-> Ty` return type's own tokens, empty for an implicit `-> ()`.
+    /// Carried alongside `tokens` (where the same tokens are re-emitted
+    /// verbatim) so a diagnostic can be built from them directly, without
+    /// the span loss a `format!` + reparse round-trip would cause — see
+    /// [`build_entry_return_assertion`].
+    return_tokens: Vec<TokenTree>,
+    /// Fallback span for an implicit `-> ()` (`return_tokens` empty): the
+    /// fn's own name.
+    return_span: Span,
     next: usize,
 }
 
@@ -701,10 +724,16 @@ fn scan_fn_item(tokens: &[TokenTree], start: usize) -> Result<ScannedFn, TokenSt
     }
 
     // The return type's own tokens are re-emitted verbatim but otherwise
-    // unexamined — see the entry-fn shape check's comment in
+    // unexamined here — see the entry-fn shape check's comment in
     // `parse_impl_body` for why: any type implementing
     // `::rshooks::exit::EntryReturn` is accepted, and the macro leaves
-    // enforcing that to the generated body's own trait bound.
+    // enforcing that to the generated body's own trait bound. They are
+    // *captured* (`return_tokens`/`return_span` below), though — not to
+    // examine, but so [`build_entry_return_assertion`] can re-emit them
+    // with their original spans intact, for a diagnostic that lands on the
+    // caller's own `-> Ty` instead of the `#[hooks]` attribute.
+    let mut return_tokens: Vec<TokenTree> = Vec::new();
+    let mut return_span = name.span();
     if matches!(tokens.get(i), Some(tt) if is_punct(tt, '-'))
         && matches!(tokens.get(i.wrapping_add(1)), Some(tt) if is_punct(tt, '>'))
     {
@@ -719,7 +748,11 @@ fn scan_fn_item(tokens: &[TokenTree], start: usize) -> Result<ScannedFn, TokenSt
             }
             i = i.wrapping_add(1);
         }
-        collected.extend_from_slice(tokens.get(ret_start..i).unwrap_or_default());
+        return_tokens = tokens.get(ret_start..i).unwrap_or_default().to_vec();
+        if let Some(first) = return_tokens.first() {
+            return_span = first.span();
+        }
+        collected.extend_from_slice(&return_tokens);
     }
 
     if matches!(tokens.get(i), Some(TokenTree::Ident(id)) if id.to_string() == "where") {
@@ -749,6 +782,8 @@ fn scan_fn_item(tokens: &[TokenTree], start: usize) -> Result<ScannedFn, TokenSt
         receiver,
         extra_args,
         args_group,
+        return_tokens,
+        return_span,
         next: i,
     })
 }
@@ -1359,6 +1394,96 @@ fn generate(
         }
     };
     out.extend(mod_ts);
+
+    // Span-carrying `EntryReturn` diagnostic assertions (TYPED_ENTRY_RESULTS
+    // follow-up): one per declared entry fn, built directly from the
+    // captured `-> Ty` tokens and spliced into `out` as real `TokenTree`s.
+    // They must land here, in the macro's *token* output, rather than in
+    // `mod_src` above — that string is `format!`-assembled and reparsed via
+    // `TokenStream::parse`, which only ever produces call-site spans, so
+    // anything built from it can't point a diagnostic at the caller's own
+    // source line. See `build_entry_return_assertion`'s doc comment.
+    for h in &hooks {
+        out.extend(build_entry_return_assertion(
+            &h.return_tokens,
+            h.return_span,
+        ));
+    }
+    for c in &cbaks {
+        out.extend(build_entry_return_assertion(
+            &c.return_tokens,
+            c.return_span,
+        ));
+    }
+
+    out
+}
+
+/// Builds one `const _: fn(<ret>) -> i64 = <<ret> as
+/// ::rshooks::exit::EntryReturn>::finish;` diagnostic assertion from an
+/// entry fn's captured return-type tokens (`HookEntry`/`CbakEntry`'s
+/// `return_tokens`/`return_span`).
+///
+/// `<RetType as ::rshooks::exit::EntryReturn>::finish` names an associated
+/// function whose only generic parameter is `Self = RetType`; taking it as
+/// a value (rather than calling it) coerces to the plain function pointer
+/// type `fn(RetType) -> i64` (`finish`'s receiver is `self: RetType`), so
+/// the assignment above type-checks exactly when `RetType: EntryReturn` —
+/// the same requirement the generated entry body's own
+/// `EntryReturn::finish(<call>)` imposes. A `RetType` that doesn't satisfy
+/// it fails with the ordinary E0277 trait-bound diagnostic, located at
+/// wherever `ret_tokens` (cloned into the assertion twice, spans intact)
+/// came from: the caller's own `-> Ty`.
+///
+/// `ret_tokens` empty means an implicit `-> ()` — there are no user tokens
+/// to reuse, so a synthetic `()` is built from `fallback_span` (the entry
+/// fn's own name) instead, keeping the diagnostic on the right line.
+///
+/// Every other token in the assertion (`const`, `fn`, `as`, the
+/// `::rshooks::exit::EntryReturn` path, ...) is glue: its span is
+/// irrelevant because none of those tokens can themselves be the mismatched
+/// type, so they're all built at `Span::call_site()`.
+fn build_entry_return_assertion(ret_tokens: &[TokenTree], fallback_span: Span) -> Vec<TokenTree> {
+    let ret_ty: Vec<TokenTree> = if ret_tokens.is_empty() {
+        let mut unit = Group::new(Delimiter::Parenthesis, TokenStream::new());
+        unit.set_span(fallback_span);
+        vec![TokenTree::Group(unit)]
+    } else {
+        ret_tokens.to_vec()
+    };
+
+    let glue = Span::call_site();
+    let ident = |s: &str| TokenTree::Ident(Ident::new(s, glue));
+    let joint = |c: char| TokenTree::Punct(Punct::new(c, Spacing::Joint));
+    let alone = |c: char| TokenTree::Punct(Punct::new(c, Spacing::Alone));
+    let path_sep = |out: &mut Vec<TokenTree>| {
+        out.push(joint(':'));
+        out.push(alone(':'));
+    };
+
+    let mut out: Vec<TokenTree> = vec![ident("const"), ident("_"), alone(':'), ident("fn")];
+    let fn_arg_stream: TokenStream = ret_ty.iter().cloned().collect();
+    out.push(TokenTree::Group(Group::new(
+        Delimiter::Parenthesis,
+        fn_arg_stream,
+    )));
+    out.push(joint('-'));
+    out.push(alone('>'));
+    out.push(ident("i64"));
+    out.push(alone('='));
+    out.push(alone('<'));
+    out.extend(ret_ty.iter().cloned());
+    out.push(ident("as"));
+    path_sep(&mut out);
+    out.push(ident("rshooks"));
+    path_sep(&mut out);
+    out.push(ident("exit"));
+    path_sep(&mut out);
+    out.push(ident("EntryReturn"));
+    out.push(alone('>'));
+    path_sep(&mut out);
+    out.push(ident("finish"));
+    out.push(alone(';'));
     out
 }
 
@@ -2078,8 +2203,13 @@ mod tests {
         let out = render_entry_body_and_wrappers("Vault", &entry, &not_any_list());
 
         // The call expression appears exactly once — in the body fn, never
-        // duplicated into either wrapper.
-        assert_eq!(out.matches("Vault::deposit(&Vault)").count(), 1);
+        // duplicated into either wrapper — wrapped in `EntryReturn::finish`
+        // unconditionally (TYPED_ENTRY_RESULTS_DESIGN.md §1.3).
+        assert_eq!(
+            out.matches("::rshooks::exit::EntryReturn::finish(Vault::deposit(&Vault))")
+                .count(),
+            1
+        );
         assert_eq!(out.matches("pub fn __rshooks_entry_body_0").count(), 1);
 
         // Both wrappers are one-line forwards to the body fn, not
@@ -2120,7 +2250,11 @@ mod tests {
         entry.cbak_fn = Some("deposit_cbak".to_string());
         let out = render_entry_body_and_wrappers("Vault", &entry, &not_any_list());
 
-        assert_eq!(out.matches("Vault::deposit_cbak(&Vault)").count(), 1);
+        assert_eq!(
+            out.matches("::rshooks::exit::EntryReturn::finish(Vault::deposit_cbak(&Vault))")
+                .count(),
+            1
+        );
         assert_eq!(out.matches("pub fn __rshooks_cbak_body_0").count(), 1);
         assert!(out.contains(
             "pub extern \"C\" fn __rshooks_cbak_sel_0(_reserved: u32) -> i64 { \

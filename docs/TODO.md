@@ -66,7 +66,7 @@ measured a small typed entry and a 15-call-site dense typed entry both at or
 below their hand-written `accept!`/`rollback!` twins — provided every
 `?`-called helper is `#[inline(always)]` — and confirmed that a
 `?`-propagated `HookError` → `Rollback` conversion (going through
-`HookError::code()`'s 45-arm re-encode match) is the one shape that *does*
+`HookError::code()`'s 46-arm re-encode match) is the one shape that *does*
 regress (3.1x WCE), which is why that specific conversion is not offered at
 all (`.map_err(..)` is the supported pattern instead). It ships as a
 default-available, co-equal form, not opt-in — the probe found no case where

@@ -1,8 +1,37 @@
 error[E0277]: the trait bound `u32: EntryReturn` is not satisfied
-  --> tests/ui/fail/hooks_entry_return_not_entryreturn.rs:13:1
+  --> tests/ui/fail/hooks_entry_return_not_entryreturn.rs:27:1
    |
-13 | #[hooks]
+27 | #[hooks]
    | ^^^^^^^^ the trait `EntryReturn` is not implemented for `u32`
    |
    = help: the trait `EntryReturn` is implemented for `i64`
    = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `(): EntryReturn` is not satisfied
+  --> tests/ui/fail/hooks_entry_return_not_entryreturn.rs:27:1
+   |
+27 | #[hooks]
+   | ^^^^^^^^ the trait `EntryReturn` is not implemented for `()`
+   |
+   = help: the following other types implement trait `EntryReturn`:
+             Result<Accept, Rollback>
+             i64
+   = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `u32: EntryReturn` is not satisfied
+  --> tests/ui/fail/hooks_entry_return_not_entryreturn.rs:35:28
+   |
+35 |     fn bad_typed(&self) -> u32 {
+   |                            ^^^ the trait `EntryReturn` is not implemented for `u32`
+   |
+   = help: the trait `EntryReturn` is implemented for `i64`
+
+error[E0277]: the trait bound `(): EntryReturn` is not satisfied
+  --> tests/ui/fail/hooks_entry_return_not_entryreturn.rs:40:8
+   |
+40 |     fn bad_missing(&self) {}
+   |        ^^^^^^^^^^^ the trait `EntryReturn` is not implemented for `()`
+   |
+   = help: the following other types implement trait `EntryReturn`:
+             Result<Accept, Rollback>
+             i64

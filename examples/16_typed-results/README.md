@@ -56,7 +56,7 @@ Two rules this example follows deliberately, both measured in
   entry — `.map_err(..)` it first.** `read_amount`/`bump_counter` both
   discard the decoded `HookError` this way (`.map_err(|_| DepositError::X)`)
   rather than converting it through some `From<HookError>` chain. Probe P5
-  measured why: `HookError::code()` is a 45-arm re-encode match, and a
+  measured why: `HookError::code()` is a 46-arm re-encode match, and a
   `?`-propagated two-hop `HookError → Rollback` conversion cost **3.1x** the
   worst-case instructions and **+67%** the size of the raw-code-check twin.
   `rshooks` does not even offer `From<HookError> for Rollback` (see

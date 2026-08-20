@@ -15,8 +15,8 @@ use crate::api::control::{accept, rollback};
 /// A successful exit: the message and code handed to the host `accept`
 /// call, returned from a typed entry as `Ok(Accept::new(..))`.
 ///
-/// Construct with [`Accept::new`] (an explicit message) or [`Accept::code`]
-/// (empty message, code only).
+/// Construct with [`Accept::new`] (an explicit message) or
+/// [`Accept::from_code`] (empty message, code only).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Accept {
     msg: &'static [u8],
@@ -34,8 +34,22 @@ impl Accept {
     /// A successful exit with an empty message and the given code.
     #[inline(always)]
     #[must_use]
-    pub const fn code(code: i64) -> Self {
+    pub const fn from_code(code: i64) -> Self {
         Self { msg: b"", code }
+    }
+
+    /// The message this exit hands to the host `accept` call.
+    #[inline(always)]
+    #[must_use]
+    pub const fn msg(&self) -> &'static [u8] {
+        self.msg
+    }
+
+    /// The code this exit hands to the host `accept` call.
+    #[inline(always)]
+    #[must_use]
+    pub const fn code(&self) -> i64 {
+        self.code
     }
 }
 
@@ -44,13 +58,13 @@ impl Accept {
 /// `?` via one of the `From` impls below.
 ///
 /// Construct with [`Rollback::new`] (an explicit message) or
-/// [`Rollback::code`] (empty message, code only) — or convert into one with
+/// [`Rollback::from_code`] (empty message, code only) — or convert into one with
 /// `?`: `From<i64>` (empty message, raw code) and every [`hook_errors!`]
 /// enum (empty message, unless the enum declares a `=> b"msg"` clause on the
 /// failing variant — see [`hook_errors!`]'s doc comment).
 ///
 /// **Deliberately no `From<HookError> for Rollback`.** [`HookError::code`]
-/// is a 45-arm re-encode match, and measurement
+/// is a 46-arm re-encode match, and measurement
 /// (`.claude/design/TYPED_ENTRY_RESULTS_DESIGN.md` §5, probe P5) showed a
 /// `?`-propagated two-hop `HookError` → `Rollback` conversion costs 3.1x the
 /// worst-case instruction count and +67% size versus a raw-code-check twin
@@ -84,8 +98,22 @@ impl Rollback {
     /// A failed exit with an empty message and the given code.
     #[inline(always)]
     #[must_use]
-    pub const fn code(code: i64) -> Self {
+    pub const fn from_code(code: i64) -> Self {
         Self { msg: b"", code }
+    }
+
+    /// The message this exit hands to the host `rollback` call.
+    #[inline(always)]
+    #[must_use]
+    pub const fn msg(&self) -> &'static [u8] {
+        self.msg
+    }
+
+    /// The code this exit hands to the host `rollback` call.
+    #[inline(always)]
+    #[must_use]
+    pub const fn code(&self) -> i64 {
+        self.code
     }
 }
 
@@ -166,43 +194,36 @@ mod tests {
     #[test]
     fn accept_new_carries_msg_and_code() {
         let a = Accept::new(b"ok", 7);
-        assert_eq!(
-            a,
-            Accept {
-                msg: b"ok",
-                code: 7
-            }
-        );
+        assert_eq!(a.msg(), b"ok");
+        assert_eq!(a.code(), 7);
     }
 
     #[test]
-    fn accept_code_has_empty_msg() {
-        let a = Accept::code(3);
-        assert_eq!(a, Accept { msg: b"", code: 3 });
+    fn accept_from_code_has_empty_msg() {
+        let a = Accept::from_code(3);
+        assert_eq!(a.msg(), b"");
+        assert_eq!(a.code(), 3);
     }
 
     #[test]
     fn rollback_new_carries_msg_and_code() {
         let r = Rollback::new(b"nope", -1);
-        assert_eq!(
-            r,
-            Rollback {
-                msg: b"nope",
-                code: -1
-            }
-        );
+        assert_eq!(r.msg(), b"nope");
+        assert_eq!(r.code(), -1);
     }
 
     #[test]
-    fn rollback_code_has_empty_msg() {
-        let r = Rollback::code(-2);
-        assert_eq!(r, Rollback { msg: b"", code: -2 });
+    fn rollback_from_code_has_empty_msg() {
+        let r = Rollback::from_code(-2);
+        assert_eq!(r.msg(), b"");
+        assert_eq!(r.code(), -2);
     }
 
     #[test]
     fn i64_into_rollback_has_empty_msg_and_raw_code() {
         let r: Rollback = 42i64.into();
-        assert_eq!(r, Rollback { msg: b"", code: 42 });
+        assert_eq!(r.msg(), b"");
+        assert_eq!(r.code(), 42);
     }
 
     #[test]
