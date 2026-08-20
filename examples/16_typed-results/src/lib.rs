@@ -13,7 +13,9 @@ hook_errors! {
     }
 }
 
-#[hooks(description = "Two typed (HookResult) entries, one chain: idiomatic `?` vs. raw accept!/rollback!.")]
+#[hooks(
+    description = "Two typed (HookResult) entries, one chain: idiomatic `?` vs. raw accept!/rollback!."
+)]
 pub struct TypedResults {
     /// Persistent running total, shared by both entries below.
     #[state(key = b"counter")]
