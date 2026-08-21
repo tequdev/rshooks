@@ -7,6 +7,3 @@ error[E0277]: `?` couldn't convert the error to `Rollback`
    |                 this can't be annotated with `?` because it has type `Result<_, HookError>`
    |
    = note: the question mark operation (`?`) implicitly performs a conversion on the error value using the `From` trait
-   = help: the trait `From<HookError>` is not implemented for `Rollback`
-           but trait `From<i64>` is implemented for it
-   = help: for that trait implementation, expected `i64`, found `HookError`

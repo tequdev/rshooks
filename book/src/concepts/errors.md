@@ -43,7 +43,7 @@ concept is what the rest of this page covers.
 
 Every `#[hook]`/`#[cbak]` entry returns `rshooks::exit::HookResult` — a
 `Result<Accept, Rollback>` alias (`rshooks::prelude` re-exports
-`Accept`/`Rollback`/`HookResult`, alongside `rshooks::exit` itself).
+`Accept`/`Rollback`/`HookResult`; the module path is `rshooks::exit`).
 `Ok(Accept::new(msg, code))` accepts; `Err(Rollback::new(msg, code))` rolls
 back; ordinary `?` propagates a failure out of a helper function, in place
 of a hand-written `accept!`/`rollback!` call at every failure point:
@@ -86,30 +86,29 @@ compile error naming `EntryReturn`, not a bespoke macro diagnostic.
 `rollback!`'s own arguments; `Accept::from_code(code)`/
 `Rollback::from_code(code)` are the empty-message shorthand, and
 `.msg()`/`.code()` read either type's fields back. `?` converts into
-`Rollback` from two sources:
+`Rollback` from **any `hook_errors!` enum** — every enum gets
+`impl From<Enum> for Rollback` unconditionally, and `hook_errors!`
+accepts an *optional* per-variant message clause that feeds it:
 
-- **A raw `i64`** — `From<i64> for Rollback` (empty message).
-- **Any `hook_errors!` enum** — every enum gets `impl From<Enum> for
-  Rollback` unconditionally, and `hook_errors!` accepts an *optional*
-  per-variant message clause that feeds it:
+```rust
+use rshooks::hook_errors;
 
-  ```rust
-  use rshooks::hook_errors;
+hook_errors! {
+    pub enum DepositError {
+        /// Message clause: this variant's `Rollback` carries it.
+        BadAmount = 1 => b"deposit: bad amount",
+        /// No clause: this variant's `Rollback` gets an empty message.
+        StateSetFailed = 2,
+    }
+}
+```
 
-  hook_errors! {
-      pub enum DepositError {
-          /// Message clause: this variant's `Rollback` carries it.
-          BadAmount = 1 => b"deposit: bad amount",
-          /// No clause: this variant's `Rollback` gets an empty message.
-          StateSetFailed = 2,
-      }
-  }
-  ```
-
-  The clause is per-variant — some variants may carry one and others not,
-  in the same enum — and an enum with no clause anywhere still gets the
-  `From<Enum> for Rollback` impl, with every message empty, so `?` works
-  uniformly whether or not any variant bothers with a message.
+The clause is per-variant — some variants may carry one and others not,
+in the same enum — and an enum with no clause anywhere still gets the
+`From<Enum> for Rollback` impl, with every message empty, so `?` works
+uniformly whether or not any variant bothers with a message. A raw code
+is constructed with `Err(Rollback::from_code(code))` (or
+`Rollback::new`), not `Err(code_i64)?`.
 
 ### The `#[inline(always)]` helper convention
 

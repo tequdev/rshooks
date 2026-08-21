@@ -75,6 +75,7 @@ paired `#[cbak(<index>)]`) as plain, safe functions:
 ```rust
 #![no_std]
 
+use rshooks::exit::{Accept, HookResult};
 use rshooks::*;
 
 #[hooks(description = "Accepts every transaction selected by HookOn.")]

@@ -1785,9 +1785,10 @@ message, or a raw, zero-indirection body.
   with an ordinary trait-bound diagnostic naming `EntryReturn` on the
   entry's own `-> Ty` span — the macro performs no bespoke return-type
   validation of its own.
-- **`hook_errors!` message clause**: `Variant = <code> => b"msg"` (optional,
-  per variant, backward compatible with the clause-less form) additionally
-  generates `impl From<Enum> for Rollback`, so `?` propagates a
+- **`hook_errors!` From impl**: every `hook_errors!` enum gets
+  `impl From<Enum> for Rollback` (clause-less enums included). The optional
+  `=> b"msg"` clause fills the message (else empty); a clause-less enum uses
+  `Rollback::from_code` with no match. `?` therefore propagates a
   `hook_errors!` variant — code and message both — straight into a typed
   entry's `Err` side.
 - **Deliberately no `From<HookError> for Rollback`.** `HookError::code()` is

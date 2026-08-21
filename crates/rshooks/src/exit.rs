@@ -59,13 +59,14 @@ impl Accept {
 
 /// A failed exit: the message and code handed to the host `rollback` call,
 /// returned from a typed entry as `Err(Rollback::new(..))` or produced by
-/// `?` via one of the `From` impls below.
+/// `?` from a [`hook_errors!`] enum.
 ///
 /// Construct with [`Rollback::new`] (an explicit message) or
-/// [`Rollback::from_code`] (empty message, code only) — or convert into one with
-/// `?`: `From<i64>` (empty message, raw code) and every [`hook_errors!`]
-/// enum (empty message, unless the enum declares a `=> b"msg"` clause on the
-/// failing variant — see [`hook_errors!`]'s doc comment).
+/// [`Rollback::from_code`] (empty message, code only). `?` converts from
+/// every [`hook_errors!`] enum (empty message, unless the enum declares a
+/// `=> b"msg"` clause on the failing variant — see [`hook_errors!`]'s doc
+/// comment). A raw code is constructed with [`Rollback::from_code`] /
+/// [`Rollback::new`] / `Err(Rollback::from_code(code))` explicitly.
 ///
 /// **Deliberately no `From<HookError> for Rollback`.** [`HookError::code`]
 /// is a 46-arm re-encode match, and measurement
@@ -118,23 +119,6 @@ impl Rollback {
     #[must_use]
     pub const fn code(&self) -> i64 {
         self.code
-    }
-}
-
-/// Converts a raw `i64` into a [`Rollback`] with an empty message — a code
-/// the caller already holds (`Err(-5i64)?`, or a discriminant /
-/// [`hook_errors!`] `code()`). Do not write
-/// `some_hook_api_call().map_err(|e| e.code())?`: [`HookError::code`] is a
-/// 46-arm re-encode, the 3.1× WCE path this crate forbids. Map the call
-/// instead (`.map_err(|_| MyError::SomeCallFailed)?`) as documented on
-/// [`Rollback`].
-///
-/// [`HookError::code`]: crate::error::HookError::code
-/// [`hook_errors!`]: crate::hook_errors
-impl ::core::convert::From<i64> for Rollback {
-    #[inline(always)]
-    fn from(code: i64) -> Self {
-        Self { msg: b"", code }
     }
 }
 
@@ -219,12 +203,5 @@ mod tests {
         let r = Rollback::from_code(-2);
         assert_eq!(r.msg(), b"");
         assert_eq!(r.code(), -2);
-    }
-
-    #[test]
-    fn i64_into_rollback_has_empty_msg_and_raw_code() {
-        let r: Rollback = 42i64.into();
-        assert_eq!(r.msg(), b"");
-        assert_eq!(r.code(), 42);
     }
 }

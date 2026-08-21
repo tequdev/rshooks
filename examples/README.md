@@ -70,6 +70,7 @@ chain's shared `State`/`HookParam`/`OtxnParam` schema, and an inherent
 hand-written `extern "C"` exports:
 
 ```rust
+use rshooks::exit::HookResult;
 use rshooks::hooks;
 
 #[hooks]
