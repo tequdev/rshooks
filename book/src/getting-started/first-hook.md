@@ -37,12 +37,18 @@ pub struct AcceptAll;
 impl AcceptAll {
     /// Accepts every triggering transaction.
     #[hook(0, name = "accept", on = [Invoke])]
-    fn main(&self) -> i64 {
+    fn main(&self) -> exit::HookResult {
         trace!(b"accept-all: accepting transaction");
         accept!()
     }
 }
 ```
+
+This first hook exits through `accept!()` — the simplest thing that works
+before `Ok`/`Accept` are introduced. The idiomatic typed exit
+(`Ok(Accept::from_code(0))` and `?`-propagated errors) is covered in
+[Accept, Rollback, and Errors](../concepts/errors.md#typed-entry-returns-hookresult);
+both compile to the same wasm here.
 
 To see the `trace!` line actually run, enable the `trace` feature in
 `Cargo.toml` alongside `rshooks`:
@@ -94,14 +100,16 @@ declares one Hook entry:
   Attributes](../build/metadata.md) for what that means.
 
 The annotated function itself is an associated function taking `&self` and
-returning `i64`. `AcceptAll` declares no fields, so `main` never reaches
-through `self` here, but the receiver is still required — `#[hooks]`
-expands it into the wasm export the Hook host requires:
+returning `exit::HookResult` — reached here as `exit::HookResult` because
+`use rshooks::*;` already brought the `exit` module in by name (see
+above). `AcceptAll` declares no fields, so `main` never reaches through
+`self` here, but the receiver is still required — `#[hooks]` expands it
+into the wasm export the Hook host requires:
 
 ```rust,ignore
 #[unsafe(no_mangle)]
 pub extern "C" fn hook(_reserved: u32) -> i64 {
-    AcceptAll::main(&AcceptAll)
+    ::rshooks::exit::EntryReturn::finish(AcceptAll::main(&AcceptAll))
 }
 ```
 
@@ -111,9 +119,11 @@ receiver form `#[hooks]` accepts on an entry — no lifetime, not `mut` — and
 it's how an entry reaches a chain's declared fields once there are any to
 reach, covered in [Hook State](../data/state.md). Any other receiver shape
 (`self`, `mut self`, `&mut self`, `self: T`), a missing receiver, or a
-non-`i64` return type is rejected at compile time with a pointed error
-rather than a malformed export. Use `#[cbak(0)]` the same way, on the same
-index, to declare the optional settlement callback for this entry.
+return type that doesn't implement the sealed `EntryReturn` trait (in
+practice, anything but `rshooks::exit::HookResult`) is rejected at compile
+time with a pointed error rather than a malformed export. Use `#[cbak(0)]`
+the same way, on the same index, to declare the optional settlement
+callback for this entry.
 
 ### `accept!()`
 

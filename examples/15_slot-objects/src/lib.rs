@@ -377,7 +377,7 @@ impl SlotObjects {
     /// Runs the check group named by the `CHK` parameter (absent = group 0)
     /// and accepts with the bits it earned.
     #[hook(0, on = [Invoke])]
-    fn main(&self) -> i64 {
+    fn main(&self) -> HookResult {
         let Ok(sender) = otxn_field_typed(sfAccount) else {
             rollback!(b"slot-objects: no sfAccount", SlotObjectsError::NoSender)
         };

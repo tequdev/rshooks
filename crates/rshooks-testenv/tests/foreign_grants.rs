@@ -12,6 +12,7 @@
     missing_docs
 )]
 
+use rshooks::exit::HookResult;
 use rshooks::*;
 use rshooks_testenv::prelude::*;
 
@@ -28,7 +29,7 @@ pub struct ForeignWriter {
 impl ForeignWriter {
     /// Writes once into the seeded target/ns, reports the raw error code.
     #[hook(0, on = [Invoke])]
-    fn write_once(&self) -> i64 {
+    fn write_once(&self) -> HookResult {
         let code = match rshooks::api::state::state_foreign_set(b"v", b"K", &NS, &TARGET) {
             Ok(_) => 0,
             Err(e) => e.code(),
@@ -39,7 +40,7 @@ impl ForeignWriter {
     /// Writes twice: an oversized (`TOO_BIG`) attempt, then a normal one —
     /// proves a size/limit failure never sets the retry-block flag.
     #[hook(1, on = [Invoke])]
-    fn oversized_then_normal(&self) -> i64 {
+    fn oversized_then_normal(&self) -> HookResult {
         let big = [0u8; 257];
         let first_code = match rshooks::api::state::state_foreign_set(&big, b"K", &NS, &TARGET) {
             Ok(_) => 0,
@@ -59,7 +60,7 @@ impl ForeignWriter {
     /// blocked by `PREVIOUS_FAILURE_PREVENTS_RETRY`, not a second
     /// `NOT_AUTHORIZED`.
     #[hook(2, on = [Invoke])]
-    fn unauthorized_twice(&self) -> i64 {
+    fn unauthorized_twice(&self) -> HookResult {
         let first_code = match rshooks::api::state::state_foreign_set(b"v", b"K", &NS, &TARGET) {
             Ok(_) => 0,
             Err(e) => e.code(),

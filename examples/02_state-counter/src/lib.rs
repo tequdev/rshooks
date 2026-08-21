@@ -1,5 +1,6 @@
 #![no_std]
 
+use rshooks::exit::{Accept, HookResult};
 use rshooks::*;
 
 hook_errors! {
@@ -21,7 +22,7 @@ pub struct StateCounter {
 impl StateCounter {
     /// Increments the persistent counter and accepts with the new count.
     #[hook(0, on = [Invoke])]
-    fn main(&self) -> i64 {
+    fn main(&self) -> HookResult {
         // Falls back to 0 on any read failure, not just absence — see
         // example 12's `config()` helper for the same masking behavior.
         let count = self.counter.get().unwrap_or(Some(0)).unwrap_or(0);
@@ -34,6 +35,6 @@ impl StateCounter {
             );
         }
 
-        accept!(b"state-counter: incremented", next as i64)
+        Ok(Accept::new(b"state-counter: incremented", next as i64))
     }
 }

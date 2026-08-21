@@ -34,7 +34,7 @@ impl Firewall {
     /// Rejects the originating transaction if its sender matches the
     /// configured blocklist account.
     #[hook(0, on = [Payment])]
-    fn main(&self) -> i64 {
+    fn main(&self) -> HookResult {
         let Ok(sender) = otxn_field_typed(sfAccount) else {
             rollback!(
                 b"firewall: could not read otxn sender",

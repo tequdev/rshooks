@@ -45,7 +45,7 @@ pub struct AccountIdMacro;
 impl AccountIdMacro {
     /// Accepts only when all conversion paths agree.
     #[hook(0, on = [Invoke])]
-    fn main(&self) -> i64 {
+    fn main(&self) -> HookResult {
         let Ok(installed_on) = hook_account_buf() else {
             rollback!(
                 b"account-id-macro: hook_account failed",

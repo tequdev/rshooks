@@ -47,22 +47,37 @@ surface a hook can call (`_g` excepted), including `float_*`/`slot_*`/
 chapter's coverage table for the current, honest list of what remains
 unmodeled.
 
-## 2. Typed `Result`-based entry return values (priority 2)
+## 2. Typed `Result`-based entry return values (priority 2) — IMPLEMENTED (breaking, typed-only)
 
-Entries currently return `i64` and exit through `accept!`/`rollback!`. A typed
-signature would make the success/failure contract explicit and enable `?`:
+A `#[hook]`/`#[cbak]` entry returns `rshooks::exit::HookResult`
+(`Result<Accept, Rollback>`) — the sole return type the sealed
+`EntryReturn` trait implements; the earlier `i64` identity impl has been
+removed (D6 in the design doc's §7). `?` propagates failures, including
+`hook_errors!` enums via an optional per-variant `=> b"msg"` clause.
+`accept!`/`rollback!` remain public and usable inside a typed entry's body
+— they diverge, so they coerce to `HookResult` — documented as the in-body
+escape hatch for a computed, non-`'static` message or a raw,
+zero-indirection body. See `docs/DESIGN.md` §10 for the shipped mechanism,
+the book's [Accept, Rollback, and Errors §"Typed entry returns:
+`HookResult`"](../book/src/concepts/errors.md#typed-entry-returns-hookresult)
+for the developer-facing walkthrough, and `examples/16_typed-results` for a
+worked example with measured numbers.
 
-- Shape sketch: `fn deposit(&self) -> HookResult<Accept>` (names TBD), where
-  the generated wrapper converts `Ok`/`Err` into the terminal
-  `accept`/`rollback` host calls, and `hook_errors!` enums convert into the
-  error side via `From` so `?` propagates them.
-- WCE impact: **this is the riskiest item on the list.** The conversion code
-  runs inside the entry and every `?` desugars to a match; the 24→70 nesting
-  precedent for enum-variant matching applies directly. The design must keep
-  error values as raw codes (or `#[repr(i64)]` enums converted without wide
-  matches) end to end, and the probe must cover both a small entry and a
-  call-site-dense entry before this becomes canonical. If it cannot be made
-  zero-cost, it ships as an opt-in layer, not as the default form.
+The risk this item flagged (raw-`i64` error codes, avoiding wide
+enum-variant matches) is exactly what the design settled on:
+`.claude/design/TYPED_ENTRY_RESULTS_DESIGN.md`'s T-1 probe matrix (§5)
+measured a small typed entry and a 15-call-site dense typed entry both at or
+below their hand-written `accept!`/`rollback!` twins — provided every
+`?`-called helper is `#[inline(always)]` — and confirmed that a
+`?`-propagated `HookError` → `Rollback` conversion (going through
+`HookError::code()`'s 46-arm re-encode match) is the one shape that *does*
+regress (3.1x WCE), which is why that specific conversion is not offered at
+all (`.map_err(..)` is the supported pattern instead). Every in-repo chain
+— examples 01–16 incl. their READMEs and the root/examples READMEs, `80_governance`, trybuild fixtures, testenv test chains,
+book snippets, doctests — is migrated to the typed form; `80_governance`
+migrates signature-only, keeping its raw internals, since its nesting/WCE
+budgets are the binding constraint there. This is a breaking change on the
+0.x line (D6): a `-> i64` entry no longer compiles.
 
 ## 3. Typed entry arguments (dispatch layer) (priority 3)
 

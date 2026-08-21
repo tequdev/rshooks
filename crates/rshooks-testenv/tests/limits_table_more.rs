@@ -13,6 +13,7 @@
     missing_docs
 )]
 
+use rshooks::exit::HookResult;
 use rshooks::*;
 use rshooks_testenv::prelude::*;
 
@@ -25,7 +26,7 @@ pub struct LimitsMore {
 #[hooks]
 impl LimitsMore {
     #[hook(0, on = [Invoke])]
-    fn key_zero_length(&self) -> i64 {
+    fn key_zero_length(&self) -> HookResult {
         let code = match rshooks::api::state::state_set(b"v", &[] as &[u8]) {
             Ok(_) => 0,
             Err(e) => e.code(),
@@ -34,7 +35,7 @@ impl LimitsMore {
     }
 
     #[hook(1, on = [Invoke])]
-    fn key_too_long(&self) -> i64 {
+    fn key_too_long(&self) -> HookResult {
         let key = [0u8; 33];
         let code = match rshooks::api::state::state_set(b"v", &key) {
             Ok(_) => 0,
@@ -44,7 +45,7 @@ impl LimitsMore {
     }
 
     #[hook(2, on = [Invoke])]
-    fn value_too_big(&self) -> i64 {
+    fn value_too_big(&self) -> HookResult {
         let data = [0u8; 257];
         let code = match rshooks::api::state::state_set(&data, b"K") {
             Ok(_) => 0,
@@ -54,7 +55,7 @@ impl LimitsMore {
     }
 
     #[hook(3, on = [Invoke])]
-    fn key_padding_equivalence(&self) -> i64 {
+    fn key_padding_equivalence(&self) -> HookResult {
         let mut out = [0u8; 8];
         let code = match rshooks::api::state::state(&mut out, b"RR") {
             Ok(n) => i64::from(n as u32),

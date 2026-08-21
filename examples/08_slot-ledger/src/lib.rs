@@ -29,7 +29,7 @@ pub struct SlotLedger;
 #[hooks]
 impl SlotLedger {
     #[hook(0, on = [Payment])]
-    fn main(&self) -> i64 {
+    fn main(&self) -> HookResult {
         let Ok(txn) = SlotObject::from_otxn() else {
             rollback!(
                 b"slot-ledger: otxn_slot failed",

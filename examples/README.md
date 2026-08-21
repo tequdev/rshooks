@@ -40,12 +40,13 @@ directory is prefixed) and matches what its own README, `Cargo.toml`, and
 | 13 | [`keylets`](13_keylets) | `rshooks::api::keylet`'s 26 typed `keylet_xxx` helpers (one per `KEYLET_*` constant), in place of the single untyped `util_keylet` |
 | 14 | [`account-id-macro`](14_account-id-macro) | `rshooks::account_id!`: compile-time r-address -> `AccountId` decode, cross-checked against `hook_account`/`util_accid`/`util_raddr` |
 | 15 | [`slot-objects`](15_slot-objects) | the typed slot layer's live acceptance harness: account-root walk, native-amount drops round-trip, parent-clear/child-read, and two 300-iteration loops proving `take_*` recycling and leak-free `slot_path!` failures |
+| 16 | [`typed-results`](16_typed-results) | typed entry returns (`HookResult`): an idiomatic `?`/`Ok` entry with a `hook_errors!` message clause, alongside a raw `accept!`/`rollback!`-style entry in the same chain |
 
 ## 80+: Production hooks in Rust
 
-Unlike `01`-`15` (one concept each, in suggested reading order), the
+Unlike `01`-`16` (one concept each, in suggested reading order), the
 `80`+ series are behavior-equivalent Rust ports of real, deployed xahaud
-C hooks — read them after `01`-`15`, not instead of them. `80_governance`
+C hooks — read them after `01`-`16`, not instead of them. `80_governance`
 is the flagship example of the `#[hooks]` **multi-hook chain** model: one
 crate declaring both hooks (`govern` at chain position 0, `reward` at
 position 1) against one shared `#[hooks]` struct, so the state layout the
@@ -69,6 +70,7 @@ chain's shared `State`/`HookParam`/`OtxnParam` schema, and an inherent
 hand-written `extern "C"` exports:
 
 ```rust
+use rshooks::exit::HookResult;
 use rshooks::hooks;
 
 #[hooks]
@@ -77,7 +79,7 @@ struct MyHook;
 #[hooks]
 impl MyHook {
     #[hook(0, on = [Invoke])]
-    fn main() -> i64 {
+    fn main(&self) -> HookResult {
         // ...
     }
 }

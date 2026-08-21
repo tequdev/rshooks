@@ -26,9 +26,9 @@ pub struct AcceptAll;
 #[hooks]
 impl AcceptAll {
     #[hook(0, name = "accept", on = [Invoke])]
-    fn main(&self) -> i64 {
+    fn main(&self) -> HookResult {
         trace!(b"accept-all: accepting transaction");
-        accept!()
+        Ok(Accept::from_code(0))
     }
 }
 ```
@@ -88,7 +88,7 @@ declared field:
 #[hooks]
 impl StateCounter {
     #[hook(0, on = [Invoke])]
-    fn main(&self) -> i64 {
+    fn main(&self) -> HookResult {
         let count = self.counter.get().unwrap_or(Some(0)).unwrap_or(0);
         // ...
     }
@@ -125,8 +125,8 @@ for what "per selected build" means).
 #[hooks]
 impl AcceptAll {
     #[hook(0)]
-    fn main(&self) -> i64 {
-        0
+    fn main(&self) -> HookResult {
+        Ok(Accept::from_code(0))
     }
 }
 ```
@@ -137,15 +137,18 @@ plus:
 ```rust,ignore
 #[unsafe(export_name = "hook")]
 pub extern "C" fn __rshooks_hook_sel_0(_reserved: u32) -> i64 {
-    AcceptAll::main(&AcceptAll)
+    ::rshooks::exit::EntryReturn::finish(AcceptAll::main(&AcceptAll))
 }
 ```
 
-The macro enforces the annotated item's shape exactly, and reports any
-violation as a `compile_error!` at the offending token rather than a panic:
+The macro enforces the annotated item's shape exactly. Receiver, modifier,
+and generic violations are a `compile_error!` at the offending token rather
+than a panic; a return type that does not implement the sealed
+`EntryReturn` trait is an ordinary `E0277` naming `EntryReturn`:
 
-- exactly one argument, a bare `&self` receiver (see above), and a return
-  type of exactly `-> i64`;
+- exactly one argument, a bare `&self` receiver (see above);
+- a return type implementing the sealed `EntryReturn` trait (currently, only
+  `rshooks::exit::HookResult`);
 - no `async`/`unsafe`/`const`/`extern` modifiers;
 - no generics, no `where` clause.
 

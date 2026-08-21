@@ -35,6 +35,7 @@ WIRED_EXAMPLES = {
     "13_keylets",
     "08_slot-ledger",
     "15_slot-objects",
+    "16_typed-results",
 }
 
 

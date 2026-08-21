@@ -29,10 +29,10 @@ pub struct Governance {
 #[hooks]
 impl Governance {
     #[hook(0, on = [Invoke], can_emit = [Invoke, SetHook])]
-    fn govern(&self) -> i64 { /* ... */ }
+    fn govern(&self) -> HookResult { /* ... */ }
 
     #[hook(1, on = [Invoke, ClaimReward], can_emit = [GenesisMint])]
-    fn reward(&self) -> i64 { /* ... */ }
+    fn reward(&self) -> HookResult { /* ... */ }
 }
 ```
 

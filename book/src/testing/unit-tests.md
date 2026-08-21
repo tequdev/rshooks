@@ -76,6 +76,12 @@ every `#[hooks]` struct in this book already is).
 demonstrates both side by side — `examples/10_emit-txn/tests/emit.rs` and an
 in-crate module at the bottom of `examples/10_emit-txn/src/lib.rs`. Both
 examples' `README.md` show the exact `cargo test` invocation.
+`examples/16_typed-results/tests/deposit.rs` uses the `tests/` layout too,
+and additionally asserts that a [typed entry's](../concepts/errors.md#typed-entry-returns-hookresult)
+`?`-propagated `hook_errors!` msg-clause message arrives byte-for-byte in
+`HookExit.msg` on the rollback path — the same `exit.msg` assertion shown
+below, just fed by `Err(Rollback::new(..))` instead of a hand-written
+`rollback!(msg, code)` call.
 
 ## A worked example
 
@@ -92,13 +98,13 @@ pub struct StateCounter {
 #[hooks]
 impl StateCounter {
     #[hook(0, on = [Invoke])]
-    fn main(&self) -> i64 {
+    fn main(&self) -> HookResult {
         let count = self.counter.get().unwrap_or(Some(0)).unwrap_or(0);
         let next = count.wrapping_add(1);
         if self.counter.set(&next).is_err() {
             rollback!(b"state-counter: state_set failed", StateCounterError::StateSetFailed);
         }
-        accept!(b"state-counter: incremented", next as i64)
+        Ok(Accept::new(b"state-counter: incremented", next as i64))
     }
 }
 ```

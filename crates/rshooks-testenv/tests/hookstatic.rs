@@ -12,6 +12,7 @@
     missing_docs
 )]
 
+use rshooks::exit::HookResult;
 use rshooks::static_cell::HookStatic;
 use rshooks::*;
 use rshooks_testenv::prelude::*;
@@ -30,7 +31,7 @@ impl StaticUser {
     /// invocation must be `None`. Reports `10` when exactly the first take
     /// succeeded (the expected shape), anything else otherwise.
     #[hook(0, on = [Invoke])]
-    fn take_twice(&self) -> i64 {
+    fn take_twice(&self) -> HookResult {
         let first = SCRATCH.take();
         let second = SCRATCH.take();
         let code = i64::from(first.is_some()) * 10 + i64::from(second.is_some());
@@ -40,7 +41,7 @@ impl StaticUser {
     /// Takes the cell once and mutates it, proving the leaked clone is a
     /// genuinely independent, writable buffer.
     #[hook(1, on = [Invoke])]
-    fn take_and_mutate(&self) -> i64 {
+    fn take_and_mutate(&self) -> HookResult {
         match SCRATCH.take() {
             Some(buf) => {
                 buf[0] = 0xAB;

@@ -113,7 +113,7 @@ pub struct Keylets;
 impl Keylets {
     /// Hook entry point. See the module doc comment for the full behavior.
     #[hook(0, on = [Invoke])]
-    fn main(&self) -> i64 {
+    fn main(&self) -> HookResult {
         let Ok(owner) = otxn_field_typed(sfAccount) else {
             rollback!(
                 b"keylets: sfAccount missing from the originating transaction",
@@ -234,6 +234,6 @@ impl Keylets {
             &compute(KEYLET_CRON, keylet_cron(&owner, CRON_START_TIME)),
         );
 
-        accept!(b"keylets: ok", 0)
+        Ok(Accept::new(b"keylets: ok", 0))
     }
 }

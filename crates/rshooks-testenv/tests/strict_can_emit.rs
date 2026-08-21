@@ -34,7 +34,7 @@ txn_template! {
 
 /// Reserves and emits one `Payment`, shared by every entry below — only
 /// their `can_emit` declaration differs.
-fn emit_a_payment() -> i64 {
+fn emit_a_payment() -> HookResult {
     if etxn_reserve(1).is_err() {
         rollback!(b"reserve", 1);
     }
@@ -58,19 +58,19 @@ pub struct CanEmitChecks;
 impl CanEmitChecks {
     /// No `can_emit` declared at all — unrestricted, even in strict mode.
     #[hook(0, on = [Invoke])]
-    fn no_declaration(&self) -> i64 {
+    fn no_declaration(&self) -> HookResult {
         emit_a_payment()
     }
 
     /// Declares `Payment`, and emits exactly that — allowed.
     #[hook(1, on = [Invoke], can_emit = [Payment])]
-    fn declared_and_matching(&self) -> i64 {
+    fn declared_and_matching(&self) -> HookResult {
         emit_a_payment()
     }
 
     /// Declares `Invoke` but emits a `Payment` — a strict-mode violation.
     #[hook(2, on = [Invoke], can_emit = [Invoke])]
-    fn declared_but_mismatched(&self) -> i64 {
+    fn declared_but_mismatched(&self) -> HookResult {
         emit_a_payment()
     }
 }

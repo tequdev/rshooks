@@ -11,6 +11,7 @@ pub mod convert;
 pub mod decl;
 pub mod error;
 mod errors;
+pub mod exit;
 mod macros;
 pub mod sfield;
 pub mod slot_obj;
@@ -942,6 +943,7 @@ pub mod prelude {
     pub use crate::convert::{FixedRead, FromBytes, ToBytes, TypedParamName};
     pub use crate::decl::{HookParam, OtxnParam, State};
     pub use crate::error::{HookError, Result};
+    pub use crate::exit::{Accept, HookResult, Rollback};
     pub use crate::sfield::*;
     pub use crate::slot_obj::{AmountBytes, CastTarget, IssueData, SlotKey, SlotObject};
     pub use crate::state::{

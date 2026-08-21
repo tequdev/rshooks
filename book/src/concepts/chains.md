@@ -88,10 +88,10 @@ pub struct Governance {
 #[hooks]
 impl Governance {
     #[hook(0, name = "govern", on = [Invoke], can_emit = [Invoke, SetHook])]
-    fn govern(&self) -> i64 { /* ... reads and writes self.reward_rate/self.reward_delay */ }
+    fn govern(&self) -> HookResult { /* ... reads and writes self.reward_rate/self.reward_delay */ }
 
     #[hook(1, name = "reward", on = [Invoke, ClaimReward], can_emit = [GenesisMint])]
-    fn reward(&self) -> i64 { /* ... reads self.reward_rate/self.reward_delay */ }
+    fn reward(&self) -> HookResult { /* ... reads self.reward_rate/self.reward_delay */ }
 }
 ```
 

@@ -9,6 +9,7 @@
     missing_docs
 )]
 
+use rshooks::exit::HookResult;
 use rshooks::*;
 use rshooks_testenv::prelude::*;
 
@@ -21,7 +22,7 @@ pub struct Reentrant {
 #[hooks]
 impl Reentrant {
     #[hook(0, on = [Invoke])]
-    fn recurse(&self) -> i64 {
+    fn recurse(&self) -> HookResult {
         let inner = TestEnv::new();
         let _ = inner.invoke::<Reentrant>(0);
         accept!(b"", 0)

@@ -20,7 +20,7 @@ pub struct StateCounter {
 #[hooks]
 impl StateCounter {
     #[hook(0, on = [Invoke])]
-    fn main(&self) -> i64 {
+    fn main(&self) -> HookResult {
         let count = self.counter.get().unwrap_or(Some(0)).unwrap_or(0);
         let next = count.wrapping_add(1);
         self.counter.set(&next);
