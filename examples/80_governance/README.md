@@ -58,8 +58,8 @@ writes, under `out/current/`:
 | `sethook.template.json` | a `SetHook` template covering **both** positions in one `Hooks` array (`Account`/`HookNamespace` left as placeholders) |
 | `sethook.template.meta.json` | generation info: hook hashes, declared/gap positions, required amendments |
 
-Measured this build: `0.govern.wasm` is 14851 bytes (WCE 44185, max
-nesting 23/32); `1.reward.wasm` is 7710 bytes (WCE 13985, max nesting
+Measured this build: `0.govern.wasm` is 14932 bytes (WCE 43082, max
+nesting 22/32); `1.reward.wasm` is 7804 bytes (WCE 13676, max nesting
 22/32). Both stay well under the 65,535-byte SetHook `CreateCode` limit.
 
 ## Shared declaration: what's actually consolidated
@@ -123,7 +123,7 @@ extracting `govern`'s own four top-level reads into separate
 `#[inline(never)]` helpers, which made no measurable difference, confirming
 the cost comes from call-site density *within* whichever function holds
 them, not cross-function fusion. Reverting those dense paths to raw calls
-(this crate's current state) brought `govern` down to nesting 23 and
+(this crate's current state) brought `govern` down to nesting 22 and
 `reward` to 22.
 
 **This is flagged as a candidate `rshooks`/`decl.rs` finding** for the
