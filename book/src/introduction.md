@@ -28,7 +28,7 @@ constraints are why Hooks aren't written like ordinary Rust programs —
 `rshooks` exists to meet them without making the developer hand-encode WASM
 exports or floating-point-free arithmetic by hand.
 
-## The four crates
+## The five crates
 
 `rshooks` is a small monorepo, layered so each crate has one job:
 
@@ -38,6 +38,7 @@ exports or floating-point-free arithmetic by hand.
 | `rshooks-macros` | Procedural macros for `rshooks` (the `#[hooks]` struct/impl attribute, XFL literals, and more). |
 | `rshooks` | `no_std`, ergonomic wrapper over `rshooks-core` — `Result`-based APIs, typed buffers, the `XFL` decimal-float type, guard/trace macros, and a panic handler. |
 | `rshooks-build` | The CLI that turns a Rust crate into one or more SetHook-valid WASM binaries: a discovery build plus one build per declared Hook, each post-processed by a hook-cleaner and guard-checker, natively in Rust. |
+| `rshooks-testenv` | An off-chain unit-test harness with a mock Hook host, for testing Hook logic without WASM or a running Xahau node. |
 
 **This book focuses on the ergonomic layer** — the `rshooks` crate and its
 macros — since that's what Hook authors write against day to day. The raw

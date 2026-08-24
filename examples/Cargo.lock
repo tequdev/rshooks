@@ -4,14 +4,14 @@ version = 4
 
 [[package]]
 name = "accept-all"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "rshooks",
 ]
 
 [[package]]
 name = "account-id-macro"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "rshooks",
 ]
@@ -188,7 +188,7 @@ dependencies = [
 
 [[package]]
 name = "emit-txn"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "rshooks",
  "rshooks-testenv",
@@ -196,7 +196,7 @@ dependencies = [
 
 [[package]]
 name = "errors"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "rshooks",
 ]
@@ -219,7 +219,7 @@ checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
 
 [[package]]
 name = "firewall"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "rshooks",
 ]
@@ -248,7 +248,7 @@ dependencies = [
 
 [[package]]
 name = "governance"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "rshooks",
 ]
@@ -266,7 +266,7 @@ dependencies = [
 
 [[package]]
 name = "guard-patterns"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "rshooks",
 ]
@@ -282,7 +282,7 @@ dependencies = [
 
 [[package]]
 name = "hook-params"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "rshooks",
 ]
@@ -308,7 +308,7 @@ dependencies = [
 
 [[package]]
 name = "keylets"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "rshooks",
  "rshooks-testenv",
@@ -382,7 +382,7 @@ dependencies = [
 
 [[package]]
 name = "rshooks"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "rshooks-core",
  "rshooks-macros",
@@ -390,11 +390,11 @@ dependencies = [
 
 [[package]]
 name = "rshooks-core"
-version = "0.0.1"
+version = "0.1.0"
 
 [[package]]
 name = "rshooks-macros"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "serde_json",
  "syn 3.0.3",
@@ -402,7 +402,7 @@ dependencies = [
 
 [[package]]
 name = "rshooks-testenv"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
  "k256",
@@ -505,7 +505,7 @@ dependencies = [
 
 [[package]]
 name = "slot-ledger"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "rshooks",
  "rshooks-testenv",
@@ -513,7 +513,7 @@ dependencies = [
 
 [[package]]
 name = "slot-objects"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "rshooks",
  "rshooks-testenv",
@@ -532,7 +532,7 @@ dependencies = [
 
 [[package]]
 name = "state-counter"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "rshooks",
  "rshooks-testenv",
@@ -540,7 +540,7 @@ dependencies = [
 
 [[package]]
 name = "state-foreign"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "rshooks",
 ]
@@ -575,14 +575,14 @@ dependencies = [
 
 [[package]]
 name = "typed-data"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "rshooks",
 ]
 
 [[package]]
 name = "typed-results"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "rshooks",
  "rshooks-testenv",
@@ -614,7 +614,7 @@ checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 
 [[package]]
 name = "xfl-math"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "rshooks",
  "rshooks-testenv",

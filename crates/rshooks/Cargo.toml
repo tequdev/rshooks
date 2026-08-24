@@ -14,8 +14,8 @@ categories = ["no-std", "wasm", "cryptography::cryptocurrencies"]
 doctest = true
 
 [dependencies]
-rshooks-core = { path = "../rshooks-core", version = "0.0.1" }
-rshooks-macros = { path = "../rshooks-macros", version = "0.0.1" }
+rshooks-core = { path = "../rshooks-core", version = "0.1.0" }
+rshooks-macros = { path = "../rshooks-macros", version = "0.1.0" }
 
 # Host-only, test-only: compiles the `tests/ui/*.rs` fixtures and diffs the
 # resulting rustc output against the committed `.stderr` files, so the
