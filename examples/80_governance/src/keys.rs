@@ -18,12 +18,13 @@
 //! unchanged (a single function's own call-site count is what compounds,
 //! not cross-function fusion), and using typed accessors at
 //! `action_seat`/`setup`/`push_l1_seat_entries`'s combined ~15 call sites
-//! would push the `govern` entry's nesting from 22 to 63, over the
-//! 32-level limit; the raw calls above keep it at 22. The *declaration*
-//! (single key/value schema, one shared ABI, reused by both hooks) is the
-//! consolidation's real payoff either way — see [`crate::Governance`]'s
-//! doc comment; using raw calls at these call sites costs nothing there,
-//! since they still use the field's own declared key bytes.
+//! would push the `govern` entry's nesting to 63, over the 32-level
+//! limit; the raw calls above keep it well under that limit. The
+//! *declaration* (single key/value schema, one shared ABI, reused by both
+//! hooks) is the consolidation's real payoff either way — see
+//! [`crate::Governance`]'s doc comment; using raw calls at these call
+//! sites costs nothing there, since they still use the field's own
+//! declared key bytes.
 //! `RR`/`RD` reads in `reward` (2 call sites total — `reward` is the only
 //! caller) stay on the typed [`crate::Governance::reward_rate`]/
 //! [`crate::Governance::reward_delay`] accessors: low enough call-site
@@ -73,17 +74,31 @@ pub fn vote_key(topic_type: u8, topic_id: u8, layer: u8, voter: &AccountId) -> [
     k
 }
 
-/// Builds a vote-count key.
+/// Builds a vote-count key. `value` is always exactly 8, 20, or 32 bytes
+/// (reward/hook/seat topics respectively — see the module doc comment);
+/// dispatching on that closed set, one fixed-size `copy_from_slice` per
+/// arm, is genuinely straight-line code — the same "compare/copy a
+/// fixed-size buffer without a loop" idiom `rshooks::buf_eq`'s
+/// `buf_eq_8`/`_20`/`_32` helpers use, applied to a copy instead of a
+/// comparison. An out-of-the-closed-set length (unreachable for a
+/// well-formed topic) leaves the value bytes zeroed rather than guessing a
+/// placement.
+///
+/// Deliberately loop-free and `guard!`-free: this function is
+/// force-inlined at all three of its call sites (govern's two direct
+/// calls plus one inside [`super::garbage_collect_votes`]'s topic scan),
+/// and `guard!`'s `(1 << 31) + line!()` id resolves to the source line it
+/// is written on — so every inlined copy would share one runtime
+/// iteration counter. With the scan calling this up to 64 times, a loop
+/// here would charge well over a thousand iterations against that single
+/// counter, far past any per-call `maxiter`.
 pub fn vote_count_key(topic_type: u8, topic_id: u8, layer: u8, value: &[u8]) -> [u8; 32] {
     let mut k = [0u8; 32];
-    let start = 32usize.saturating_sub(value.len());
-    let mut i = 0usize;
-    while i < value.len() {
-        guard!(32);
-        if let (Some(slot), Some(&b)) = (k.get_mut(start.wrapping_add(i)), value.get(i)) {
-            *slot = b;
-        }
-        i = i.wrapping_add(1);
+    match value.len() {
+        8 => k[24..32].copy_from_slice(value),
+        20 => k[12..32].copy_from_slice(value),
+        32 => k[0..32].copy_from_slice(value),
+        _ => {}
     }
     k[0] = b'C';
     k[1] = topic_type;
