@@ -127,9 +127,16 @@ impl MintTxn {
     #[inline(always)]
     fn push<const N: usize>(&mut self, src: &[u8; N]) -> usize {
         let start = self.len;
-        let Some(end) = start.checked_add(N) else {
-            fail(b"reward: mint txn overflow");
-        };
+        // `wrapping_add`, not `checked_add`, for this range's end: `start`
+        // never exceeds the small compile-time constant `MAX_LEN`, so
+        // `start + N` cannot overflow `usize`, and `get_mut` below still
+        // catches a bad range safely (`None`, not a panic) if it somehow
+        // did. This whole `push`/`push_field_header`/`push_u32_field`
+        // chain gets force-inlined at every call site inside
+        // `push_l1_seat_entries`'s guarded seat loop, so a dead
+        // `checked_add`/`else { fail(..) }` branch here is multiplied by
+        // the loop's guard maxiter along with everything else.
+        let end = start.wrapping_add(N);
         let Some(dst) = self.buf.get_mut(start..end) else {
             fail(b"reward: mint txn overflow");
         };
@@ -213,9 +220,7 @@ impl MintTxn {
     /// [`Self::start`] and before any [`Self::push_entry`].
     pub fn write_emit_details(&mut self) {
         let start = self.len;
-        let Some(end) = start.checked_add(EMIT_DETAILS_MAX_LEN) else {
-            fail(b"reward: mint txn overflow");
-        };
+        let end = start.wrapping_add(EMIT_DETAILS_MAX_LEN); // range end; see `push`'s overflow comment
         let Some(region) = self.buf.get_mut(start..end) else {
             fail(b"reward: mint txn overflow");
         };
@@ -227,7 +232,10 @@ impl MintTxn {
         // hook declares neither) may be less than the reserved worst-case
         // region; only the actually-written prefix is part of the
         // transaction, so the cursor advances by `written`, not by the
-        // full reservation.
+        // full reservation. `written` is host-provided, not a value this
+        // module bounds itself, and this assignment isn't a slice range
+        // endpoint any `get_mut` here re-checks — `checked_add`, not
+        // `wrapping_add`.
         let Some(new_len) = start.checked_add(written) else {
             fail(b"reward: mint txn overflow");
         };
@@ -244,9 +252,7 @@ impl MintTxn {
 
         self.push_field_header(HDR_AMOUNT);
         let amount_start = self.len;
-        let Some(amount_end) = amount_start.checked_add(8) else {
-            fail(b"reward: mint txn overflow");
-        };
+        let amount_end = amount_start.wrapping_add(8); // range end; see `push`'s overflow comment
         let Some(dst) = self.buf.get_mut(amount_start..amount_end) else {
             fail(b"reward: mint txn overflow");
         };
@@ -271,24 +277,25 @@ impl MintTxn {
     pub fn finish(&mut self, current_ledger_seq: u32) -> &[u8] {
         self.push(&[ARRAY_END]);
 
+        // `fls`/`lls` are serialized *values* (a ledger sequence plus a
+        // small literal offset), not slice-range endpoints any `get_mut`
+        // below re-checks, so they stay on `checked_add` rather than the
+        // `wrapping_add` this file otherwise uses for range ends bounded by
+        // `MAX_LEN` — see `push`'s overflow comment for that case.
         let Some(fls) = current_ledger_seq.checked_add(1) else {
             fail(b"reward: mint txn overflow");
         };
         let Some(lls) = current_ledger_seq.checked_add(5) else {
             fail(b"reward: mint txn overflow");
         };
-        let Some(fls_end) = self.fls_offset.checked_add(4) else {
-            fail(b"reward: mint txn overflow");
-        };
+        let fls_end = self.fls_offset.wrapping_add(4); // range end; see `push`'s overflow comment
         let Some(fls_dst) = self.buf.get_mut(self.fls_offset..fls_end) else {
             fail(b"reward: mint txn overflow");
         };
         for (d, s) in fls_dst.iter_mut().zip(fls.to_be_bytes().iter()) {
             *d = *s;
         }
-        let Some(lls_end) = self.lls_offset.checked_add(4) else {
-            fail(b"reward: mint txn overflow");
-        };
+        let lls_end = self.lls_offset.wrapping_add(4); // range end; see `push`'s overflow comment
         let Some(lls_dst) = self.buf.get_mut(self.lls_offset..lls_end) else {
             fail(b"reward: mint txn overflow");
         };
@@ -303,9 +310,7 @@ impl MintTxn {
             Ok(f) => f,
             Err(_) => fail(b"reward: could not compute GenesisMint fee"),
         };
-        let Some(fee_end) = self.fee_offset.checked_add(8) else {
-            fail(b"reward: mint txn overflow");
-        };
+        let fee_end = self.fee_offset.wrapping_add(8); // range end; see `push`'s overflow comment
         let Some(fee_dst) = self.buf.get_mut(self.fee_offset..fee_end) else {
             fail(b"reward: mint txn overflow");
         };
