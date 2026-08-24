@@ -27,7 +27,7 @@ with a digit, so only the directory is prefixed).
 | 09 | `state-foreign` | `state_foreign`: reading another (hook-parameter-configured) account's hook state | [Hook State](../data/state.md) |
 | 10 | `emit-txn` | `etxn_reserve` + a `txn_template!`-declared Payment/`emit`, with a `cbak` | [Emitting Transactions](../emit/emitting.md) |
 | 12 | `typed-data` | `#[derive(HookData)]`: composite (multi-field) state keys/values and `otxn_param`/`hook_param` structs, in place of hand-packed byte buffers | [Typed Data with Derives](../data/typed-data.md) |
-| 13 | `keylets` | `rshooks::api::keylet`'s 26 typed `keylet_xxx` helpers (one per `KEYLET_*` constant), in place of the single untyped `util_keylet` | [Keylets](../data/keylets.md) |
+| 13 | `keylets` | `rshooks::api::keylet`'s 26 typed `keylet_xxx` helpers (one per `KEYLET_*` constant) and their `keylet_xxx_into` out-param twins, in place of the single untyped `util_keylet` | [Keylets](../data/keylets.md) |
 | 14 | `account-id-macro` | `rshooks::account_id!`: compile-time r-address → `AccountId` decode, cross-checked against `hook_account`/`util_accid`/`util_raddr` | [Reading the Originating Transaction](../data/otxn.md) |
 | 15 | `slot-objects` | the typed slot layer's live acceptance harness: account-root walk, native-amount drops round-trip, parent-clear/child-read, and two 300-iteration loops proving `take_*` recycling and leak-free `slot_path!` failures | [Slots and Ledger Objects](../data/slots.md) |
 | 16 | `typed-results` | typed entry returns (`HookResult`): an idiomatic `?`/`Ok` entry with a `hook_errors!` message clause, alongside a raw `accept!`/`rollback!`-style entry in the same chain | [Accept, Rollback, and Errors](../concepts/errors.md#typed-entry-returns-hookresult) |

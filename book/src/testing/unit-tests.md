@@ -363,7 +363,7 @@ call, `_g` (guard enforcement) excepted:
 | Float (XFL) | the full `float_*` family (`float_set`, arithmetic, comparison, `float_sto`/`float_sto_set`, `float_int`, `float_log`, `float_root`, ...) — see [XFL: Decimal Floating Point](../data/xfl.md) |
 | Slot | the full `slot_*` family plus `otxn_slot`/`meta_slot`/`xpop_slot` — see [Slots and Ledger Objects](../data/slots.md) |
 | STO | `sto_subfield`, `sto_subarray`, `sto_validate`, `sto_emplace`, `sto_erase` |
-| Util / Keylets | `util_sha512h`, `util_accid`, `util_raddr`, `util_verify`, `util_keylet`, and all 26 typed `keylet_*` helpers — see [Keylets](../data/keylets.md) |
+| Util / Keylets | `util_sha512h`, `util_accid`, `util_raddr`, `util_verify`, `util_keylet`/`util_keylet_buf`, and all 26 typed `keylet_*` helpers plus their `keylet_*_into` out-param twins — see [Keylets](../data/keylets.md) |
 | Callbacks | `invoke_cbak::<C>(index, outcome)` runs a declared `#[cbak(index)]` body directly — see [Callback invocation](#callback-cbak-invocation) above |
 
 `hook_param`'s override precedence (`hook_param_set`, P2-E) reduces

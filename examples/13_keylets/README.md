@@ -5,7 +5,11 @@
 How to use `rshooks::api::keylet`'s 26 typed `keylet_xxx` helpers — one
 per `rshooks_core::consts::KEYLET_*` constant — in place of the single
 untyped `util_keylet`/`util_keylet_buf` (which takes a `keylet_type` plus
-six same-typed `u32` components meaning something different per type), and
+six same-typed `u32` components meaning something different per type); this
+hook specifically reaches for each type's `keylet_xxx_into` out-param twin
+rather than the by-value form, since every result here is immediately
+borrowed into `state_set` anyway (see `rshooks::api::keylet`'s module doc
+comment's "`_into` twins" section for why that avoids an extra copy); and
 how 25 of those 26 results get independently verified end-to-end against
 expected values recomputed in TypeScript (`e2e/test/keylets.test.ts`) — the
 one exception, `KEYLET_TICKET`, is a real, live-tested host limitation, not
@@ -76,25 +80,28 @@ No extra flags — see "Toolchain note" below for why this needs neither
 
 ## Toolchain note: `Keylet`'s 34 bytes, at this workspace's `opt-level = 3`
 
-`util_keylet_buf` (which every `keylet_xxx` helper is built on)
-zero-initializes a local `Keylet::default()` scratch buffer — 34 bytes —
-before the host call fills it. `wasm32v1-none` codegen only keeps a local
-zero-init as plain inlined stores up to a fixed byte threshold that
+This hook's own `main` zero-initializes a fresh local `Keylet::default()`
+scratch buffer — 34 bytes — before each `keylet_xxx_into` call fills it (25
+such locals total, one per call site; see the module doc comment for why
+`_into` rather than the by-value form). `wasm32v1-none` codegen only keeps
+a local zero-init as plain inlined stores up to a fixed byte threshold that
 depends on `opt-level`: **32 bytes** at `"z"`/`"s"`, but **64 bytes** at
 `1`/`2`/`3` (see `docs/DESIGN.md`'s §2 C6 for the full measurement and
-rationale). `examples/Cargo.toml`'s workspace-wide `opt-level = 3`
-default puts `Keylet`'s 34 bytes comfortably under that 64-byte ceiling,
-so the zero-init lowers to plain stores — never the unguarded `memset`
-call a `"z"`/`"s"` build of the same source would need
-`--auto-guard --default-maxiter 34` to guard (see
-`rshooks::api::util::util_keylet_buf`'s own doc comment for that case).
+rationale, and `rshooks::api::util::util_keylet_buf`'s own doc comment for
+the same threshold applied to *its* internal scratch buffer, the by-value
+helpers' equivalent case). `examples/Cargo.toml`'s workspace-wide
+`opt-level = 3` default puts `Keylet`'s 34 bytes comfortably under that
+64-byte ceiling, so every one of these 25 zero-inits lowers to plain
+stores — never the unguarded `memset` call a `"z"`/`"s"` build of the same
+source would need `--auto-guard --default-maxiter 34` to guard.
 
 Measured (25 of the 26 `keylet_xxx` calls actually exercised — see "e2e
-verification scope" below for why not all 26): **4150** worst-case
+verification scope" below for why not all 26): **3165** worst-case
 instructions, 1 nesting level after `rshooks-build`'s own ladder-flattening
-pass, 9638 bytes. This workspace builds every crate — including
+pass, 7295 bytes. This workspace builds every crate — including
 `rshooks`/`rshooks-core` — at `opt-level = 3` (`docs/DESIGN.md`'s §2 C6);
-this hook's 25 near-identical `compute`/`store` call sites make its
+this hook's 25 near-identical `check`/`store` call sites (each preceded by
+its own `keylet_xxx_into` call filling that call's `Keylet` local) make its
 inlining more sensitive to that setting than most examples. Still
 comfortably under the 65,535-byte `SetHook` limit, and still guard-clean
 (no `--auto-guard` needed) — see the workspace root's `docs/DESIGN.md` §2
@@ -110,11 +117,11 @@ C6 for the full instruction-count table across all examples.
 - Missing `sfAccount`/`sfDestination` on the originating transaction (should
   never happen for a real `Invoke`) → rollback, codes `1`/`2`.
 - A `state_set` failure (should never happen) → rollback, code `4`.
-- A `keylet_xxx` compute failure (should never happen for the 25 this hook
-  actually calls) → rollback, code `100 + KEYLET_*`'s own numeric value
-  (`101`..`126`) — identifies exactly which type failed, see `compute`'s
-  own doc comment in `src/lib.rs`. This is how the `Ticket` limitation
-  below was actually found and isolated.
+- A `keylet_xxx_into` compute failure (should never happen for the 25 this
+  hook actually calls) → rollback, code `100 + KEYLET_*`'s own numeric
+  value (`101`..`126`) — identifies exactly which type failed, see
+  `check`'s own doc comment in `src/lib.rs`. This is how the `Ticket`
+  limitation below was actually found and isolated.
 
 ## e2e verification scope
 

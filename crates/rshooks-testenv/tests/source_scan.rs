@@ -5,15 +5,15 @@
 //!    unbridged sections together) and a fresh grep of every direct
 //!    `rshooks_core::<fn>(` call site in the bridged families under
 //!    `crates/rshooks/src/api/*.rs`, plus `crates/rshooks/src/xfl.rs`/
-//!    `xfl_unchecked.rs` and `api/keylet.rs`'s `util_keylet_buf(` calls (see
-//!    [`find_raw_call_in_keylet`]'s doc comment and the inventory file's own
-//!    header for why those two need different matching than the rest). This
-//!    only keeps the committed *inventory* honest against a fresh grep — it
-//!    does not by itself prove any call site is actually intercepted under
-//!    `testenv`; a raw call and its own bridging `#[cfg(feature =
-//!    "testenv", ...)]` guard could both vanish together (e.g. an entire
-//!    intercepted block deleted) without this test noticing, since the grep
-//!    and the inventory would still agree.
+//!    `xfl_unchecked.rs` and `api/keylet.rs`'s `util_keylet_buf(`/
+//!    `util_keylet(` calls (see [`find_raw_call_in_keylet`]'s doc comment
+//!    and the inventory file's own header for why those two need different
+//!    matching than the rest). This only keeps the committed *inventory*
+//!    honest against a fresh grep — it does not by itself prove any call
+//!    site is actually intercepted under `testenv`; a raw call and its own
+//!    bridging `#[cfg(feature = "testenv", ...)]` guard could both vanish
+//!    together (e.g. an entire intercepted block deleted) without this test
+//!    noticing, since the grep and the inventory would still agree.
 //! 2. [`every_raw_call_site_has_an_enclosing_testenv_guard`] is the test that
 //!    actually catches that case: for every raw call site the grep in (1)
 //!    finds, it requires the literal text `feature = "testenv"` to appear
@@ -154,21 +154,36 @@ fn find_raw_call(line: &str) -> Option<String> {
     }
 }
 
-/// `api/keylet.rs`'s 26 typed helpers each intercept the backend with their
-/// own real slices *before* falling through to `util_keylet_buf` (a
+/// `api/keylet.rs`'s 26 `_into` out-param twins each intercept the backend
+/// with their own real slices *before* falling through to `util_keylet` — a
 /// crate-local composing call, not a bare `rshooks_core::<fn>(` one — see
 /// `crates/rshooks/testenv-call-sites.txt`'s header and
 /// [`rshooks_core::backend::KeyletArg`]'s doc comment for the full
-/// rationale). [`find_raw_call`]'s `"rshooks_core::"` needle never matches
-/// those calls, so this file's own raw-call marker is
-/// `util_keylet_buf(` instead.
+/// rationale. The 26 by-value helpers delegate to their `_into` twin
+/// instead of calling `util_keylet`/`util_keylet_buf` themselves, so they
+/// carry no raw call site of their own. [`find_raw_call`]'s
+/// `"rshooks_core::"` needle never matches a crate-local composing call
+/// either way, so this file's own raw-call markers are `util_keylet_buf(`
+/// and `util_keylet(` instead — `util_keylet_buf(` is checked first only so
+/// a match reports the more specific name; a bare `util_keylet(` can never
+/// occur as a substring of `util_keylet_buf(` (the next byte there is `_`,
+/// not `(`), so the two checks never race.
 fn find_raw_call_in_keylet(line: &str) -> Option<String> {
-    const NEEDLE: &str = "util_keylet_buf(";
-    if line.contains(NEEDLE) {
-        Some("util_keylet_buf".to_string())
-    } else {
-        None
+    if line.contains("util_keylet_buf(") {
+        return Some("util_keylet_buf".to_string());
     }
+    // A bare `util_keylet(` call, not `.util_keylet(` (`testenv_keylet`'s own
+    // `b.util_keylet(...)` backend method call, an unrelated same-named
+    // method on `HostBackend`). Checks every occurrence on the line, not
+    // just the first, so a line containing both a method call and a real
+    // call still matches.
+    let has_real_call = line
+        .match_indices("util_keylet(")
+        .any(|(idx, _)| idx == 0 || line.as_bytes().get(idx - 1) != Some(&b'.'));
+    if has_real_call {
+        return Some("util_keylet".to_string());
+    }
+    None
 }
 
 fn grep_raw_call_sites(api_dir: &Path) -> BTreeSet<Row> {
