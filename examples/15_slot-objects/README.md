@@ -19,11 +19,11 @@ which passed. A full pass is `2047` (`0b111_1111_1111`).
 | 0 | 1 | **Account-root walk** — `from_keylet` on an account keylet, then typed reads of `sfSequence`/`sfAccount`/`sfBalance` | host stubs return `NotImplemented` for every call; nothing about a real object is observable |
 | 1 | 2 | **Drops round-trip** — `as_xfl()` on a native amount, scaled back with `to_int(6, false)`, equals the raw wire drops | `as_xfl` on a native amount yields **XAH units**, not drops (mantissa = drops, exponent −6, normalized). Round 1 of the design review corrected this by a factor of 10⁶; this is the pin |
 | 2 | 4 | **Parent-clear then child-read** — derive a child, clear the parent, *then* read the child | `slot_path!` clears each intermediate as soon as its child exists. That is only sound if the host **copies** the parent's storage into the child slot rather than aliasing it |
-| 3 | 8 | **`take_*` past the 255-slot budget** — 300 iterations of derive-read-release | the budget is 255 slots per execution. The same loop with a plain `value()` stops at iteration 256 with `NO_FREE_SLOTS`; this proves `take_value()` really frees |
-| 4 | 16 | **Failing mid-hop leaks nothing** — 300 `slot_path!` walks whose second hop always fails | the ladder clears the current handle *unconditionally*, before inspecting the result, so a later failing hop cannot leak the parent that produced it. Repeating past the budget is what makes a leak visible |
-| 5 | 32 | **Repeated successful navigation** — 260 three-hop walks, each leaf read with `take_value()` | the success path has to recycle too; 260 iterations move 780 slots through a 255-slot budget |
-| 6 | 64 | **Failure-path `take_*` cleanup** — 260 *failing* `take_value()` reads | the other half of the `take_*` contract: it clears on failure as well as success, and only that keeps this inside the budget |
-| 7 | 128 | **Failed `try_cast` cleans up** — 260 casts that cannot hold | any `try_cast` failure consumes the handle and best-effort clears the slot; repeating past the budget is what proves the clear happened |
+| 3 | 8 | **`take_*` past the 255-slot budget** — 256 iterations of derive-read-release | the budget is 255 slots per execution; the root itself holds one slot, so the same loop with a plain `value()` runs out at iteration 255 — this proves `take_value()` really frees |
+| 4 | 16 | **Failing mid-hop leaks nothing** — 256 `slot_path!` walks whose second hop always fails | the ladder clears the current handle *unconditionally*, before inspecting the result, so a later failing hop cannot leak the parent that produced it. Repeating past the budget is what makes a leak visible |
+| 5 | 32 | **Repeated successful navigation** — 256 three-hop walks, each leaf read with `take_value()` | the success path has to recycle too; 256 iterations move 768 slots through a 255-slot budget |
+| 6 | 64 | **Failure-path `take_*` cleanup** — 256 *failing* `take_value()` reads | the other half of the `take_*` contract: it clears on failure as well as success, and only that keeps this inside the budget |
+| 7 | 128 | **Failed `try_cast` cleans up** — 256 casts that cannot hold | any `try_cast` failure consumes the handle and best-effort clears the slot; repeating past the budget is what proves the clear happened |
 | 8 | 256 | **A root slot casts to `STObject`** | a root slot reports a high-level object code (serialized type ID 10001–10004), not the ordinary 14 — the predicate has to accept those, and still reject a wrong target |
 | 9 | 512 | **`u64` reads agree** between `value()` and raw bytes | `u64::value()` decodes wire bytes rather than using as-int64 mode, which rejects bit-63 values (`sfExchangeRate` sets one). An account root has no such field, so this pins the two paths agreeing on a real value |
 | 10 | 1024 | **IOU `as_xfl`** — the sender's trust-line balance, `is_native() == false`, round-tripped to the amount paid in | the account root's balance is always native, so the IOU branch of `slot_float` needs a `RippleState` object. With bit 1 this covers both branches live |
@@ -43,9 +43,9 @@ with worst-case instructions growing linearly (46 / 94 / 255).
 
 ## Cost
 
-Each recycling loop runs 260 iterations of real host calls — just past the
+Each recycling loop runs 256 iterations of real host calls — just past the
 255-slot budget, which is the only property that matters — so the worst-case
-instruction count is large by design (~62k). This hook exists to exhaust
+instruction count is large by design (~63k). This hook exists to exhaust
 things, not to be cheap; `examples/08_slot-ledger` is where the layer's
 zero-cost claim is measured.
 
@@ -55,9 +55,11 @@ check here:
 - **The guard checker sums every loop in the module.** A `match` over check
   groups does not make them alternatives to it, so all four loops are paid
   for in one worst-case figure against the Hook API's 65,535 ceiling. That
-  is why the iteration count is 260 rather than a rounder 300, and why the
-  simple `take_*` loop was folded into the successful walk (whose leaf uses
-  `take_value()`, so one loop proves both recycling contracts).
+  is why the iteration count is 256 — the minimum that exceeds the 255-slot
+  budget — not a round number picked for looks, and why the successful walk
+  doubles as the simple `take_*` proof: its leaf `take_value()` read is the
+  only place that mechanism needs testing, so one loop proves both
+  recycling contracts.
 - **One check group per invocation.** Running every loop in a single
   execution needed ~130k instructions. The originating transaction carries a
   `CHK` parameter naming one group; the e2e submits one `Invoke` per group

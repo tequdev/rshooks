@@ -39,7 +39,7 @@ directory is prefixed) and matches what its own README, `Cargo.toml`, and
 | 12 | [`typed-data`](12_typed-data) | `#[derive(HookData)]`: composite (multi-field) state keys/values and `otxn_param`/`hook_param` structs, in place of hand-packed byte buffers |
 | 13 | [`keylets`](13_keylets) | `rshooks::api::keylet`'s 26 typed `keylet_xxx` helpers (one per `KEYLET_*` constant), in place of the single untyped `util_keylet` |
 | 14 | [`account-id-macro`](14_account-id-macro) | `rshooks::account_id!`: compile-time r-address -> `AccountId` decode, cross-checked against `hook_account`/`util_accid`/`util_raddr` |
-| 15 | [`slot-objects`](15_slot-objects) | the typed slot layer's live acceptance harness: account-root walk, native-amount drops round-trip, parent-clear/child-read, and two 300-iteration loops proving `take_*` recycling and leak-free `slot_path!` failures |
+| 15 | [`slot-objects`](15_slot-objects) | the typed slot layer's live acceptance harness: account-root walk, native-amount drops round-trip, parent-clear/child-read, and four 256-iteration loops proving `take_*` recycling on both the success and failure paths, leak-free `slot_path!` failures, and cleanup after a failed `try_cast` |
 | 16 | [`typed-results`](16_typed-results) | typed entry returns (`HookResult`): an idiomatic `?`/`Ok` entry with a `hook_errors!` message clause, alongside a raw `accept!`/`rollback!`-style entry in the same chain |
 
 ## 80+: Production hooks in Rust

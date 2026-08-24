@@ -21,7 +21,9 @@ import {
 import { HookFlags } from 'xahau/dist/npm/models/common/xahau'
 
 const namespace = 'rshooks-e2e-slot-objects'
-const WORST_CASE_INSTRUCTIONS = 61658
+// The hook's static worst case, from out/current/0.main.metadata.json (WCE.hook).
+// Live counts run one group per Invoke, so they sit well under this.
+const WORST_CASE_INSTRUCTIONS = 62839
 
 const BIT_ACCOUNT_WALK = 1
 const BIT_DROPS_ROUNDTRIP = 2
@@ -211,7 +213,7 @@ describe('slot-objects (typed slot layer)', () => {
     expect(checks & BIT_ROOT_CAST).toBe(BIT_ROOT_CAST)
   })
 
-  it('survives 260 successful three-hop walks without exhausting the slots', () => {
+  it('survives 256 successful three-hop walks without exhausting the slots', () => {
     // Recycle slots to remain below the 255-slot limit.
     expect(checks & BIT_DEEP_LOOP).toBe(BIT_DEEP_LOOP)
     expect(checks & BIT_TAKE_LOOP).toBe(BIT_TAKE_LOOP)
