@@ -148,62 +148,30 @@ impl From<i64> for HookError {
         if code == rshooks_core::INVALID_FLOAT {
             return HookError::InvalidFloat;
         }
-        const TABLE: [Option<HookError>; 45] = [
-            Some(HookError::OutOfBounds),
-            Some(HookError::InternalError),
-            Some(HookError::TooBig),
-            Some(HookError::TooSmall),
-            Some(HookError::DoesntExist),
-            Some(HookError::NoFreeSlots),
-            Some(HookError::InvalidArgument),
-            Some(HookError::AlreadySet),
-            Some(HookError::PrerequisiteNotMet),
-            Some(HookError::FeeTooLarge),
-            Some(HookError::EmissionFailure),
-            Some(HookError::TooManyNonces),
-            Some(HookError::TooManyEmittedTxn),
-            Some(HookError::NotImplemented),
-            Some(HookError::InvalidAccount),
-            Some(HookError::GuardViolation),
-            Some(HookError::InvalidField),
-            Some(HookError::ParseError),
-            Some(HookError::RcRollback),
-            Some(HookError::RcAccept),
-            Some(HookError::NoSuchKeylet),
-            Some(HookError::NotAnArray),
-            Some(HookError::NotAnObject),
-            None, // -24: unassigned upstream (INVALID_FLOAT is -10024, handled above)
-            Some(HookError::DivisionByZero),
-            Some(HookError::MantissaOversized),
-            Some(HookError::MantissaUndersized),
-            Some(HookError::ExponentOversized),
-            Some(HookError::ExponentUndersized),
-            Some(HookError::XflOverflow),
-            Some(HookError::NotIouAmount),
-            Some(HookError::NotAnAmount),
-            Some(HookError::CantReturnNegative),
-            Some(HookError::NotAuthorized),
-            Some(HookError::PreviousFailurePreventsRetry),
-            Some(HookError::TooManyParams),
-            Some(HookError::InvalidTxn),
-            Some(HookError::ReserveInsufficient),
-            Some(HookError::ComplexNotSupported),
-            Some(HookError::DoesNotMatch),
-            Some(HookError::InvalidKey),
-            Some(HookError::NotAString),
-            Some(HookError::MemOverlap),
-            Some(HookError::TooManyStateModifications),
-            Some(HookError::TooManyNamespaces),
+        // A byte tag table avoids loading/copying payload-sized enum values.
+        // 45 is the sentinel for the unassigned -24 gap.
+        const TABLE: [u8; 45] = [
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 45,
+            24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
         ];
         let idx = code.wrapping_neg().wrapping_sub(1);
-        match usize::try_from(idx)
+        let Some(tag) = usize::try_from(idx)
             .ok()
             .and_then(|i| TABLE.get(i))
             .copied()
-            .flatten()
-        {
-            Some(e) => e,
-            None => HookError::Unknown(code),
+        else {
+            return HookError::Unknown(code);
+        };
+        if tag >= 45 {
+            return HookError::Unknown(code);
+        }
+        // SAFETY: `HookError` is `#[repr(u8)]`; tags 0..=44 are exactly its
+        // fieldless variants in declaration order. Zeroing initializes the
+        // complete enum storage before the valid discriminant is written.
+        let mut error = core::mem::MaybeUninit::<HookError>::zeroed();
+        unsafe {
+            error.as_mut_ptr().cast::<u8>().write(tag);
+            error.assume_init()
         }
     }
 }
@@ -328,6 +296,96 @@ mod tests {
                 code,
                 "round-trip failed for {code}"
             );
+        }
+    }
+
+    #[test]
+    fn every_known_code_maps_to_its_named_variant() {
+        let mappings = [
+            (rshooks_core::OUT_OF_BOUNDS, HookError::OutOfBounds),
+            (rshooks_core::INTERNAL_ERROR, HookError::InternalError),
+            (rshooks_core::TOO_BIG, HookError::TooBig),
+            (rshooks_core::TOO_SMALL, HookError::TooSmall),
+            (rshooks_core::DOESNT_EXIST, HookError::DoesntExist),
+            (rshooks_core::NO_FREE_SLOTS, HookError::NoFreeSlots),
+            (rshooks_core::INVALID_ARGUMENT, HookError::InvalidArgument),
+            (rshooks_core::ALREADY_SET, HookError::AlreadySet),
+            (
+                rshooks_core::PREREQUISITE_NOT_MET,
+                HookError::PrerequisiteNotMet,
+            ),
+            (rshooks_core::FEE_TOO_LARGE, HookError::FeeTooLarge),
+            (rshooks_core::EMISSION_FAILURE, HookError::EmissionFailure),
+            (rshooks_core::TOO_MANY_NONCES, HookError::TooManyNonces),
+            (
+                rshooks_core::TOO_MANY_EMITTED_TXN,
+                HookError::TooManyEmittedTxn,
+            ),
+            (rshooks_core::NOT_IMPLEMENTED, HookError::NotImplemented),
+            (rshooks_core::INVALID_ACCOUNT, HookError::InvalidAccount),
+            (rshooks_core::GUARD_VIOLATION, HookError::GuardViolation),
+            (rshooks_core::INVALID_FIELD, HookError::InvalidField),
+            (rshooks_core::PARSE_ERROR, HookError::ParseError),
+            (rshooks_core::RC_ROLLBACK, HookError::RcRollback),
+            (rshooks_core::RC_ACCEPT, HookError::RcAccept),
+            (rshooks_core::NO_SUCH_KEYLET, HookError::NoSuchKeylet),
+            (rshooks_core::NOT_AN_ARRAY, HookError::NotAnArray),
+            (rshooks_core::NOT_AN_OBJECT, HookError::NotAnObject),
+            (rshooks_core::INVALID_FLOAT, HookError::InvalidFloat),
+            (rshooks_core::DIVISION_BY_ZERO, HookError::DivisionByZero),
+            (
+                rshooks_core::MANTISSA_OVERSIZED,
+                HookError::MantissaOversized,
+            ),
+            (
+                rshooks_core::MANTISSA_UNDERSIZED,
+                HookError::MantissaUndersized,
+            ),
+            (
+                rshooks_core::EXPONENT_OVERSIZED,
+                HookError::ExponentOversized,
+            ),
+            (
+                rshooks_core::EXPONENT_UNDERSIZED,
+                HookError::ExponentUndersized,
+            ),
+            (rshooks_core::XFL_OVERFLOW, HookError::XflOverflow),
+            (rshooks_core::NOT_IOU_AMOUNT, HookError::NotIouAmount),
+            (rshooks_core::NOT_AN_AMOUNT, HookError::NotAnAmount),
+            (
+                rshooks_core::CANT_RETURN_NEGATIVE,
+                HookError::CantReturnNegative,
+            ),
+            (rshooks_core::NOT_AUTHORIZED, HookError::NotAuthorized),
+            (
+                rshooks_core::PREVIOUS_FAILURE_PREVENTS_RETRY,
+                HookError::PreviousFailurePreventsRetry,
+            ),
+            (rshooks_core::TOO_MANY_PARAMS, HookError::TooManyParams),
+            (rshooks_core::INVALID_TXN, HookError::InvalidTxn),
+            (
+                rshooks_core::RESERVE_INSUFFICIENT,
+                HookError::ReserveInsufficient,
+            ),
+            (
+                rshooks_core::COMPLEX_NOT_SUPPORTED,
+                HookError::ComplexNotSupported,
+            ),
+            (rshooks_core::DOES_NOT_MATCH, HookError::DoesNotMatch),
+            (rshooks_core::INVALID_KEY, HookError::InvalidKey),
+            (rshooks_core::NOT_A_STRING, HookError::NotAString),
+            (rshooks_core::MEM_OVERLAP, HookError::MemOverlap),
+            (
+                rshooks_core::TOO_MANY_STATE_MODIFICATIONS,
+                HookError::TooManyStateModifications,
+            ),
+            (
+                rshooks_core::TOO_MANY_NAMESPACES,
+                HookError::TooManyNamespaces,
+            ),
+        ];
+        for (code, expected) in mappings {
+            assert_eq!(HookError::from(code), expected, "wrong variant for {code}");
         }
     }
 
