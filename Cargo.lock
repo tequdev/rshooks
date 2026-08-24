@@ -550,7 +550,7 @@ dependencies = [
 
 [[package]]
 name = "rshooks"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "rshooks-core",
  "rshooks-macros",
@@ -559,7 +559,7 @@ dependencies = [
 
 [[package]]
 name = "rshooks-build"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "cc",
@@ -575,14 +575,14 @@ dependencies = [
 
 [[package]]
 name = "rshooks-core"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "sha2",
 ]
 
 [[package]]
 name = "rshooks-macros"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "serde_json",
  "syn 3.0.3",
@@ -590,7 +590,7 @@ dependencies = [
 
 [[package]]
 name = "rshooks-testenv"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
  "k256",
@@ -1010,7 +1010,7 @@ checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 
 [[package]]
 name = "xtask"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",

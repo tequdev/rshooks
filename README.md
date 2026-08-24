@@ -19,6 +19,7 @@ design.
 | `rshooks-macros` | Procedural macros for `rshooks` (the `#[hooks]` struct/impl attribute, XFL literals, and more). |
 | `rshooks` | `no_std`, ergonomic wrapper over `rshooks-core` (`Result`-based APIs, typed buffers, XFL type, guard/trace macros, panic handler). |
 | `rshooks-build` | CLI that turns a Rust crate into one or more SetHook-valid WASM binaries: a discovery build plus one build per declared Hook, each cleaned and guard-checked natively in Rust. |
+| `rshooks-testenv` | Off-chain unit-test harness with a mock Hook host, for testing Hook logic without WASM or a running Xahau node. |
 
 `examples/` (a separate workspace) holds runnable Hooks built with
 `rshooks`.
