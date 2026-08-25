@@ -13,6 +13,7 @@ pub mod error;
 mod errors;
 pub mod exit;
 mod macros;
+pub mod remit;
 pub mod sfield;
 pub mod slot_obj;
 pub mod state;
@@ -948,6 +949,7 @@ pub mod prelude {
     pub use crate::error::{HookError, Result};
     pub use crate::exit::{Accept, HookResult, Rollback};
     pub use crate::macros::no_unroll;
+    pub use crate::remit::{RemitBuilder, RemitError};
     pub use crate::sfield::*;
     pub use crate::slot_obj::{AmountBytes, CastTarget, IssueData, SlotKey, SlotObject};
     pub use crate::state::{
