@@ -16,7 +16,9 @@ import { calculateHookOn } from 'xahau'
 import { HookFlags } from 'xahau/dist/npm/models/common/xahau'
 
 const namespace = 'rshooks-e2e-reward'
-const WORST_CASE_HOOK_INSTRUCTIONS = 13269
+// The hook's static worst case, from
+// out/current/1.reward.metadata.json (WCE.hook).
+const WORST_CASE_HOOK_INSTRUCTIONS = 14169
 
 describe('reward', () => {
   let testContext: XrplIntegrationTestContext

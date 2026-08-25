@@ -141,6 +141,17 @@ risks hiding real bugs regardless of whether the loop ends up unrolled —
 only its effect on the *reported number* changes with optimization level,
 not the underlying correctness argument for choosing `maxiter` precisely.
 
+**One nuance to this file's own "unrolling drops WCE" observation**: that
+holds for a small loop unrolled *on its own*. If the loop being unrolled
+*wraps* another `guard!`-protected loop, unrolling instead physically
+duplicates that inner loop once per outer iteration, and the checker then
+charges its full cost per duplicate — silently multiplying, not
+amortizing, the inner loop's contribution. `examples/80_governance` hit
+exactly this; see the book's
+[Guards and Loops](../../book/src/concepts/guards.md#a-nested-guarded-loop-pitfall-unrolling-that-duplicates-the-inner-loop)
+page and `rshooks::no_unroll`'s doc comment for the full mechanism and the
+fix.
+
 ## Build
 
 ```sh
