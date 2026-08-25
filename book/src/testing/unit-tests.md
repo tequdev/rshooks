@@ -35,11 +35,11 @@ neither of them linked into its wasm artifact.
 crate-type = ["cdylib", "rlib"]   # rlib only needed for tests/ integration tests
 
 [dependencies]
-rshooks = { version = "0.1.0", features = ["host-panic-handler"] }
+rshooks = { version = "0.1.1", features = ["host-panic-handler"] }
 
 [dev-dependencies]
-rshooks = { version = "0.1.0", features = ["testenv"] }
-rshooks-testenv = "0.1.0"
+rshooks = { version = "0.1.1", features = ["testenv"] }
+rshooks-testenv = "0.1.1"
 ```
 
 Declaring `rshooks` twice — once in `[dependencies]`, once in
