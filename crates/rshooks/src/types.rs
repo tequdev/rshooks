@@ -59,6 +59,26 @@
 //! otxn_field_exact(sfAccount)?;`, no turbofish, the expected length coming
 //! from the annotated return type rather than a caller-supplied `N`. See
 //! [`crate::convert::FixedRead`]'s doc comment for the full story.
+//!
+//! `==`/`!=` on any of these ten types is loop-free: `PartialEq` is a
+//! hand-written impl delegating to the matching [`crate::buf_eq`] function
+//! rather than a derive (derived `==` on a `[u8; N]`-backed type compiles to
+//! a `memcmp` loop on `wasm32v1-none`). [`AccountId`] additionally
+//! implements `Ord`/`PartialOrd` (`<`, `>`, ...), also loop-free, giving the
+//! canonical 160-bit big-endian ordering XRPL/Xahau uses to pick the
+//! high/low account of a pair (e.g. a `RippleState` trustline keylet) — see
+//! [`crate::buf_eq::buf_cmp_20`].
+//!
+//! **Breaking change:** `PartialEq` used to be derived; it is now a
+//! hand-written impl (see above), which drops `StructuralPartialEq`. A
+//! `const`/`static` of one of these ten types (e.g. one built with
+//! [`crate::account_id!`]) can therefore no longer be used as a `match`
+//! pattern — `match account { OWNER => ..., _ => ... }` stops compiling.
+//! Rewrite it as `if account == OWNER { ... } else { ... }`. This loss
+//! propagates to any downstream struct/enum holding one of these types as a
+//! field, for the same reason. Values themselves — comparing with `==`,
+//! storing in a `HashMap`/`BTreeMap` key, etc. — are unaffected; only
+//! pattern-matching a value against one of these types' consts is.
 
 use core::marker::PhantomData;
 
@@ -96,14 +116,32 @@ pub const EMIT_DETAILS_MAX_LEN: usize = 138;
 
 /// Defines one `#[repr(transparent)]` fixed-size buffer newtype, plus its
 /// `Deref`/`DerefMut`/`AsRef`/`AsMut`/`From`/`Default`/`zeroed`/`ToBytes`/
-/// `FromBytes`/`FixedRead` impls. See the module doc comment for the
-/// rationale.
+/// `FromBytes`/`FixedRead`/`PartialEq`/`Eq` impls. See the module doc
+/// comment for the rationale.
+///
+/// `PartialEq` is hand-written rather than derived, delegating to `$eq_fn`
+/// (one of the loop-free `crate::buf_eq::buf_eq_*` functions) — derived
+/// `==` on a `[u8; $len]`-backed type compiles to a `memcmp` loop on
+/// `wasm32v1-none`. `Eq` is still derived; a manual `PartialEq` does not
+/// prevent that.
+///
+/// **Breaking:** a hand-written `PartialEq` drops `StructuralPartialEq`, so
+/// a `const`/`static` of `$name` can no longer appear as a `match` pattern
+/// — convert such a site to `if value == THE_CONST { .. }`. See the module
+/// doc comment for the full migration note.
 macro_rules! fixed_bytes_type {
-    ($(#[$meta:meta])* $name:ident, $len:expr) => {
+    ($(#[$meta:meta])* $name:ident, $len:expr, $eq_fn:path) => {
         $(#[$meta])*
         #[repr(transparent)]
-        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        #[derive(Clone, Copy, Debug, Eq)]
         pub struct $name(pub [u8; $len]);
+
+        impl PartialEq for $name {
+            #[inline(always)]
+            fn eq(&self, other: &Self) -> bool {
+                $eq_fn(&self.0, &other.0)
+            }
+        }
 
         impl $name {
             #[doc = concat!(
@@ -207,53 +245,83 @@ macro_rules! fixed_bytes_type {
 fixed_bytes_type!(
     /// A 20-byte AccountID.
     AccountId,
-    ACC_ID_LEN
+    ACC_ID_LEN,
+    crate::buf_eq::buf_eq_20
 );
 fixed_bytes_type!(
     /// A 32-byte hash (transaction ID, ledger hash, ...).
     Hash,
-    HASH_LEN
+    HASH_LEN,
+    crate::buf_eq::buf_eq_32
 );
 fixed_bytes_type!(
     /// A 34-byte Keylet.
     Keylet,
-    KEYLET_LEN
+    KEYLET_LEN,
+    crate::buf_eq::buf_eq_34
 );
 fixed_bytes_type!(
     /// A 32-byte hook state key.
     StateKey,
-    STATE_KEY_LEN
+    STATE_KEY_LEN,
+    crate::buf_eq::buf_eq_32
 );
 fixed_bytes_type!(
     /// A 32-byte hook state namespace.
     NameSpace,
-    NAMESPACE_LEN
+    NAMESPACE_LEN,
+    crate::buf_eq::buf_eq_32
 );
 fixed_bytes_type!(
     /// A 32-byte nonce.
     Nonce,
-    NONCE_LEN
+    NONCE_LEN,
+    crate::buf_eq::buf_eq_32
 );
 fixed_bytes_type!(
     /// A 33-byte public key.
     PublicKey,
-    PUB_KEY_LEN
+    PUB_KEY_LEN,
+    crate::buf_eq::buf_eq_33
 );
 fixed_bytes_type!(
     /// A 20-byte currency code.
     CurrencyCode,
-    CURRENCY_CODE_LEN
+    CURRENCY_CODE_LEN,
+    crate::buf_eq::buf_eq_20
 );
 fixed_bytes_type!(
     /// An 8-byte serialized native (XRP/XAH) amount.
     NativeAmount,
-    NATIVE_AMOUNT_LEN
+    NATIVE_AMOUNT_LEN,
+    crate::buf_eq::buf_eq_8
 );
 fixed_bytes_type!(
     /// A 48-byte serialized IOU amount.
     IouAmount,
-    IOU_AMOUNT_LEN
+    IOU_AMOUNT_LEN,
+    crate::buf_eq::buf_eq_48
 );
+
+// `AccountId` additionally gets a total order: `Ord`/`PartialOrd`, loop-free
+// via `buf_eq::buf_cmp_20`. This is the canonical 160-bit big-endian
+// ordering XRPL/Xahau uses to pick the "high"/"low" account of a pair (e.g.
+// the two accounts in a `RippleState` trustline keylet) — that high/low use
+// is the primary intended use case for `<`/`>` here. `<=`/`>=` come for
+// free from `Ord`'s default methods; no special handling needed.
+impl Ord for AccountId {
+    #[inline(always)]
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        crate::buf_eq::buf_cmp_20(&self.0, &other.0)
+    }
+}
+
+impl PartialOrd for AccountId {
+    #[inline(always)]
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Serialized wire-type markers and typed field codes
@@ -489,6 +557,56 @@ mod tests {
         assert!(erased == crate::sfield::sfAccount);
         assert!(crate::sfield::sfAccount == erased);
         assert!(erased != crate::sfield::sfBalance);
+    }
+
+    #[test]
+    fn account_id_ordering_agrees_with_inner_array_ordering() {
+        let low = AccountId([0x10u8; ACC_ID_LEN]);
+        let high = AccountId([0x20u8; ACC_ID_LEN]);
+        assert_eq!(low.cmp(&high), low.0.cmp(&high.0));
+        assert_eq!(high.cmp(&low), high.0.cmp(&low.0));
+        assert_eq!(low.cmp(&low), low.0.cmp(&low.0));
+    }
+
+    #[test]
+    fn account_id_high_low_pair() {
+        let low = AccountId([0x01; ACC_ID_LEN]);
+        let high = AccountId([0x02; ACC_ID_LEN]);
+
+        assert!(low < high);
+        assert!(high > low);
+        assert!(low == low);
+        assert!(low != high);
+    }
+
+    #[test]
+    fn account_id_cmp_agrees_with_partial_cmp() {
+        let a = AccountId([0x33; ACC_ID_LEN]);
+        let b = AccountId([0x44; ACC_ID_LEN]);
+        assert_eq!(Some(a.cmp(&b)), a.partial_cmp(&b));
+        assert_eq!(Some(b.cmp(&a)), b.partial_cmp(&a));
+        assert_eq!(Some(a.cmp(&a)), a.partial_cmp(&a));
+    }
+
+    /// A non-uniform pair — the leading byte and the trailing byte disagree
+    /// on direction — so this only agrees with the inner-array ordering (and
+    /// only picks the right answer) if the leading byte is compared first,
+    /// same as [`crate::buf_eq::buf_cmp_20`]'s own such test.
+    #[test]
+    fn account_id_ordering_first_differing_byte_wins() {
+        let mut a = [0x5Au8; ACC_ID_LEN];
+        let mut b = [0x5Au8; ACC_ID_LEN];
+        a[0] = 0x10;
+        b[0] = 0x20;
+        a[ACC_ID_LEN - 1] = 0xFF;
+        b[ACC_ID_LEN - 1] = 0x00;
+
+        let low = AccountId(a);
+        let high = AccountId(b);
+        assert_eq!(low.cmp(&high), a.cmp(&b));
+        assert_eq!(low.cmp(&high), core::cmp::Ordering::Less);
+        assert!(low < high);
+        assert!(high > low);
     }
 
     #[test]
