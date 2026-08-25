@@ -35,6 +35,8 @@ pub use macros::padded_bytes;
 #[doc(hidden)]
 pub use macros::padded_bytes_left;
 
+pub use macros::no_unroll;
+
 /// Direct re-export of `rshooks-core`: raw Hook API declarations and every
 /// C-verbatim constant. See the crate doc comment for why this is a plain
 /// alias rather than a re-exporting wrapper module.
@@ -944,6 +946,7 @@ pub mod prelude {
     pub use crate::decl::{HookParam, OtxnParam, State};
     pub use crate::error::{HookError, Result};
     pub use crate::exit::{Accept, HookResult, Rollback};
+    pub use crate::macros::no_unroll;
     pub use crate::sfield::*;
     pub use crate::slot_obj::{AmountBytes, CastTarget, IssueData, SlotKey, SlotObject};
     pub use crate::state::{

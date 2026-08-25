@@ -47,6 +47,94 @@ macro_rules! guard_m {
     };
 }
 
+/// Defeats full loop unrolling for a small, fixed-trip-count loop whose body
+/// contains further [`guard!`]-protected work, by making the loop's own
+/// trip count opaque to the optimizer. Wrap the loop's induction variable at
+/// its comparison, e.g. `while no_unroll(i) < N { .. }`.
+///
+/// # Why this exists
+///
+/// `guard!`'s worst-case-instruction-count model assumes each `guard!` call
+/// site is a single point in the compiled module, entered up to `maxiter`
+/// times across the whole hook execution — a nested loop's inner `guard!`
+/// is meant to amortize its cost across every outer iteration that reaches
+/// it (the outer loop's own `guard!` already bounds how many times that
+/// can happen). This holds as long as the compiled module actually
+/// contains one physical copy of the inner loop.
+///
+/// At `opt-level = 3`, LLVM routinely fully unrolls a small, provably-
+/// bounded outer loop (2 or 3 iterations is a typical threshold) whenever
+/// it judges duplicating the body worthwhile — completely independent of
+/// whether that body is written inline or behind a function call (the
+/// flatten pass inlines every defined non-entry function into
+/// `hook()`/`cbak()` regardless, so unrolling and inlining compound rather
+/// than substitute for each other — `docs/DESIGN.md` §6.2b). When the
+/// outer loop wraps an inner `guard!`-protected loop, unrolling physically
+/// duplicates that inner loop once per outer iteration: the checker (which
+/// walks the compiled bytecode, not the source) then counts the inner
+/// loop's full worst-case cost *once per duplicate* instead of once total
+/// — silently multiplying, rather than amortizing, its contribution to the
+/// worst-case instruction count. Measured on `examples/80_governance`'s
+/// vote-garbage-collection loop (an outer 2-iteration table loop wrapping a
+/// `guard!(66)`-bounded 32-topic scan): unrolling doubled that loop's
+/// measured cost, worth roughly a third of the whole `govern` entry's
+/// worst-case instruction count.
+///
+/// `no_unroll` breaks this by routing the loop's induction variable through
+/// [`core::hint::black_box`] at its comparison: the optimizer can no longer
+/// prove the trip count at compile time, so it keeps the loop as one real
+/// `loop` construct instead of duplicating its body. This changes no
+/// observable behavior (`black_box` is the identity function) — only which
+/// optimizations the compiler is allowed to apply.
+///
+/// Only worth reaching for at a call site actually exhibiting this
+/// pathology (an outer loop, itself small enough to be a plausible full-
+/// unroll candidate, wrapping further `guard!`-protected work) — a plain
+/// small loop with a cheap, unguarded body is usually *cheaper* fully
+/// unrolled (straight-line code has no loop-control overhead and no
+/// worst-case-padding waste), so applying this unconditionally to every
+/// `guard!`-protected loop is not a good default.
+///
+/// # Failure mode
+///
+/// `black_box` is a best-effort optimization barrier, not a guaranteed
+/// one — the compiler is not contractually required to honor it, only
+/// documented (as of this writing) to do so in practice. If a future
+/// toolchain version ever stopped treating it as opaque, this function
+/// would still behave identically (it is the identity function either
+/// way), but the unrolling this doc comment describes could silently
+/// return, regressing the caller's worst-case instruction count with no
+/// compile-time or runtime signal — nothing below the protocol's 65535
+/// ceiling would catch a regression that stays under it. Guard against
+/// this by measuring the worst case after any toolchain upgrade for a hook
+/// that relies on `no_unroll`.
+///
+/// # Examples
+///
+/// ```
+/// use rshooks::{guard, no_unroll};
+///
+/// let mut outer = 0u8;
+/// while no_unroll(outer) < 2 {
+///     guard!(2);
+///     let this_outer = outer;
+///     outer += 1;
+///
+///     let mut inner = 0u8;
+///     while inner < 32 {
+///         guard!(64);
+///         inner += 1;
+///         let _ = this_outer;
+///     }
+/// }
+/// assert_eq!(outer, 2);
+/// ```
+#[inline(always)]
+#[must_use] // `no_unroll(x);` as a bare statement is silently a no-op
+pub fn no_unroll<T>(value: T) -> T {
+    core::hint::black_box(value)
+}
+
 /// Terminate hook execution successfully. `accept!()` sends no message and
 /// error code `0`; `accept!(msg, code)` forwards both.
 ///

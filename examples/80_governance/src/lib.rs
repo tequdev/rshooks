@@ -904,7 +904,12 @@ fn action_seat(n: u8, topic_data_zero: bool, topic_data: &[u8; 32]) -> ! {
         previous_member[0] = b'V';
         let vote_value = take_scratch(&VOTE_VALUE);
         let mut tbl = 1u8;
-        while tbl <= 2 {
+        // `no_unroll`: without it, `opt-level = 3` fully unrolls this
+        // 2-iteration loop, physically duplicating
+        // `garbage_collect_votes`'s `guard!(66)` scan and multiplying
+        // (rather than amortizing) its worst-case instruction count — see
+        // `no_unroll`'s own doc comment for the full mechanism.
+        while no_unroll(tbl) <= 2 {
             guard!(2);
             let this_tbl = tbl;
             tbl = tbl.wrapping_add(1);

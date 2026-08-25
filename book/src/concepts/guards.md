@@ -187,6 +187,71 @@ If you do reach for `--auto-guard`, size `--default-maxiter` from the
 loop's true worst-case iteration count — found via disassembly, not
 guessed — every time.
 
+## A nested-guarded-loop pitfall: unrolling that duplicates the inner loop
+
+The worst-case-instruction-count model a nested `guard!` relies on assumes
+each `guard!` call site compiles to exactly one physical loop in the final
+module: an inner loop's cost is meant to be amortized across every
+iteration of its outer loop (the outer loop's own `guard!` already bounds
+how many times that can happen), so the checker only has to charge that
+inner loop's cost once, at the multiplier its `maxiter` implies relative
+to its parent's.
+
+At `opt-level = 3`, that assumption can quietly break. LLVM routinely
+fully unrolls a small, provably-bounded outer loop (2 or 3 iterations is a
+typical threshold) whenever it judges duplicating the body worthwhile —
+independent of whether that body is written inline or behind a function
+call, since Guard-type hooks force-inline every reachable function into
+`hook()`/`cbak()` regardless (`docs/DESIGN.md` §6.2b), so unrolling and
+inlining compound. When the outer loop wraps a `guard!`-protected inner
+loop, unrolling physically duplicates that inner loop once per outer
+iteration. The checker walks the *compiled* bytecode, not the source, so
+it then counts the inner loop's full worst-case cost once per duplicate
+instead of once total — silently **multiplying**, not amortizing, its
+contribution to the worst-case instruction count.
+
+The actual driver is what happens to the *parent* loop, not the duplicate
+count by itself: the checker's multiplier for a loop is its own `maxiter`
+divided by whatever its immediate parent's iteration bound is, so
+duplicated copies that stay nested under a real parent loop are still
+charged at that parent-divided rate (three copies nested under a
+`guard!(2)` outer loop each cost `66/2`, the same total as one copy would)
+— no penalty from duplication alone. The penalty shows up specifically
+when unrolling removes the parent loop entirely: each duplicate then sits
+at the top level, with no parent to divide by, so its multiplier jumps
+from `66/2` to the loop's full, undivided `66/1` — once per duplicate.
+
+`examples/80_governance` hit this directly: an outer 2-iteration table
+loop wrapping a `guard!(66)`-bounded 32-topic scan got fully unrolled,
+doubling the inner loop's measured cost — worth roughly a third of the
+whole `govern` entry's worst-case instruction count. `rshooks::no_unroll`
+fixes it by routing the outer loop's induction variable through
+`core::hint::black_box` at its comparison, which makes the trip count
+opaque to the optimizer and keeps the loop as one real `loop` construct:
+
+```rust,ignore
+use rshooks::{guard, no_unroll};
+
+let mut tbl = 1u8;
+while no_unroll(tbl) <= 2 {
+    guard!(2);
+    // ... the inner guard!(66)-protected loop goes here, once ...
+}
+```
+
+This is the mirror image of the compiler-generated-loop pitfall above:
+that section is about the compiler turning *no* loop into one that needs a
+guard; this one is about the compiler turning *one* guarded loop into
+several, silently. Only reach for `no_unroll` at a call site actually
+exhibiting this shape — an outer loop, itself small enough to be a
+plausible full-unroll candidate, wrapping further `guard!`-protected work
+— applying it to every guarded loop by default would regress the common
+case, where full unrolling is *cheaper* (straight-line code has no loop
+overhead and no worst-case-padding waste). See `no_unroll`'s own doc
+comment (`crates/rshooks/src/macros.rs`) for the full reasoning, including
+its failure mode if a future toolchain ever stopped honoring
+`black_box`'s optimization-barrier hint.
+
 ## Where to go next
 
 - [Anatomy of a Hook](anatomy.md) covers the `HookStatic` idiom in full,

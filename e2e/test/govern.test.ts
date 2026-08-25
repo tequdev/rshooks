@@ -18,7 +18,9 @@ import { HookFlags } from 'xahau/dist/npm/models/common/xahau'
 type Wallet = XrplIntegrationTestContext['alice']
 
 const namespace = 'rshooks-e2e-govern'
-const WORST_CASE_HOOK_INSTRUCTIONS = 41510
+// The hook's static worst case, from
+// out/current/0.govern.metadata.json (WCE.hook).
+const WORST_CASE_HOOK_INSTRUCTIONS = 28121
 
 function accountIdHex(classicAddress: string): string {
   return Buffer.from(decodeAccountID(classicAddress)).toString('hex').toUpperCase()
