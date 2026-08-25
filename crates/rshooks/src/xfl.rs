@@ -7,7 +7,7 @@
 //! justifies deferring validation until the end of an arithmetic chain.
 
 use crate::api;
-use crate::error::{Result, res};
+use crate::error::{HookError, Result, res};
 use crate::types::{AccountId, CurrencyCode, IouAmount};
 
 /// Bias applied to the stored 8-bit exponent field (bits 54..=61): unbiased
@@ -18,6 +18,51 @@ const EXPONENT_SHIFT: u32 = 54;
 /// Mask for the 8-bit exponent field once shifted into place. `u64`, not
 /// `i64`, to match [`XFL`]'s internal storage — see its type doc comment.
 const EXPONENT_MASK: u64 = 0xFF;
+/// Mask for the 54-bit mantissa field (bits 0..=53).
+const MANTISSA_MASK: u64 = (1u64 << EXPONENT_SHIFT) - 1;
+/// Lower bound of a canonical nonzero mantissa (`hook_float::minMantissa`).
+const MIN_MANTISSA: u64 = 1_000_000_000_000_000;
+/// Upper bound of a canonical nonzero mantissa (`hook_float::maxMantissa`).
+const MAX_MANTISSA: u64 = 9_999_999_999_999_999;
+/// Lower bound of a canonical unbiased exponent (stored field `1`).
+const MIN_EXPONENT: i64 = -96;
+/// Upper bound of a canonical unbiased exponent (stored field `177`).
+const MAX_EXPONENT: i64 = 80;
+/// Bit offset of the sign bit within a canonical nonzero encoding: set
+/// means positive, clear means negative (`hook_float::is_negative`'s
+/// convention — see [`is_canonical`]'s doc comment; not consulted for
+/// canonical zero, which short-circuits before this bit is read).
+const SIGN_SHIFT: u32 = 62;
+
+/// Whether raw bits `bits` are a canonical XFL encoding — the Hook API's own
+/// `RETURN_IF_INVALID_FLOAT` gate (`applyHook.cpp`), reproduced as a pure,
+/// loop-free local bit test rather than a host round trip: the canonical
+/// mantissa/exponent ranges are fixed protocol constants, not host state, so
+/// a `float_*` call could not tell this anything the bits don't already
+/// encode. `bits < 0` is never a valid float (that channel is reserved for
+/// Hook API error codes, e.g. [`crate::error::HookError::NotImplemented`]'s
+/// `-14`); `bits == 0` is always canonical zero; otherwise both the mantissa
+/// and exponent fields must fall within their canonical ranges (the sign bit
+/// itself is unconstrained — both signs are canonical for an in-range
+/// nonzero mantissa/exponent pair).
+#[inline(always)]
+fn is_canonical(bits: i64) -> bool {
+    if bits < 0 {
+        return false;
+    }
+    if bits == 0 {
+        return true;
+    }
+    let bits = bits as u64;
+    let mantissa = bits & MANTISSA_MASK;
+    let exponent_field = (bits >> EXPONENT_SHIFT) & EXPONENT_MASK;
+    // See `XFL::exponent`'s own comment: `wrapping_sub` sidesteps
+    // `clippy::arithmetic_side_effects` without an `#[allow]`; `EXPONENT_BIAS`
+    // is the fixed constant 97, so this never actually wraps.
+    let exponent = (exponent_field as i64).wrapping_sub(EXPONENT_BIAS);
+    (MIN_MANTISSA..=MAX_MANTISSA).contains(&mantissa)
+        && (MIN_EXPONENT..=MAX_EXPONENT).contains(&exponent)
+}
 
 /// A Xahau XFL value: an opaque wrapper over the raw bit pattern the Hook
 /// API's `float_*` functions operate on.
@@ -198,6 +243,120 @@ impl XFL {
         // produce (it would wrap to a huge positive value instead).
         let field = field as i64;
         Ok(field.wrapping_sub(EXPONENT_BIAS))
+    }
+
+    /// Whether `self` is the canonical XFL zero.
+    ///
+    /// Pure bit test, no host call, infallible: zero has exactly one
+    /// canonical encoding (raw bits `0` — see the module doc comment's bit
+    /// layout), so equality against that one pattern is exact for every
+    /// constructible `XFL`. This holds even for a value obtained through
+    /// [`XFL::from_raw_bits`] with an otherwise invalid or non-canonical
+    /// bit pattern: such a value simply is not the zero encoding, so
+    /// `is_zero` correctly reports `false` for it without first needing to
+    /// classify it as valid or invalid — unlike
+    /// [`XFL::is_strictly_positive`]/[`XFL::is_strictly_negative`], which
+    /// do need that classification (see their doc comments for why).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rshooks::XFL;
+    /// use rshooks::xfl::XFL as XflType;
+    ///
+    /// assert!(XflType::from_raw_bits(0).is_zero());
+    /// assert!(!XFL!(1).is_zero());
+    /// ```
+    #[inline(always)]
+    #[must_use]
+    pub const fn is_zero(self) -> bool {
+        self.0 == 0
+    }
+
+    /// Whether `self` is strictly greater than zero.
+    ///
+    /// Fallible, unlike [`XFL::is_zero`]: classifying a sign first requires
+    /// confirming `self` is a canonical XFL encoding at all. A value
+    /// obtained through [`XFL::from_raw_bits`] can hold an out-of-range
+    /// mantissa/exponent, or a negative bit pattern reserved for a Hook API
+    /// error code, neither of which has a numeric sign to report — reading
+    /// the sign bit anyway would silently misclassify that garbage as a
+    /// signed number. This returns
+    /// `Err(`[`crate::error::HookError::InvalidFloat`]`)` for such a value
+    /// instead, mirroring what the Hook API's own `RETURN_IF_INVALID_FLOAT`
+    /// gate would report for the same bits (see [`is_canonical`]).
+    ///
+    /// Implemented as a local, loop-free bit test (mantissa/exponent range,
+    /// then the sign bit), not a `float_sign`/`float_compare` host round
+    /// trip — the canonical-range rule and the sign-bit convention are both
+    /// fixed protocol constants, so a host call would add nothing but
+    /// overhead. `self.is_zero()` is neither strictly positive nor strictly
+    /// negative.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rshooks::XFL;
+    /// use rshooks::error::HookError;
+    /// use rshooks::xfl::XFL as XflType;
+    ///
+    /// assert_eq!(XFL!(1).is_strictly_positive(), Ok(true));
+    /// assert_eq!(XFL!(-1).is_strictly_positive(), Ok(false));
+    /// assert_eq!(XFL!(0).is_strictly_positive(), Ok(false));
+    ///
+    /// // Application-side error mapping: fold an invalid encoding into a
+    /// // domain-specific decision instead of propagating `HookError` further.
+    /// fn accepts_only_positive(amount: XflType) -> Result<(), &'static str> {
+    ///     match amount.is_strictly_positive() {
+    ///         Ok(true) => Ok(()),
+    ///         Ok(false) => Err("amount must be positive"),
+    ///         Err(HookError::InvalidFloat) => Err("amount is not a valid XFL value"),
+    ///         Err(_) => Err("could not evaluate amount"),
+    ///     }
+    /// }
+    ///
+    /// assert_eq!(accepts_only_positive(XflType::from_raw_bits(-1)),
+    ///     Err("amount is not a valid XFL value"));
+    /// ```
+    #[inline(always)]
+    pub fn is_strictly_positive(self) -> Result<bool> {
+        let bits = self.raw_bits();
+        if bits == 0 {
+            return Ok(false);
+        }
+        if !is_canonical(bits) {
+            return Err(HookError::InvalidFloat);
+        }
+        Ok((self.0 >> SIGN_SHIFT) & 1 != 0)
+    }
+
+    /// Whether `self` is strictly less than zero.
+    ///
+    /// Mirror image of [`XFL::is_strictly_positive`] — see its doc comment
+    /// for the fallibility rationale, the canonical-encoding gate, and an
+    /// application-side error-mapping example; this differs only in reading
+    /// the sign bit clear (rather than set) on a canonical nonzero value.
+    /// `self.is_zero()` is neither strictly positive nor strictly negative.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rshooks::XFL;
+    ///
+    /// assert_eq!(XFL!(-1).is_strictly_negative(), Ok(true));
+    /// assert_eq!(XFL!(1).is_strictly_negative(), Ok(false));
+    /// assert_eq!(XFL!(0).is_strictly_negative(), Ok(false));
+    /// ```
+    #[inline(always)]
+    pub fn is_strictly_negative(self) -> Result<bool> {
+        let bits = self.raw_bits();
+        if bits == 0 {
+            return Ok(false);
+        }
+        if !is_canonical(bits) {
+            return Err(HookError::InvalidFloat);
+        }
+        Ok((self.0 >> SIGN_SHIFT) & 1 == 0)
     }
 
     /// Whether `self` is negative (per `float_sign`: `0` = positive or
@@ -625,6 +784,200 @@ mod tests {
         // Stored field 177 (maximum) decodes to +80.
         let bits_max = 177i64 << EXPONENT_SHIFT;
         assert_eq!(XFL::from_raw_bits(bits_max).exponent(), Ok(80));
+    }
+
+    /// Builds a raw XFL encoding directly from its stored fields, bypassing
+    /// `XFL::new`/`float_set` (unavailable without the `testenv` feature's
+    /// host stub) — mirrors `hook_float::make_float`'s field layout, so
+    /// boundary and invalid encodings can be constructed precisely.
+    /// `exponent_field` is the stored (biased) field, not the unbiased
+    /// exponent — callers pass the field value directly (see
+    /// `exponent_decodes_bias_97_field` above for the bias-97 mapping).
+    fn encode(mantissa: u64, exponent_field: u64, positive: bool) -> i64 {
+        let mut bits = mantissa | (exponent_field << EXPONENT_SHIFT);
+        if positive {
+            bits |= 1u64 << SIGN_SHIFT;
+        }
+        bits as i64
+    }
+
+    // `XFL!` cannot be used from inside this crate's own tests -- it always
+    // expands to a `rshooks::`-prefixed path, resolvable only from an
+    // external crate that depends on `rshooks` by that name (exactly how
+    // every doctest above uses it). These are the same reference vectors
+    // `tests/ui/pass/xfl_const.rs` pins for `XFL!(1)`/`XFL!(-1)`/`XFL!(0.1)`;
+    // `NEG_TENTH_BITS` is `TENTH_BITS` with only the sign bit (62) flipped.
+    const ONE_BITS: i64 = 6_089_866_696_204_910_592;
+    const NEG_ONE_BITS: i64 = 1_478_180_677_777_522_688;
+    const TENTH_BITS: i64 = 6_071_852_297_695_428_608;
+    const NEG_TENTH_BITS: i64 = 1_460_166_279_268_040_704;
+
+    #[test]
+    fn is_zero_is_pure_bit_equality_against_canonical_zero() {
+        assert!(XFL::from_raw_bits(0).is_zero());
+        assert!(!XFL::from_raw_bits(ONE_BITS).is_zero());
+        assert!(!XFL::from_raw_bits(NEG_ONE_BITS).is_zero());
+        // Not zero even though invalid -- `is_zero` never claims validity,
+        // it only ever compares against the one canonical zero pattern.
+        assert!(!XFL::from_raw_bits(-1).is_zero());
+        assert!(!XFL::from_raw_bits(i64::MIN).is_zero());
+    }
+
+    #[test]
+    fn strictly_positive_and_negative_match_known_values() {
+        // Integers.
+        assert_eq!(
+            XFL::from_raw_bits(ONE_BITS).is_strictly_positive(),
+            Ok(true)
+        );
+        assert_eq!(
+            XFL::from_raw_bits(ONE_BITS).is_strictly_negative(),
+            Ok(false)
+        );
+        assert_eq!(
+            XFL::from_raw_bits(NEG_ONE_BITS).is_strictly_positive(),
+            Ok(false)
+        );
+        assert_eq!(
+            XFL::from_raw_bits(NEG_ONE_BITS).is_strictly_negative(),
+            Ok(true)
+        );
+        // Fractions.
+        assert_eq!(
+            XFL::from_raw_bits(TENTH_BITS).is_strictly_positive(),
+            Ok(true)
+        );
+        assert_eq!(
+            XFL::from_raw_bits(TENTH_BITS).is_strictly_negative(),
+            Ok(false)
+        );
+        assert_eq!(
+            XFL::from_raw_bits(NEG_TENTH_BITS).is_strictly_positive(),
+            Ok(false)
+        );
+        assert_eq!(
+            XFL::from_raw_bits(NEG_TENTH_BITS).is_strictly_negative(),
+            Ok(true)
+        );
+        // Zero is neither.
+        assert_eq!(XFL::from_raw_bits(0).is_strictly_positive(), Ok(false));
+        assert_eq!(XFL::from_raw_bits(0).is_strictly_negative(), Ok(false));
+        assert!(XFL::from_raw_bits(0).is_zero());
+    }
+
+    #[test]
+    fn boundary_magnitudes_are_canonical_and_correctly_signed() {
+        // Min exponent (-96) at the min mantissa: field 1.
+        let min_pos = XFL::from_raw_bits(encode(1_000_000_000_000_000, 1, true));
+        let min_neg = XFL::from_raw_bits(encode(1_000_000_000_000_000, 1, false));
+        assert_eq!(min_pos.is_strictly_positive(), Ok(true));
+        assert_eq!(min_pos.is_strictly_negative(), Ok(false));
+        assert_eq!(min_neg.is_strictly_positive(), Ok(false));
+        assert_eq!(min_neg.is_strictly_negative(), Ok(true));
+
+        // Max exponent (+80) at the max mantissa: field 177.
+        let max_pos = XFL::from_raw_bits(encode(9_999_999_999_999_999, 177, true));
+        let max_neg = XFL::from_raw_bits(encode(9_999_999_999_999_999, 177, false));
+        assert_eq!(max_pos.is_strictly_positive(), Ok(true));
+        assert_eq!(max_pos.is_strictly_negative(), Ok(false));
+        assert_eq!(max_neg.is_strictly_positive(), Ok(false));
+        assert_eq!(max_neg.is_strictly_negative(), Ok(true));
+    }
+
+    #[test]
+    fn invalid_encodings_error_instead_of_reading_the_sign_bit() {
+        // Negative raw bits: the Hook API's error-code channel, never a
+        // valid float, regardless of what the lower bits look like.
+        for bits in [-1i64, i64::MIN] {
+            let v = XFL::from_raw_bits(bits);
+            assert!(!v.is_zero());
+            assert_eq!(v.is_strictly_positive(), Err(HookError::InvalidFloat));
+            assert_eq!(v.is_strictly_negative(), Err(HookError::InvalidFloat));
+        }
+
+        // Mantissa field below the canonical minimum (field 97 = unbiased 0).
+        let mantissa_too_small = XFL::from_raw_bits(encode(999_999_999_999_999, 97, true));
+        assert_eq!(
+            mantissa_too_small.is_strictly_positive(),
+            Err(HookError::InvalidFloat)
+        );
+        assert_eq!(
+            mantissa_too_small.is_strictly_negative(),
+            Err(HookError::InvalidFloat)
+        );
+
+        // Mantissa field above the canonical maximum (still fits the 54-bit
+        // field: 10^16 < 2^54 - 1).
+        let mantissa_too_large = XFL::from_raw_bits(encode(10_000_000_000_000_000, 97, true));
+        assert_eq!(
+            mantissa_too_large.is_strictly_positive(),
+            Err(HookError::InvalidFloat)
+        );
+        assert_eq!(
+            mantissa_too_large.is_strictly_negative(),
+            Err(HookError::InvalidFloat)
+        );
+
+        // Exponent field below the canonical minimum (field 0 = unbiased -97).
+        let exponent_too_small = XFL::from_raw_bits(encode(1_000_000_000_000_000, 0, true));
+        assert_eq!(
+            exponent_too_small.is_strictly_positive(),
+            Err(HookError::InvalidFloat)
+        );
+        assert_eq!(
+            exponent_too_small.is_strictly_negative(),
+            Err(HookError::InvalidFloat)
+        );
+
+        // Exponent field above the canonical maximum (field 178 = unbiased
+        // +81).
+        let exponent_too_large = XFL::from_raw_bits(encode(9_999_999_999_999_999, 178, true));
+        assert_eq!(
+            exponent_too_large.is_strictly_positive(),
+            Err(HookError::InvalidFloat)
+        );
+        assert_eq!(
+            exponent_too_large.is_strictly_negative(),
+            Err(HookError::InvalidFloat)
+        );
+
+        // A value none of these predicates ever classify from the sign bit
+        // alone: mantissa/exponent are both invalid, but bit 62 (the sign
+        // bit) happens to be set the same way a valid positive value's
+        // would be.
+        let doubly_invalid = XFL::from_raw_bits(encode(1, 255, true));
+        assert_eq!(
+            doubly_invalid.is_strictly_positive(),
+            Err(HookError::InvalidFloat)
+        );
+    }
+
+    #[test]
+    fn exactly_one_predicate_holds_for_every_valid_value() {
+        let cases = [
+            XFL::from_raw_bits(0),
+            XFL::from_raw_bits(ONE_BITS),
+            XFL::from_raw_bits(NEG_ONE_BITS),
+            XFL::from_raw_bits(TENTH_BITS),
+            XFL::from_raw_bits(NEG_TENTH_BITS),
+            XFL::from_raw_bits(encode(1_000_000_000_000_000, 1, true)),
+            XFL::from_raw_bits(encode(1_000_000_000_000_000, 1, false)),
+            XFL::from_raw_bits(encode(9_999_999_999_999_999, 177, true)),
+            XFL::from_raw_bits(encode(9_999_999_999_999_999, 177, false)),
+        ];
+        for v in cases {
+            let pos_result = v.is_strictly_positive();
+            let neg_result = v.is_strictly_negative();
+            assert!(pos_result.is_ok(), "a valid value must not error");
+            assert!(neg_result.is_ok(), "a valid value must not error");
+            let flags = [v.is_zero(), pos_result == Ok(true), neg_result == Ok(true)];
+            let true_count = flags.into_iter().filter(|&b| b).count();
+            assert_eq!(
+                true_count, 1,
+                "exactly one of is_zero/is_strictly_positive/is_strictly_negative \
+                 must hold for {v:?}"
+            );
+        }
     }
 }
 
