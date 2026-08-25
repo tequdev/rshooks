@@ -1,18 +1,75 @@
-//! The emission walker: design §5.6's normative acceptance grammar for a
-//! blob passed to `emit`.
+//! The emission walker: field-sequence parsing shared by `emit`'s
+//! acceptance check (design §5.6's normative grammar) and by
+//! `crate::host::sto`/`crate::host::slots`' raw STObject/slot navigation.
 //!
-//! A canonical serialized-field walk: fields in canonical `(type, field)`
-//! order (strictly increasing — this also rejects a duplicated field),
-//! canonical variable-length prefixes, correct inner-object/array
-//! terminators, no trailing bytes, and a depth limit of 2 (enough for
-//! `EmitDetails`/`Memos`, no general recursion). Required invariants: a
-//! known `TransactionType`, `Sequence == 0`, an empty `SigningPubKey`,
-//! `Fee` present, and an `EmitDetails` field whose bytes are **exactly**
-//! the bytes this invocation's `etxn_details()` returned.
+//! A structural serialized-field walk: fields in **any** order — real
+//! xahaud's raw parse (`STObject::set`, and `HookAPI::get_stobject_length`,
+//! `HookAPI.cpp:2888-3179`, which every `sto_*` function goes through) reads
+//! a field sequence by decoding each field's own header in turn, never
+//! requiring ascending `(type, field)` order to locate or consume a field;
+//! `crate::host::sto`'s own module doc comment cites `HookAPI::sto_validate`
+//! (`HookAPI.cpp:68-96`) as having "no field-ordering or duplicate-field
+//! check", and this walker (which `sto_validate` calls directly) matches
+//! that exactly — canonical variable-length prefixes, correct
+//! inner-object/array terminators, no trailing bytes, and a depth limit of
+//! 2 (enough for `EmitDetails`/`Memos`, no general recursion) are the only
+//! structural rules enforced here. [`validate_emit_blob`] layers its own,
+//! additional rules on top for `emit`'s acceptance grammar specifically —
+//! see its own doc comment.
 //!
 //! What this walker does *not* check (documented, design §5.6): fee
 //! sufficiency, ledger-window validity against real ledger progress, and
 //! full STObject codec canonicality beyond the rules above — all e2e-only.
+//!
+//! # Order is tolerant everywhere; duplicate tolerance differs by real path
+//!
+//! Every caller below is order-tolerant, but real xahaud's own duplicate
+//! handling is *not* uniform across the two families of host function this
+//! walker backs, so this module's tolerance isn't either:
+//!
+//! - [`validate_emit_blob`] (`crate::backend::Backend::emit`) and
+//!   `crate::backend::Backend::prepare` both parse a hook-authored buffer
+//!   through real xahaud's `STObject::set`-family deserialization — `emit`
+//!   via `STTx(SerialIter)` -> `STObject::set`
+//!   (`src/libxrpl/protocol/STObject.cpp:203`), `prepare`
+//!   (`HookAPI::prepare`, `HookAPI.cpp:382`) via
+//!   `STObject(SerialIter&, sfGeneric)`'s own `SerialIter`-based
+//!   construction at the top of that function (`HookAPI.cpp:392-396`,
+//!   before it round-trips through JSON). `STObject::set`'s main loop
+//!   consumes fields in whatever order they appear — no ordering check —
+//!   but afterward sorts every field by code and rejects the object
+//!   outright (`Throw<std::runtime_error>("Duplicate field detected")`) if
+//!   any two share a field code (`STObject.cpp:266-276`). This walker
+//!   itself stays order/duplicate-tolerant (kept uniform with the `sto_*`
+//!   family below, since callers besides [`validate_emit_blob`] use it
+//!   too); [`validate_emit_blob`] alone layers a duplicate rejection back
+//!   on top — a direct citation of `STObject::set`'s real invariant, not
+//!   independent mock strictness — see its own doc comment. (This walker's
+//!   duplicate check does not recurse into nested objects/arrays the way
+//!   `STObject::set` genuinely does at every depth; only top-level
+//!   duplicates are caught here — a known, narrower scope, not a claim of
+//!   full fidelity.)
+//! - `crate::host::sto::sto_validate`/`sto_subfield`/`sto_subarray`: cited
+//!   directly above and in `crate::host::sto`'s own module doc comment
+//!   (`HookAPI::sto_validate`, `HookAPI.cpp:68-96`, "no field-ordering or
+//!   duplicate-field check"; every other `sto_*` function shares its
+//!   underlying single-field parser, `HookAPI::get_stobject_length`,
+//!   `HookAPI.cpp:2888-3179`) — genuinely duplicate-tolerant on real
+//!   xahaud, unlike the `STObject::set` family above: `get_stobject_length`
+//!   never sorts or compares field codes across calls, it just measures one
+//!   field's length at a time.
+//! - `crate::otxn::deserialize`/`from_emitted`: parses a blob that has
+//!   already passed [`validate_emit_blob`], so must tolerate whatever order
+//!   that already accepted — not an independent host-behavior claim, just
+//!   internal consistency with the function above.
+//! - `crate::host::slots` (`slot_subfield`/`slot_set`/`otxn_slot`/
+//!   `meta_slot`/`xpop_slot`): root slot content is always sourced from a
+//!   real, already-canonically-serialized ledger object or transaction —
+//!   see that module's own "slot content = value payload, exactly what
+//!   `slot()` itself returns" doc section — so this walker's order/
+//!   duplicate tolerance is inert here: genuine ledger data was always
+//!   canonical and duplicate-free already, on either the old strict walk or
+//!   this one.
 //!
 //! # P2-D extension: field/array navigation primitives
 //!
@@ -187,8 +244,10 @@ fn dispatch_value(data: &[u8], pos: &mut usize, ty: u32, depth: u32) -> Result<(
 }
 
 /// Walks one field sequence (a top-level transaction, or the inside of a
-/// nested object) starting at `*pos`, in canonical strictly-increasing
-/// `(type, field)` order. For a nested object (`in_object == true`),
+/// nested object) starting at `*pos` — real xahaud's raw STObject parse
+/// reads each field sequentially by decoding its own header, independent
+/// of field-code order or repetition (see this module's doc comment); this
+/// walker does the same. For a nested object (`in_object == true`),
 /// consumes through the [`OBJECT_END_MARKER`]; for the top level
 /// (`in_object == false`), consumes until `data.len()` — the "no trailing
 /// bytes" rule is exactly this loop's termination condition.
@@ -199,7 +258,6 @@ fn walk_fields(
     in_object: bool,
 ) -> Result<Vec<FieldSpan>, ()> {
     let mut fields = Vec::new();
-    let mut last_code: Option<u64> = None;
     loop {
         if in_object {
             match data.get(*pos) {
@@ -217,12 +275,6 @@ fn walk_fields(
         let (ty, field) = decode_header(data, pos)?;
         let value_start = *pos;
         let code = sfcode(ty, field);
-        if let Some(last) = last_code {
-            if code <= last {
-                return Err(()); // out of order, or a duplicate field
-            }
-        }
-        last_code = Some(code);
         dispatch_value(data, pos, ty, depth)?;
         fields.push(FieldSpan {
             code,
@@ -384,11 +436,30 @@ pub(crate) fn field_value_payload(data: &[u8], field: &FieldSpan) -> Result<(usi
 /// is the exact bytes this invocation's `etxn_details()` returned (`None`
 /// if it was never called this invocation) — `blob`'s `EmitDetails` field
 /// must match those bytes exactly, header and terminator included.
+///
+/// Rejects a repeated top-level field code — a direct citation of real
+/// xahaud's `STObject::set`, which sorts every deserialized field by code
+/// and throws `"Duplicate field detected"` if any two share one
+/// (`STObject.cpp:266-276`; see this module's doc comment). The underlying
+/// field walk itself (shared with `sto_validate`/`sto_subfield`, whose real
+/// host implementation genuinely does tolerate a repeat) stays permissive;
+/// this rejection is layered on here specifically, matching `emit`'s own
+/// `STTx(SerialIter)` -> `STObject::set` parse path. Scoped to top-level
+/// fields only — nested objects/arrays are not independently checked, so
+/// this is narrower than `STObject::set`'s real per-depth invariant, not a
+/// claim of matching it exactly at every nesting level.
 pub(crate) fn validate_emit_blob(
     blob: &[u8],
     expected_emit_details: Option<&[u8]>,
 ) -> Result<(), ()> {
     let fields = walk_top_level(blob)?;
+
+    for (i, f) in fields.iter().enumerate() {
+        let earlier = fields.get(..i).ok_or(())?;
+        if earlier.iter().any(|e| e.code == f.code) {
+            return Err(());
+        }
+    }
 
     let tx_type_field = fields
         .iter()
@@ -565,21 +636,26 @@ mod tests {
     }
 
     #[test]
-    fn rejects_out_of_order_fields() {
+    fn accepts_out_of_order_fields() {
         let d = details();
         let mut out = Vec::new();
-        // Sequence (2,4) placed before TransactionType (1,2): violates
-        // canonical increasing order.
+        // Sequence (2,4) placed before TransactionType (1,2): outside
+        // ascending (type, field) order, which real xahaud does not
+        // require (see this module's doc comment).
         out.extend_from_slice(&[0x24, 0, 0, 0, 0]);
         out.extend_from_slice(&[0x12, 0x00, 0x00]);
         out.extend_from_slice(&[0x68, 0x40, 0, 0, 0, 0, 0, 0, 0]);
         out.extend_from_slice(&[0x73, 0x00]);
         out.extend_from_slice(&d);
-        assert!(validate_emit_blob(&out, Some(&d)).is_err());
+        assert!(validate_emit_blob(&out, Some(&d)).is_ok());
     }
 
     #[test]
     fn rejects_duplicate_field() {
+        // Citing `STObject::set`'s real "Duplicate field detected" throw —
+        // see `validate_emit_blob`'s doc comment; the underlying walk
+        // itself tolerates a repeat, matching `sto_validate`/`sto_subfield`
+        // (see `walk_top_level_fields_accepts_a_duplicate_field` below).
         let d = details();
         let mut out = Vec::new();
         out.extend_from_slice(&[0x12, 0x00, 0x00]);
@@ -589,6 +665,32 @@ mod tests {
         out.extend_from_slice(&[0x73, 0x00]);
         out.extend_from_slice(&d);
         assert!(validate_emit_blob(&out, Some(&d)).is_err());
+    }
+
+    #[test]
+    fn rejects_a_non_adjacent_duplicate_field() {
+        // The duplicate-Sequence check does not depend on adjacency: a
+        // TransactionType field sits between the two Sequence occurrences.
+        let d = details();
+        let mut out = Vec::new();
+        out.extend_from_slice(&[0x24, 0, 0, 0, 0]); // Sequence
+        out.extend_from_slice(&[0x12, 0x00, 0x00]); // TransactionType
+        out.extend_from_slice(&[0x24, 0, 0, 0, 0]); // duplicate Sequence
+        out.extend_from_slice(&[0x68, 0x40, 0, 0, 0, 0, 0, 0, 0]);
+        out.extend_from_slice(&[0x73, 0x00]);
+        out.extend_from_slice(&d);
+        assert!(validate_emit_blob(&out, Some(&d)).is_err());
+    }
+
+    #[test]
+    fn walk_top_level_fields_accepts_a_duplicate_field() {
+        // The general field walk (shared with `sto_validate`/
+        // `sto_subfield`) is more permissive than `validate_emit_blob`'s
+        // own grammar — see this module's doc comment.
+        let data: &[u8] = &[0x24, 0, 0, 0, 1, 0x24, 0, 0, 0, 2];
+        let fields = walk_top_level_fields(data).unwrap();
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].code, fields[1].code);
     }
 
     #[test]

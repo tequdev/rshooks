@@ -62,6 +62,7 @@ Numbered in suggested reading order — see
 | 14 | [`account-id-macro`](examples/14_account-id-macro) | `rshooks::account_id!`: compile-time r-address → `AccountId` decode |
 | 15 | [`slot-objects`](examples/15_slot-objects) | the typed slot layer's live acceptance harness: account-root walk, native-amount round-trip, parent-clear/child-read |
 | 16 | [`typed-results`](examples/16_typed-results) | typed entry returns (`HookResult`): an idiomatic `?`/`Ok` entry with a `hook_errors!` message clause, alongside a raw `accept!`/`rollback!`-style entry in the same chain |
+| 17 | [`sto-writer`](examples/17_sto-writer) | `rshooks::sto_writer::StoWriter`: a runtime-shaped Remit — a native `sfAmounts` entry always, an issued one when hook parameters supply it — built field-by-field and emitted via `prepare_for_emit()`/`Prepared::emit()` |
 | 80 | [`governance`](examples/80_governance) | a two-entry `#[hooks]` **chain** (`govern` + `reward`) porting xahaud's genesis governance hooks, sharing one state schema |
 
 ```sh

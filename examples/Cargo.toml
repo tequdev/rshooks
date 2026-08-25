@@ -16,6 +16,7 @@ members = [
     "14_account-id-macro",
     "15_slot-objects",
     "16_typed-results",
+    "17_sto-writer",
     "80_governance",
 ]
 

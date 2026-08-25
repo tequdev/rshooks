@@ -41,6 +41,7 @@ directory is prefixed) and matches what its own README, `Cargo.toml`, and
 | 14 | [`account-id-macro`](14_account-id-macro) | `rshooks::account_id!`: compile-time r-address -> `AccountId` decode, cross-checked against `hook_account`/`util_accid`/`util_raddr` |
 | 15 | [`slot-objects`](15_slot-objects) | the typed slot layer's live acceptance harness: account-root walk, native-amount drops round-trip, parent-clear/child-read, and two 300-iteration loops proving `take_*` recycling and leak-free `slot_path!` failures |
 | 16 | [`typed-results`](16_typed-results) | typed entry returns (`HookResult`): an idiomatic `?`/`Ok` entry with a `hook_errors!` message clause, alongside a raw `accept!`/`rollback!`-style entry in the same chain |
+| 17 | [`sto-writer`](17_sto-writer) | `rshooks::sto_writer::StoWriter`: a runtime-shaped Remit — a native `sfAmounts` entry always, an issued one when hook parameters supply it — built field-by-field and emitted via `prepare_for_emit()`/`Prepared::emit()` |
 
 ## 80+: Production hooks in Rust
 

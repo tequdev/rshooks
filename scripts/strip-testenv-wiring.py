@@ -36,6 +36,7 @@ WIRED_EXAMPLES = {
     "08_slot-ledger",
     "15_slot-objects",
     "16_typed-results",
+    "17_sto-writer",
 }
 
 
