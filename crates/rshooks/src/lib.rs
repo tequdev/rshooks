@@ -19,6 +19,7 @@ pub mod state;
 pub mod static_cell;
 #[cfg(all(not(target_arch = "wasm32"), feature = "testenv"))]
 pub(crate) mod testenv_bridge;
+pub mod trust_line;
 pub mod tx_type;
 pub mod txn;
 pub mod types;
@@ -956,6 +957,7 @@ pub mod prelude {
         state_update_loose, state_update_typed,
     };
     pub use crate::static_cell::HookStatic;
+    pub use crate::trust_line::{TrustLineSide, TrustLineView};
     pub use crate::tx_type::TxType;
     pub use crate::types::*;
     pub use crate::xfl::XFL;
