@@ -303,6 +303,91 @@ fixed_bytes_type!(
     crate::buf_eq::buf_eq_48
 );
 
+// ---------------------------------------------------------------------------
+// IssuedAsset: the (currency, issuer) identity of a non-native amount
+// ---------------------------------------------------------------------------
+
+/// A currency/issuer pair identifying an issued (non-native) asset.
+///
+/// Distinct from [`Issue`] — that is a wire-type marker for navigating a
+/// serialized `Issue` field through [`crate::slot_obj`], not a value.
+/// `IssuedAsset` is the decoded identity an application actually compares
+/// and stores: [`IouAmount::asset`] produces one from a 48-byte IOU
+/// `Amount`, and [`crate::slot_obj::IssueData::Iou`] holds one when a
+/// 40-byte IOU `Issue` is decoded through an `Issue`-typed slot. Represents
+/// only asset identity: no trust-line, authorization, or freeze state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct IssuedAsset {
+    /// The asset's currency code.
+    pub currency: CurrencyCode,
+    /// The asset's issuing account.
+    pub issuer: AccountId,
+}
+
+impl IouAmount {
+    /// Borrows the currency-code component (bytes 8..28 of the 48-byte
+    /// layout: 8-byte value, 20-byte currency, 20-byte issuer) without
+    /// copying. `None` only if `self` is not that standard layout, which
+    /// cannot happen through this crate's own decoders — every `IouAmount`
+    /// they produce is exactly 48 bytes.
+    #[inline(always)]
+    fn currency_ref(&self) -> Option<&[u8; CURRENCY_CODE_LEN]> {
+        self.0.get(8..28)?.try_into().ok()
+    }
+
+    /// Borrows the issuer component (bytes 28..48). See
+    /// [`Self::currency_ref`].
+    #[inline(always)]
+    fn issuer_ref(&self) -> Option<&[u8; ACC_ID_LEN]> {
+        self.0.get(28..48)?.try_into().ok()
+    }
+
+    /// The currency code component.
+    #[inline(always)]
+    #[must_use]
+    pub fn currency(&self) -> CurrencyCode {
+        CurrencyCode(
+            self.currency_ref()
+                .copied()
+                .unwrap_or([0u8; CURRENCY_CODE_LEN]),
+        )
+    }
+
+    /// The issuing account component.
+    #[inline(always)]
+    #[must_use]
+    pub fn issuer(&self) -> AccountId {
+        AccountId(self.issuer_ref().copied().unwrap_or([0u8; ACC_ID_LEN]))
+    }
+
+    /// The (currency, issuer) identity this amount is denominated in.
+    #[inline(always)]
+    #[must_use]
+    pub fn asset(&self) -> IssuedAsset {
+        IssuedAsset {
+            currency: self.currency(),
+            issuer: self.issuer(),
+        }
+    }
+
+    /// Whether this amount's currency and issuer match `asset`.
+    ///
+    /// Compares directly against the wire bytes via [`crate::buf_eq`] —
+    /// unlike [`Self::asset`], this never constructs an intermediate
+    /// [`IssuedAsset`] or copies the 40-byte currency+issuer pair.
+    #[inline(always)]
+    #[must_use]
+    pub fn matches_asset(&self, asset: &IssuedAsset) -> bool {
+        let currency_eq = self
+            .currency_ref()
+            .is_some_and(|c| crate::buf_eq::buf_eq_20(c, &asset.currency.0));
+        let issuer_eq = self
+            .issuer_ref()
+            .is_some_and(|i| crate::buf_eq::buf_eq_20(i, &asset.issuer.0));
+        currency_eq && issuer_eq
+    }
+}
+
 // `AccountId` additionally gets a total order: `Ord`/`PartialOrd`, loop-free
 // via `buf_eq::buf_cmp_20`. This is the canonical 160-bit big-endian
 // ordering XRPL/Xahau uses to pick the "high"/"low" account of a pair (e.g.
@@ -351,7 +436,9 @@ pub struct STArray;
 pub struct Amount;
 
 /// Wire-type marker: a serialized `Issue` — 20 bytes native or 40 bytes
-/// IOU (currency + issuer).
+/// IOU (currency + issuer). Navigates a slot field through
+/// [`crate::slot_obj`]; reading it decodes to
+/// [`crate::slot_obj::IssueData`] (`Native` or `Iou(`[`IssuedAsset`]`)`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Issue;
 
@@ -616,5 +703,88 @@ mod tests {
             core::mem::align_of::<AccountId>(),
             core::mem::align_of::<[u8; ACC_ID_LEN]>()
         );
+    }
+
+    /// Builds a 48-byte `IouAmount` with a distinctive 8-byte value
+    /// component, currency, and issuer, so extraction tests can tell the
+    /// three components apart. `.get_mut(..)` throughout, never `[..]` —
+    /// this workspace denies `clippy::indexing_slicing`, tests included.
+    fn sample_iou_amount(currency_fill: u8, issuer_fill: u8) -> IouAmount {
+        // Literal bounds, not `NATIVE_AMOUNT_LEN + CURRENCY_CODE_LEN` —
+        // this workspace warns on `clippy::arithmetic_side_effects` and
+        // `mise run lint` denies warnings.
+        let mut bytes = [0u8; IOU_AMOUNT_LEN];
+        if let Some(value) = bytes.get_mut(..8) {
+            value.copy_from_slice(&[0xAAu8; NATIVE_AMOUNT_LEN]);
+        }
+        if let Some(currency) = bytes.get_mut(8..28) {
+            currency.fill(currency_fill);
+        }
+        if let Some(issuer) = bytes.get_mut(28..) {
+            issuer.fill(issuer_fill);
+        }
+        IouAmount(bytes)
+    }
+
+    #[test]
+    fn iou_amount_currency_issuer_and_asset_extraction() {
+        let amount = sample_iou_amount(0x11, 0x22);
+        assert_eq!(amount.currency(), CurrencyCode([0x11; CURRENCY_CODE_LEN]));
+        assert_eq!(amount.issuer(), AccountId([0x22; ACC_ID_LEN]));
+        assert_eq!(
+            amount.asset(),
+            IssuedAsset {
+                currency: CurrencyCode([0x11; CURRENCY_CODE_LEN]),
+                issuer: AccountId([0x22; ACC_ID_LEN]),
+            }
+        );
+    }
+
+    #[test]
+    fn matches_asset_true_for_identical_currency_and_issuer() {
+        let amount = sample_iou_amount(0x33, 0x44);
+        let asset = IssuedAsset {
+            currency: CurrencyCode([0x33; CURRENCY_CODE_LEN]),
+            issuer: AccountId([0x44; ACC_ID_LEN]),
+        };
+        assert!(amount.matches_asset(&asset));
+    }
+
+    #[test]
+    fn matches_asset_false_for_different_currency() {
+        let amount = sample_iou_amount(0x33, 0x44);
+        let asset = IssuedAsset {
+            currency: CurrencyCode([0x99; CURRENCY_CODE_LEN]), // differs
+            issuer: AccountId([0x44; ACC_ID_LEN]),
+        };
+        assert!(!amount.matches_asset(&asset));
+    }
+
+    #[test]
+    fn matches_asset_false_for_different_issuer() {
+        let amount = sample_iou_amount(0x33, 0x44);
+        let asset = IssuedAsset {
+            currency: CurrencyCode([0x33; CURRENCY_CODE_LEN]),
+            issuer: AccountId([0x99; ACC_ID_LEN]), // differs
+        };
+        assert!(!amount.matches_asset(&asset));
+    }
+
+    #[test]
+    fn matches_asset_ignores_the_value_component() {
+        // Two amounts with the same asset but different values must both
+        // match — `matches_asset` compares identity, not magnitude.
+        let low = sample_iou_amount(0x55, 0x66);
+        let mut bytes = low.0;
+        if let Some(value) = bytes.get_mut(..NATIVE_AMOUNT_LEN) {
+            value.copy_from_slice(&[0x01u8; NATIVE_AMOUNT_LEN]);
+        }
+        let high = IouAmount(bytes);
+        let asset = IssuedAsset {
+            currency: CurrencyCode([0x55; CURRENCY_CODE_LEN]),
+            issuer: AccountId([0x66; ACC_ID_LEN]),
+        };
+        assert!(low.matches_asset(&asset));
+        assert!(high.matches_asset(&asset));
     }
 }
