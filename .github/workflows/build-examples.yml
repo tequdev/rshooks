@@ -162,7 +162,7 @@ jobs:
         run: cargo test -p rshooks-testenv
 
       - name: cargo test (examples workspace, testenv-wired examples)
-        run: cargo test --manifest-path examples/Cargo.toml -p state-counter -p emit-txn -p typed-results
+        run: cargo test --manifest-path examples/Cargo.toml -p state-counter -p emit-txn -p typed-results -p sto-writer
 
   build:
     name: ${{ matrix.name }}

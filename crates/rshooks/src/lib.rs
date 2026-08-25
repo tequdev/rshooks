@@ -17,6 +17,7 @@ pub mod sfield;
 pub mod slot_obj;
 pub mod state;
 pub mod static_cell;
+pub mod sto_writer;
 #[cfg(all(not(target_arch = "wasm32"), feature = "testenv"))]
 pub(crate) mod testenv_bridge;
 pub mod tx_type;
@@ -956,6 +957,7 @@ pub mod prelude {
         state_update_loose, state_update_typed,
     };
     pub use crate::static_cell::HookStatic;
+    pub use crate::sto_writer::StoWriter;
     pub use crate::tx_type::TxType;
     pub use crate::types::*;
     pub use crate::xfl::XFL;

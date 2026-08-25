@@ -32,9 +32,10 @@ pub enum EmitFailureReason {
     /// `TOO_MANY_EMITTED_TXN`).
     ReserveExceeded,
     /// The blob failed the emission walker's acceptance grammar (design
-    /// §5.6: `EMISSION_FAILURE`) — malformed framing, an unknown/out-of-order
-    /// field, a required field missing or wrong, or an `EmitDetails` field
-    /// whose bytes did not exactly match this invocation's `etxn_details()`.
+    /// §5.6: `EMISSION_FAILURE`) — malformed framing, an unknown or
+    /// duplicate field, a required field missing or wrong, or an
+    /// `EmitDetails` field whose bytes did not exactly match this
+    /// invocation's `etxn_details()`.
     InvalidBlob,
 }
 
