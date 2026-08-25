@@ -47,7 +47,7 @@
 
 use crate::api::util::util_keylet_buf;
 use crate::error::Result;
-use crate::types::{AccountId, CurrencyCode, Hash, Keylet, NameSpace, StateKey};
+use crate::types::{AccountId, CurrencyCode, Hash, IssuedAsset, Keylet, NameSpace, StateKey};
 use rshooks_core::consts::{
     KEYLET_ACCOUNT, KEYLET_AMENDMENTS, KEYLET_CHECK, KEYLET_CHILD, KEYLET_CRON,
     KEYLET_DEPOSIT_PREAUTH, KEYLET_EMITTED, KEYLET_EMITTED_DIR, KEYLET_ESCROW, KEYLET_FEES,
@@ -342,6 +342,14 @@ pub fn keylet_line(
         currency.as_ptr() as u32,
         currency.len() as u32,
     )
+}
+
+/// [`keylet_line`] taking an [`IssuedAsset`] in place of separate
+/// currency/issuer arguments — the keylet for the trust line between
+/// `account` and `asset.issuer` in `asset.currency`.
+#[inline(always)]
+pub fn keylet_line_for_asset(account: &AccountId, asset: &IssuedAsset) -> Result<Keylet> {
+    keylet_line(account, &asset.issuer, &asset.currency)
 }
 
 /// `KEYLET_OFFER` (10): the keylet for `account`'s `Offer` ledger object

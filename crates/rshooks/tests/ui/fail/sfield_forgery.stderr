@@ -7,8 +7,8 @@ error[E0603]: struct `SField` is private
 note: the struct `SField` is defined here
   --> src/slot_obj.rs
    |
-   |     AccountId, Amount, CurrencyCode, Hash, IouAmount, Issue, Keylet, NativeAmount, Opaque, SField,
-   |                                                                                            ^^^^^^
+   |     Opaque, SField, STArray, STObject,
+   |             ^^^^^^
 help: consider importing this struct instead
    |
 19 -     let _ = rshooks::slot_obj::SField::<u64>::new(0);

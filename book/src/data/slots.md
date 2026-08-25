@@ -83,12 +83,17 @@ serialized length rather than assuming a shape:
 ```rust,ignore
 pub enum AmountBytes {
     Native(NativeAmount), // 8 bytes
-    Iou(IouAmount),        // 48 bytes
+    Iou(IouAmount),       // 48 bytes
 }
 
 pub enum IssueData {
-    Native,                                       // 20 bytes
-    Iou { currency: CurrencyCode, issuer: AccountId }, // 40 bytes
+    Native,             // 20 bytes
+    Iou(IssuedAsset),   // 40 bytes: currency and issuer
+}
+
+pub struct IssuedAsset {
+    pub currency: CurrencyCode,
+    pub issuer: AccountId,
 }
 ```
 
