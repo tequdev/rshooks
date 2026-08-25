@@ -311,9 +311,11 @@ fixed_bytes_type!(
 ///
 /// Distinct from [`Issue`] — that is a wire-type marker for navigating a
 /// serialized `Issue` field through [`crate::slot_obj`], not a value.
-/// `IssuedAsset` is the decoded value an application actually compares and
-/// stores, e.g. the result of [`IouAmount::asset`]. Represents only asset
-/// identity: no trust-line, authorization, or freeze state.
+/// `IssuedAsset` is the decoded identity an application actually compares
+/// and stores: [`IouAmount::asset`] produces one from a 48-byte IOU
+/// `Amount`, and [`crate::slot_obj::IssueData::Iou`] holds one when a
+/// 40-byte IOU `Issue` is decoded through an `Issue`-typed slot. Represents
+/// only asset identity: no trust-line, authorization, or freeze state.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct IssuedAsset {
     /// The asset's currency code.
@@ -434,7 +436,9 @@ pub struct STArray;
 pub struct Amount;
 
 /// Wire-type marker: a serialized `Issue` — 20 bytes native or 40 bytes
-/// IOU (currency + issuer).
+/// IOU (currency + issuer). Navigates a slot field through
+/// [`crate::slot_obj`]; reading it decodes to
+/// [`crate::slot_obj::IssueData`] (`Native` or `Iou(`[`IssuedAsset`]`)`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Issue;
 

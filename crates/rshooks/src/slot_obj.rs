@@ -101,8 +101,8 @@ use crate::api;
 use crate::convert::FixedRead;
 use crate::error::{HookError, Result};
 use crate::types::{
-    AccountId, Amount, CurrencyCode, Hash, IouAmount, Issue, Keylet, NativeAmount, Opaque, SField,
-    STArray, STObject,
+    AccountId, Amount, CurrencyCode, Hash, IouAmount, Issue, IssuedAsset, Keylet, NativeAmount,
+    Opaque, SField, STArray, STObject,
 };
 use crate::xfl::XFL;
 
@@ -543,18 +543,15 @@ pub enum AmountBytes {
     Iou(IouAmount),
 }
 
-/// A serialized issue, classified by its length.
+/// A serialized issue, classified by its length. `Iou` holds the decoded
+/// asset identity as an [`IssuedAsset`] — the same type
+/// [`IouAmount::asset`] produces from a 48-byte IOU `Amount`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IssueData {
     /// A 20-byte native issue.
     Native,
-    /// A 40-byte IOU issue.
-    Iou {
-        /// The currency code.
-        currency: CurrencyCode,
-        /// The issuing account.
-        issuer: AccountId,
-    },
+    /// A 40-byte IOU issue: currency and issuer.
+    Iou(IssuedAsset),
 }
 
 impl SlotObject<Amount> {
@@ -718,10 +715,10 @@ pub(crate) fn classify_issue(bytes: &[u8]) -> Result<IssueData> {
                 .ok_or(HookError::TooSmall)?;
             currency.copy_from_slice(c_src);
             issuer.copy_from_slice(i_src);
-            Ok(IssueData::Iou {
+            Ok(IssueData::Iou(IssuedAsset {
                 currency: CurrencyCode(currency),
                 issuer: AccountId(issuer),
-            })
+            }))
         }
         _ => Err(HookError::ParseError),
     }
@@ -992,10 +989,10 @@ mod tests {
         issuer.copy_from_slice(buf.get(CUR..IOU).unwrap_or(&[]));
         assert_eq!(
             classify_issue(at(IOU)),
-            Ok(IssueData::Iou {
+            Ok(IssueData::Iou(IssuedAsset {
                 currency: CurrencyCode(currency),
                 issuer: AccountId(issuer),
-            })
+            }))
         );
 
         // 44 is the MPT issue length. `decode_issue`'s buffer is sized to
