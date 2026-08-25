@@ -111,12 +111,17 @@ source at all*. On `wasm32v1-none` (the WASM MVP target, with no
 bulk-memory instructions), this happens for:
 
 - **Fixed-size array/slice equality** — `[u8; N] == [u8; N]` lowers to a
-  `bcmp`-style byte-compare loop.
+  `bcmp`-style byte-compare loop. (The protocol newtypes in
+  `rshooks::types` — `AccountId`, `Hash`, `Keylet`, and the rest — are the
+  exception: their `PartialEq` is hand-written to call the matching
+  `buf_eq_*` internally, so `==` between two of them is already loop-free.
+  This pitfall is specifically about comparing bare `[u8; N]` arrays.)
 - **Large buffer zero-init or copy** — a big stack-local `[0u8; N]`, or a
   large `memcpy`-shaped copy, lowers to a `memset`/`memcpy`-style loop.
 
-`examples/05_firewall` hits exactly this with a `sender == blocked`
-account comparison, and as a result needs to be built with:
+`examples/05_firewall` used to hit exactly this: an earlier version of its
+account comparison, written as `sender == blocked`, needed to be built
+with:
 
 ```sh
 cargo run -p rshooks-build -- build --manifest-path examples/05_firewall/Cargo.toml \
@@ -126,7 +131,12 @@ cargo run -p rshooks-build -- build --manifest-path examples/05_firewall/Cargo.t
 `rshooks build` defaults to treating an unguarded loop as a hard
 build error — missing a `guard!` in your own code is a bug, not something
 to silently paper over. `--auto-guard` is the escape hatch for loops the
-guard checker finds that your source never wrote.
+guard checker finds that your source never wrote. `examples/05_firewall`'s
+current source (`examples/05_firewall/src/lib.rs`) avoids all of this: it
+compares with `buf_eq_20` explicitly and needs no extra flags — and today,
+`AccountId`'s own `==` would itself already be loop-free too (see the
+callout above), since its `PartialEq` delegates to `buf_eq_20`
+internally.
 
 ### The two idioms that avoid it
 
@@ -150,10 +160,14 @@ if buf_eq_20(&sender, &blocked) {
 }
 ```
 
-Switching `firewall`'s `sender == blocked` to `buf_eq_20` removed both the
-loop and the `--auto-guard` flag entirely, and the word-at-a-time
-comparison further dropped its worst-case instruction count from 419 to
-122.
+Historically, switching `firewall`'s `sender == blocked` from a derived
+array comparison to `buf_eq_20` removed both the loop and the
+`--auto-guard` flag entirely, and the word-at-a-time comparison further
+dropped its worst-case instruction count from 419 to 122. `buf_eq_20` is
+still what the example calls today, and the measurement still holds — it's
+just no longer the *only* loop-free option for two `AccountId`s, since the
+type's own `==` now delegates to `buf_eq_20` as well (see the callout
+above).
 
 **Statics for templates and large buffers** — covered in
 [Anatomy of a Hook](anatomy.md#statics-for-templates-and-large-buffers):

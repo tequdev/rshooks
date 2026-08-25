@@ -46,7 +46,8 @@ impl Firewall {
             accept!()
         };
 
-        // Avoid `==`, which can compile to an unguarded loop.
+        // `AccountId`'s `==` is loop-free too, but spelling this as
+        // `buf_eq_20` makes the loop-free mechanism explicit.
         if buf_eq_20(&sender, &blocked) {
             rollback!(b"firewall: blocked account", FirewallError::BlockedAccount);
         }

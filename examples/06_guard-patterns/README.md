@@ -55,13 +55,19 @@ is exactly the trap `--auto-guard`'s default of 16 sets (see §2).
 
 ## 2. Why not `==`
 
-It's tempting to write `*a == *b` instead of the loop above. On
-`wasm32v1-none` (WASM MVP only — no bulk-memory instructions), LLVM at
-`opt-level = "z"` lowers a `[u8; 20]` equality check to a call into a
-`compiler_builtins` `bcmp`-style function containing a real, unguarded
-loop — one that never appears as a `loop` keyword anywhere in the crate's
-own source. `firewall` (`examples/05_firewall`) does exactly this, and as a
-result needs:
+It's tempting to write `*a == *b` instead of the loop above. That's
+actually fine today: `a`/`b` are `&AccountId`, and `AccountId`'s own
+`PartialEq` is hand-written to delegate to `buf_eq_20` internally, so
+`*a == *b` is already loop-free. The pitfall this section teaches is about
+the **bare `[u8; 20]` buffer** underneath — exactly what `accounts_equal`'s
+hand-written loop above compares via `a.get(i)`/`b.get(i)` instead of
+`==`. On `wasm32v1-none` (WASM MVP only — no bulk-memory instructions),
+LLVM at `opt-level = "z"` lowers a bare `[u8; 20]` equality check to a call
+into a `compiler_builtins` `bcmp`-style function containing a real,
+unguarded loop — one that never appears as a `loop` keyword anywhere in
+the crate's own source. `firewall` (`examples/05_firewall`) hit exactly
+this in an earlier version that wrote `sender == blocked` directly, and as
+a result needed:
 
 ```sh
 cargo run -p rshooks-build -- build --manifest-path examples/05_firewall/Cargo.toml \
@@ -71,11 +77,13 @@ cargo run -p rshooks-build -- build --manifest-path examples/05_firewall/Cargo.t
 `--auto-guard`'s own default (`--default-maxiter 16`) would build
 successfully for that same loop yet risks a real on-ledger
 `GUARD_VIOLATION`: the compare can run up to 20 iterations, one more than
-16 covers. `firewall`'s README works through the exact reasoning for `24`.
-This example's `accounts_equal` sidesteps the whole problem: because the
-loop is hand-written, its `guard!` is present in the source and its
-`maxiter` is exact — `rshooks build` needs **no extra flags at all**
-for this function.
+16 covers. `firewall`'s README works through the exact reasoning for `24`
+— though `firewall`'s current source needs none of this, since it compares
+with `buf_eq_20` explicitly (and its `AccountId`s' own `==` would be
+loop-free too, same as here). This example's `accounts_equal` sidesteps
+the whole problem another way: because the loop is hand-written, its
+`guard!` is present in the source and its `maxiter` is exact —
+`rshooks build` needs **no extra flags at all** for this function.
 
 ## 3. `guard_m!`: what it actually protects against
 

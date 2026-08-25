@@ -1,7 +1,8 @@
-//! Loop-free equality checks for protocol-sized byte arrays.
+//! Loop-free equality and ordering checks for protocol-sized byte arrays.
 //!
-//! These concrete functions use literal indices and straight-line XOR/OR
-//! comparisons so Hooks do not rely on compiler-generated comparison loops.
+//! These concrete functions use literal indices and straight-line XOR/OR (or
+//! compare-and-branch) code so Hooks do not rely on compiler-generated
+//! comparison loops.
 
 /// Computes `u64((a's word at literal indices) ^ (b's word at literal
 /// indices))` for one word-sized chunk, where the word width is `u64`,
@@ -117,6 +118,46 @@ impl_buf_eq!(
         u64[56, 57, 58, 59, 60, 61, 62, 63],
     ]
 );
+
+/// Loop-free, panic-free 160-bit big-endian ordering of two 20-byte buffers
+/// (e.g. two [`crate::types::AccountId`]s).
+///
+/// Compares as three big-endian words (`u64` bytes 0..7, `u64` bytes 8..15,
+/// `u32` bytes 16..19), each built from literal indices, so the body is
+/// straight-line code (no loop, no bounds-check panic path) regardless of
+/// optimization level. Byte-lexicographic order on a 20-byte buffer is
+/// exactly numeric 160-bit big-endian order, which is exactly XRPL/Xahau's
+/// "high"/"low" account ordering used to canonicalize a pair of accounts
+/// (e.g. picking the low/high account of a `RippleState` trustline keylet).
+/// That high/low comparison is the primary intended use case for this
+/// function.
+#[inline(always)]
+#[must_use]
+pub fn buf_cmp_20(a: &[u8; 20], b: &[u8; 20]) -> core::cmp::Ordering {
+    let a_hi = u64::from_be_bytes([a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]]);
+    let b_hi = u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]);
+    if a_hi != b_hi {
+        return if a_hi < b_hi {
+            core::cmp::Ordering::Less
+        } else {
+            core::cmp::Ordering::Greater
+        };
+    }
+
+    let a_mid = u64::from_be_bytes([a[8], a[9], a[10], a[11], a[12], a[13], a[14], a[15]]);
+    let b_mid = u64::from_be_bytes([b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]]);
+    if a_mid != b_mid {
+        return if a_mid < b_mid {
+            core::cmp::Ordering::Less
+        } else {
+            core::cmp::Ordering::Greater
+        };
+    }
+
+    let a_lo = u32::from_be_bytes([a[16], a[17], a[18], a[19]]);
+    let b_lo = u32::from_be_bytes([b[16], b[17], b[18], b[19]]);
+    a_lo.cmp(&b_lo)
+}
 
 #[cfg(test)]
 mod tests {
@@ -269,5 +310,71 @@ mod tests {
         assert!(buf_eq_64(&a, &b));
         b[63] = 0x56;
         assert!(!buf_eq_64(&a, &b));
+    }
+
+    #[test]
+    fn buf_cmp_20_equal_buffers() {
+        let a = [0x5Au8; 20];
+        let b = a;
+        assert_eq!(buf_cmp_20(&a, &b), core::cmp::Ordering::Equal);
+        assert_eq!(buf_cmp_20(&a, &b), a.cmp(&b));
+    }
+
+    #[test]
+    fn buf_cmp_20_agrees_with_array_ord_at_every_position() {
+        let a = [0x5Au8; 20];
+        for i in 0..20 {
+            // a < b: bump byte i up (avoid overflow).
+            let mut lo = a;
+            lo[i] = 0x5B;
+            assert_eq!(
+                buf_cmp_20(&a, &lo),
+                a.cmp(&lo),
+                "buf_cmp_20 must agree with [u8; 20]::cmp at index {i} (a<b)"
+            );
+            assert_eq!(buf_cmp_20(&a, &lo), core::cmp::Ordering::Less);
+
+            // a > b: bump byte i down.
+            let mut hi = a;
+            hi[i] = 0x59;
+            assert_eq!(
+                buf_cmp_20(&a, &hi),
+                a.cmp(&hi),
+                "buf_cmp_20 must agree with [u8; 20]::cmp at index {i} (a>b)"
+            );
+            assert_eq!(buf_cmp_20(&a, &hi), core::cmp::Ordering::Greater);
+        }
+    }
+
+    /// Guards against a reordering of `buf_cmp_20`'s three word comparisons:
+    /// every case above differs in exactly one byte, so a byte at index 0
+    /// (first `u64` word) and a byte at index 19 (last `u32` word) always
+    /// move together and a swapped comparison order would go undetected.
+    /// Here the two words disagree — a's first word is smaller while a's
+    /// last word is larger, and vice versa — so only the *first* differing
+    /// word (index order 0 then 8 then 16) may decide the result.
+    #[test]
+    fn buf_cmp_20_first_differing_word_wins_even_when_later_words_disagree() {
+        let mut a = [0x5Au8; 20];
+        let mut b = [0x5Au8; 20];
+
+        // a's leading word is smaller, a's trailing word is larger.
+        a[0] = 0x10;
+        b[0] = 0x20;
+        a[19] = 0xFF;
+        b[19] = 0x00;
+        assert_eq!(buf_cmp_20(&a, &b), core::cmp::Ordering::Less);
+        assert_eq!(buf_cmp_20(&a, &b), a.cmp(&b));
+
+        // Mirror image: a's leading word is larger, a's trailing word is
+        // smaller.
+        let mut c = [0x5Au8; 20];
+        let mut d = [0x5Au8; 20];
+        c[0] = 0x20;
+        d[0] = 0x10;
+        c[19] = 0x00;
+        d[19] = 0xFF;
+        assert_eq!(buf_cmp_20(&c, &d), core::cmp::Ordering::Greater);
+        assert_eq!(buf_cmp_20(&c, &d), c.cmp(&d));
     }
 }
