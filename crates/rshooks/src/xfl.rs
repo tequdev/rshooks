@@ -8,7 +8,7 @@
 
 use crate::api;
 use crate::error::{Result, res};
-use crate::types::{AccountId, CurrencyCode};
+use crate::types::{AccountId, CurrencyCode, IouAmount};
 
 /// Bias applied to the stored 8-bit exponent field (bits 54..=61): unbiased
 /// exponent = stored field - 97.
@@ -305,6 +305,24 @@ impl XFL {
     #[inline(always)]
     pub fn from_slot(slot_no: u32) -> Result<XFL> {
         api::float::slot_float(slot_no)
+    }
+}
+
+impl IouAmount {
+    /// Decodes the amount's value component as an [`XFL`], via
+    /// [`XFL::sto_set`] (`float_sto_set`).
+    ///
+    /// Hands the host exactly the 8-byte value component, never the full
+    /// 48 bytes and never a local bit-reinterpret: the wire value
+    /// component sets an always-on "not native" flag bit a real XFL never
+    /// sets, so treating those 8 bytes as an XFL bit pattern directly (or
+    /// passing all 48 bytes to `float_sto_set`, which only strips a header
+    /// past 8 bytes) both produce wrong results — see
+    /// [`api::float::float_sto_set`]'s doc comment.
+    #[inline(always)]
+    pub fn xfl(&self) -> Result<XFL> {
+        let value = self.0.get(..crate::types::NATIVE_AMOUNT_LEN).unwrap_or(&[]);
+        XFL::sto_set(value)
     }
 }
 
@@ -607,5 +625,57 @@ mod tests {
         // Stored field 177 (maximum) decodes to +80.
         let bits_max = 177i64 << EXPONENT_SHIFT;
         assert_eq!(XFL::from_raw_bits(bits_max).exponent(), Ok(80));
+    }
+}
+
+/// Proves `IouAmount::xfl` reaches the host through exactly one
+/// `float_sto_set` call, carrying only the 8-byte value component — not
+/// the full 48-byte amount. See [`api::float::float_sto_set`]'s doc
+/// comment for why a wider slice would be silently misparsed.
+#[cfg(all(test, feature = "testenv"))]
+mod testenv_tests {
+    #![allow(clippy::unwrap_used, clippy::panic)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
+
+    extern crate std;
+
+    use std::rc::Rc;
+
+    use super::*;
+    use crate::types::IOU_AMOUNT_LEN;
+    use rshooks_core::backend::{HostBackend, install};
+
+    /// Records the slice `float_sto_set` was called with and answers a
+    /// fixed raw bit pattern; `accept`/`rollback` are unused here.
+    struct RecordingBackend(i64);
+
+    impl HostBackend for RecordingBackend {
+        fn float_sto_set(&self, sto: &[u8]) -> i64 {
+            assert_eq!(
+                sto,
+                &[1u8, 2, 3, 4, 5, 6, 7, 8],
+                "IouAmount::xfl must pass only the 8-byte value component"
+            );
+            self.0
+        }
+
+        fn accept(&self, _msg: &[u8], _code: i64) -> ! {
+            panic!("RecordingBackend::accept unexpectedly called")
+        }
+
+        fn rollback(&self, _msg: &[u8], _code: i64) -> ! {
+            panic!("RecordingBackend::rollback unexpectedly called")
+        }
+    }
+
+    #[test]
+    fn xfl_passes_only_the_value_component_and_returns_the_hosts_answer() {
+        let _guard = install(Rc::new(RecordingBackend(42)));
+        let mut bytes = [0u8; IOU_AMOUNT_LEN];
+        if let Some(value) = bytes.get_mut(..8) {
+            value.copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+        }
+        // The currency/issuer bytes are irrelevant to `xfl()`; leave zeroed.
+        let amount = IouAmount(bytes);
+        assert_eq!(amount.xfl().unwrap().raw_bits(), 42);
     }
 }
