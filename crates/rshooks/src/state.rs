@@ -103,6 +103,18 @@
 //! already-32-byte key) is the one exception with nothing to shorten: it
 //! passes all 32 bytes through unchanged.
 //!
+//! [`StateKeyEncode::with_key_bytes`] carries the identical real-length,
+//! never-locally-padded contract — it exists purely to let a concrete key
+//! type hand those same bytes to a caller-supplied closure directly,
+//! without necessarily building an [`EncodedStateKey`] to hold them first
+//! (an `EncodedStateKey` is always a fixed 32-byte buffer regardless of a
+//! key's own real length, since it must be able to hold *any* key up to
+//! [`crate::types::STATE_KEY_LEN`] — see that struct's doc comment). Every
+//! [`state_get`]/[`state_set_loose`]/[`state_update_loose`]/[`state_delete`]
+//! (and `_foreign` twin) call in this module goes through
+//! [`StateKeyEncode::with_key_bytes`], not [`StateKeyEncode::encode`]
+//! directly, for exactly that reason.
+//!
 //! # Struct keys (`#[derive(crate::HookKey)]`) vs. `state_keys!`
 //!
 //! [`state_keys!`](crate::state_keys) suits a **small, fixed set** of
@@ -133,8 +145,8 @@
 //! struct included) does **not** automatically qualify, so a state *value*
 //! type can never be passed where a key is expected by accident.
 //! [`crate::HookKey`]'s derive checks at compile time that the struct fits
-//! the 32-byte key space (the same bound [`encode_write`]'s value-side check
-//! enforces below), rather than silently truncating.
+//! the 32-byte key space (the same bound [`with_encoded_value`]'s
+//! value-side check enforces below), rather than silently truncating.
 //!
 //! # Pairing a key with its value type: [`TypedStateKey`]
 //!
@@ -246,6 +258,32 @@ const MAX_TYPED_STATE_LEN: usize = 32;
 pub trait StateKeyEncode {
     /// `self`'s own real-length key encoding — see this trait's doc comment.
     fn encode(&self) -> EncodedStateKey;
+
+    /// Encodes `self`'s key bytes and hands them to `f`, returning whatever
+    /// `f` returns.
+    ///
+    /// The default implementation calls [`Self::encode`] and hands `f` the
+    /// resulting [`EncodedStateKey`]'s [`AsRef<[u8]>`](AsRef) view — so
+    /// every existing `StateKeyEncode` impl (including one a hook crate
+    /// wrote itself) keeps working unchanged with no override required. A
+    /// concrete impl that already has its own bytes on hand — a plain
+    /// `[u8; N]`, an already-[`encode`](Self::encode)d [`EncodedStateKey`],
+    /// a full 32-byte [`crate::types::StateKey`], or a
+    /// [`crate::HookKey`]-derived struct — overrides this to hand `f` those
+    /// bytes directly, skipping the `EncodedStateKey` round trip (and, for
+    /// [`EncodedStateKey`] itself, the redundant `Copy` of its 32-byte
+    /// buffer that going through [`Self::encode`] would otherwise repeat at
+    /// every [`state_get`]/[`state_set_loose`]/[`state_update_loose`]/
+    /// [`state_delete`] (and `_foreign` twin) call site — e.g.
+    /// `examples/12_typed-data`'s `key_by = DepositKey` field, whose
+    /// `State::at()`-bound accessors store the key as a pre-computed
+    /// `EncodedStateKey` (see [`crate::decl`]'s module doc comment), so
+    /// every accessor call was re-copying that same 32-byte buffer through
+    /// [`Self::encode`]'s identity impl before reaching the host call).
+    #[inline(always)]
+    fn with_key_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        f(self.encode().as_ref())
+    }
 }
 
 /// The real-length byte encoding [`StateKeyEncode::encode`] returns: a
@@ -304,6 +342,16 @@ impl StateKeyEncode for EncodedStateKey {
     fn encode(&self) -> EncodedStateKey {
         *self
     }
+
+    /// Hands `f` this already-encoded key's [`AsRef<[u8]>`](AsRef) view
+    /// directly — no [`Self::encode`] round trip (which would `Copy` the
+    /// full 32-byte buffer onto a fresh stack slot only to immediately
+    /// reference it the same way). See [`StateKeyEncode::with_key_bytes`]'s
+    /// doc comment for the measured payoff this override exists for.
+    #[inline(always)]
+    fn with_key_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        f(self.as_ref())
+    }
 }
 
 /// Identity impl: a raw, already-32-byte [`crate::types::StateKey`] passes
@@ -312,6 +360,15 @@ impl StateKeyEncode for StateKey {
     #[inline(always)]
     fn encode(&self) -> EncodedStateKey {
         EncodedStateKey::new(self.0, STATE_KEY_LEN)
+    }
+
+    /// Hands `f` this key's own 32-byte buffer directly — nothing to
+    /// shorten, so there is no [`EncodedStateKey`] to build at all. See
+    /// [`StateKeyEncode::with_key_bytes`]'s doc comment for why this
+    /// override exists.
+    #[inline(always)]
+    fn with_key_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        f(&self.0)
     }
 }
 
@@ -371,6 +428,26 @@ impl<const N: usize> StateKeyEncode for [u8; N] {
         }
         EncodedStateKey::new(buf, N)
     }
+
+    /// Hands `f` this array's own bytes directly — no 32-byte
+    /// [`EncodedStateKey`] buffer at all. Carries its own copy of
+    /// [`Self::encode`]'s compile-time length assert (an override replaces
+    /// the default body, assert included — see
+    /// [`crate::convert::TypedParamName::with_name_bytes`]'s doc comment
+    /// for the identical convention). See
+    /// [`StateKeyEncode::with_key_bytes`]'s doc comment for why this
+    /// override exists.
+    #[inline(always)]
+    fn with_key_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        const {
+            assert!(
+                N >= 1 && N <= STATE_KEY_LEN,
+                "rshooks::state: a [u8; N] state key must be 1..=32 bytes \
+                 (the Hook API's own key-length bound)"
+            );
+        }
+        f(self)
+    }
 }
 
 /// A [`StateKeyEncode`] key type bound to exactly one value type.
@@ -416,6 +493,16 @@ pub trait TypedStateKey: StateKeyEncode {
 ///
 /// Factored out of the two public functions so the mapping logic has one,
 /// directly testable, definition.
+///
+/// Deliberately still reads through a fixed [`MAX_TYPED_STATE_LEN`]-byte
+/// buffer rather than a `T`-sized one: unlike the write side
+/// ([`with_encoded_value`]), a right-sized read buffer would change
+/// observable behavior for an entry longer than `T`'s own encoding — the
+/// host call would fail with [`HookError::TooSmall`] instead of the
+/// current lenient prefix decode. `examples/09_state-foreign` relies on
+/// that prefix decode (its README documents reading a 32-byte foreign
+/// entry through a 1-byte `[u8; 1]` value type), so this crate keeps the
+/// read side at the fixed buffer width.
 #[inline(always)]
 fn decode_read<T: FromBytes>(code: i64, raw: &[u8; MAX_TYPED_STATE_LEN]) -> Result<Option<T>> {
     if code == rshooks_core::DOESNT_EXIST {
@@ -427,15 +514,25 @@ fn decode_read<T: FromBytes>(code: i64, raw: &[u8; MAX_TYPED_STATE_LEN]) -> Resu
 }
 
 /// Shared write path for [`state_set_loose`]/[`state_foreign_set_loose`]:
-/// encodes `value` into a [`MAX_TYPED_STATE_LEN`]-byte scratch buffer.
+/// encodes `value` via [`ToBytes::with_bytes`] and hands the encoded prefix
+/// to `f`.
 ///
 /// A compile-time check (monomorphized per `T`) rejects any `T` whose
 /// [`ToBytes::MAX_LEN`] does not fit — see [`MAX_TYPED_STATE_LEN`]'s doc
 /// comment for the escape hatch. Without this check a too-large `T` would
 /// silently encode to `0` bytes (`ToBytes::write`'s documented short-buffer
 /// behavior) and write an empty state entry instead of failing loudly.
+///
+/// Replaces this function's former shape (build a fixed
+/// [`MAX_TYPED_STATE_LEN`]-byte buffer and return it by value): every
+/// concrete `T` this crate provides now sizes its own encoding buffer via
+/// its own [`ToBytes::with_bytes`] override (e.g. 8 bytes for a `u64`
+/// state value, not 32) — see that method's doc comment for the measured
+/// payoff. The `T::MAX_LEN <= MAX_TYPED_STATE_LEN` bound above still caps
+/// *how large* that self-sized buffer is allowed to be, independent of
+/// this right-sizing.
 #[inline(always)]
-fn encode_write<T: ToBytes>(value: &T) -> [u8; MAX_TYPED_STATE_LEN] {
+fn with_encoded_value<T: ToBytes, R>(value: &T, f: impl FnOnce(&[u8]) -> R) -> R {
     const {
         assert!(
             T::MAX_LEN <= MAX_TYPED_STATE_LEN,
@@ -443,9 +540,7 @@ fn encode_write<T: ToBytes>(value: &T) -> [u8; MAX_TYPED_STATE_LEN] {
              — use api::state's raw functions directly for larger values"
         );
     }
-    let mut raw = [0u8; MAX_TYPED_STATE_LEN];
-    let _ = value.write(&mut raw);
-    raw
+    value.with_bytes(f)
 }
 
 /// Read this hook's own state entry for `key`, decoded as `T`.
@@ -453,10 +548,11 @@ fn encode_write<T: ToBytes>(value: &T) -> [u8; MAX_TYPED_STATE_LEN] {
 /// `Ok(None)` means no entry exists for `key` — see the module doc comment.
 #[inline(always)]
 pub fn state_get<T: FromBytes>(key: &impl StateKeyEncode) -> Result<Option<T>> {
-    let encoded = key.encode();
-    let mut raw = [0u8; MAX_TYPED_STATE_LEN];
-    let code = crate::api::state::state_raw_code(&mut raw, &encoded);
-    decode_read(code, &raw)
+    key.with_key_bytes(|kbytes| {
+        let mut raw = [0u8; MAX_TYPED_STATE_LEN];
+        let code = crate::api::state::state_raw_code(&mut raw, kbytes);
+        decode_read(code, &raw)
+    })
 }
 
 /// Read this hook's own state entry for `key`, decoded as `key`'s own
@@ -472,10 +568,9 @@ pub fn state_get_typed<K: TypedStateKey>(key: &K) -> Result<Option<K::Value>> {
 /// Returns the number of bytes written.
 #[inline(always)]
 pub fn state_set_loose<T: ToBytes>(key: &impl StateKeyEncode, value: &T) -> Result<usize> {
-    let encoded = key.encode();
-    let raw = encode_write(value);
-    let src = raw.get(..T::MAX_LEN).ok_or(HookError::TooBig)?;
-    crate::api::state::state_set(src, &encoded)
+    key.with_key_bytes(|kbytes| {
+        with_encoded_value(value, |vbytes| crate::api::state::state_set(vbytes, kbytes))
+    })
 }
 
 /// Write this hook's own state entry for `key`, encoding `value` as `key`'s
@@ -525,7 +620,7 @@ where
 /// *names* that operation — [`state_set_typed`] takes a `&K::Value`, so
 /// reaching a zero-length write through it would mean pairing the key with
 /// a value type that happens to encode to nothing (`[u8; 0]` does; the
-/// encode-side check in [`encode_write`] only bounds the maximum), which
+/// encode-side check in [`with_encoded_value`] only bounds the maximum), which
 /// spells "delete this entry" as an accident of the value type rather than
 /// as an intent at the call site.
 ///
@@ -547,8 +642,7 @@ where
 /// a [`TypedStateKey`] pairing.
 #[inline(always)]
 pub fn state_delete(key: &impl StateKeyEncode) -> Result<()> {
-    let encoded = key.encode();
-    crate::api::state::state_set(&[], &encoded).map(|_| ())
+    key.with_key_bytes(|kbytes| crate::api::state::state_set(&[], kbytes).map(|_| ()))
 }
 
 /// Read a state entry belonging to another namespace/account, decoded as
@@ -561,10 +655,11 @@ pub fn state_foreign_get<T: FromBytes>(
     namespace: Option<&[u8]>,
     account: Option<&[u8]>,
 ) -> Result<Option<T>> {
-    let encoded = key.encode();
-    let mut raw = [0u8; MAX_TYPED_STATE_LEN];
-    let code = crate::api::state::state_foreign_raw_code(&mut raw, &encoded, namespace, account);
-    decode_read(code, &raw)
+    key.with_key_bytes(|kbytes| {
+        let mut raw = [0u8; MAX_TYPED_STATE_LEN];
+        let code = crate::api::state::state_foreign_raw_code(&mut raw, kbytes, namespace, account);
+        decode_read(code, &raw)
+    })
 }
 
 /// Write a state entry belonging to another namespace/account, encoding
@@ -578,10 +673,11 @@ pub fn state_foreign_set_loose<T: ToBytes>(
     namespace: Option<&[u8]>,
     account: Option<&[u8]>,
 ) -> Result<usize> {
-    let encoded = key.encode();
-    let raw = encode_write(value);
-    let src = raw.get(..T::MAX_LEN).ok_or(HookError::TooBig)?;
-    crate::api::state::state_foreign_set(src, &encoded, namespace, account)
+    key.with_key_bytes(|kbytes| {
+        with_encoded_value(value, |vbytes| {
+            crate::api::state::state_foreign_set(vbytes, kbytes, namespace, account)
+        })
+    })
 }
 
 /// Read-modify-write a state entry belonging to another namespace/account:
@@ -963,9 +1059,10 @@ mod tests {
     }
 
     #[test]
-    fn encode_write_round_trips_through_from_bytes() {
-        let raw = encode_write(&0x1122_3344u32);
-        assert_eq!(u32::read(&raw), Ok(0x1122_3344));
+    fn encoded_value_round_trips_through_from_bytes() {
+        with_encoded_value(&0x1122_3344u32, |raw| {
+            assert_eq!(u32::read(raw), Ok(0x1122_3344));
+        });
     }
 
     #[test]

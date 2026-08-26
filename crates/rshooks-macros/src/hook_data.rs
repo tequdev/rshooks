@@ -170,6 +170,19 @@ impl ::rshooks::convert::ToBytes for {name} {{
             ::core::option::Option::None => 0,
         }}
     }}
+
+    // Right-sized to this struct's own `MAX_LEN` — a literal this
+    // concrete, non-generic `impl` block already knows — rather than
+    // `ToBytes::with_bytes`'s generic default, which falls back to a
+    // fixed, always-32-byte scratch buffer (see that method's doc comment;
+    // the same restriction motivates `FixedRead::read_exact`'s `[u8; N]`
+    // impl and this derive's own `FixedRead` impl below).
+    #[inline(always)]
+    fn with_bytes<__R>(&self, f: impl ::core::ops::FnOnce(&[u8]) -> __R) -> __R {{
+        let mut __buf = [0u8; <Self as ::rshooks::convert::ToBytes>::MAX_LEN];
+        let _ = <Self as ::rshooks::convert::ToBytes>::write(self, &mut __buf);
+        f(&__buf)
+    }}
 }}
 
 #[automatically_derived]
