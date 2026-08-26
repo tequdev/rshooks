@@ -52,6 +52,11 @@ cargo run -p rshooks-build -- build --manifest-path examples/16_typed-results/Ca
 cargo run -p rshooks-build -- check examples/16_typed-results/out/current/0.deposit.wasm
 cargo run -p rshooks-build -- check examples/16_typed-results/out/current/1.reset.wasm
 
+# 18_param-signature's `#[hook(0, ..)]` entry fn is named `increment`, not
+# `main` (docs/PARAM_SIGNATURE_DESIGN.md's own worked example).
+cargo run -p rshooks-build -- build --manifest-path examples/18_param-signature/Cargo.toml --out examples/18_param-signature/out
+cargo run -p rshooks-build -- check examples/18_param-signature/out/current/0.increment.wasm
+
 # 80_governance declares two hooks in one chain: `0.govern` and `1.reward`.
 cargo run -p rshooks-build -- build --manifest-path examples/80_governance/Cargo.toml --out examples/80_governance/out
 cargo run -p rshooks-build -- check examples/80_governance/out/current/0.govern.wasm

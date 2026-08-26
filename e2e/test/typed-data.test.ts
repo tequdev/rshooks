@@ -20,9 +20,10 @@ import {
   type TransactionMetadata,
 } from 'xahau'
 import { HookFlags } from 'xahau/dist/npm/models/common/xahau'
+import { STI_UINT8, STI_UINT64, sigParam, sigParamName, u64BEHex, u8Hex } from './sig-param'
 
 const namespace = 'rshooks-e2e-typed-data'
-const WORST_CASE_INSTRUCTIONS = 504
+const WORST_CASE_INSTRUCTIONS = 560
 
 const ACTION_DEPOSIT = 1
 const ACTION_WITHDRAW = 2
@@ -49,10 +50,12 @@ function cfgHex(minAmount: bigint, lockLedgers: number): string {
   return u64LEHex(minAmount) + u32LEHex(lockLedgers)
 }
 
-function insHex(action: number, amount: bigint): string {
-  const actionByte = Buffer.from([action]).toString('hex').toUpperCase()
-  return actionByte + u64LEHex(amount)
-}
+// Declared `HookParameterName`s for `main`'s own signature parameters
+// (docs/PARAM_SIGNATURE_DESIGN.md §1): `action`(0, `u8`/`STI_UINT8`),
+// `amount`(1, `u64`/`STI_UINT64`) — mirrors `sig_name!(0, u8, b"action")`/
+// `sig_name!(1, u64, b"amount")` on the Rust side.
+const ACTION_NAME = sigParamName(0, STI_UINT8, 'action')
+const AMOUNT_NAME = sigParamName(1, STI_UINT64, 'amount')
 
 // The host left-pads this 21-byte state key to 32 bytes.
 function depositStateKeyHex(address: string): string {
@@ -95,14 +98,18 @@ function hookParam(name: string, valueHex: string) {
 async function invoke(
   testContext: XrplIntegrationTestContext,
   sender: XrplIntegrationTestContext['alice'],
-  insValueHex: string,
+  action: number,
+  amount: bigint,
 ) {
   return Xrpld.submit(testContext.client, {
     tx: {
       TransactionType: 'Invoke',
       Account: sender.classicAddress,
       Destination: testContext.hook1.classicAddress,
-      HookParameters: [hookParam('INS', insValueHex)],
+      HookParameters: [
+        sigParam(ACTION_NAME, u8Hex(action)),
+        sigParam(AMOUNT_NAME, u64BEHex(amount)),
+      ],
     } as any,
     wallet: sender,
   })
@@ -137,7 +144,7 @@ describe('typed-data', () => {
     await teardownClient(testContext)
   })
 
-  it('rejects an Invoke with no INS parameter', async () => {
+  it('rejects an Invoke with no action/amount signature parameters', async () => {
     const response = Xrpld.submit(testContext.client, {
       tx: {
         TransactionType: 'Invoke',
@@ -146,8 +153,45 @@ describe('typed-data', () => {
       },
       wallet: testContext.alice,
     })
+    // `action` is index 0 - the generated prologue decodes signature
+    // parameters in declaration order, so with both missing this is the
+    // first rollback reached (docs/PARAM_SIGNATURE_DESIGN.md §1).
     await expect(response).rejects.toThrow(
-      'typed-data: INS parameter missing or malformed',
+      "rshooks: bad sig param 'action'",
+    )
+  })
+
+  it('rejects an Invoke with action present but amount missing', async () => {
+    const response = Xrpld.submit(testContext.client, {
+      tx: {
+        TransactionType: 'Invoke',
+        Account: testContext.alice.classicAddress,
+        Destination: testContext.hook1.classicAddress,
+        HookParameters: [sigParam(ACTION_NAME, u8Hex(ACTION_DEPOSIT))],
+      } as any,
+      wallet: testContext.alice,
+    })
+    await expect(response).rejects.toThrow(
+      "rshooks: bad sig param 'amount'",
+    )
+  })
+
+  it('rejects an Invoke with a short (wrong-length) amount value', async () => {
+    const response = Xrpld.submit(testContext.client, {
+      tx: {
+        TransactionType: 'Invoke',
+        Account: testContext.alice.classicAddress,
+        Destination: testContext.hook1.classicAddress,
+        HookParameters: [
+          sigParam(ACTION_NAME, u8Hex(ACTION_DEPOSIT)),
+          // `amount` decodes as `u64` (8 bytes BE) - one byte is too short.
+          sigParam(AMOUNT_NAME, '00'),
+        ],
+      } as any,
+      wallet: testContext.alice,
+    })
+    await expect(response).rejects.toThrow(
+      "rshooks: bad sig param 'amount'",
     )
   })
 
@@ -158,7 +202,8 @@ describe('typed-data', () => {
     const response = invoke(
       testContext,
       testContext.bob,
-      insHex(ACTION_WITHDRAW, 0n),
+      ACTION_WITHDRAW,
+      0n,
     )
     await expect(response).rejects.toThrow('typed-data: nothing to withdraw')
   })
@@ -167,7 +212,8 @@ describe('typed-data', () => {
     const response = invoke(
       testContext,
       testContext.alice,
-      insHex(ACTION_DEPOSIT, MIN_DROPS - 1n),
+      ACTION_DEPOSIT,
+      MIN_DROPS - 1n,
     )
     await expect(response).rejects.toThrow(
       'typed-data: deposit below configured minimum',
@@ -178,7 +224,8 @@ describe('typed-data', () => {
     const response = await invoke(
       testContext,
       testContext.alice,
-      insHex(ACTION_DEPOSIT, MIN_DROPS),
+      ACTION_DEPOSIT,
+      MIN_DROPS,
     )
 
     const meta = response.meta as TransactionMetadata
@@ -212,7 +259,8 @@ describe('typed-data', () => {
     const response = invoke(
       testContext,
       testContext.alice,
-      insHex(ACTION_WITHDRAW, 0n),
+      ACTION_WITHDRAW,
+      0n,
     )
     await expect(response).rejects.toThrow('typed-data: deposit still locked')
   })
@@ -230,7 +278,8 @@ describe('typed-data', () => {
     const response = await invoke(
       testContext,
       testContext.alice,
-      insHex(ACTION_WITHDRAW, 0n),
+      ACTION_WITHDRAW,
+      0n,
     )
 
     const meta = response.meta as TransactionMetadata
@@ -264,18 +313,20 @@ describe('typed-data', () => {
     const response = invoke(
       testContext,
       testContext.alice,
-      insHex(ACTION_WITHDRAW, 0n),
+      ACTION_WITHDRAW,
+      0n,
     )
     await expect(response).rejects.toThrow('typed-data: nothing to withdraw')
   })
 
-  it('rejects an unknown INS action', async () => {
+  it('rejects an unknown action', async () => {
     const response = invoke(
       testContext,
       testContext.bob,
-      insHex(99, 0n),
+      99,
+      0n,
     )
-    await expect(response).rejects.toThrow('typed-data: unknown INS action')
+    await expect(response).rejects.toThrow('typed-data: unknown action')
   })
 
   describe('deposit pause switch (composite AdminName parameter)', () => {
@@ -339,7 +390,8 @@ describe('typed-data', () => {
       const response = invoke(
         testContext,
         testContext.bob,
-        insHex(ACTION_DEPOSIT, MIN_DROPS),
+        ACTION_DEPOSIT,
+        MIN_DROPS,
       )
       await expect(response).rejects.toThrow(
         'typed-data: deposits are currently paused',
@@ -355,7 +407,8 @@ describe('typed-data', () => {
       const response = invoke(
         testContext,
         testContext.bob,
-        insHex(ACTION_WITHDRAW, 0n),
+        ACTION_WITHDRAW,
+        0n,
       )
       await expect(response).rejects.toThrow('typed-data: nothing to withdraw')
     })

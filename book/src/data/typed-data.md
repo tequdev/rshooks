@@ -187,14 +187,6 @@ struct Config {
     lock_ledgers: u32,
 }
 
-// Per-invocation instruction, read from the `INS` originating-transaction
-// parameter.
-#[derive(ParamValue)]
-struct Instruction {
-    action: u8,
-    amount: u64,
-}
-
 #[hooks]
 pub struct TypedData {
     /// Per-account deposit record, keyed by [`DepositKey`].
@@ -204,21 +196,15 @@ pub struct TypedData {
     /// Install-time configuration (`CFG`).
     #[hook_param(name = b"CFG", default = Config { min_amount: DEFAULT_MIN_AMOUNT, lock_ledgers: DEFAULT_LOCK_LEDGERS })]
     config: HookParam<Config>,
-
-    /// Per-invocation instruction (`INS`). Missing or malformed is a
-    /// rollback, never a silent default.
-    #[otxn_param(name = b"INS", required)]
-    instruction: OtxnParam<Instruction>,
 }
 ```
 
-`DepositKey` gets `HookKey`-equivalent codegen; `DepositValue`/`Config`/
-`Instruction` get `HookData`/`ParamValue`-equivalent codegen — the field
-attributes (`#[state(key_by = ...)]`, `#[hook_param(...)]`,
-`#[otxn_param(...)]`) tie each field's key/name to its value type, the
-struct-field equivalent of `HookState`'s pairing form. Used directly inside
-the `#[hooks] impl` via a `&self` entry, with no manual byte packing
-anywhere:
+`DepositKey` gets `HookKey`-equivalent codegen; `DepositValue`/`Config` get
+`HookData`/`ParamValue`-equivalent codegen — the field attributes
+(`#[state(key_by = ...)]`, `#[hook_param(...)]`) tie each field's key/name
+to its value type, the struct-field equivalent of `HookState`'s pairing
+form. Used directly inside the `#[hooks] impl` via a `&self` entry, with no
+manual byte packing anywhere:
 
 ```rust,ignore
 let deposit = self.deposits.at(DepositKey { tag: DEPOSIT_TAG, owner });
@@ -226,6 +212,12 @@ let current = deposit.get()?.unwrap_or(EMPTY_DEPOSIT);
 // ...
 deposit.set(&next)?;
 ```
+
+That example's own per-invocation instruction (`action`/`amount`) is
+declared a different way entirely — as extra arguments on the entry fn's
+own signature, per the Hook Parameter Signature Interface — see [Hook and
+Transaction Parameters](parameters.md#signature-parameters-fn-arguments),
+not a fourth derived struct here.
 
 ### What the derives replace
 
@@ -279,8 +271,9 @@ size this toolchain's release profile still lowers to inlined stores
 rather than a `memset`/`memcpy` builtin call) no unguarded loop at all.
 `examples/12_typed-data`'s README backs this with a real
 `rshooks build`/`check` measurement: this hook's core deposit-ledger
-logic, built twice — once with the derives as committed, once with all
-four hand-packed instead, everything else byte-for-byte identical:
+logic (`DepositKey`/`DepositValue`/`Config`), built twice — once with the
+derives as committed, once with all three hand-packed instead, everything
+else byte-for-byte identical:
 
 | version | worst-case instructions | wasm size |
 |---|---|---|
@@ -299,7 +292,7 @@ apply the trick themselves. Both versions are guard-clean at the source
 level; no `--auto-guard`/`--default-maxiter` needed for either.
 
 Composite parameter *names* have one caveat: unlike a plain byte-string tag
-(`CFG`/`INS` above, free — the wire encoding *is* the in-memory bytes,
+(`CFG` above, free — the wire encoding *is* the in-memory bytes,
 handed to the host with no copy), a struct-shaped name like `AdminName` in
 [Hook and Transaction Parameters](parameters.md) has to actually run its
 `write()` at runtime, since Rust has no stable way to run a trait method at

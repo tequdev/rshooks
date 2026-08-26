@@ -20,8 +20,11 @@ const buildDir = join(e2eRoot, 'build')
 // examples/README.md) -> [chain-position artifact basename produced by
 // rshooks-build under out/current/, destination wasm basename]. Every
 // single-hook example's `#[hook(0, ..)]` entry fn is named `main`, so its
-// one artifact is always `0.main`; the consolidated `80_governance` chain
-// produces both `0.govern` and `1.reward`.
+// one artifact is always `0.main` - except `18_param-signature`, whose
+// entry fn is named `increment` (the Hook Parameter Signature Interface
+// draft's own worked example, docs/PARAM_SIGNATURE_DESIGN.md); the
+// consolidated `80_governance` chain produces both `0.govern` and
+// `1.reward`.
 const examples = {
   '01_accept-all': [['0.main', 'accept_all']],
   '02_state-counter': [['0.main', 'state_counter']],
@@ -37,6 +40,7 @@ const examples = {
   '13_keylets': [['0.main', 'keylets']],
   '14_account-id-macro': [['0.main', 'account_id_macro']],
   '15_slot-objects': [['0.main', 'slot_objects']],
+  '18_param-signature': [['0.increment', 'param_signature']],
   '80_governance': [
     ['0.govern', 'govern'],
     ['1.reward', 'reward'],

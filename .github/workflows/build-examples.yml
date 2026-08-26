@@ -206,9 +206,18 @@ jobs:
             bin/rshooks check "$wasm"
           done
 
+      # `*.wasm` for `copy-wasm.mjs`/`readHookBinaryHexFromNS`, plus this
+      # example's own `sethook.template.json` for the (growing) set of e2e
+      # suites that install a hook using its generated declaration entries
+      # verbatim (e.g. `e2e/test/param-signature.test.ts`) rather than
+      # hand-writing them — same rationale as uploading the wasm itself:
+      # the e2e job never runs `rshooks build`, so anything it reads from
+      # `out/current/` has to come through this artifact.
       - name: Upload hook binary
         uses: actions/upload-artifact@v7
         with:
           name: example-hooks-${{ matrix.name }}
-          path: ${{ matrix.dir }}/out/current/*.wasm
+          path: |
+            ${{ matrix.dir }}/out/current/*.wasm
+            ${{ matrix.dir }}/out/current/sethook.template.json
           if-no-files-found: error

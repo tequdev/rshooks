@@ -73,7 +73,7 @@ covers when accessor density at one call site outgrows the nesting budget.
 
 `hook_param_exact`/`otxn_param_exact` take the name and the value type `T`
 as two *independent* arguments — nothing stops calling
-`otxn_param_exact::<WrongType>(b"INS")` for a name/type combination that
+`otxn_param_exact::<WrongType>(b"T")` for a name/type combination that
 was never intended, as long as `WrongType: FixedRead` (true of nearly
 every fixed-size type this crate provides, including some *other*
 parameter's value type). A field on the `#[hooks]` struct closes that gap
@@ -170,11 +170,6 @@ pub struct TypedData {
     /// defaults when absent.
     #[hook_param(name = b"CFG", default = Config { min_amount: DEFAULT_MIN_AMOUNT, lock_ledgers: DEFAULT_LOCK_LEDGERS })]
     config: HookParam<Config>,
-
-    /// Per-invocation instruction (`INS`). Missing or malformed is a
-    /// rollback, never a silent default.
-    #[otxn_param(name = b"INS", required)]
-    instruction: OtxnParam<Instruction>,
 }
 ```
 
@@ -182,11 +177,11 @@ pub struct TypedData {
 fallback**, not baked into the deployed `SetHook` template as an installed
 value — see [Per-Hook Attributes](../build/metadata.md) for why a
 `HookParameters` entry has to be added to the template by hand if you want
-a position to install with a concrete value at all. `config` and
-`instruction` show the two ends of the same page's presence spectrum side
-by side: `config` degrades gracefully when unconfigured, `instruction`
-never does, and the field declaration itself (`default = ...` vs.
-`required`) is where that policy lives, not scattered across call sites.
+a position to install with a concrete value at all. Contrast `required`
+above: the field declaration itself (`default = ...` vs. `required`) is
+where a parameter's presence policy lives, not scattered across call
+sites — `config` here degrades gracefully when `CFG` is unconfigured, the
+same way `examples/09_state-foreign`'s `acct` field (above) never does.
 
 ## Composite names: `#[derive(ParamName)]` and `name_by`
 
@@ -246,8 +241,155 @@ name-encoding has to actually run at runtime — laying `section` and
 `field` out into a small buffer sized exactly to `AdminName::MAX_LEN`.
 `examples/12_typed-data`'s README measures this directly: +29 worst-case
 instructions over the same hook without the composite name, versus the
-near-zero cost of the plain `CFG`/`INS` tags used elsewhere in that same
-hook.
+near-zero cost of the plain `CFG` tag used elsewhere in that same hook.
+
+## Signature parameters (fn arguments)
+
+Both surfaces above pair a name with a value type through this crate's own
+choices (a struct field, `default`/`required`). The **Hook Parameter
+Signature Interface** is a different, protocol-level convention: a
+`HookParameterName` wire format that makes a Hook's declared parameters a
+machine-readable, typed function signature, and `rshooks` maps it onto the
+most direct possible Rust surface — extra arguments on the entry fn itself.
+The normative rules live in `docs/PARAM_SIGNATURE_DESIGN.md`; this section
+covers the day-to-day surface built on it.
+
+```rust,ignore
+#[hooks]
+impl Increment {
+    /// increment(account: AccountID, count: UInt16)
+    #[hook(0, on = [Invoke])]
+    fn increment(&self, account: AccountId, count: u16) -> HookResult {
+        // `account` and `count` are already decoded here.
+        ...
+    }
+}
+```
+
+(from `examples/18_param-signature`, the interface draft's own worked
+example.) Every argument after `&self` on a `#[hook(..)]` fn declares one
+signature parameter, in declaration order — the argument's position (0-based)
+is its wire **index**, its identifier is its display **name**, and its type
+picks the wire **type byte**. `#[cbak(..)]` fns cannot declare extra
+arguments: a callback's originating transaction is the emitted transaction,
+not the invocation, so the interface doesn't apply there.
+
+### The wire name
+
+Each declared parameter's `HookParameterName` is a fixed-layout byte string,
+7 to 22 bytes total:
+
+| bytes | meaning |
+|---|---|
+| `0x5F 0x5F` | reserved `"__"` prefix |
+| 1 byte | index, `0x00..=0x0F` (so at most 16 arguments per entry) |
+| `0x5F` | `"_"` separator |
+| 1 byte | the `STI_*` type byte (see the type table below) |
+| `0x5F` | `"_"` separator |
+| 1 to 16 bytes | the display name, `[A-Za-z][A-Za-z0-9]*` (no `_`) |
+
+`rshooks` builds this name entirely at macro/compile time — never at
+runtime — and validates every one of those rules (index range, a supported
+type byte, the name's charset/length) as a `const`-evaluable assert, so a
+malformed declaration is a compile error, not a deploy-time or runtime
+surprise. A Rust identifier containing `_` (the common case — `min_amount`,
+say) therefore cannot be used as a signature-parameter argument name; rename
+it, or fall back to the escape hatch below with an explicit name literal.
+
+### Supported types
+
+| Rust type | `STI_*` byte | wire payload |
+|---|---|---|
+| `u8` | `0x10` (`STI_UINT8`) | 1 byte |
+| `u16` | `0x01` (`STI_UINT16`) | 2 bytes |
+| `u32` | `0x02` (`STI_UINT32`) | 4 bytes |
+| `u64` | `0x03` (`STI_UINT64`) | 8 bytes |
+| `[u8; 16]` | `0x04` (`STI_UINT128`) | 16 bytes |
+| `[u8; 32]` / `Hash` | `0x05` (`STI_UINT256`) | 32 bytes |
+| `AmountBytes` | `0x06` (`STI_AMOUNT`) | 8 (native) or 48 (IOU) bytes |
+| `Blob<N>` | `0x07` (`STI_VL`) | 1 to `min(N, 256)` bytes |
+| `AccountId` | `0x08` (`STI_ACCOUNT`) | 20 bytes |
+| `[u8; 20]` | `0x11` (`STI_UINT160`) | 20 bytes |
+| `IssueBytes` | `0x18` (`STI_ISSUE`) | 20 (native, all-zero) or 40 (issued) bytes |
+| `CurrencyCode` | `0x1A` (`STI_CURRENCY`) | 20 bytes |
+
+Every integer type here decodes **big-endian**, unlike this crate's own
+`ToBytes`/`FromBytes` little-endian convention covered earlier on this page
+and in [Typed Data with Derives](typed-data.md) — a signature parameter's
+value crosses the same protocol boundary a raw `otxn_field`/`otxn_param`
+read does (see [Reading the Originating Transaction](otxn.md)), not this
+crate's own hook-private wire format. `Blob<N>`/`IssueBytes` are new types
+in `rshooks::sig`; every other row is a type this page and [Typed Data with
+Derives](typed-data.md) already cover.
+
+### The generated prologue and its rollback
+
+For each declared argument, the `#[hooks]`-generated code ahead of the
+entry's body reads the value via `otxn_param` (against the full declared
+name above) and decodes it per the argument's type. On any failure —
+absent, or the wrong length/shape for the declared type — it rolls back
+immediately, with:
+
+- message `b"rshooks: bad sig param '<name>'"`
+- code = the argument's own 0-based index
+
+before the body ever runs, so the body never sees a partially-decoded
+invocation. See `examples/18_param-signature` and `examples/12_typed-data`
+for this rollback exercised end-to-end (both hand-written unit tests via
+`rshooks_testenv::TestEnv::invoke`, and e2e).
+
+#### The `>= 16` convention for hook-authored rollback codes
+
+Because the generated prologue's own rollback code is always an argument
+index, `0x00..=0x0F` (`0..=15` — the interface's own index bound), any
+`rollback!`/`hook_errors!` code your own entry body uses has to stay clear
+of that whole range, or the two rollback sources (the generated prologue,
+and your own body) become ambiguous by code alone: a caller inspecting
+`HookReturnCode` in isolation can no longer tell "argument 3 was malformed"
+from "my own error variant 3" without also checking the message. Every
+`rshooks` example that declares signature parameters and its own
+`hook_errors!` enum (`examples/12_typed-data`, `examples/18_param-signature`)
+follows the same fix: number every hook-authored variant from `16`, one
+past the highest possible argument index, rather than the usual `1`. This
+is a convention, not something the macro enforces — `hook_errors!` accepts
+any `i64` discriminant — but it is the one this crate's own examples use
+consistently for any signature-parameter-declaring entry, and is worth
+adopting in your own hooks for the same reason.
+
+### The escape hatch
+
+Per the standing rule that every macro surface documents its raw
+counterpart, `rshooks::sig` exposes the same name-building and decoding
+directly, for a hand-rolled read outside the entry-fn-argument surface:
+
+```rust,ignore
+use rshooks::sig::otxn_sig_param;
+use rshooks::sig_name;
+
+const COUNT_NAME: [u8; 11] = sig_name!(1, u16, b"count");
+let count: rshooks::error::Result<u16> = otxn_sig_param(&COUNT_NAME);
+```
+
+`sig_name!(index, Type, name)` resolves the wire name and type byte for
+you at compile time; `sig_param_name` (also in `rshooks::sig`) is its
+lower-level, non-macro counterpart. See `crates/rshooks/src/sig.rs`'s own
+rustdoc for the full trait (`SigParamType`) and every type's decode
+contract.
+
+### Generated `SetHook` declarations
+
+An entry with signature-parameter arguments needs its parameters
+*declared*, not just read — the interface requires an on-ledger
+declaration entry (`HookParameterValue = 0x00`) at `SetHook` time for every
+parameter the entry's signature names. `rshooks build` generates this
+automatically: any `#[hook(..)]` entry with signature-parameter arguments
+gets a `HookParameters` block in `sethook.template.json`, one entry per
+declared argument, in index order — see [Per-Hook Attributes and the
+SetHook Template](../build/metadata.md) for the exact shape and where it
+sits among that entry's other generated fields. This supersedes the
+general "`HookParameters` is never generated" rule *only* for declared
+signature parameters; an ordinary `#[hook_param(...)]`/`#[otxn_param(...)]`
+field (covered earlier on this page) still never appears there.
 
 ## Why this prevents name/value mismatches
 
@@ -258,9 +400,9 @@ the right type, and both compile fine as long as `T: FixedRead`. A
 `#[hook_param(...)]`/`#[otxn_param(...)]` field removes that degree of
 freedom: the field's declared name is permanently tied to exactly one value
 type, so `TypedData.config.get_or_default()` (read from a free function
-outside the impl) and `self.instruction.get_required()` (read directly
-inside `examples/12_typed-data`'s `&self` entry) can never accidentally
-decode one parameter's bytes as the other's struct shape — the compiler
+outside the impl) and `self.acct.get_required()` (read directly inside
+`examples/09_state-foreign`'s `&self` entry) can never accidentally decode
+one parameter's bytes as the other's struct shape — the compiler
 resolves the return type from the field itself, with
 no independently-chosen type left for a mismatch to hide in. This is the
 identical safety property [Hook State](state.md)'s `#[state(...)]` fields
