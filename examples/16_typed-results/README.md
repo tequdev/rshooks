@@ -106,7 +106,7 @@ profile):
 
 | entry | form | worst-case instructions | size | max nesting depth |
 |---|---|---:|---:|---:|
-| `deposit` (index 0) | typed, idiomatic (`HookResult`, `?`, msg-clause `hook_errors!`) | 326 | 944 bytes | 1 |
+| `deposit` (index 0) | typed, idiomatic (`HookResult`, `?`, msg-clause `hook_errors!`) | 310 | 912 bytes | 1 |
 | `reset` (index 1) | typed, raw (`HookResult`, `accept!`/`rollback!`) | 131 | 465 bytes | 1 |
 
 Both are well within the 32-level nesting budget and the 65,535-byte

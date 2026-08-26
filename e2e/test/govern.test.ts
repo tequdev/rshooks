@@ -20,7 +20,7 @@ type Wallet = XrplIntegrationTestContext['alice']
 const namespace = 'rshooks-e2e-govern'
 // The hook's static worst case, from
 // out/current/0.govern.metadata.json (WCE.hook).
-const WORST_CASE_HOOK_INSTRUCTIONS = 28121
+const WORST_CASE_HOOK_INSTRUCTIONS = 28114
 
 function accountIdHex(classicAddress: string): string {
   return Buffer.from(decodeAccountID(classicAddress)).toString('hex').toUpperCase()

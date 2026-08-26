@@ -20,11 +20,20 @@ pub fn hook_account<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
 }
 
 /// The AccountID this hook is installed on.
+///
+/// Routed through [`FixedRead::read_exact`] rather than a hand-rolled
+/// `AccountId::default()` + discarded write count: `hook_account`'s
+/// underlying host call is protocol-fixed-width (the `HostBackend` trait's
+/// own `hook_account` method returns `Result<[u8; ACC_ID_LEN], i64>`, not a
+/// variable-length blob — see `testenv_bridge::write_array`'s doc comment),
+/// so a successful call always writes exactly `ACC_ID_LEN` bytes; routing
+/// through `read_exact` gets both that as an explicit checked invariant
+/// (rather than an unchecked assumption) and this crate's `MaybeUninit`
+/// read-buffer optimization (see `crate::convert`'s module doc comment) for
+/// free.
 #[inline(always)]
 pub fn hook_account_buf() -> Result<AccountId> {
-    let mut buf = AccountId::default();
-    let _ = hook_account(buf.as_mut())?;
-    Ok(buf)
+    AccountId::read_exact(hook_account)
 }
 
 /// The hash of the hook definition at chain position `hook_no`, written into
@@ -44,11 +53,13 @@ pub fn hook_hash<B: AsMut<[u8]> + ?Sized>(out: &mut B, hook_no: i32) -> Result<u
 /// The hash of the hook definition at chain position `hook_no` on this
 /// hook's account (negative indices address relative to the current hook,
 /// per Hook API convention).
+///
+/// Routed through [`FixedRead::read_exact`] — see [`hook_account_buf`]'s
+/// doc comment for why that's sound (and not just an optimization) for a
+/// protocol-fixed-width call like this one.
 #[inline(always)]
 pub fn hook_hash_buf(hook_no: i32) -> Result<Hash> {
-    let mut buf = Hash::default();
-    let _ = hook_hash(buf.as_mut(), hook_no)?;
-    Ok(buf)
+    Hash::read_exact(|buf| hook_hash(buf, hook_no))
 }
 
 /// Read this hook's own parameter `name` into `out`. Returns the number of

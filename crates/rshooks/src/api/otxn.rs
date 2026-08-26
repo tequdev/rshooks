@@ -207,10 +207,23 @@ impl private::Sealed for Amount {}
 impl OtxnFieldValue for Amount {
     type Output = AmountBytes;
 
+    /// The read buffer is [`core::mem::MaybeUninit`], not `[0u8; N]` (see
+    /// `crate::convert`'s module doc comment): only the `..written` prefix
+    /// `otxn_field` reports actually writing is ever passed to
+    /// [`slot_obj::classify_amount`] below.
     #[inline(always)]
     fn read_otxn_field(field: SField<Self>) -> Result<Self::Output> {
-        let mut buf = [0u8; crate::types::IOU_AMOUNT_LEN];
-        let written = otxn_field(&mut buf, field.code())?;
+        let mut storage = core::mem::MaybeUninit::<[u8; crate::types::IOU_AMOUNT_LEN]>::uninit();
+        // SAFETY: see `crate::convert::uninit_slice_mut`'s doc comment;
+        // `otxn_field` cannot report writing more bytes than the buffer it
+        // was handed, and only the `..written` prefix of `storage` is read
+        // below.
+        let written = otxn_field(
+            unsafe { crate::convert::uninit_slice_mut(&mut storage) },
+            field.code(),
+        )?;
+        // SAFETY: same contract as above.
+        let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
         let bytes = buf.get(..written).ok_or(HookError::TooBig)?;
         slot_obj::classify_amount(bytes)
     }
@@ -225,10 +238,24 @@ impl OtxnFieldValue for Issue {
     /// what makes a 44-byte MPT issue reach [`slot_obj::classify_issue`] as a
     /// [`HookError::ParseError`] instead of failing the host call first as
     /// `TooSmall`.
+    ///
+    /// The read buffer is [`core::mem::MaybeUninit`], not `[0u8; N]` (see
+    /// `crate::convert`'s module doc comment): only the `..written` prefix
+    /// `otxn_field` reports actually writing is ever passed to
+    /// [`slot_obj::classify_issue`] below.
     #[inline(always)]
     fn read_otxn_field(field: SField<Self>) -> Result<Self::Output> {
-        let mut buf = [0u8; slot_obj::ISSUE_MAX_READ_LEN];
-        let written = otxn_field(&mut buf, field.code())?;
+        let mut storage = core::mem::MaybeUninit::<[u8; slot_obj::ISSUE_MAX_READ_LEN]>::uninit();
+        // SAFETY: see `crate::convert::uninit_slice_mut`'s doc comment;
+        // `otxn_field` cannot report writing more bytes than the buffer it
+        // was handed, and only the `..written` prefix of `storage` is read
+        // below.
+        let written = otxn_field(
+            unsafe { crate::convert::uninit_slice_mut(&mut storage) },
+            field.code(),
+        )?;
+        // SAFETY: same contract as above.
+        let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
         let bytes = buf.get(..written).ok_or(HookError::TooBig)?;
         slot_obj::classify_issue(bytes)
     }
@@ -290,11 +317,15 @@ pub fn otxn_id<B: AsMut<[u8]> + ?Sized>(out: &mut B, flags: u32) -> Result<usize
 /// emit-failure transaction ID where applicable; other flag values are
 /// passed through verbatim (undocumented beyond that in the upstream Hook
 /// API reference, so exposed as a plain `u32` rather than an invented enum).
+///
+/// Routed through [`FixedRead::read_exact`] rather than a hand-rolled
+/// `Hash::default()` + discarded write count — see
+/// `crate::api::hook_ctx::hook_account_buf`'s doc comment for why that's
+/// sound (not just an optimization) for a protocol-fixed-width call like
+/// this one.
 #[inline(always)]
 pub fn otxn_id_buf(flags: u32) -> Result<Hash> {
-    let mut buf = Hash::default();
-    let _ = otxn_id(buf.as_mut(), flags)?;
-    Ok(buf)
+    Hash::read_exact(|buf| otxn_id(buf, flags))
 }
 
 /// The [`TxType`] of the originating transaction.

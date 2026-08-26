@@ -140,7 +140,7 @@ For `Governance`'s `govern` entry (index `0`, `on = [Invoke]`,
   "HookCanEmit": "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF7FFFFFFFFFFFFFFFFFF9FFFFD",
   "HookName": "676F7665726E",
   "HookHash": "…64 hex chars…",
-  "WCE": { "hook": 28121, "cbak": 0 },
+  "WCE": { "hook": 28114, "cbak": 0 },
   "builder": {
     "name": "rshooks-build",
     "version": "0.2.0",

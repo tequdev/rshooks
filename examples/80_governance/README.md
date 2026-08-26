@@ -58,8 +58,8 @@ writes, under `out/current/`:
 | `sethook.template.json` | a `SetHook` template covering **both** positions in one `Hooks` array (`Account`/`HookNamespace` left as placeholders) |
 | `sethook.template.meta.json` | generation info: hook hashes, declared/gap positions, required amendments |
 
-Measured this build: `0.govern.wasm` is 14540 bytes (WCE 28121, max
-nesting 23/32); `1.reward.wasm` is 8129 bytes (WCE 14169, max nesting
+Measured this build: `0.govern.wasm` is 14531 bytes (WCE 28114, max
+nesting 23/32); `1.reward.wasm` is 8141 bytes (WCE 14171, max nesting
 22/32). Both stay well under the 65,535-byte SetHook `CreateCode` limit.
 
 ## Shared declaration: what's actually consolidated
