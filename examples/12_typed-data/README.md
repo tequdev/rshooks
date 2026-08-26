@@ -456,21 +456,26 @@ removed (everything else byte-for-byte identical):
 |---|---|---|
 | without the `AdminName` pause switch | 441 | 1504 bytes |
 | with the `AdminName` pause switch | 470 | 1611 bytes |
-| + deleting the record on a full withdrawal (as committed) | 504 | 1685 bytes |
+| + deleting the record on a full withdrawal (as committed) | 439 | 1556 bytes |
 
 +29 instructions, +107 bytes for `AdminName` over the no-`AdminName`
 baseline — the unavoidable cost of one composite-name-keyed `hook_param`
 lookup (the struct encode itself, plus the extra branch/rollback path
 checking it).
 
-The third row is a **behavior** change, not an abstraction cost: the
-withdraw branch calls `deposit.delete()` and accepts from inside the
-branch instead of falling through to the shared `deposit.set(&next)`,
-so the hook now carries two distinct terminating state writes rather than
-one. +34 instructions, +74 bytes buys the reserve refund a deleted entry
-gets and an all-zero stored entry does not. (Both earlier rows were
-measured before that change, on otherwise byte-identical sources; they
-remain a valid A/B for the `AdminName` question they were built to answer.)
+Going from the second row to the third is a **behavior** change, not an
+abstraction cost: the withdraw branch calls `deposit.delete()` and accepts
+from inside the branch instead of falling through to the shared
+`deposit.set(&next)`, so the hook now carries two distinct terminating
+state writes rather than one. That delta is no longer directly readable
+off the table above, though: rows one and two were measured before
+`crate::state`'s key/value buffers were right-sized (the write side now
+scratch-allocates exactly `T::MAX_LEN` bytes instead of always
+`MAX_TYPED_STATE_LEN`/32 — see `crate::state`'s module doc comment), so row
+three sits on a cheaper shared baseline than rows one and two do. Rows one
+and two remain a valid A/B for the `AdminName` question they were built to
+answer; re-measuring them on the current `rshooks` is a follow-up, not done
+here.
 
 Still guard-clean at the source level throughout: no `--auto-guard`/
 `--default-maxiter` needed for any of the three.

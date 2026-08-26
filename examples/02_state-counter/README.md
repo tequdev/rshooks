@@ -100,11 +100,14 @@ harness does and does not model.
 
 The typed layer's convenience (no hand-written buffer/length-check/
 byte-order code) isn't free: `state_get_typed`/`state_set_typed` go
-through `crate::state`'s generic, 32-byte-scratch-buffer machinery
-(`MAX_TYPED_STATE_LEN`), rather than this hook reading/writing a plain
-8-byte buffer via the raw `state`/`state_set` calls directly. Measured
-(`rshooks build`/`check`): 257 worst-case instructions / 749 bytes,
-versus 58 / 349 for a hand-rolled-buffer version of this same hook. Still
+through `crate::state`'s generic typed-storage machinery rather than this
+hook reading/writing a plain 8-byte buffer via the raw `state`/`state_set`
+calls directly. The write side right-sizes its scratch buffer to `u64`'s
+own 8-byte encoding (`ToBytes::with_bytes`); the read side still allocates
+the full `MAX_TYPED_STATE_LEN` (32-byte) buffer regardless of `T` — see
+`crate::state::decode_read`'s doc comment for why. Measured (`rshooks
+build`/`check`): 224 worst-case instructions / 684 bytes, versus 58 / 349
+for a hand-rolled-buffer version of this same hook. Still
 guard-clean at the source level — no `--auto-guard`/
 `--default-maxiter` needed. For a hook this simple (one `u64` counter,
 one key), the raw layer is the cheaper choice; this example uses the

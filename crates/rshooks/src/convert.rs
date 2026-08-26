@@ -38,6 +38,20 @@
 
 use crate::error::{HookError, Result};
 
+/// Default scratch-buffer width for [`ToBytes::with_bytes`]'s generic
+/// default implementation.
+///
+/// 32, matching `crate::state::MAX_TYPED_STATE_LEN`'s own empirically-picked
+/// width — see that constant's doc comment for the exact wasm-codegen
+/// threshold this reflects (beyond it, this toolchain's `wasm32v1-none`
+/// codegen stops lowering a local `[0u8; N]` zero-init to a handful of
+/// inlined stores and instead calls the shared `memset` builtin, a real,
+/// unguarded wasm `loop` the Hook API's guard checker rejects). A concrete,
+/// non-generic [`ToBytes`] impl overrides [`with_bytes`](ToBytes::with_bytes)
+/// with its own exact-length buffer instead of this fallback width — see
+/// that method's doc comment.
+const DEFAULT_SCRATCH_LEN: usize = 32;
+
 /// Encode `Self` into the front of a caller-provided buffer.
 ///
 /// Mirrors this crate's caller-buffer convention (`state`, `hook_account`,
@@ -54,6 +68,27 @@ pub trait ToBytes {
     /// `0` if `buf` is shorter than `Self::MAX_LEN` (nothing is written in
     /// that case — never a partial write).
     fn write(&self, buf: &mut [u8]) -> usize;
+
+    /// Encodes `self` into a scratch buffer and hands the written prefix to
+    /// `f`, returning whatever `f` returns.
+    ///
+    /// The default implementation (generic over any `Self: ToBytes`)
+    /// allocates a [`DEFAULT_SCRATCH_LEN`]-byte buffer — using
+    /// [`Self::MAX_LEN`](ToBytes::MAX_LEN) as an array length isn't legal
+    /// in a *generic* default trait method on stable Rust, only inside a
+    /// concrete, non-generic `impl` (the same restriction
+    /// [`FixedRead::read_exact`]'s doc comment describes). A concrete,
+    /// non-generic `ToBytes` impl is free to override this to allocate
+    /// exactly `Self::MAX_LEN` bytes instead — see
+    /// `crate::state::state_set_loose`'s doc comment for the measured
+    /// payoff (e.g. an 8-byte buffer for a `u64` state value in place of
+    /// this default's 32).
+    #[inline(always)]
+    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        let mut buf = [0u8; DEFAULT_SCRATCH_LEN];
+        let n = self.write(&mut buf);
+        f(buf.get(..n).unwrap_or(&[]))
+    }
 }
 
 /// Decode `Self` from a byte buffer.
@@ -80,6 +115,11 @@ impl ToBytes for u8 {
             None => 0,
         }
     }
+
+    #[inline(always)]
+    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        f(&self.to_le_bytes())
+    }
 }
 
 impl FromBytes for u8 {
@@ -104,6 +144,11 @@ impl ToBytes for u16 {
             }
             None => 0,
         }
+    }
+
+    #[inline(always)]
+    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        f(&self.to_le_bytes())
     }
 }
 
@@ -130,6 +175,11 @@ impl ToBytes for u32 {
             None => 0,
         }
     }
+
+    #[inline(always)]
+    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        f(&self.to_le_bytes())
+    }
 }
 
 impl FromBytes for u32 {
@@ -154,6 +204,11 @@ impl ToBytes for u64 {
             }
             None => 0,
         }
+    }
+
+    #[inline(always)]
+    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        f(&self.to_le_bytes())
     }
 }
 
@@ -180,6 +235,11 @@ impl ToBytes for i64 {
             None => 0,
         }
     }
+
+    #[inline(always)]
+    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        f(&self.to_le_bytes())
+    }
 }
 
 impl FromBytes for i64 {
@@ -200,6 +260,11 @@ impl ToBytes for crate::xfl::XFL {
     #[inline(always)]
     fn write(&self, buf: &mut [u8]) -> usize {
         self.raw_bits().write(buf)
+    }
+
+    #[inline(always)]
+    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        self.raw_bits().with_bytes(f)
     }
 }
 
@@ -238,6 +303,17 @@ impl<const N: usize> ToBytes for [u8; N] {
             }
             None => 0,
         }
+    }
+
+    /// Hands `f` this array's own bytes directly — no scratch buffer at
+    /// all. Legal even though [`ToBytes::with_bytes`]'s default can't do
+    /// the same generically: `N` here is the concrete const generic
+    /// parameter this `impl` block is written against, not an associated
+    /// constant projected through a generic `Self` (the same distinction
+    /// [`FixedRead::read_exact`]'s `[u8; N]` impl already relies on).
+    #[inline(always)]
+    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        f(self)
     }
 }
 
