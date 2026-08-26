@@ -3,7 +3,7 @@ import { convertStringToHex, decodeAccountID, type TransactionMetadata } from 'x
 import { buildHook, installHook } from './harness'
 
 const namespace = 'rshooks-e2e-typed-data'
-const WORST_CASE_INSTRUCTIONS = 504
+const WORST_CASE_INSTRUCTIONS = 439
 
 const ACTION_DEPOSIT = 1
 const ACTION_WITHDRAW = 2

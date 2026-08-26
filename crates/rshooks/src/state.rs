@@ -98,6 +98,18 @@
 //! already-32-byte key) is the one exception with nothing to shorten: it
 //! passes all 32 bytes through unchanged.
 //!
+//! [`StateKeyEncode::with_key_bytes`] carries the identical real-length,
+//! never-locally-padded contract — it exists purely to let a concrete key
+//! type hand those same bytes to a caller-supplied closure directly,
+//! without necessarily building an [`EncodedStateKey`] to hold them first
+//! (an `EncodedStateKey` is always a fixed 32-byte buffer regardless of a
+//! key's own real length, since it must be able to hold *any* key up to
+//! [`crate::types::STATE_KEY_LEN`] — see that struct's doc comment). Every
+//! [`state_get`]/[`state_set_loose`]/[`state_update_loose`]/[`state_delete`]
+//! (and `_foreign` twin) call in this module goes through
+//! [`StateKeyEncode::with_key_bytes`], not [`StateKeyEncode::encode`]
+//! directly, for exactly that reason.
+//!
 //! # Struct keys (`#[derive(crate::HookKey)]`) vs. `state_keys!`
 //!
 //! [`state_keys!`](crate::state_keys) suits a **small, fixed set** of
@@ -128,7 +140,8 @@
 //! struct included) does **not** automatically qualify, so a state *value*
 //! type can never be passed where a key is expected by accident.
 //! [`crate::HookKey`]'s derive checks at compile time that the struct fits
-//! the 32-byte key space, rather than silently truncating.
+//! the 32-byte key space (the same bound [`with_encoded_value`]'s
+//! value-side check enforces below), rather than silently truncating.
 //!
 //! # Pairing a key with its value type: [`TypedStateKey`]
 //!
@@ -221,6 +234,32 @@ const MAX_TYPED_STATE_LEN: usize = 32;
 pub trait StateKeyEncode {
     /// `self`'s own real-length key encoding — see this trait's doc comment.
     fn encode(&self) -> EncodedStateKey;
+
+    /// Encodes `self`'s key bytes and hands them to `f`, returning whatever
+    /// `f` returns.
+    ///
+    /// The default implementation calls [`Self::encode`] and hands `f` the
+    /// resulting [`EncodedStateKey`]'s [`AsRef<[u8]>`](AsRef) view — so
+    /// every existing `StateKeyEncode` impl (including one a hook crate
+    /// wrote itself) keeps working unchanged with no override required. A
+    /// concrete impl that already has its own bytes on hand — a plain
+    /// `[u8; N]`, an already-[`encode`](Self::encode)d [`EncodedStateKey`],
+    /// a full 32-byte [`crate::types::StateKey`], or a
+    /// [`crate::HookKey`]-derived struct — overrides this to hand `f` those
+    /// bytes directly, skipping the `EncodedStateKey` round trip (and, for
+    /// [`EncodedStateKey`] itself, the redundant `Copy` of its 32-byte
+    /// buffer that going through [`Self::encode`] would otherwise repeat at
+    /// every [`state_get`]/[`state_set_loose`]/[`state_update_loose`]/
+    /// [`state_delete`] (and `_foreign` twin) call site — e.g.
+    /// `examples/12_typed-data`'s `key_by = DepositKey` field, whose
+    /// `State::at()`-bound accessors store the key as a pre-computed
+    /// `EncodedStateKey` (see [`crate::decl`]'s module doc comment), so
+    /// every accessor call was re-copying that same 32-byte buffer through
+    /// [`Self::encode`]'s identity impl before reaching the host call).
+    #[inline(always)]
+    fn with_key_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        f(self.encode().as_ref())
+    }
 }
 
 /// The real-length byte encoding [`StateKeyEncode::encode`] returns: a
@@ -302,6 +341,16 @@ impl StateKeyEncode for EncodedStateKey {
     fn encode(&self) -> EncodedStateKey {
         *self
     }
+
+    /// Hands `f` this already-encoded key's [`AsRef<[u8]>`](AsRef) view
+    /// directly — no [`Self::encode`] round trip (which would `Copy` the
+    /// full 32-byte buffer onto a fresh stack slot only to immediately
+    /// reference it the same way). See [`StateKeyEncode::with_key_bytes`]'s
+    /// doc comment for the measured payoff this override exists for.
+    #[inline(always)]
+    fn with_key_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        f(self.as_ref())
+    }
 }
 
 /// Identity impl: a raw, already-32-byte [`crate::types::StateKey`] passes
@@ -310,6 +359,15 @@ impl StateKeyEncode for StateKey {
     #[inline(always)]
     fn encode(&self) -> EncodedStateKey {
         EncodedStateKey::new(self.0, STATE_KEY_LEN)
+    }
+
+    /// Hands `f` this key's own 32-byte buffer directly — nothing to
+    /// shorten, so there is no [`EncodedStateKey`] to build at all. See
+    /// [`StateKeyEncode::with_key_bytes`]'s doc comment for why this
+    /// override exists.
+    #[inline(always)]
+    fn with_key_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        f(&self.0)
     }
 }
 
@@ -369,6 +427,26 @@ impl<const N: usize> StateKeyEncode for [u8; N] {
         }
         EncodedStateKey::new(buf, N)
     }
+
+    /// Hands `f` this array's own bytes directly — no 32-byte
+    /// [`EncodedStateKey`] buffer at all. Carries its own copy of
+    /// [`Self::encode`]'s compile-time length assert (an override replaces
+    /// the default body, assert included — see
+    /// [`crate::convert::TypedParamName::with_name_bytes`]'s doc comment
+    /// for the identical convention). See
+    /// [`StateKeyEncode::with_key_bytes`]'s doc comment for why this
+    /// override exists.
+    #[inline(always)]
+    fn with_key_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        const {
+            assert!(
+                N >= 1 && N <= STATE_KEY_LEN,
+                "rshooks::state: a [u8; N] state key must be 1..=32 bytes \
+                 (the Hook API's own key-length bound)"
+            );
+        }
+        f(self)
+    }
 }
 
 /// A [`StateKeyEncode`] key type bound to exactly one value type — see the
@@ -392,12 +470,21 @@ pub trait TypedStateKey: StateKeyEncode {
 /// propagates that error onward via `?`.
 ///
 /// `raw` is only ever read over its `..n` prefix (`n = res(code)?`, the
-/// host's own reported write count) — so [`state_get_encoded`]/
-/// [`state_foreign_get_encoded`] pass a [`core::mem::MaybeUninit`] scratch
-/// buffer viewed through [`uninit_slice_mut`] here rather than a
-/// zero-initialized one: nothing beyond that prefix is ever touched, so
-/// zeroing the rest first would be dead work the guard checker still
-/// charges for.
+/// host's own reported write count) — so the bytes-level read helpers below
+/// pass a [`core::mem::MaybeUninit`] scratch buffer viewed through
+/// [`uninit_slice_mut`] here rather than a zero-initialized one: nothing
+/// beyond that prefix is ever touched, so zeroing the rest first would be
+/// dead work the guard checker still charges for.
+///
+/// Deliberately still reads through a fixed [`MAX_TYPED_STATE_LEN`]-byte
+/// buffer rather than a `T`-sized one: unlike the write side
+/// ([`with_encoded_value`]), a right-sized read buffer would change
+/// observable behavior for an entry longer than `T`'s own encoding — the
+/// host call would fail with [`HookError::TooSmall`] instead of the
+/// current lenient prefix decode. `examples/09_state-foreign` relies on
+/// that prefix decode (its README documents reading a 32-byte foreign
+/// entry through a 1-byte `[u8; 1]` value type), so this crate keeps the
+/// read side at the fixed buffer width.
 #[inline(always)]
 fn decode_read<T: FromBytes>(code: i64, raw: &[u8]) -> Result<Option<T>> {
     if code == rshooks_core::DOESNT_EXIST {
@@ -430,6 +517,23 @@ fn with_encoded_value<T: ToBytes, R>(value: &T, f: impl FnOnce(&[u8]) -> R) -> R
     value.with_bytes(f)
 }
 
+/// Read this hook's own state entry for raw key bytes, decoded as `T`.
+///
+/// Shared body behind [`state_get_encoded`] (an already-[`EncodedStateKey`]d
+/// key, handed its [`AsRef<[u8]>`](AsRef) view) and [`state_get`] (any
+/// [`StateKeyEncode`] key, via [`StateKeyEncode::with_key_bytes`]) — see
+/// [`decode_read`]'s doc comment for the `MaybeUninit` scratch buffer.
+#[inline(always)]
+fn state_get_bytes<T: FromBytes>(kbytes: &[u8]) -> Result<Option<T>> {
+    let mut storage = core::mem::MaybeUninit::<[u8; MAX_TYPED_STATE_LEN]>::uninit();
+    // SAFETY: see `uninit_slice_mut`'s doc comment; `state_raw_code` cannot
+    // report writing more bytes than the buffer it was handed, and
+    // `decode_read` only ever reads the `..n` prefix that count reports.
+    let buf = unsafe { uninit_slice_mut(&mut storage) };
+    let code = crate::api::state::state_raw_code(buf, kbytes);
+    decode_read(code, buf)
+}
+
 /// Read this hook's own state entry for an already-[`EncodedStateKey`]d
 /// `key`, decoded as `T`.
 ///
@@ -439,13 +543,7 @@ fn with_encoded_value<T: ToBytes, R>(value: &T, f: impl FnOnce(&[u8]) -> R) -> R
 /// [`state_get`] would otherwise perform.
 #[inline(always)]
 pub(crate) fn state_get_encoded<T: FromBytes>(key: &EncodedStateKey) -> Result<Option<T>> {
-    let mut storage = core::mem::MaybeUninit::<[u8; MAX_TYPED_STATE_LEN]>::uninit();
-    // SAFETY: see `uninit_slice_mut`'s doc comment; `state_raw_code` cannot
-    // report writing more bytes than the buffer it was handed, and
-    // `decode_read` only ever reads the `..n` prefix that count reports.
-    let buf = unsafe { uninit_slice_mut(&mut storage) };
-    let code = crate::api::state::state_raw_code(buf, key);
-    decode_read(code, buf)
+    state_get_bytes(key.as_ref())
 }
 
 /// Read this hook's own state entry for `key`, decoded as `T`.
@@ -453,7 +551,7 @@ pub(crate) fn state_get_encoded<T: FromBytes>(key: &EncodedStateKey) -> Result<O
 /// `Ok(None)` means no entry exists for `key` — see the module doc comment.
 #[inline(always)]
 pub fn state_get<T: FromBytes>(key: &impl StateKeyEncode) -> Result<Option<T>> {
-    state_get_encoded(&key.encode())
+    key.with_key_bytes(|kbytes| state_get_bytes::<T>(kbytes))
 }
 
 /// Read this hook's own state entry for `key`, decoded as `key`'s own
@@ -465,20 +563,28 @@ pub fn state_get_typed<K: TypedStateKey>(key: &K) -> Result<Option<K::Value>> {
     state_get::<K::Value>(key)
 }
 
+/// Write this hook's own state entry for raw key bytes, encoding `value` as
+/// `T`. Shared body behind [`state_set_encoded`] and [`state_set_loose`] —
+/// see [`state_get_bytes`]'s doc comment for why this split exists.
+#[inline(always)]
+fn state_set_bytes<T: ToBytes>(value: &T, kbytes: &[u8]) -> Result<usize> {
+    with_encoded_value(value, |vbytes| crate::api::state::state_set(vbytes, kbytes))
+}
+
 /// Write this hook's own state entry for an already-[`EncodedStateKey`]d
 /// `key`, encoding `value` as `T`. Internal funnel behind
 /// [`state_set_loose`] — see [`state_get_encoded`]'s doc comment for why
 /// this exists.
 #[inline(always)]
 pub(crate) fn state_set_encoded<T: ToBytes>(key: &EncodedStateKey, value: &T) -> Result<usize> {
-    with_encoded_value(value, |bytes| crate::api::state::state_set(bytes, key))
+    state_set_bytes(value, key.as_ref())
 }
 
 /// Write this hook's own state entry for `key`, encoding `value` as `T`.
 /// Returns the number of bytes written.
 #[inline(always)]
 pub fn state_set_loose<T: ToBytes>(key: &impl StateKeyEncode, value: &T) -> Result<usize> {
-    state_set_encoded(&key.encode(), value)
+    key.with_key_bytes(|kbytes| state_set_bytes(value, kbytes))
 }
 
 /// Write this hook's own state entry for `key`, encoding `value` as `key`'s
@@ -536,13 +642,17 @@ where
 ///
 /// The Hook API has no "delete" call: an entry is deleted by **writing zero
 /// bytes to it** (`state` with an empty value), which also refunds the
-/// owner reserve that entry was holding. [`state_set_typed`] takes a
-/// `&K::Value`, so reaching a zero-length write through it would mean
-/// pairing the key with a value type that happens to encode to nothing
-/// (`[u8; 0]` does) — spelling "delete" as an accident of the value type
-/// rather than an intent at the call site. This function is the explicit
-/// spelling instead, independent of any value type, and available to a key
-/// with no [`TypedStateKey`] pairing at all.
+/// owner reserve that entry was holding. Nothing in the typed write path
+/// *names* that operation — [`state_set_typed`] takes a `&K::Value`, so
+/// reaching a zero-length write through it would mean pairing the key with
+/// a value type that happens to encode to nothing (`[u8; 0]` does; the
+/// encode-side check in [`with_encoded_value`] only bounds the maximum), which
+/// spells "delete this entry" as an accident of the value type rather than
+/// as an intent at the call site.
+///
+/// This function is the explicit spelling instead: deletion stated as
+/// itself, independent of any value type — which also makes it available
+/// to a key that has no [`TypedStateKey`] pairing at all.
 ///
 /// Deleting an entry that does not exist has no distinct "not found"
 /// failure — the host accepts a delete of an absent entry like any other
@@ -552,7 +662,14 @@ where
 /// [`state_get`]/[`state_get_typed`] if that distinction matters.
 #[inline(always)]
 pub fn state_delete(key: &impl StateKeyEncode) -> Result<()> {
-    state_delete_encoded(&key.encode())
+    key.with_key_bytes(state_delete_bytes)
+}
+
+/// Delete this hook's own state entry for raw key bytes. Shared body behind
+/// [`state_delete_encoded`] and [`state_delete`].
+#[inline(always)]
+fn state_delete_bytes(kbytes: &[u8]) -> Result<()> {
+    crate::api::state::state_set(&[], kbytes).map(|_| ())
 }
 
 /// Delete this hook's own state entry for an already-[`EncodedStateKey`]d
@@ -560,7 +677,7 @@ pub fn state_delete(key: &impl StateKeyEncode) -> Result<()> {
 /// [`state_get_encoded`]'s doc comment for why this exists.
 #[inline(always)]
 pub(crate) fn state_delete_encoded(key: &EncodedStateKey) -> Result<()> {
-    crate::api::state::state_set(&[], key).map(|_| ())
+    state_delete_bytes(key.as_ref())
 }
 
 /// Read a state entry belonging to another namespace/account, decoded as
@@ -573,7 +690,26 @@ pub fn state_foreign_get<T: FromBytes>(
     namespace: Option<&[u8]>,
     account: Option<&[u8]>,
 ) -> Result<Option<T>> {
-    state_foreign_get_encoded(&key.encode(), namespace, account)
+    key.with_key_bytes(|kbytes| state_foreign_get_bytes::<T>(kbytes, namespace, account))
+}
+
+/// Read a state entry belonging to another namespace/account for raw key
+/// bytes, decoded as `T`. Shared body behind [`state_foreign_get_encoded`]
+/// and [`state_foreign_get`] — see [`state_get_bytes`]'s doc comment for why
+/// this split exists.
+#[inline(always)]
+fn state_foreign_get_bytes<T: FromBytes>(
+    kbytes: &[u8],
+    namespace: Option<&[u8]>,
+    account: Option<&[u8]>,
+) -> Result<Option<T>> {
+    let mut storage = core::mem::MaybeUninit::<[u8; MAX_TYPED_STATE_LEN]>::uninit();
+    // SAFETY: see `uninit_slice_mut`'s doc comment; `state_foreign_raw_code`
+    // cannot report writing more bytes than the buffer it was handed, and
+    // `decode_read` only ever reads the `..n` prefix that count reports.
+    let buf = unsafe { uninit_slice_mut(&mut storage) };
+    let code = crate::api::state::state_foreign_raw_code(buf, kbytes, namespace, account);
+    decode_read(code, buf)
 }
 
 /// Read a state entry belonging to another namespace/account for an
@@ -586,13 +722,7 @@ pub(crate) fn state_foreign_get_encoded<T: FromBytes>(
     namespace: Option<&[u8]>,
     account: Option<&[u8]>,
 ) -> Result<Option<T>> {
-    let mut storage = core::mem::MaybeUninit::<[u8; MAX_TYPED_STATE_LEN]>::uninit();
-    // SAFETY: see `uninit_slice_mut`'s doc comment; `state_foreign_raw_code`
-    // cannot report writing more bytes than the buffer it was handed, and
-    // `decode_read` only ever reads the `..n` prefix that count reports.
-    let buf = unsafe { uninit_slice_mut(&mut storage) };
-    let code = crate::api::state::state_foreign_raw_code(buf, key, namespace, account);
-    decode_read(code, buf)
+    state_foreign_get_bytes(key.as_ref(), namespace, account)
 }
 
 /// Write a state entry belonging to another namespace/account, encoding
@@ -606,7 +736,23 @@ pub fn state_foreign_set_loose<T: ToBytes>(
     namespace: Option<&[u8]>,
     account: Option<&[u8]>,
 ) -> Result<usize> {
-    state_foreign_set_encoded(&key.encode(), value, namespace, account)
+    key.with_key_bytes(|kbytes| state_foreign_set_bytes(value, kbytes, namespace, account))
+}
+
+/// Write a state entry belonging to another namespace/account for raw key
+/// bytes, encoding `value` as `T`. Shared body behind
+/// [`state_foreign_set_encoded`] and [`state_foreign_set_loose`] — see
+/// [`state_get_bytes`]'s doc comment for why this split exists.
+#[inline(always)]
+fn state_foreign_set_bytes<T: ToBytes>(
+    value: &T,
+    kbytes: &[u8],
+    namespace: Option<&[u8]>,
+    account: Option<&[u8]>,
+) -> Result<usize> {
+    with_encoded_value(value, |vbytes| {
+        crate::api::state::state_foreign_set(vbytes, kbytes, namespace, account)
+    })
 }
 
 /// Write a state entry belonging to another namespace/account for an
@@ -620,9 +766,7 @@ pub(crate) fn state_foreign_set_encoded<T: ToBytes>(
     namespace: Option<&[u8]>,
     account: Option<&[u8]>,
 ) -> Result<usize> {
-    with_encoded_value(value, |bytes| {
-        crate::api::state::state_foreign_set(bytes, key, namespace, account)
-    })
+    state_foreign_set_bytes(value, key.as_ref(), namespace, account)
 }
 
 /// Read-modify-write a state entry belonging to another namespace/account:
@@ -1074,6 +1218,21 @@ mod tests {
         let short = b"RR".encode();
         assert_ne!(short.as_ref().len(), STATE_KEY_LEN);
         assert_eq!(short.as_ref(), b"RR");
+    }
+
+    /// `with_key_bytes`'s override must hand `f` the exact same bytes
+    /// `encode()` would — the override only changes how those bytes reach
+    /// the caller (skipping the `EncodedStateKey` round trip), never what
+    /// they are.
+    #[test]
+    fn with_key_bytes_matches_encode_for_every_key_impl() {
+        fn assert_matches(key: &impl StateKeyEncode) {
+            key.with_key_bytes(|bytes| assert_eq!(bytes, key.encode().as_ref()));
+        }
+        assert_matches(b"RR");
+        assert_matches(&[0xABu8; STATE_KEY_LEN]);
+        assert_matches(&StateKey::from([0xCDu8; STATE_KEY_LEN]));
+        assert_matches(&b"RR".encode());
     }
 
     #[test]
