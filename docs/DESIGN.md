@@ -1289,6 +1289,18 @@ are **self-contained and diverging** (push constants, `call rollback`,
    it fixed up. This also erases flatten wrapper blocks whose `return`
    rewrites never materialized.
 3. Iterate to fixpoint (ladders unwrap outermost-inward).
+4. **Dead-code elimination**: unwrapping a block in step 2 leaves its
+   original continuation in place, now sitting in straight-line code right
+   after the unconditional terminator (`unreachable`/`br`/`br_table`/
+   `return`) that used to end the block body — unreachable, but still
+   counted by the worst-case analysis, which sums instructions
+   syntactically rather than by reachability. A final linear pass drops
+   every instruction following such a terminator up to the closing
+   `end`/`else` at that nesting level, dropping a nested block/loop/if
+   encountered while already dead as one whole unit rather than descending
+   into it. No branch's `relative_depth` is affected, since every
+   surviving frame is untouched and every dropped frame's branches are
+   dead code too.
 
 The local `if` costs one level only inside a short error arm, while each
 removed ladder block spanned the entire function — net max-depth drops from

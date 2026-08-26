@@ -340,3 +340,175 @@ fn non_empty_result_block_is_not_rewritten() {
     assert_eq!(report.tails_duplicated, 0);
     assert!(contains_block(&post));
 }
+
+// ---------------------------------------------------------------------
+// Counts the number of `Operator::Call` instructions targeting import index
+// `target`, and the number of `Operator::I32Const` instructions carrying
+// `value`, across every defined function body in `wasm` — used below to
+// confirm specific (live vs. dead) instruction occurrences, not just that
+// *some* instruction count changed. `contains_loop` mirrors `contains_block`
+// above but for `Operator::Loop`.
+// ---------------------------------------------------------------------
+
+fn count_calls(wasm: &[u8], target: u32) -> usize {
+    let mut n: usize = 0;
+    for payload in wasmparser::Parser::new(0).parse_all(wasm) {
+        if let wasmparser::Payload::CodeSectionEntry(body) = payload.expect("valid wasm") {
+            let mut reader = body.get_operators_reader().expect("operators");
+            while !reader.eof() {
+                if let wasmparser::Operator::Call { function_index } =
+                    reader.read().expect("operator")
+                    && function_index == target
+                {
+                    n = n.saturating_add(1);
+                }
+            }
+        }
+    }
+    n
+}
+
+fn count_i32_const(wasm: &[u8], value: i32) -> usize {
+    let mut n: usize = 0;
+    for payload in wasmparser::Parser::new(0).parse_all(wasm) {
+        if let wasmparser::Payload::CodeSectionEntry(body) = payload.expect("valid wasm") {
+            let mut reader = body.get_operators_reader().expect("operators");
+            while !reader.eof() {
+                if let wasmparser::Operator::I32Const { value: v } =
+                    reader.read().expect("operator")
+                    && v == value
+                {
+                    n = n.saturating_add(1);
+                }
+            }
+        }
+    }
+    n
+}
+
+fn contains_loop(wasm: &[u8]) -> bool {
+    for payload in wasmparser::Parser::new(0).parse_all(wasm) {
+        if let wasmparser::Payload::CodeSectionEntry(body) = payload.expect("valid wasm") {
+            let mut reader = body.get_operators_reader().expect("operators");
+            while !reader.eof() {
+                if matches!(
+                    reader.read().expect("operator"),
+                    wasmparser::Operator::Loop { .. }
+                ) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+// ---------------------------------------------------------------------
+// Fixture (f): the motivating case from `docs/DESIGN.md` §6.2c — step 3
+// unwraps ladder block `$L0`, but its *original* continuation (`obs(100,
+// x)` then `unreachable`, right after where its `end` used to be) is left
+// in place rather than removed, so it now sits directly after the
+// unwrapped block body's own `unreachable` — dead code duplicating what
+// step 2 already spliced into the rewritten `br_if`. A second, wholly
+// unrelated dead group (`obs(999, x)` then `unreachable`) follows it,
+// mirroring the multi-group leftover seen in `03_hook-params`'s real
+// output. The post-pass must drop both dead groups in full, leaving only
+// the one live copy of each call.
+// ---------------------------------------------------------------------
+
+const DEAD_TAIL_AFTER_LADDER_BLOCK: &str = r#"
+(module
+  (import "env" "obs" (func $obs (param i32 i32) (result i32)))
+  (func $hook (param $x i32) (result i64)
+    (block $L0
+      (br_if $L0 (i32.eqz (local.get $x)))
+      (drop (call $obs (i32.const 1) (local.get $x)))
+      (unreachable))
+    (drop (call $obs (i32.const 100) (local.get $x)))
+    (unreachable)
+    (drop (call $obs (i32.const 999) (local.get $x)))
+    (unreachable))
+  (export "hook" (func $hook)))
+"#;
+
+#[test]
+fn dead_tail_after_ladder_block_is_eliminated() {
+    // x=0: `br_if` fires, takes the spliced `obs(100, x)` tail (traps).
+    // x=5: `br_if` doesn't fire, falls through to `obs(1, x)` (traps too —
+    // this fixture has no non-trapping path, which is fine: both branches
+    // are exercised and must match pre/post regardless).
+    let (post, report) =
+        assert_differential(DEAD_TAIL_AFTER_LADDER_BLOCK, &[("hook", 0), ("hook", 5)]);
+
+    assert_eq!(report.blocks_removed, 1);
+    assert_eq!(report.tails_duplicated, 1);
+    assert_eq!(
+        report.dead_ops_removed, 10,
+        "both dead 5-op groups (the leftover duplicate `obs(100, x)` tail and the unrelated \
+         `obs(999, x)` tail) should be reported removed"
+    );
+    assert_eq!(
+        count_i32_const(&post, 999),
+        0,
+        "the `obs(999, x)` group is pure dead code and must be gone entirely"
+    );
+    assert_eq!(
+        count_i32_const(&post, 100),
+        1,
+        "only the spliced copy of the `obs(100, x)` tail should survive; the leftover original \
+         copy step 3 left in place must be eliminated"
+    );
+    assert_eq!(
+        count_calls(&post, 0),
+        2,
+        "exactly the spliced `obs(100, x)` call and the live `obs(1, x)` call should remain"
+    );
+}
+
+// ---------------------------------------------------------------------
+// Fixture (g): an entire nested `loop` — unnest's own steps never touch
+// `loop` frames at all, so this isolates the dead-code pass's "drop a whole
+// nested span" behavior from any interaction with steps 1–4 — sits after an
+// unconditional `return` at the top level, i.e. the whole loop is dead
+// code, not just a flat instruction run. It must be dropped as one unit
+// (and the trailing top-level `unreachable` after it, itself dead too, must
+// go as well).
+// ---------------------------------------------------------------------
+
+const DEAD_NESTED_LOOP: &str = r#"
+(module
+  (import "env" "obs" (func $obs (param i32 i32) (result i32)))
+  (func $hook (param $x i32) (result i64)
+    (return (i64.extend_i32_s (call $obs (local.get $x) (i32.const 1))))
+    (loop $L0
+      (drop (call $obs (i32.const 2) (local.get $x)))
+      (br_if $L0 (i32.eqz (local.get $x))))
+    (unreachable))
+  (export "hook" (func $hook)))
+"#;
+
+#[test]
+fn dead_nested_loop_is_dropped_as_a_whole_unit() {
+    // Every path takes the unconditional `return` immediately; the dead
+    // loop is never reachable for any `x`.
+    let (post, report) = assert_differential(DEAD_NESTED_LOOP, &[("hook", 0), ("hook", 9)]);
+
+    assert_eq!(
+        report.blocks_removed, 0,
+        "a `loop` is never a candidate for steps 1-3, which only ever touch `block` frames"
+    );
+    assert_eq!(report.tails_duplicated, 0);
+    assert!(
+        !contains_loop(&post),
+        "the entire dead `$L0` loop must be dropped, not merely left in place"
+    );
+    assert_eq!(
+        count_calls(&post, 0),
+        1,
+        "only the live `obs(1, x)` call on the `return` path should remain"
+    );
+    assert!(
+        report.dead_ops_removed > 0,
+        "the dead-code pass should have reported at least the loop's own dropped instructions"
+    );
+}

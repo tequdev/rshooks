@@ -80,6 +80,44 @@
 //! a Rust `match`, unrelated to any ladder — with an otherwise-qualifying
 //! continuation is left in place) but always correct, and LLVM-generated
 //! error ladders only ever use `br`/`br_if`.
+//!
+//! # Dead-code elimination (post-pass)
+//!
+//! Step 3 removes a qualifying block's own `block`/`end` tokens, but it does
+//! *not* remove the instructions that originally followed that `end` — the
+//! very tail step 1 scanned to decide the block qualified in the first
+//! place. Those instructions are still needed as a *program text* while the
+//! block frame exists (steps 1–2 read them, don't move them), but once the
+//! frame is gone in step 3, they're left sitting in straight-line code
+//! immediately after whatever unconditional terminator now precedes them at
+//! that same nesting level — usually the `unreachable` that used to end the
+//! block's own body, or a spliced tail's `unreachable` from step 2. Wasm's
+//! operand-stack polymorphism after an unconditional terminator (`Guard.h`'s
+//! own checker sums instructions *syntactically*, not by reachability) means
+//! this leftover tail stays well-typed and present in the emitted binary
+//! even though it can never execute — inflating the reported worst-case
+//! instruction count for code that is provably dead.
+//!
+//! After step 4's fixpoint loop finishes, [`eliminate_dead_code`] makes one
+//! more linear pass over the (already-flattened, already-unnested) function
+//! body to drop exactly that kind of leftover: every instruction following
+//! an unconditional terminator (`unreachable`, `br`, `br_table`, `return`)
+//! at the same nesting level, up to (not including) the `end`/`else` that
+//! closes that level. A nested `block`/`loop`/`if` encountered while
+//! already dead is dropped as one whole unit — its own opening instruction
+//! is never emitted and its interior is never inspected — rather than
+//! descended into, so no frame is ever *partially* dropped. Combined with
+//! the fact that no *enclosing* frame is ever removed (only whole nested
+//! spans, and only ones that were themselves unreachable), no surviving
+//! branch's `relative_depth` is ever affected: every frame a surviving
+//! branch could target either still encloses it exactly as before, or was
+//! deleted together with the branch itself (since a branch inside a
+//! wholly-dropped span is unreachable code too, and is dropped along with
+//! it). One linear pass is exhaustive — unlike steps 1–4, which alternate
+//! rewriting and removal because a rewrite can create a *new* removal
+//! candidate, dropping dead code never creates more dead code for a later
+//! pass to find, since the scan already follows every nesting level (and
+//! every wholly-dropped span) to its own closing token in one traversal.
 
 use std::collections::{HashMap, HashSet};
 
@@ -106,6 +144,10 @@ pub struct UnnestReport {
     /// Total number of branch sites (`br`/`br_if`) rewritten into a spliced
     /// tail — each rewrite duplicates that tail's instructions once.
     pub tails_duplicated: u32,
+    /// Total number of instructions dropped by the post-fixpoint dead-code
+    /// elimination pass (see the module doc comment) across every defined
+    /// function — leftover unreachable tails from step 3's frame removal.
+    pub dead_ops_removed: u32,
 }
 
 /// Runs the unnest pass on already-flattened `wasm`. Every defined
@@ -153,11 +195,12 @@ pub fn unnest(wasm: &[u8]) -> Result<(Vec<u8>, UnnestReport)> {
 
         report.blocks_removed += stats.blocks_removed;
         report.tails_duplicated += stats.tails_duplicated;
-        if stats.blocks_removed > 0 || stats.tails_duplicated > 0 {
+        report.dead_ops_removed += stats.dead_ops_removed;
+        if stats.blocks_removed > 0 || stats.tails_duplicated > 0 || stats.dead_ops_removed > 0 {
             report.notes.push(format!(
-                "function {func_idx}: unnest removed {} block(s), duplicated {} tail(s) \
-                 (max nesting depth {depth_before} -> {depth_after})",
-                stats.blocks_removed, stats.tails_duplicated
+                "function {func_idx}: unnest removed {} block(s), duplicated {} tail(s), \
+                 eliminated {} dead instruction(s) (max nesting depth {depth_before} -> {depth_after})",
+                stats.blocks_removed, stats.tails_duplicated, stats.dead_ops_removed
             ));
         }
 
@@ -292,6 +335,7 @@ pub fn unnest(wasm: &[u8]) -> Result<(Vec<u8>, UnnestReport)> {
 struct FuncStats {
     blocks_removed: u32,
     tails_duplicated: u32,
+    dead_ops_removed: u32,
 }
 
 /// One `block`/`loop`/`if` frame found while scanning a function body,
@@ -592,7 +636,110 @@ fn unnest_function<'a>(
         ops = remove_frames(&ops, &removable);
     }
 
+    // --- Post-pass: drop the leftover dead tails step 3's frame removal
+    // creates (see the module doc comment). Runs once, after the fixpoint
+    // above settles — it never creates a new removal opportunity for steps
+    // 1–3, since it only deletes code that was already unreachable. ---
+    let (ops, dead_ops_removed) = eliminate_dead_code(ops);
+    stats.dead_ops_removed = dead_ops_removed;
+
     Ok((ops, stats))
+}
+
+/// Post-fixpoint dead-code elimination: see the module doc comment's
+/// "Dead-code elimination (post-pass)" section for the full rationale.
+///
+/// Makes one linear pass over `ops`, tracking a single `dead` flag scoped to
+/// whatever nesting level is currently being scanned (there is never a need
+/// for a *stack* of these — a new level is only ever entered while `dead` is
+/// `false`, since a level entered while `dead` is `true` is instead dropped
+/// whole via `skip_depth` below, so the level a `block`/`loop`/`if`'s `end`
+/// returns to is always `false` by construction). Once an unconditional
+/// terminator (`unreachable`, `br`, `br_table`, `return`) is emitted while
+/// alive, `dead` flips to `true` and every following instruction at the same
+/// level is dropped until the `else`/`end` that closes it, which resets
+/// `dead` to `false` for the next region (the `else` arm, or whatever
+/// follows the closing `end`).
+///
+/// `skip_depth` handles the one case a flat `dead` flag alone can't: a
+/// nested `block`/`loop`/`if` whose own *opening* instruction is itself
+/// already dead. That whole span — however deeply nested internally — is
+/// dropped as a single unit: its instructions are never emitted and never
+/// individually inspected, so no branch inside it (necessarily also dead
+/// code, since a branch can only target a frame that lexically encloses it)
+/// needs its own handling, and no frame outside the span is touched at all.
+fn eliminate_dead_code<'a>(ops: Vec<Operator<'a>>) -> (Vec<Operator<'a>>, u32) {
+    let mut out = Vec::with_capacity(ops.len());
+    let mut removed: u32 = 0;
+    let mut dead = false;
+    // >0 while dropping a whole nested `block`/`loop`/`if` ... `end` span
+    // that is itself dead code; counts that span's own internal nesting so
+    // its matching `end` is found without emitting or inspecting anything
+    // in between. `else` doesn't change this count: it doesn't close the
+    // `if` frame, only `end` does.
+    let mut skip_depth: u32 = 0;
+
+    for op in ops {
+        if skip_depth > 0 {
+            match op {
+                Operator::Block { .. } | Operator::Loop { .. } | Operator::If { .. } => {
+                    skip_depth += 1;
+                }
+                Operator::End => skip_depth -= 1,
+                _ => {}
+            }
+            removed += 1;
+            continue;
+        }
+
+        match op {
+            Operator::Block { .. } | Operator::Loop { .. } | Operator::If { .. } => {
+                if dead {
+                    // Drop the whole span rather than descending into it —
+                    // see the doc comment above.
+                    skip_depth = 1;
+                    removed += 1;
+                    continue;
+                }
+                out.push(op);
+                // `dead` is already `false` here (the `if dead` branch
+                // above returns before reaching this point) — the newly
+                // opened region starts alive, as it must.
+            }
+            Operator::Else | Operator::End => {
+                // Closes the current region (an `if`'s `then` arm, or the
+                // enclosing `block`/`loop`/`if`/function scope): always
+                // kept even when `dead`, since it's the boundary token the
+                // dead run stops at, not part of the dead run itself. The
+                // next region starts alive.
+                out.push(op);
+                dead = false;
+            }
+            Operator::Unreachable
+            | Operator::Br { .. }
+            | Operator::BrTable { .. }
+            | Operator::Return => {
+                if dead {
+                    // Already unreachable code following an earlier
+                    // terminator at this same level — drop it like any
+                    // other dead instruction, same as the `_` arm below.
+                    removed += 1;
+                    continue;
+                }
+                out.push(op);
+                dead = true;
+            }
+            _ => {
+                if dead {
+                    removed += 1;
+                    continue;
+                }
+                out.push(op);
+            }
+        }
+    }
+
+    (out, removed)
 }
 
 /// Removes every `block` frame whose `start` is in `removable` (dropping

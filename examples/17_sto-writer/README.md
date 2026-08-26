@@ -127,11 +127,11 @@ profile):
 
 | | worst-case instructions | size | max nesting depth |
 |---|---:|---:|---:|
-| `main` (index 0, `cbak` declared) | 776 | 2347 bytes | 3 |
+| `main` (index 0, `cbak` declared) | 746 | 2282 bytes | 3 |
 
 Well within the 32-level nesting budget, the 65,535-instruction WCE
 ceiling, and the 65,535-byte `SetHook` size limit. Higher than
-`10_emit-txn`'s fixed-template Payment (358 WCE, 1326 bytes) — expected,
+`10_emit-txn`'s fixed-template Payment (327 WCE, 1260 bytes) — expected,
 since this hook does strictly more work at runtime (two hook-parameter
 reads, a conditional issued-amount branch, and `StoWriter`'s own
 bounds/duplicate checks on every field, versus a `const fn`-baked template
