@@ -379,10 +379,25 @@ fn value_or_absent<T>(code: i64, decode: impl FnOnce(i64) -> Result<T>) -> Resul
 /// caller's own responsibility here (via [`value_or_absent`]'s `decode`
 /// closure), since this function only makes the raw code available before
 /// any [`HookError`] is constructed.
+///
+/// Returns the buffer as [`core::mem::MaybeUninit`], not `[u8; N]` (see
+/// `crate::convert`'s module doc comment): whether `state_raw_code` wrote
+/// all `N` bytes is exactly the check each caller's `decode` closure
+/// performs (`written == N`) before ever turning the buffer into a concrete
+/// `[u8; N]` via `assume_init` — this function itself has no way to know
+/// that check has passed, so it cannot honestly return an
+/// already-initialized `[u8; N]` value.
 #[inline(always)]
-fn state_raw_code_buf<const N: usize, K: AsRef<[u8]> + ?Sized>(key: &K) -> (i64, [u8; N]) {
-    let mut buf = [0u8; N];
-    let code = state_raw_code(&mut buf, key);
+fn state_raw_code_buf<const N: usize, K: AsRef<[u8]> + ?Sized>(
+    key: &K,
+) -> (i64, core::mem::MaybeUninit<[u8; N]>) {
+    let mut buf = core::mem::MaybeUninit::<[u8; N]>::uninit();
+    // SAFETY: see `crate::convert::uninit_slice_mut`'s doc comment. The
+    // returned `MaybeUninit` is only ever turned into a concrete `[u8; N]`
+    // by a caller that has independently confirmed (via the raw `code`
+    // returned alongside it) that `state_raw_code` wrote exactly `N` bytes
+    // before calling `assume_init` — see each `state_update_*` call site.
+    let code = state_raw_code(unsafe { crate::convert::uninit_slice_mut(&mut buf) }, key);
     (code, buf)
 }
 
@@ -416,7 +431,9 @@ pub fn state_update_u32<K: AsRef<[u8]> + ?Sized>(
     let current = value_or_absent(code, |c| {
         let written = res(c)? as usize;
         if written == 4 {
-            Ok(u32::from_le_bytes(buf))
+            // SAFETY: `written == 4` (this buffer's own width) means
+            // `state_raw_code` wrote every byte of `buf`.
+            Ok(u32::from_le_bytes(unsafe { buf.assume_init() }))
         } else {
             Err(HookError::TooSmall)
         }
@@ -438,7 +455,9 @@ pub fn state_update_i64<K: AsRef<[u8]> + ?Sized>(
     let current = value_or_absent(code, |c| {
         let written = res(c)? as usize;
         if written == 8 {
-            Ok(i64::from_le_bytes(buf))
+            // SAFETY: `written == 8` (this buffer's own width) means
+            // `state_raw_code` wrote every byte of `buf`.
+            Ok(i64::from_le_bytes(unsafe { buf.assume_init() }))
         } else {
             Err(HookError::TooSmall)
         }
@@ -460,7 +479,11 @@ pub fn state_update_xfl<K: AsRef<[u8]> + ?Sized>(
     let current = value_or_absent(code, |c| {
         let written = res(c)? as usize;
         if written == 8 {
-            Ok(XFL::from_raw_bits(i64::from_le_bytes(buf)))
+            // SAFETY: `written == 8` (this buffer's own width) means
+            // `state_raw_code` wrote every byte of `buf`.
+            Ok(XFL::from_raw_bits(i64::from_le_bytes(unsafe {
+                buf.assume_init()
+            })))
         } else {
             Err(HookError::TooSmall)
         }
@@ -647,6 +670,16 @@ where
     N: ForeignRef<'ns>,
     A: ForeignRef<'ac>,
 {
+    // Deliberately still `[0u8; 8]`, not `MaybeUninit`: unlike `state_u64_le`
+    // (which goes through `state_exact`'s `written == N` check), this
+    // function decodes `raw` on any `Ok` from `state_foreign` without first
+    // confirming exactly 8 bytes were written — a foreign entry shorter
+    // than 8 bytes reads back its zero-padded tail today rather than
+    // failing as `TooSmall`. That's an existing behavior this optimization
+    // pass leaves alone; switching to `MaybeUninit` here without also
+    // adding the length check would turn "silently zero-padded" into a
+    // genuine soundness hole (reading whatever uninitialized bytes happen
+    // to follow `raw` on the stack).
     let mut raw = [0u8; 8];
     let _ = state_foreign(&mut raw, key, namespace, account)?;
     Ok(u64::from_le_bytes(raw))

@@ -6,9 +6,15 @@
 //! The `unsafe` call to `_g` lives inside the macro expansion, so these are
 //! usable from safe code without an `unsafe` block at the call site.
 //!
-//! `uninit_buf!` is deliberately NOT provided:
-//! `MaybeUninit::uninit().assume_init()` for a byte array is UB for this use
-//! case. Buffers are always `[0u8; N]`.
+//! `uninit_buf!` is deliberately NOT provided as a general-purpose,
+//! hook-author-facing macro: naively calling
+//! `MaybeUninit::uninit().assume_init()` on a byte array before every byte
+//! is actually written is UB, and a macro expanding at an arbitrary call
+//! site can't enforce the "only assume-init after a verified full write"
+//! discipline that makes it sound. This crate's own internal host-call read
+//! buffers (`crate::convert::FixedRead::read_exact` and its siblings) *do*
+//! use `MaybeUninit` under that narrow, verified contract — see
+//! `crate::convert::uninit_slice_mut`'s doc comment.
 
 /// Guard a loop against exceeding `maxiter` iterations, per the Hook API's
 /// static guard-check requirement (see DESIGN.md §2 C2). Matches the C

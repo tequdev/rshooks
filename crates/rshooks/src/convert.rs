@@ -35,8 +35,63 @@
 //!
 //! See DESIGN.md §5.6 ("Endianness conventions") for the full two-world
 //! rule this module's little-endian convention is one half of.
+//!
+//! # Uninitialized read buffers
+//!
+//! [`FixedRead::read_exact`]'s buffer (and the sibling "read a prefix,
+//! classify by length" call sites this same shape shows up at —
+//! [`crate::api::otxn::OtxnFieldValue`]'s `Amount`/`Issue` impls,
+//! [`crate::api::state`]'s `state_update_*` family) allocates
+//! [`core::mem::MaybeUninit`], never `[0u8; N]`. The host call these buffers
+//! are handed to always *completely overwrites* them on the only path their
+//! contents are ever read (see [`uninit_slice_mut`]'s doc comment for the
+//! exact contract), so zero-initializing first is dead work the Hook API's
+//! guard checker still charges for — a zeroed `[u8; N]` buffer whose address
+//! escapes into an `extern` call is a store LLVM cannot prove dead, because
+//! it cannot see across the FFI boundary that nothing ever reads the zeros.
 
 use crate::error::{HookError, Result};
+
+/// Forms a `&mut [u8]` view over `buf`'s storage without requiring it to be
+/// initialized first — the primitive every host-call read buffer in this
+/// crate uses instead of `[0u8; N]` zero-initialization (see the module doc
+/// comment's "Uninitialized read buffers" section).
+///
+/// # Contract
+///
+/// The returned slice must only ever be read (directly, or indirectly via
+/// [`MaybeUninit::assume_init`](core::mem::MaybeUninit::assume_init) on
+/// `buf`) over the range a prior write into it actually covered. Every call
+/// site in this crate satisfies that by handing the slice straight to a
+/// Hook API host-call wrapper (`otxn_field`, `hook_param`, `state`, ...) as
+/// its caller-buffer output parameter, then reading back only the prefix
+/// (up to, and including exactly, the host's own reported "bytes written"
+/// count) that call is documented to have written — never more. The host
+/// call itself is `unsafe` `extern` FFI already fully trusted by every other
+/// line of this crate (it is handed a raw pointer into guest linear memory
+/// the host can read or write without restriction regardless of what this
+/// function does), so trusting its reported byte count here adds no new
+/// trust boundary.
+///
+/// # Safety
+///
+/// The caller must uphold the contract above. `u8` itself has no invalid
+/// bit patterns and no padding, so forming the `&mut [u8]` here is sound
+/// unconditionally — the requirement is entirely about what the caller does
+/// with it afterward.
+#[inline(always)]
+pub(crate) unsafe fn uninit_slice_mut<const N: usize>(
+    buf: &mut core::mem::MaybeUninit<[u8; N]>,
+) -> &mut [u8] {
+    // SAFETY: `buf` is `N` bytes of live, properly aligned storage (a
+    // `MaybeUninit<[u8; N]>` has the same size and alignment as `[u8; N]`).
+    // `u8` has no invalid bit patterns and no padding, so a `&mut [u8]` over
+    // that storage is well-formed the instant it is created, whether or not
+    // the storage has been written to yet — only reading through it before
+    // it is written would be unsound, and this function's own safety
+    // contract puts that burden on the caller.
+    unsafe { core::slice::from_raw_parts_mut(buf.as_mut_ptr().cast::<u8>(), N) }
+}
 
 /// Encode `Self` into the front of a caller-provided buffer.
 ///
@@ -270,11 +325,12 @@ impl<const N: usize> FromBytes for [u8; N] {
 ///
 /// # Why `read_exact` takes a closure, not a length
 ///
-/// A single generic function can't allocate `[0u8; T::SOME_ASSOCIATED_LEN]`
-/// — using an associated constant as an array length needs
-/// `generic_const_exprs`, unstable on this crate's pinned stable toolchain.
-/// `read_exact` sidesteps that by moving the actual `[0u8; N]`/newtype
-/// buffer allocation into *this trait method's own implementation*, one
+/// A single generic function can't allocate
+/// `MaybeUninit::<[u8; T::SOME_ASSOCIATED_LEN]>::uninit()` — using an
+/// associated constant as an array length needs `generic_const_exprs`,
+/// unstable on this crate's pinned stable toolchain. `read_exact` sidesteps
+/// that by moving the actual `MaybeUninit<[u8; N]>`/newtype buffer
+/// allocation into *this trait method's own implementation*, one
 /// per concrete `Self`, where the length is a literal the `impl` block
 /// already knows — never a generic parameter's associated constant. The
 /// caller-buffer wrapper function itself (`otxn_field`, `state`, ...) is
@@ -300,10 +356,16 @@ pub trait FixedRead: Sized {
 impl<const N: usize> FixedRead for [u8; N] {
     #[inline(always)]
     fn read_exact(read: impl FnOnce(&mut [u8]) -> Result<usize>) -> Result<Self> {
-        let mut out = [0u8; N];
-        let written = read(&mut out)?;
+        let mut out = core::mem::MaybeUninit::<[u8; N]>::uninit();
+        // SAFETY: `uninit_slice_mut`'s contract requires the slice to be
+        // read only over the range `read` actually wrote — `written == N`
+        // below confirms `read` wrote every one of `out`'s `N` bytes before
+        // `assume_init` reads any of them.
+        let written = read(unsafe { uninit_slice_mut(&mut out) })?;
         if written == N {
-            Ok(out)
+            // SAFETY: `written == N` means `read` reported writing all `N`
+            // bytes of `out`'s storage, so `out` is now fully initialized.
+            Ok(unsafe { out.assume_init() })
         } else {
             Err(HookError::TooSmall)
         }
