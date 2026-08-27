@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use anyhow::{Context, Result, bail};
 use wasm_encoder::reencode::Reencode;
 
+use crate::encode;
 use crate::ir;
 
 /// Report from a [`flatten`] run: which callee bodies were duplicated into
@@ -90,7 +91,26 @@ pub fn flatten(wasm: &[u8]) -> Result<(Vec<u8>, FlattenReport)> {
         let mut ops = Vec::new();
         let mut reader = body.get_operators_reader().context("function body")?;
         while !reader.eof() {
-            ops.push(reader.read().context("function body operator")?);
+            let op = reader.read().context("function body operator")?;
+            // Flatten rebuilds the type section down to {import types} ∪
+            // {entry type} but copies function bodies through unchanged, so
+            // a `BlockType::FuncType` blocktype (explicit type-index,
+            // non-MVP multi-value/param blocks) would end up referencing a
+            // type index that no longer exists, or means something else,
+            // after this pass runs. wasm32v1-none/LLVM never emits these;
+            // reject loudly here rather than let it surface later as a
+            // confusing wasmparser-invalid-output error.
+            if let wasmparser::Operator::Block { blockty }
+            | wasmparser::Operator::Loop { blockty }
+            | wasmparser::Operator::If { blockty } = &op
+                && matches!(blockty, wasmparser::BlockType::FuncType(_))
+            {
+                bail!(
+                    "function {old_idx}: explicit type-index blocktype (non-MVP \
+                     multi-value/param block) is not supported by the flatten pass"
+                );
+            }
+            ops.push(op);
         }
         funcs.insert(
             old_idx,
@@ -191,43 +211,14 @@ pub fn flatten(wasm: &[u8]) -> Result<(Vec<u8>, FlattenReport)> {
     // --- Assemble the output module. ---
     let mut module = wasm_encoder::Module::new();
 
-    let mut types_sec = wasm_encoder::TypeSection::new();
-    for ty in &new_types {
-        let (params, results) = ir::conv_functype(ty)?;
-        types_sec.ty().function(params, results);
-    }
-    module.section(&types_sec);
+    module.section(&encode::encode_type_section(&new_types)?);
 
-    let mut imports_sec = wasm_encoder::ImportSection::new();
-    for imp in &m.imports {
-        match imp.ty {
-            wasmparser::TypeRef::Func(old_ty) => {
-                let new_ty = *old_type_to_new
-                    .get(&old_ty)
-                    .context("internal error: import type was not registered")?;
-                imports_sec.import(
-                    imp.module,
-                    imp.name,
-                    wasm_encoder::EntityType::Function(new_ty),
-                );
-            }
-            wasmparser::TypeRef::Table(t) => {
-                imports_sec.import(imp.module, imp.name, ir::conv_tabletype(t)?);
-            }
-            wasmparser::TypeRef::Memory(mt) => {
-                imports_sec.import(imp.module, imp.name, ir::conv_memtype(mt));
-            }
-            wasmparser::TypeRef::Global(gt) => {
-                imports_sec.import(imp.module, imp.name, ir::conv_globaltype(gt)?);
-            }
-            wasmparser::TypeRef::Tag(_) => {
-                bail!("unsupported import: tag imports are not supported");
-            }
-            wasmparser::TypeRef::FuncExact(_) => {
-                bail!("unsupported import: exact function-reference imports are not supported");
-            }
-        }
-    }
+    let mut imports_sec = encode::encode_import_section(&m.imports, |_ordinal, old_ty| {
+        let new_ty = *old_type_to_new
+            .get(&old_ty)
+            .context("internal error: import type was not registered")?;
+        Ok(Some(wasm_encoder::EntityType::Function(new_ty)))
+    })?;
     if let Some(g_type_idx) = g_type_idx {
         imports_sec.import("env", "_g", wasm_encoder::EntityType::Function(g_type_idx));
     }
@@ -247,22 +238,10 @@ pub fn flatten(wasm: &[u8]) -> Result<(Vec<u8>, FlattenReport)> {
     // No table section: the cleaner already dropped the table and every
     // element segment (call_indirect is banned), and flatten never adds one.
 
-    let mut mem_sec = wasm_encoder::MemorySection::new();
-    for &mem in &m.memories {
-        mem_sec.memory(ir::conv_memtype(mem));
-    }
-    module.section(&mem_sec);
+    module.section(&encode::encode_memory_section(&m.memories));
 
-    let mut globals_sec = wasm_encoder::GlobalSection::new();
-    {
-        let mut remapper = ir::IndexRemapper::new(|x| x, |x| x);
-        for g in &m.globals {
-            let ty = ir::conv_globaltype(g.ty)?;
-            let expr = ir::remap_const_expr(&g.init_expr, &mut remapper)?;
-            globals_sec.global(ty, &expr);
-        }
-    }
-    module.section(&globals_sec);
+    let mut remapper = ir::IndexRemapper::new(|x| x, |x| x);
+    module.section(&encode::encode_global_section(&m.globals, &mut remapper)?);
 
     let mut exports_sec = wasm_encoder::ExportSection::new();
     exports_sec.export("hook", wasm_encoder::ExportKind::Func, hook_new_idx);
@@ -284,25 +263,8 @@ pub fn flatten(wasm: &[u8]) -> Result<(Vec<u8>, FlattenReport)> {
     }
     module.section(&code_sec);
 
-    let mut data_sec = wasm_encoder::DataSection::new();
-    {
-        let mut remapper = ir::IndexRemapper::new(|x| x, |x| x);
-        for d in &m.datas {
-            match &d.kind {
-                wasmparser::DataKind::Active {
-                    memory_index,
-                    offset_expr,
-                } => {
-                    let expr = ir::remap_const_expr(offset_expr, &mut remapper)?;
-                    data_sec.active(*memory_index, &expr, d.data.iter().copied());
-                }
-                wasmparser::DataKind::Passive => {
-                    data_sec.passive(d.data.iter().copied());
-                }
-            }
-        }
-    }
-    module.section(&data_sec);
+    let mut remapper = ir::IndexRemapper::new(|x| x, |x| x);
+    module.section(&encode::encode_data_section(&m.datas, &mut remapper)?);
 
     Ok((module.finish(), report))
 }
@@ -551,17 +513,10 @@ fn topo_post_order(m: &ir::ParsedModule, n_imp_funcs: u32, total_funcs: u32) -> 
         }
     };
     let defined_edges = |idx: u32| -> Vec<u32> {
-        match m.defined_body(idx) {
-            Some(body) => match ir::scan_refs(body) {
-                Ok(refs) => refs
-                    .calls
-                    .into_iter()
-                    .filter(|&c| c >= n_imp_funcs)
-                    .collect(),
-                Err(_) => Vec::new(),
-            },
-            None => Vec::new(),
-        }
+        ir::out_edges(m, idx)
+            .into_iter()
+            .filter(|&c| c >= n_imp_funcs)
+            .collect()
     };
 
     let mut order = Vec::new();

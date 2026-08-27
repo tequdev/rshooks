@@ -12,6 +12,7 @@ use std::collections::{BTreeSet, HashMap};
 use anyhow::{Context, Result, bail};
 
 use crate::Options;
+use crate::encode;
 use crate::ir::{self, IndexRemapper};
 
 /// Cleans `wasm`, producing a module whose only exports are `hook` (and
@@ -136,45 +137,15 @@ pub fn clean(wasm: &[u8], _opts: &Options) -> Result<Vec<u8>> {
     // --- Emit the cleaned module. ---
     let mut module = wasm_encoder::Module::new();
 
-    let mut types_sec = wasm_encoder::TypeSection::new();
-    for ty in &m.types {
-        let (params, results) = ir::conv_functype(ty)?;
-        types_sec.ty().function(params, results);
-    }
-    module.section(&types_sec);
+    module.section(&encode::encode_type_section(&m.types)?);
 
-    let mut imports_sec = wasm_encoder::ImportSection::new();
-    let mut func_import_counter = 0u32;
-    for imp in &m.imports {
-        match imp.ty {
-            wasmparser::TypeRef::Func(type_idx) => {
-                let old_idx = func_import_counter;
-                func_import_counter += 1;
-                if reachable_funcs.contains(&old_idx) {
-                    imports_sec.import(
-                        imp.module,
-                        imp.name,
-                        wasm_encoder::EntityType::Function(type_idx),
-                    );
-                }
-            }
-            wasmparser::TypeRef::Table(t) => {
-                imports_sec.import(imp.module, imp.name, ir::conv_tabletype(t)?);
-            }
-            wasmparser::TypeRef::Memory(mt) => {
-                imports_sec.import(imp.module, imp.name, ir::conv_memtype(mt));
-            }
-            wasmparser::TypeRef::Global(gt) => {
-                imports_sec.import(imp.module, imp.name, ir::conv_globaltype(gt)?);
-            }
-            wasmparser::TypeRef::Tag(_) => {
-                bail!("unsupported import: tag imports are not supported");
-            }
-            wasmparser::TypeRef::FuncExact(_) => {
-                bail!("unsupported import: exact function-reference imports are not supported");
-            }
+    let imports_sec = encode::encode_import_section(&m.imports, |ordinal, type_idx| {
+        if reachable_funcs.contains(&ordinal) {
+            Ok(Some(wasm_encoder::EntityType::Function(type_idx)))
+        } else {
+            Ok(None)
         }
-    }
+    })?;
     module.section(&imports_sec);
 
     let n_imp_funcs = m.num_imported_funcs();
@@ -192,11 +163,7 @@ pub fn clean(wasm: &[u8], _opts: &Options) -> Result<Vec<u8>> {
     // Tables and element segments are always dropped (call_indirect is
     // banned, so a table can never be a legitimate reachability root).
 
-    let mut mem_sec = wasm_encoder::MemorySection::new();
-    for &mem in &m.memories {
-        mem_sec.memory(ir::conv_memtype(mem));
-    }
-    module.section(&mem_sec);
+    module.section(&encode::encode_memory_section(&m.memories));
 
     let mut globals_sec = wasm_encoder::GlobalSection::new();
     {

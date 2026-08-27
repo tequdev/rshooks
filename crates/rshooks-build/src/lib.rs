@@ -8,6 +8,7 @@
 pub mod carriers;
 pub mod chain_build;
 mod cleaner;
+mod encode;
 pub mod entry_sidecar;
 mod fee;
 mod flatten;

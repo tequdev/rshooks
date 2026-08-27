@@ -10,6 +10,7 @@
 use anyhow::{Context, Result};
 
 use crate::Options;
+use crate::encode;
 use crate::ir::{self, IndexRemapper};
 
 /// One `loop` site found while scanning a function body.
@@ -273,42 +274,11 @@ pub fn auto_guard(wasm: &[u8], opts: &Options) -> Result<Vec<u8>> {
 
     let mut module = wasm_encoder::Module::new();
 
-    let mut types_sec = wasm_encoder::TypeSection::new();
-    for ty in &types {
-        let (params, results) = ir::conv_functype(ty)?;
-        types_sec.ty().function(params, results);
-    }
-    module.section(&types_sec);
+    module.section(&encode::encode_type_section(&types)?);
 
-    let mut imports_sec = wasm_encoder::ImportSection::new();
-    for imp in &m.imports {
-        match imp.ty {
-            wasmparser::TypeRef::Func(type_idx) => {
-                imports_sec.import(
-                    imp.module,
-                    imp.name,
-                    wasm_encoder::EntityType::Function(type_idx),
-                );
-            }
-            wasmparser::TypeRef::Table(t) => {
-                imports_sec.import(imp.module, imp.name, ir::conv_tabletype(t)?);
-            }
-            wasmparser::TypeRef::Memory(mt) => {
-                imports_sec.import(imp.module, imp.name, ir::conv_memtype(mt));
-            }
-            wasmparser::TypeRef::Global(gt) => {
-                imports_sec.import(imp.module, imp.name, ir::conv_globaltype(gt)?);
-            }
-            wasmparser::TypeRef::Tag(_) => {
-                anyhow::bail!("unsupported import: tag imports are not supported");
-            }
-            wasmparser::TypeRef::FuncExact(_) => {
-                anyhow::bail!(
-                    "unsupported import: exact function-reference imports are not supported"
-                );
-            }
-        }
-    }
+    let mut imports_sec = encode::encode_import_section(&m.imports, |_ordinal, type_idx| {
+        Ok(Some(wasm_encoder::EntityType::Function(type_idx)))
+    })?;
     if let GImport::New { type_idx, .. } = g_import {
         imports_sec.import("env", "_g", wasm_encoder::EntityType::Function(type_idx));
     }
@@ -320,35 +290,14 @@ pub fn auto_guard(wasm: &[u8], opts: &Options) -> Result<Vec<u8>> {
     }
     module.section(&funcs_sec);
 
-    let mut mem_sec = wasm_encoder::MemorySection::new();
-    for &mem in &m.memories {
-        mem_sec.memory(ir::conv_memtype(mem));
-    }
-    module.section(&mem_sec);
+    module.section(&encode::encode_memory_section(&m.memories));
 
-    let mut globals_sec = wasm_encoder::GlobalSection::new();
-    {
-        let mut remapper = IndexRemapper::new(func_map, global_map);
-        for g in &m.globals {
-            let ty = ir::conv_globaltype(g.ty)?;
-            let expr = ir::remap_const_expr(&g.init_expr, &mut remapper)?;
-            globals_sec.global(ty, &expr);
-        }
-    }
-    module.section(&globals_sec);
+    let mut remapper = IndexRemapper::new(func_map, global_map);
+    module.section(&encode::encode_global_section(&m.globals, &mut remapper)?);
 
     let mut exports_sec = wasm_encoder::ExportSection::new();
     for e in &m.exports {
-        let kind = match e.kind {
-            wasmparser::ExternalKind::Func => wasm_encoder::ExportKind::Func,
-            wasmparser::ExternalKind::Table => wasm_encoder::ExportKind::Table,
-            wasmparser::ExternalKind::Memory => wasm_encoder::ExportKind::Memory,
-            wasmparser::ExternalKind::Global => wasm_encoder::ExportKind::Global,
-            wasmparser::ExternalKind::Tag => wasm_encoder::ExportKind::Tag,
-            wasmparser::ExternalKind::FuncExact => anyhow::bail!(
-                "unsupported export: exact function-reference exports are not supported"
-            ),
-        };
+        let kind = encode::conv_export_kind(e.kind)?;
         let index = if matches!(e.kind, wasmparser::ExternalKind::Func) {
             func_map(e.index)
         } else {
@@ -398,25 +347,8 @@ pub fn auto_guard(wasm: &[u8], opts: &Options) -> Result<Vec<u8>> {
     }
     module.section(&code_sec);
 
-    let mut data_sec = wasm_encoder::DataSection::new();
-    {
-        let mut remapper = IndexRemapper::new(func_map, global_map);
-        for d in &m.datas {
-            match &d.kind {
-                wasmparser::DataKind::Active {
-                    memory_index,
-                    offset_expr,
-                } => {
-                    let expr = ir::remap_const_expr(offset_expr, &mut remapper)?;
-                    data_sec.active(*memory_index, &expr, d.data.iter().copied());
-                }
-                wasmparser::DataKind::Passive => {
-                    data_sec.passive(d.data.iter().copied());
-                }
-            }
-        }
-    }
-    module.section(&data_sec);
+    let mut remapper = IndexRemapper::new(func_map, global_map);
+    module.section(&encode::encode_data_section(&m.datas, &mut remapper)?);
 
     Ok(module.finish())
 }
