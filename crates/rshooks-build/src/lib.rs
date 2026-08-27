@@ -152,3 +152,64 @@ pub fn verify(wasm: &[u8], opts: &Options) -> anyhow::Result<ValidationReport> {
         }
     }
 }
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
+mod tests {
+    use super::*;
+
+    fn wasm(src: &str) -> Vec<u8> {
+        wat::parse_str(src).expect("fixture is valid wat")
+    }
+
+    #[test]
+    fn options_default_values_are_pinned() {
+        let o = Options::default();
+        assert_eq!(o.api_version, ApiVersion::V0);
+        assert!(!o.auto_guard);
+        assert_eq!(o.default_maxiter, 16);
+        assert!(!o.allow_oversize);
+    }
+
+    #[test]
+    fn run_pipeline_v1_skips_flatten_and_unnest() {
+        // A helper function that survives cleaning (reachable from `hook`)
+        // but is not a `hook`/`cbak` entry point: under V0 it would be
+        // inlined away by flatten; under V1 it must survive untouched.
+        let src = r#"
+        (module
+          (func $helper (param i32) (result i64) (i64.extend_i32_u (local.get 0)))
+          (func $hook (param i32) (result i64) (call $helper (local.get 0)))
+          (export "hook" (func $hook)))
+        "#;
+        let opts = Options {
+            api_version: ApiVersion::V1,
+            ..Options::default()
+        };
+        let (out, _report) = run_pipeline(&wasm(src), &opts).expect("V1 pipeline succeeds");
+
+        // The cleaned-but-unflattened output must still have 2 defined
+        // functions (helper survives as a separate function; V0 would
+        // inline it away, leaving only 1).
+        let mut func_count = 0u32;
+        for payload in wasmparser::Parser::new(0).parse_all(&out) {
+            if let wasmparser::Payload::FunctionSection(r) = payload.expect("valid wasm") {
+                func_count = r.count();
+            }
+        }
+        assert_eq!(
+            func_count, 2,
+            "V1 must skip flatten/unnest: helper should survive as its own function"
+        );
+
+        // And it must equal `clean`'s output directly (V1 pipeline is
+        // exactly cleaner + verify, nothing else).
+        let cleaned = cleaner::clean(&wasm(src), &opts).expect("clean succeeds");
+        assert_eq!(out, cleaned);
+    }
+}

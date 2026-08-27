@@ -545,3 +545,329 @@ fn topo_post_order(m: &ir::ParsedModule, n_imp_funcs: u32, total_funcs: u32) -> 
     }
     order
 }
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
+mod tests {
+    use super::*;
+    use wasmparser::{BlockType, Operator};
+
+    // -- classify_returns -------------------------------------------------------
+
+    #[test]
+    fn classify_returns_no_return() {
+        let body = vec![Operator::I32Const { value: 0 }, Operator::End];
+        assert!(matches!(classify_returns(&body), ReturnShape::NoReturn));
+    }
+
+    #[test]
+    fn classify_returns_single_trailing_top_level_return() {
+        let body = vec![Operator::Return, Operator::End];
+        assert!(matches!(classify_returns(&body), ReturnShape::TrailingOnly));
+    }
+
+    #[test]
+    fn classify_returns_return_nested_in_a_block_needs_wrapper() {
+        let body = vec![
+            Operator::Block {
+                blockty: BlockType::Empty,
+            },
+            Operator::Return,
+            Operator::End, // closes block
+            Operator::End, // function end
+        ];
+        assert!(matches!(classify_returns(&body), ReturnShape::NeedsWrapper));
+    }
+
+    #[test]
+    fn classify_returns_multiple_returns_needs_wrapper() {
+        let body = vec![
+            Operator::Return,
+            Operator::I32Const { value: 0 },
+            Operator::Return,
+            Operator::End,
+        ];
+        assert!(matches!(classify_returns(&body), ReturnShape::NeedsWrapper));
+    }
+
+    #[test]
+    fn classify_returns_top_level_return_not_last_needs_wrapper() {
+        let body = vec![
+            Operator::Return,
+            Operator::I32Const { value: 0 },
+            Operator::End,
+        ];
+        assert!(matches!(classify_returns(&body), ReturnShape::NeedsWrapper));
+    }
+
+    // -- Pass-level (wat) ---------------------------------------------------
+
+    fn wasm(src: &str) -> Vec<u8> {
+        wat::parse_str(src).expect("fixture is valid wat")
+    }
+
+    fn func_bodies(wasm: &[u8]) -> Vec<Vec<u8>> {
+        let mut bodies = Vec::new();
+        for payload in wasmparser::Parser::new(0).parse_all(wasm) {
+            if let wasmparser::Payload::CodeSectionEntry(body) = payload.expect("valid wasm") {
+                bodies.push(body.as_bytes().to_vec());
+            }
+        }
+        bodies
+    }
+
+    fn ops_of(body_bytes: &[u8]) -> Vec<Operator<'_>> {
+        let body = wasmparser::FunctionBody::new(wasmparser::BinaryReader::new(body_bytes, 0));
+        let mut ops = Vec::new();
+        let mut r = body.get_operators_reader().expect("operators");
+        while !r.eof() {
+            ops.push(r.read().expect("op"));
+        }
+        ops
+    }
+
+    fn import_names(wasm: &[u8]) -> Vec<String> {
+        let mut names = Vec::new();
+        for payload in wasmparser::Parser::new(0).parse_all(wasm) {
+            if let wasmparser::Payload::ImportSection(r) = payload.expect("valid wasm") {
+                for imp in r.into_imports() {
+                    names.push(imp.expect("valid import").name.to_string());
+                }
+            }
+        }
+        names
+    }
+
+    fn type_shapes(wasm: &[u8]) -> Vec<(Vec<wasmparser::ValType>, Vec<wasmparser::ValType>)> {
+        let mut shapes = Vec::new();
+        for payload in wasmparser::Parser::new(0).parse_all(wasm) {
+            if let wasmparser::Payload::TypeSection(reader) = payload.expect("valid wasm") {
+                for rec_group in reader {
+                    for sub in rec_group.expect("rec group").into_types() {
+                        if let wasmparser::CompositeInnerType::Func(ft) = sub.composite_type.inner {
+                            shapes.push((ft.params().to_vec(), ft.results().to_vec()));
+                        }
+                    }
+                }
+            }
+        }
+        shapes
+    }
+
+    #[test]
+    fn callee_called_twice_reports_duplication() {
+        let src = r#"
+        (module
+          (func $callee (param i32) (result i64) (i64.extend_i32_u (local.get 0)))
+          (func $hook (param i32) (result i64)
+            (i64.add
+              (call $callee (i32.const 1))
+              (call $callee (i32.const 2))))
+          (export "hook" (func $hook)))
+        "#;
+        let (_out, report) = flatten(&wasm(src)).expect("flatten succeeds");
+        assert!(
+            report
+                .notes
+                .iter()
+                .any(|n| n.contains("2 call sites") || n.contains("2x")),
+            "expected a note about 2x duplication: {:?}",
+            report.notes
+        );
+    }
+
+    #[test]
+    fn missing_g_gets_exactly_one_import_appended() {
+        let src = r#"
+        (module
+          (import "env" "accept" (func $accept (param i32 i32 i64) (result i64)))
+          (func $hook (param i32) (result i64)
+            (call $accept (i32.const 0) (i32.const 0) (i64.const 0)))
+          (export "hook" (func $hook)))
+        "#;
+        let (out, _report) = flatten(&wasm(src)).expect("flatten succeeds");
+        let names = import_names(&out);
+        assert_eq!(
+            names.iter().filter(|n| n.as_str() == "_g").count(),
+            1,
+            "exactly one `_g` import expected: {names:?}"
+        );
+        assert_eq!(
+            names.last().map(String::as_str),
+            Some("_g"),
+            "`_g` appended last"
+        );
+
+        // Its type must be (i32, i32) -> i32.
+        let g_shape = (
+            vec![wasmparser::ValType::I32, wasmparser::ValType::I32],
+            vec![wasmparser::ValType::I32],
+        );
+        assert!(
+            type_shapes(&out).contains(&g_shape),
+            "{:?}",
+            type_shapes(&out)
+        );
+    }
+
+    #[test]
+    fn existing_g_is_not_duplicated() {
+        let src = r#"
+        (module
+          (import "env" "_g" (func $g (param i32 i32) (result i32)))
+          (func $hook (param i32) (result i64) (i64.const 0))
+          (export "hook" (func $hook)))
+        "#;
+        let (out, _report) = flatten(&wasm(src)).expect("flatten succeeds");
+        let names = import_names(&out);
+        assert_eq!(names.iter().filter(|n| n.as_str() == "_g").count(), 1);
+    }
+
+    #[test]
+    fn output_type_section_is_import_types_union_entry_type_deduped() {
+        let src = r#"
+        (module
+          (import "env" "accept" (func $accept (param i32 i32 i64) (result i64)))
+          (import "env" "rollback" (func $rollback (param i32 i32 i64) (result i64)))
+          (func $hook (param i32) (result i64)
+            (call $accept (i32.const 0) (i32.const 0) (i64.const 0)))
+          (export "hook" (func $hook)))
+        "#;
+        let (out, _report) = flatten(&wasm(src)).expect("flatten succeeds");
+        let shapes = type_shapes(&out);
+        // {accept/rollback's shared shape} ∪ {entry (i32)->i64} ∪ {_g
+        // (i32,i32)->i32} — accept and rollback share one type, deduped.
+        assert_eq!(shapes.len(), 3, "{shapes:?}");
+        let accept_shape = (
+            vec![
+                wasmparser::ValType::I32,
+                wasmparser::ValType::I32,
+                wasmparser::ValType::I64,
+            ],
+            vec![wasmparser::ValType::I64],
+        );
+        let entry_shape = (
+            vec![wasmparser::ValType::I32],
+            vec![wasmparser::ValType::I64],
+        );
+        assert!(shapes.contains(&accept_shape));
+        assert!(shapes.contains(&entry_shape));
+    }
+
+    #[test]
+    fn recursive_call_graph_errors_mentioning_cycle() {
+        let src = r#"
+        (module
+          (func $a (param i32) (result i64) (call $b (local.get 0)))
+          (func $b (param i32) (result i64) (call $a (local.get 0)))
+          (func $hook (param i32) (result i64) (call $a (local.get 0)))
+          (export "hook" (func $hook)))
+        "#;
+        let err = flatten(&wasm(src)).unwrap_err();
+        assert!(err.to_string().to_lowercase().contains("cycle"), "{err}");
+    }
+
+    #[test]
+    fn explicit_type_index_blocktype_errors_naming_the_function() {
+        // A `(block (param i32) ...)` with an operand on the stack encodes
+        // as `BlockType::FuncType` (the non-MVP multi-value/param-block
+        // form), which flatten refuses to carry through.
+        let src = r#"
+        (module
+          (type $bt (func (param i32) (result i32)))
+          (func $hook (param i32) (result i64)
+            (drop
+              (block $b (type $bt) (param i32) (result i32)
+                (i32.const 0)))
+            (i64.const 0))
+          (export "hook" (func $hook)))
+        "#;
+        let err = flatten(&wasm(src)).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("function 0"), "{msg}");
+        assert!(
+            msg.to_lowercase().contains("type-index") || msg.to_lowercase().contains("blocktype"),
+            "{msg}"
+        );
+    }
+
+    #[test]
+    fn local_remapping_spills_args_in_reverse_order() {
+        // Callee has two params; the caller passes two distinct constants,
+        // so the spill order (last operand popped first) is directly
+        // observable: two `local.set`s must appear before the callee's
+        // body, targeting fresh caller locals.
+        let src = r#"
+        (module
+          (func $callee (param i32 i32) (result i64)
+            (i64.extend_i32_u (i32.sub (local.get 0) (local.get 1))))
+          (func $hook (param i32) (result i64)
+            (call $callee (i32.const 11) (i32.const 22)))
+          (export "hook" (func $hook)))
+        "#;
+        let (out, _report) = flatten(&wasm(src)).expect("flatten succeeds");
+        let bodies = func_bodies(&out);
+        let hook_ops = ops_of(&bodies[0]);
+
+        // Expect: i32.const 11; i32.const 22; local.set <b>; local.set <a>;
+        // ... i.e. the second argument (22) is set first (reverse order).
+        let consts: Vec<i32> = hook_ops
+            .iter()
+            .filter_map(|op| match op {
+                Operator::I32Const { value } => Some(*value),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(&consts[..2], &[11, 22], "arguments pushed in call order");
+
+        let local_sets: Vec<u32> = hook_ops
+            .iter()
+            .filter_map(|op| match op {
+                Operator::LocalSet { local_index } => Some(*local_index),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            local_sets.len(),
+            2,
+            "two spill locals expected: {local_sets:?}"
+        );
+        // The second argument (22, popped first) is spilled to the *second*
+        // arg local (arg_base + 1); the first argument (11) to arg_base.
+        assert_eq!(
+            local_sets[0],
+            local_sets[1] + 1,
+            "last operand spilled first: {local_sets:?}"
+        );
+    }
+
+    #[test]
+    fn nested_return_in_callee_becomes_br_to_wrapper() {
+        let src = r#"
+        (module
+          (func $callee (param i32) (result i64)
+            (block $b
+              (br_if $b (i32.eqz (local.get 0)))
+              (return (i64.const 1)))
+            (i64.const 0))
+          (func $hook (param i32) (result i64)
+            (call $callee (local.get 0)))
+          (export "hook" (func $hook)))
+        "#;
+        let (out, _report) = flatten(&wasm(src)).expect("flatten succeeds");
+        let bodies = func_bodies(&out);
+        let hook_ops = ops_of(&bodies[0]);
+        let has_return = hook_ops.iter().any(|op| matches!(op, Operator::Return));
+        assert!(
+            !has_return,
+            "inlined callee's `return` must not survive: {hook_ops:?}"
+        );
+        let has_br = hook_ops.iter().any(|op| matches!(op, Operator::Br { .. }));
+        assert!(has_br, "nested `return` should become `br`: {hook_ops:?}");
+    }
+}

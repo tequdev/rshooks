@@ -327,3 +327,243 @@ fn check_entry_signature(m: &ir::ParsedModule, idx: u32, export_name: &str) -> R
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
+mod tests {
+    use super::*;
+
+    // -- trim_trailing_zeros --------------------------------------------------
+
+    #[test]
+    fn trim_trailing_zeros_empty_is_none() {
+        assert_eq!(trim_trailing_zeros(&[]), None);
+    }
+
+    #[test]
+    fn trim_trailing_zeros_all_zero_is_none() {
+        assert_eq!(trim_trailing_zeros(&[0, 0, 0]), None);
+    }
+
+    #[test]
+    fn trim_trailing_zeros_no_trailing_zeros_is_unchanged() {
+        assert_eq!(trim_trailing_zeros(b"ABC"), Some(b"ABC".as_slice()));
+    }
+
+    #[test]
+    fn trim_trailing_zeros_trims_at_last_nonzero() {
+        assert_eq!(trim_trailing_zeros(b"AB\0\0\0"), Some(b"AB".as_slice()));
+    }
+
+    // -- data_trim_is_safe ------------------------------------------------------
+
+    fn active_data<'a>(offset_bytes: &'a [u8], data: &'a [u8]) -> wasmparser::Data<'a> {
+        wasmparser::Data {
+            kind: wasmparser::DataKind::Active {
+                memory_index: 0,
+                offset_expr: wasmparser::ConstExpr::new(wasmparser::BinaryReader::new(
+                    offset_bytes,
+                    0,
+                )),
+            },
+            data,
+            range: 0..0,
+        }
+    }
+
+    fn passive_data(data: &[u8]) -> wasmparser::Data<'_> {
+        wasmparser::Data {
+            kind: wasmparser::DataKind::Passive,
+            data,
+            range: 0..0,
+        }
+    }
+
+    // `i32.const N; end` const-expr encodings, for a handful of small N.
+    const OFF0: [u8; 3] = [0x41, 0x00, 0x0B];
+    const OFF4: [u8; 3] = [0x41, 0x04, 0x0B];
+    const OFF5: [u8; 3] = [0x41, 0x05, 0x0B];
+    // `global.get 0; end`.
+    const GLOBAL_GET_OFFSET: [u8; 3] = [0x23, 0x00, 0x0B];
+
+    #[test]
+    fn data_trim_is_safe_for_non_overlapping_segments() {
+        let datas = vec![active_data(&OFF0, b"AB"), active_data(&OFF4, b"CD")];
+        assert!(data_trim_is_safe(&datas));
+    }
+
+    #[test]
+    fn data_trim_is_unsafe_for_overlapping_segments() {
+        // [0, 4) and [4, ...) don't overlap, but [0,4) and OFF... let's make
+        // an actual overlap: segment at 0 of length 5 covers [0,5), segment
+        // at 4 covers [4, ...) -> overlap at byte 4.
+        let datas = vec![active_data(&OFF0, b"ABCDE"), active_data(&OFF4, b"X")];
+        assert!(!data_trim_is_safe(&datas));
+    }
+
+    #[test]
+    fn data_trim_is_safe_for_exactly_adjacent_segments() {
+        // Segment at 0 of length 4 covers [0,4); segment at 4 starts exactly
+        // where the first ends.
+        let datas = vec![active_data(&OFF0, b"ABCD"), active_data(&OFF4, b"E")];
+        assert!(data_trim_is_safe(&datas));
+    }
+
+    #[test]
+    fn data_trim_is_unsafe_with_a_global_get_offset() {
+        let datas = vec![active_data(&GLOBAL_GET_OFFSET, b"AB")];
+        assert!(!data_trim_is_safe(&datas));
+    }
+
+    #[test]
+    fn data_trim_ignores_passive_segments() {
+        let datas = vec![active_data(&OFF0, b"AB"), passive_data(b"anything")];
+        assert!(data_trim_is_safe(&datas));
+    }
+
+    // -- const_expr_offset --------------------------------------------------
+
+    #[test]
+    fn const_expr_offset_plain_i32_const() {
+        let expr = wasmparser::ConstExpr::new(wasmparser::BinaryReader::new(&OFF5, 0));
+        assert_eq!(const_expr_offset(&expr), Some(5));
+    }
+
+    #[test]
+    fn const_expr_offset_global_get_is_none() {
+        let expr = wasmparser::ConstExpr::new(wasmparser::BinaryReader::new(&GLOBAL_GET_OFFSET, 0));
+        assert_eq!(const_expr_offset(&expr), None);
+    }
+
+    #[test]
+    fn const_expr_offset_negative_i32_const_wraps_to_u32() {
+        // `i32.const -1; end`.
+        let bytes = [0x41, 0x7F, 0x0B];
+        let expr = wasmparser::ConstExpr::new(wasmparser::BinaryReader::new(&bytes, 0));
+        assert_eq!(const_expr_offset(&expr), Some(u64::from(u32::MAX)));
+    }
+
+    // -- Module-level (wat) ---------------------------------------------------
+
+    fn wasm(src: &str) -> Vec<u8> {
+        wat::parse_str(src).expect("fixture is valid wat")
+    }
+
+    fn opts() -> Options {
+        Options::default()
+    }
+
+    fn global_count(wasm: &[u8]) -> u32 {
+        let mut count = 0;
+        for payload in wasmparser::Parser::new(0).parse_all(wasm) {
+            if let wasmparser::Payload::GlobalSection(r) = payload.expect("valid wasm") {
+                count = r.count();
+            }
+        }
+        count
+    }
+
+    fn import_names(wasm: &[u8]) -> Vec<String> {
+        let mut names = Vec::new();
+        for payload in wasmparser::Parser::new(0).parse_all(wasm) {
+            if let wasmparser::Payload::ImportSection(r) = payload.expect("valid wasm") {
+                for imp in r.into_imports() {
+                    names.push(imp.expect("valid import").name.to_string());
+                }
+            }
+        }
+        names
+    }
+
+    #[test]
+    fn kept_global_referencing_another_global_keeps_both() {
+        // `hook` reads global $b (via a helper), whose initializer
+        // references global $a — both must survive the fixed-point GC.
+        let src = r#"
+        (module
+          (global $a i32 (i32.const 1))
+          (global $b i32 (global.get $a))
+          (func $hook (param i32) (result i64)
+            (drop (global.get $b))
+            (i64.const 0))
+          (export "hook" (func $hook)))
+        "#;
+        let cleaned = clean(&wasm(src), &opts()).expect("clean succeeds");
+        assert_eq!(global_count(&cleaned), 2, "both globals must be kept");
+    }
+
+    #[test]
+    fn unreferenced_global_is_dropped() {
+        let src = r#"
+        (module
+          (global $unused i32 (i32.const 1))
+          (func $hook (param i32) (result i64) (i64.const 0))
+          (export "hook" (func $hook)))
+        "#;
+        let cleaned = clean(&wasm(src), &opts()).expect("clean succeeds");
+        assert_eq!(global_count(&cleaned), 0);
+    }
+
+    #[test]
+    fn data_segment_offset_via_imported_global_keeps_it() {
+        // Imported globals are always kept regardless of reachability.
+        let src = r#"
+        (module
+          (import "env" "g" (global $g (mut i32)))
+          (memory 1)
+          (data (global.get $g) "AB")
+          (func $hook (param i32) (result i64) (i64.const 0))
+          (export "hook" (func $hook)))
+        "#;
+        let cleaned = clean(&wasm(src), &opts()).expect("clean succeeds");
+        assert!(
+            import_names(&cleaned).contains(&"g".to_string()),
+            "imported global referenced by a data segment offset must be kept"
+        );
+    }
+
+    #[test]
+    fn unused_function_import_is_gcd() {
+        let src = r#"
+        (module
+          (import "env" "unused" (func $unused (param i32) (result i64)))
+          (func $hook (param i32) (result i64) (i64.const 0))
+          (export "hook" (func $hook)))
+        "#;
+        let cleaned = clean(&wasm(src), &opts()).expect("clean succeeds");
+        assert!(
+            !import_names(&cleaned).contains(&"unused".to_string()),
+            "unreachable import should have been GC'd"
+        );
+    }
+
+    #[test]
+    fn hook_with_wrong_signature_errors_naming_the_signature() {
+        let src = r#"
+        (module
+          (func $hook (param i32) (result i32) (i32.const 0))
+          (export "hook" (func $hook)))
+        "#;
+        let err = clean(&wasm(src), &opts()).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("hook"), "{msg}");
+        assert!(msg.contains("i32) -> i64") || msg.contains("i64"), "{msg}");
+    }
+
+    #[test]
+    fn data_segments_with_no_memory_errors() {
+        let src = r#"
+        (module
+          (func $hook (param i32) (result i64) (i64.const 0))
+          (export "hook" (func $hook))
+          (data (i32.const 0) "AB"))
+        "#;
+        let err = clean(&wasm(src), &opts()).unwrap_err();
+        assert!(err.to_string().contains("memory"), "{err}");
+    }
+}

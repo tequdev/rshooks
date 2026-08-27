@@ -759,3 +759,389 @@ fn adjust_depth(skip_stack: &[bool], relative_depth: u32) -> u32 {
         .count() as u32;
     relative_depth - decrement
 }
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
+mod tests {
+    use super::*;
+
+    fn arity_none(_: u32) -> Option<(u32, u32)> {
+        None
+    }
+
+    /// One imported function of arity `(params, results)` at index 0.
+    fn arity_one(params: u32, results: u32) -> impl Fn(u32) -> Option<(u32, u32)> {
+        move |idx| {
+            if idx == 0 {
+                Some((params, results))
+            } else {
+                None
+            }
+        }
+    }
+
+    // -- extract_tail -----------------------------------------------------------
+
+    #[test]
+    fn extract_tail_qualifying_tail() {
+        let ops = vec![
+            Operator::I32Const { value: 1 },
+            Operator::LocalGet { local_index: 0 },
+            Operator::Call { function_index: 0 },
+            Operator::Drop,
+            Operator::Unreachable,
+        ];
+        let tail = extract_tail(&ops, 0, &arity_one(2, 1)).expect("should qualify");
+        assert_eq!(tail, ops, "tail should be exactly the scanned operators");
+    }
+
+    #[test]
+    fn extract_tail_disqualified_by_local_set() {
+        let ops = vec![Operator::LocalSet { local_index: 0 }, Operator::Unreachable];
+        assert!(extract_tail(&ops, 0, &arity_none).is_none());
+    }
+
+    #[test]
+    fn extract_tail_disqualified_by_drop_below_empty() {
+        let ops = vec![Operator::Drop, Operator::Unreachable];
+        assert!(extract_tail(&ops, 0, &arity_none).is_none());
+    }
+
+    #[test]
+    fn extract_tail_disqualified_by_call_to_defined_function() {
+        // `arity_none` simulates a call target that does not resolve as an
+        // import (a defined function).
+        let ops = vec![Operator::Call { function_index: 0 }, Operator::Unreachable];
+        assert!(extract_tail(&ops, 0, &arity_none).is_none());
+    }
+
+    #[test]
+    fn extract_tail_disqualified_by_call_popping_below_empty() {
+        // Import needs 1 param but the stack is empty.
+        let ops = vec![Operator::Call { function_index: 0 }, Operator::Unreachable];
+        assert!(extract_tail(&ops, 0, &arity_one(1, 1)).is_none());
+    }
+
+    #[test]
+    fn extract_tail_disqualified_by_running_out_of_ops() {
+        let ops = vec![Operator::I32Const { value: 1 }, Operator::Drop];
+        assert!(extract_tail(&ops, 0, &arity_none).is_none());
+    }
+
+    #[test]
+    fn extract_tail_disqualified_by_nested_block() {
+        let ops = vec![
+            Operator::Block {
+                blockty: BlockType::Empty,
+            },
+            Operator::End,
+            Operator::Unreachable,
+        ];
+        assert!(extract_tail(&ops, 0, &arity_none).is_none());
+    }
+
+    // -- adjust_depth -------------------------------------------------------------
+
+    #[test]
+    fn adjust_depth_no_removed_frames_is_unchanged() {
+        let skip_stack = vec![false, false, false];
+        assert_eq!(adjust_depth(&skip_stack, 1), 1);
+    }
+
+    #[test]
+    fn adjust_depth_one_removed_frame_between_branch_and_target() {
+        // Stack (outer..inner): [removed, kept, kept]; branch at
+        // relative_depth 2 targets the outermost (removed) frame — wait, we
+        // want a frame *between* the branch and its target to be removed.
+        // Stack positions 0(outer)..2(inner). Target at position 0 (outer),
+        // removed frame at position 1 (between branch at position 2 and
+        // target at 0).
+        let skip_stack = vec![false, true, false];
+        // relative_depth 2 -> target_pos = len-1-2 = 0. Frame at position 1
+        // (removed) is > 0, so it counts: decrement by 1.
+        assert_eq!(adjust_depth(&skip_stack, 2), 1);
+    }
+
+    #[test]
+    fn adjust_depth_removed_frame_at_target_position_is_unaffected() {
+        // Target position itself removed: doesn't decrement (only frames
+        // strictly deeper than the target count).
+        let skip_stack = vec![false, true];
+        // relative_depth 0 -> target_pos = len-1-0 = 1 (the removed frame
+        // itself). No frame is deeper than position 1, so no decrement.
+        assert_eq!(adjust_depth(&skip_stack, 0), 0);
+    }
+
+    #[test]
+    fn adjust_depth_target_beyond_stack_with_removed_frames_between() {
+        // relative_depth reaches past the whole stack (function-level
+        // scope): target_pos = -1, so every removed frame counts.
+        let skip_stack = vec![true, false, true];
+        assert_eq!(adjust_depth(&skip_stack, 5), 3);
+    }
+
+    // -- eliminate_dead_code --------------------------------------------------
+
+    #[test]
+    fn eliminate_dead_code_drops_ops_after_unreachable_up_to_end() {
+        let ops = vec![
+            Operator::Unreachable,
+            Operator::I32Const { value: 1 },
+            Operator::Drop,
+            Operator::End,
+        ];
+        let (out, removed) = eliminate_dead_code(ops);
+        assert_eq!(removed, 2);
+        assert_eq!(out, vec![Operator::Unreachable, Operator::End]);
+    }
+
+    #[test]
+    fn eliminate_dead_code_drops_whole_nested_block_opened_while_dead() {
+        let ops = vec![
+            Operator::Unreachable,
+            Operator::Block {
+                blockty: BlockType::Empty,
+            },
+            Operator::I32Const { value: 1 },
+            Operator::Drop,
+            Operator::End, // closes the dropped block
+            Operator::End, // function end
+        ];
+        let (out, removed) = eliminate_dead_code(ops);
+        // Block, i32.const, drop, end (of block) -> 4 dropped.
+        assert_eq!(removed, 4);
+        assert_eq!(out, vec![Operator::Unreachable, Operator::End]);
+    }
+
+    #[test]
+    fn eliminate_dead_code_else_resets_deadness() {
+        let ops = vec![
+            Operator::If {
+                blockty: BlockType::Empty,
+            },
+            Operator::Unreachable,
+            Operator::I32Const { value: 1 }, // dead: dropped
+            Operator::Else,
+            Operator::I32Const { value: 2 }, // live: kept
+            Operator::End,
+        ];
+        let (out, removed) = eliminate_dead_code(ops);
+        assert_eq!(removed, 1);
+        assert_eq!(
+            out,
+            vec![
+                Operator::If {
+                    blockty: BlockType::Empty
+                },
+                Operator::Unreachable,
+                Operator::Else,
+                Operator::I32Const { value: 2 },
+                Operator::End,
+            ]
+        );
+    }
+
+    #[test]
+    fn eliminate_dead_code_live_code_is_untouched() {
+        let ops = vec![
+            Operator::I32Const { value: 1 },
+            Operator::Drop,
+            Operator::End,
+        ];
+        let (out, removed) = eliminate_dead_code(ops.clone());
+        assert_eq!(removed, 0);
+        assert_eq!(out, ops);
+    }
+
+    #[test]
+    fn eliminate_dead_code_br_return_br_table_also_start_dead_runs() {
+        for terminator in [Operator::Br { relative_depth: 0 }, Operator::Return] {
+            let ops = vec![
+                terminator.clone(),
+                Operator::I32Const { value: 1 },
+                Operator::End,
+            ];
+            let (out, removed) = eliminate_dead_code(ops);
+            assert_eq!(removed, 1, "{terminator:?}");
+            assert_eq!(out, vec![terminator, Operator::End]);
+        }
+    }
+
+    // -- remove_frames --------------------------------------------------------
+
+    #[test]
+    fn remove_frames_decrements_crossing_br_depths() {
+        // (block $outer (block $removed (br 1))) -- removing $removed means
+        // the `br 1` (targeting $outer) now only crosses one frame: `br 0`.
+        let ops = vec![
+            Operator::Block {
+                blockty: BlockType::Empty,
+            }, // start 0: $outer, kept
+            Operator::Block {
+                blockty: BlockType::Empty,
+            }, // start 1: $removed
+            Operator::Br { relative_depth: 1 },
+            Operator::End, // closes $removed
+            Operator::End, // closes $outer
+        ];
+        let removable = HashSet::from([1]);
+        let out = remove_frames(&ops, &removable);
+        assert_eq!(
+            out,
+            vec![
+                Operator::Block {
+                    blockty: BlockType::Empty
+                },
+                Operator::Br { relative_depth: 0 },
+                Operator::End,
+            ]
+        );
+    }
+
+    #[test]
+    fn remove_frames_br_to_frame_inside_removed_frame_is_unaffected() {
+        // (block $removed (block $inner (br 0))) -- the `br 0` targets
+        // $inner, which is *inside* $removed and is not itself removed, so
+        // its depth is unaffected by $removed's removal.
+        let ops = vec![
+            Operator::Block {
+                blockty: BlockType::Empty,
+            }, // start 0: $removed
+            Operator::Block {
+                blockty: BlockType::Empty,
+            }, // start 1: $inner, kept
+            Operator::Br { relative_depth: 0 },
+            Operator::End,
+            Operator::End,
+        ];
+        let removable = HashSet::from([0]);
+        let out = remove_frames(&ops, &removable);
+        assert_eq!(
+            out,
+            vec![
+                Operator::Block {
+                    blockty: BlockType::Empty
+                },
+                Operator::Br { relative_depth: 0 },
+                Operator::End,
+            ]
+        );
+    }
+
+    #[test]
+    fn remove_frames_never_removes_loop_or_if_frames() {
+        // `removable` names a `Loop`'s start position; `remove_frames` only
+        // special-cases `Block`, so a Loop frame is never dropped even if
+        // its start position appears in `removable`.
+        let ops = vec![
+            Operator::Loop {
+                blockty: BlockType::Empty,
+            },
+            Operator::End,
+        ];
+        let removable = HashSet::from([0]);
+        let out = remove_frames(&ops, &removable);
+        assert_eq!(out, ops);
+    }
+
+    // -- Pass-level (wat) ---------------------------------------------------
+
+    fn wasm(src: &str) -> Vec<u8> {
+        wat::parse_str(src).expect("fixture is valid wat")
+    }
+
+    fn hook_ops(wasm_bytes: &[u8]) -> Vec<Operator<'_>> {
+        for payload in wasmparser::Parser::new(0).parse_all(wasm_bytes) {
+            if let wasmparser::Payload::CodeSectionEntry(body) = payload.expect("valid wasm") {
+                let mut ops = Vec::new();
+                let mut r = body.get_operators_reader().expect("operators");
+                while !r.eof() {
+                    ops.push(r.read().expect("op"));
+                }
+                return ops;
+            }
+        }
+        panic!("no code section entry found")
+    }
+
+    #[test]
+    fn error_ladder_collapses_and_revalidates() {
+        // A synthetic error ladder: a `block` wrapping the whole tail, with
+        // a `br_if` escaping to a self-contained diverging tail after the
+        // block's `end`.
+        let src = r#"
+        (module
+          (import "env" "rollback" (func $rollback (param i32 i32 i64) (result i64)))
+          (func $hook (param i32) (result i64)
+            (block $b
+              (br_if $b (i32.eqz (local.get 0)))
+              (return (i64.const 0)))
+            (drop (call $rollback (i32.const 0) (i32.const 0) (i64.const 0)))
+            (unreachable))
+          (export "hook" (func $hook)))
+        "#;
+        let (out, report) = unnest(&wasm(src)).expect("unnest succeeds");
+        assert!(report.blocks_removed >= 1, "{report:?}");
+        assert!(report.tails_duplicated >= 1, "{report:?}");
+
+        let ops = hook_ops(&out);
+        // The `br_if` should have become an `if` wrapping the duplicated
+        // tail (no more `br_if` targeting the removed block).
+        assert!(!ops.iter().any(|op| matches!(op, Operator::BrIf { .. })));
+        assert!(ops.iter().any(|op| matches!(op, Operator::If { .. })));
+
+        wasmparser::Validator::new()
+            .validate_all(&out)
+            .expect("unnested output must re-validate");
+    }
+
+    #[test]
+    fn block_targeted_by_br_table_is_untouched() {
+        let src = r#"
+        (module
+          (func $hook (param i32) (result i64)
+            (block $b
+              (br_table $b $b (local.get 0))
+              (unreachable))
+            (i64.const 1))
+          (export "hook" (func $hook)))
+        "#;
+        let (out, report) = unnest(&wasm(src)).expect("unnest succeeds");
+        assert_eq!(report.blocks_removed, 0, "{report:?}");
+        wasmparser::Validator::new()
+            .validate_all(&out)
+            .expect("output must re-validate");
+    }
+
+    #[test]
+    fn block_containing_a_br_table_is_not_removed() {
+        let src = r#"
+        (module
+          (func $hook (param i32) (result i64)
+            (block $outer
+              (block $inner
+                (br_table $inner $inner (local.get 0)))
+              (unreachable))
+            (i64.const 0))
+          (export "hook" (func $hook)))
+        "#;
+        let (out, _report) = unnest(&wasm(src)).expect("unnest succeeds");
+        let ops = hook_ops(&out);
+        let block_count = ops
+            .iter()
+            .filter(|op| matches!(op, Operator::Block { .. }))
+            .count();
+        assert_eq!(
+            block_count, 2,
+            "the block enclosing the br_table must never be removed: {ops:?}"
+        );
+        wasmparser::Validator::new()
+            .validate_all(&out)
+            .expect("output must re-validate");
+    }
+}

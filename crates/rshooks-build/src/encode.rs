@@ -134,3 +134,235 @@ pub(crate) fn conv_export_kind(kind: wasmparser::ExternalKind) -> Result<wasm_en
         }
     })
 }
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
+mod tests {
+    use super::*;
+
+    // -- conv_export_kind -----------------------------------------------------
+
+    #[test]
+    fn conv_export_kind_maps_each_mvp_kind() {
+        assert_eq!(
+            conv_export_kind(wasmparser::ExternalKind::Func).unwrap(),
+            wasm_encoder::ExportKind::Func
+        );
+        assert_eq!(
+            conv_export_kind(wasmparser::ExternalKind::Table).unwrap(),
+            wasm_encoder::ExportKind::Table
+        );
+        assert_eq!(
+            conv_export_kind(wasmparser::ExternalKind::Memory).unwrap(),
+            wasm_encoder::ExportKind::Memory
+        );
+        assert_eq!(
+            conv_export_kind(wasmparser::ExternalKind::Global).unwrap(),
+            wasm_encoder::ExportKind::Global
+        );
+    }
+
+    #[test]
+    fn conv_export_kind_rejects_func_exact() {
+        assert!(conv_export_kind(wasmparser::ExternalKind::FuncExact).is_err());
+    }
+
+    // -- encode_import_section -------------------------------------------------
+
+    #[test]
+    fn encode_import_section_func_entity_can_filter_a_function_import() {
+        let imports = vec![
+            wasmparser::Import {
+                module: "env",
+                name: "kept",
+                ty: wasmparser::TypeRef::Func(0),
+            },
+            wasmparser::Import {
+                module: "env",
+                name: "dropped",
+                ty: wasmparser::TypeRef::Func(1),
+            },
+        ];
+        // Drop the second function import (ordinal 1); keep the first.
+        let sec = encode_import_section(&imports, |ordinal, type_idx| {
+            if ordinal == 0 {
+                Ok(Some(wasm_encoder::EntityType::Function(type_idx)))
+            } else {
+                Ok(None)
+            }
+        })
+        .expect("encode succeeds");
+
+        let mut module = wasm_encoder::Module::new();
+        module.section(&wasm_encoder::TypeSection::new());
+        module.section(&sec);
+        let bytes = module.finish();
+        let mut names = Vec::new();
+        for payload in wasmparser::Parser::new(0).parse_all(&bytes) {
+            if let wasmparser::Payload::ImportSection(reader) = payload.expect("valid wasm") {
+                for imp in reader.into_imports() {
+                    names.push(imp.expect("valid import").name.to_string());
+                }
+            }
+        }
+        assert_eq!(names, vec!["kept".to_string()]);
+    }
+
+    #[test]
+    fn encode_import_section_passes_through_table_memory_global() {
+        let imports = vec![
+            wasmparser::Import {
+                module: "env",
+                name: "t",
+                ty: wasmparser::TypeRef::Table(wasmparser::TableType {
+                    element_type: wasmparser::RefType::FUNCREF,
+                    table64: false,
+                    initial: 1,
+                    maximum: None,
+                    shared: false,
+                }),
+            },
+            wasmparser::Import {
+                module: "env",
+                name: "m",
+                ty: wasmparser::TypeRef::Memory(wasmparser::MemoryType {
+                    memory64: false,
+                    shared: false,
+                    initial: 1,
+                    maximum: None,
+                    page_size_log2: None,
+                }),
+            },
+            wasmparser::Import {
+                module: "env",
+                name: "g",
+                ty: wasmparser::TypeRef::Global(wasmparser::GlobalType {
+                    content_type: wasmparser::ValType::I32,
+                    mutable: false,
+                    shared: false,
+                }),
+            },
+        ];
+        let sec = encode_import_section(&imports, |_, ty| {
+            Ok(Some(wasm_encoder::EntityType::Function(ty)))
+        })
+        .expect("encode succeeds");
+
+        let mut module = wasm_encoder::Module::new();
+        module.section(&wasm_encoder::TypeSection::new());
+        module.section(&sec);
+        let bytes = module.finish();
+        let mut kinds = Vec::new();
+        for payload in wasmparser::Parser::new(0).parse_all(&bytes) {
+            if let wasmparser::Payload::ImportSection(reader) = payload.expect("valid wasm") {
+                for imp in reader.into_imports() {
+                    let imp = imp.expect("valid import");
+                    kinds.push(match imp.ty {
+                        wasmparser::TypeRef::Table(_) => "table",
+                        wasmparser::TypeRef::Memory(_) => "memory",
+                        wasmparser::TypeRef::Global(_) => "global",
+                        _ => "other",
+                    });
+                }
+            }
+        }
+        assert_eq!(kinds, vec!["table", "memory", "global"]);
+    }
+
+    #[test]
+    fn encode_import_section_rejects_tag_import() {
+        let imports = vec![wasmparser::Import {
+            module: "env",
+            name: "t",
+            ty: wasmparser::TypeRef::Tag(wasmparser::TagType {
+                kind: wasmparser::TagKind::Exception,
+                func_type_idx: 0,
+            }),
+        }];
+        let err = encode_import_section(&imports, |_, ty| {
+            Ok(Some(wasm_encoder::EntityType::Function(ty)))
+        })
+        .unwrap_err();
+        assert!(err.to_string().contains("tag"));
+    }
+
+    // -- section encoders vs. hand-built wasm-encoder sections -----------------
+
+    #[test]
+    fn encode_type_section_matches_hand_built_section() {
+        let types = vec![
+            wasmparser::FuncType::new([wasmparser::ValType::I32], [wasmparser::ValType::I64]),
+            wasmparser::FuncType::new([], []),
+        ];
+        let got = encode_type_section(&types).expect("encode succeeds");
+
+        let mut want = wasm_encoder::TypeSection::new();
+        want.ty()
+            .function([wasm_encoder::ValType::I32], [wasm_encoder::ValType::I64]);
+        want.ty().function([], []);
+
+        assert_eq!(section_bytes(&got), section_bytes(&want));
+    }
+
+    #[test]
+    fn encode_memory_section_matches_hand_built_section() {
+        let mem = wasmparser::MemoryType {
+            memory64: false,
+            shared: false,
+            initial: 2,
+            maximum: Some(4),
+            page_size_log2: None,
+        };
+        let got = encode_memory_section(&[mem]);
+
+        let mut want = wasm_encoder::MemorySection::new();
+        want.memory(wasm_encoder::MemoryType {
+            minimum: 2,
+            maximum: Some(4),
+            memory64: false,
+            shared: false,
+            page_size_log2: None,
+        });
+
+        assert_eq!(section_bytes(&got), section_bytes(&want));
+    }
+
+    #[test]
+    fn encode_data_section_matches_hand_built_section() {
+        // `i32.const 4; end`.
+        let offset_bytes = [0x41, 0x04, 0x0B];
+        let datas = vec![wasmparser::Data {
+            kind: wasmparser::DataKind::Active {
+                memory_index: 0,
+                offset_expr: wasmparser::ConstExpr::new(wasmparser::BinaryReader::new(
+                    &offset_bytes,
+                    0,
+                )),
+            },
+            data: b"AB",
+            range: 0..0,
+        }];
+        let mut remapper = ir::IndexRemapper::new(|x| x, |x| x);
+        let got = encode_data_section(&datas, &mut remapper).expect("encode succeeds");
+
+        let mut want = wasm_encoder::DataSection::new();
+        want.active(
+            0,
+            &wasm_encoder::ConstExpr::i32_const(4),
+            b"AB".iter().copied(),
+        );
+
+        assert_eq!(section_bytes(&got), section_bytes(&want));
+    }
+
+    fn section_bytes(sec: &impl wasm_encoder::Encode) -> Vec<u8> {
+        let mut out = Vec::new();
+        sec.encode(&mut out);
+        out
+    }
+}
