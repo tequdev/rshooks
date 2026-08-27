@@ -16,12 +16,12 @@ import { calculateHookOn, convertStringToHex, type TransactionMetadata } from 'x
 import { HookFlags } from 'xahau/dist/npm/models/common/xahau'
 
 const namespace = 'rshooks-e2e-hook-params'
-const WORST_CASE_INSTRUCTIONS = 177
+const WORST_CASE_INSTRUCTIONS = 172
 const MIN_DROPS = 5_000_000n
 
-function u64BEHex(value: bigint): string {
+function u64LEHex(value: bigint): string {
   const buf = Buffer.alloc(8)
-  buf.writeBigUInt64BE(value)
+  buf.writeBigUInt64LE(value)
   return buf.toString('hex').toUpperCase()
 }
 
@@ -41,7 +41,7 @@ describe('hook-params', () => {
         {
           HookParameter: {
             HookParameterName: convertStringToHex('MIN'),
-            HookParameterValue: u64BEHex(MIN_DROPS),
+            HookParameterValue: u64LEHex(MIN_DROPS),
           },
         },
       ],
