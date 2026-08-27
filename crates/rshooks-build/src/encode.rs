@@ -291,6 +291,65 @@ mod tests {
         assert!(err.to_string().contains("tag"));
     }
 
+    #[test]
+    fn encode_import_section_ordinals_advance_past_dropped_and_nonfunc_imports() {
+        // The func-import ordinal must advance for every function import —
+        // dropped ones included — and must not advance for interspersed
+        // non-function imports, so that it always equals the import's
+        // function index.
+        let imports = vec![
+            wasmparser::Import {
+                module: "env",
+                name: "a",
+                ty: wasmparser::TypeRef::Func(0),
+            },
+            wasmparser::Import {
+                module: "env",
+                name: "b",
+                ty: wasmparser::TypeRef::Func(1),
+            },
+            wasmparser::Import {
+                module: "env",
+                name: "g",
+                ty: wasmparser::TypeRef::Global(wasmparser::GlobalType {
+                    content_type: wasmparser::ValType::I32,
+                    mutable: false,
+                    shared: false,
+                }),
+            },
+            wasmparser::Import {
+                module: "env",
+                name: "c",
+                ty: wasmparser::TypeRef::Func(2),
+            },
+        ];
+        let mut seen = Vec::new();
+        let sec = encode_import_section(&imports, |ordinal, type_idx| {
+            seen.push((ordinal, type_idx));
+            // Drop `b` (ordinal 1); keep `a` and `c`.
+            Ok((ordinal != 1).then_some(wasm_encoder::EntityType::Function(type_idx)))
+        })
+        .expect("encode succeeds");
+        assert_eq!(seen, vec![(0, 0), (1, 1), (2, 2)]);
+
+        let mut module = wasm_encoder::Module::new();
+        module.section(&wasm_encoder::TypeSection::new());
+        module.section(&sec);
+        let bytes = module.finish();
+        let mut names = Vec::new();
+        for payload in wasmparser::Parser::new(0).parse_all(&bytes) {
+            if let wasmparser::Payload::ImportSection(reader) = payload.expect("valid wasm") {
+                for imp in reader.into_imports() {
+                    names.push(imp.expect("valid import").name.to_string());
+                }
+            }
+        }
+        assert_eq!(
+            names,
+            vec!["a".to_string(), "g".to_string(), "c".to_string()]
+        );
+    }
+
     // -- section encoders vs. hand-built wasm-encoder sections -----------------
 
     #[test]
@@ -353,6 +412,42 @@ mod tests {
         let mut want = wasm_encoder::DataSection::new();
         want.active(
             0,
+            &wasm_encoder::ConstExpr::i32_const(4),
+            b"AB".iter().copied(),
+        );
+
+        assert_eq!(section_bytes(&got), section_bytes(&want));
+    }
+
+    #[test]
+    fn encode_data_section_preserves_passive_kind_and_memory_index() {
+        // `i32.const 4; end`.
+        let offset_bytes = [0x41, 0x04, 0x0B];
+        let datas = vec![
+            wasmparser::Data {
+                kind: wasmparser::DataKind::Passive,
+                data: b"PQ",
+                range: 0..0,
+            },
+            wasmparser::Data {
+                kind: wasmparser::DataKind::Active {
+                    memory_index: 1,
+                    offset_expr: wasmparser::ConstExpr::new(wasmparser::BinaryReader::new(
+                        &offset_bytes,
+                        0,
+                    )),
+                },
+                data: b"AB",
+                range: 0..0,
+            },
+        ];
+        let mut remapper = ir::IndexRemapper::new(|x| x, |x| x);
+        let got = encode_data_section(&datas, &mut remapper).expect("encode succeeds");
+
+        let mut want = wasm_encoder::DataSection::new();
+        want.passive(b"PQ".iter().copied());
+        want.active(
+            1,
             &wasm_encoder::ConstExpr::i32_const(4),
             b"AB".iter().copied(),
         );

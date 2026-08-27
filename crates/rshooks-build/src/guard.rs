@@ -170,7 +170,10 @@ pub(crate) fn scan_function_loops(
 }
 
 /// Peeks (without consuming `reader`) at the next few operators to check for
-/// the guard prologue `i32.const; i32.const; call $_g`.
+/// the guard prologue `i32.const; i32.const; call $_g`. The second constant
+/// (`maxiter`) must be non-zero: the upstream checker rejects a zero
+/// `maxiter` outright (`Guard.h` "Guard call cannot specify 0 maxiter"), so
+/// a zero-`maxiter` prologue counts as unguarded here too.
 fn is_guard_prologue(reader: &wasmparser::OperatorsReader, g_index: Option<u32>) -> Result<bool> {
     let Some(g_index) = g_index else {
         return Ok(false);
@@ -185,7 +188,7 @@ fn is_guard_prologue(reader: &wasmparser::OperatorsReader, g_index: Option<u32>)
     if r.eof() {
         return Ok(false);
     }
-    if !matches!(r.read()?, wasmparser::Operator::I32Const { .. }) {
+    if !matches!(r.read()?, wasmparser::Operator::I32Const { value } if value != 0) {
         return Ok(false);
     }
     if r.eof() {
@@ -218,6 +221,18 @@ pub(crate) fn find_g_index(m: &ir::ParsedModule) -> Option<u32> {
 /// re-encoding a module that needed no changes.
 pub fn auto_guard(wasm: &[u8], opts: &Options) -> Result<Vec<u8>> {
     let m = ir::parse(wasm)?;
+
+    // Cleaned input never contains a table or an element segment (the
+    // cleaner drops both — `call_indirect` is banned). The re-encode below
+    // emits neither section, so accepting one here would silently drop it;
+    // reject instead.
+    if !m.tables.is_empty() || !m.elements.is_empty() {
+        anyhow::bail!(
+            "module has a table or element segment; the guard pass requires cleaned input \
+             (run the cleaner first)"
+        );
+    }
+
     let existing_g_index = find_g_index(&m);
 
     // First pass: does anything actually need inserting? If not, return the
@@ -442,6 +457,23 @@ mod tests {
     }
 
     #[test]
+    fn is_guard_prologue_zero_maxiter_is_false() {
+        // `Guard.h` rejects a zero `maxiter` outright ("Guard call cannot
+        // specify 0 maxiter"), so a zero-maxiter prologue must count as
+        // unguarded here too.
+        let bytes = body_bytes(&[
+            wasm_encoder::Instruction::Loop(wasm_encoder::BlockType::Empty),
+            wasm_encoder::Instruction::I32Const(1),
+            wasm_encoder::Instruction::I32Const(0),
+            wasm_encoder::Instruction::Call(3),
+            wasm_encoder::Instruction::End,
+        ]);
+        let body = parse_body(&bytes);
+        let r = reader_after_loop(&body);
+        assert!(!is_guard_prologue(&r, Some(3)).expect("valid"));
+    }
+
+    #[test]
     fn is_guard_prologue_no_g_index_is_false() {
         let bytes = body_bytes(&[
             wasm_encoder::Instruction::Loop(wasm_encoder::BlockType::Empty),
@@ -577,6 +609,18 @@ mod tests {
         (i64.const 0))
       (export "hook" (func $hook)))
     "#;
+
+    #[test]
+    fn table_or_element_input_errors() {
+        let src = r#"
+        (module
+          (table 1 funcref)
+          (func $hook (param i32) (result i64) (i64.const 0))
+          (export "hook" (func $hook)))
+        "#;
+        let err = auto_guard(&wasm(src), &opts()).unwrap_err();
+        assert!(err.to_string().contains("table or element"), "{err}");
+    }
 
     #[test]
     fn two_unguarded_loops_get_sequential_ids() {

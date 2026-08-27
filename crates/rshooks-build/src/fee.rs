@@ -68,6 +68,9 @@ mod tests {
         assert_eq!(fee.xah_string(), "1.000000");
     }
 
+    // `usize::MAX * 5000` only overflows `u64` on a 64-bit host; on a
+    // 32-bit host the product is exact and nothing saturates.
+    #[cfg(target_pointer_width = "64")]
     #[test]
     fn estimate_fee_saturates_on_overflow() {
         let fee = estimate_fee(usize::MAX);

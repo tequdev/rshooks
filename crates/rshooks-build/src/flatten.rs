@@ -48,6 +48,17 @@ struct FlatFunc<'a> {
 pub fn flatten(wasm: &[u8]) -> Result<(Vec<u8>, FlattenReport)> {
     let m = ir::parse(wasm)?;
 
+    // Cleaned input never contains a table or an element segment (the
+    // cleaner drops both — `call_indirect` is banned). The re-encode below
+    // emits neither section, so accepting one here would silently drop it;
+    // reject instead.
+    if !m.tables.is_empty() || !m.elements.is_empty() {
+        bail!(
+            "module has a table or element segment; the flatten pass requires cleaned input \
+             (run the cleaner first)"
+        );
+    }
+
     let hook_old = m
         .exports
         .iter()
@@ -102,6 +113,7 @@ pub fn flatten(wasm: &[u8]) -> Result<(Vec<u8>, FlattenReport)> {
         let mut reader = body.get_operators_reader().context("function body")?;
         while !reader.eof() {
             let op = reader.read().context("function body operator")?;
+            ir::reject_eh_operator(&op, old_idx)?;
             // Flatten rebuilds the type section down to {import types} ∪
             // {entry type} but copies function bodies through unchanged, so
             // a `BlockType::FuncType` blocktype (explicit type-index,
@@ -279,27 +291,38 @@ pub fn flatten(wasm: &[u8]) -> Result<(Vec<u8>, FlattenReport)> {
     Ok((module.finish(), report))
 }
 
-/// Classifies a callee body's `return` shape, per `docs/DESIGN.md` §6.2b's
-/// final paragraph: whether inlining it needs the `block`-wrapper + `return`
-/// -> `br` rewrite at all, or can splice the body in bare.
+/// Classifies a callee body's exit shape, per `docs/DESIGN.md` §6.2b's
+/// final paragraph: whether inlining it needs the `block`-wrapper +
+/// `return` -> `br` rewrite at all, or can splice the body in bare.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ReturnShape {
-    /// No `return` anywhere in the body: nothing to rewrite, splice bare.
+    /// No `return` and no function-level-targeting branch anywhere in the
+    /// body: nothing to rewrite, splice bare.
     NoReturn,
-    /// Exactly one `return`, and it is the very last instruction before the
+    /// Exactly one `return`, it is the very last instruction before the
     /// body's own trailing `end`, at depth 0 (top level, not nested in any
-    /// `block`/`loop`/`if`): dropping it and falling through is equivalent,
-    /// so splice bare.
+    /// `block`/`loop`/`if`), and there is no function-level-targeting
+    /// branch: dropping the `return` and falling through is equivalent, so
+    /// splice bare.
     TrailingOnly,
-    /// Anything else (multiple returns, or a `return` that is nested or not
-    /// the final instruction): keep the `block`-wrapper + `br` rewrite.
+    /// Anything else (multiple returns, a `return` that is nested or not
+    /// the final instruction, or any `br`/`br_if`/`br_table` targeting the
+    /// body's implicit function-level label): keep the `block`-wrapper +
+    /// `br` rewrite.
     NeedsWrapper,
 }
 
 /// Pre-scans a callee body to classify its [`ReturnShape`] (`docs/DESIGN.md`
 /// §6.2b final paragraph).
+///
+/// A `br`/`br_if`/`br_table` whose relative depth reaches past every frame
+/// open at that point targets the body's implicit function-level label — an
+/// exit with `return` semantics. A bare splice would leave its depth
+/// unchanged and silently retarget it at a caller frame, so any such branch
+/// forces [`ReturnShape::NeedsWrapper`]: the wrapper block becomes exactly
+/// that label's replacement (see [`emit_inlined`]).
 fn classify_returns(body: &[wasmparser::Operator]) -> ReturnShape {
-    let mut depth: i32 = 0;
+    let mut depth: i64 = 0;
     let mut count: usize = 0;
     let mut trailing = false;
     let n = body.len();
@@ -315,6 +338,27 @@ fn classify_returns(body: &[wasmparser::Operator]) -> ReturnShape {
                 // own final `end` (i.e. is the second-to-last operator) and
                 // is not nested in any open block/loop/if.
                 trailing = depth == 0 && i + 2 == n;
+            }
+            wasmparser::Operator::Br { relative_depth }
+            | wasmparser::Operator::BrIf { relative_depth } => {
+                if i64::from(*relative_depth) >= depth {
+                    return ReturnShape::NeedsWrapper;
+                }
+            }
+            wasmparser::Operator::BrTable { targets } => {
+                if i64::from(targets.default()) >= depth {
+                    return ReturnShape::NeedsWrapper;
+                }
+                for t in targets.targets() {
+                    // `targets()` only errors on a malformed encoding, which
+                    // cannot occur for operators already read successfully
+                    // out of a parsed body.
+                    if let Ok(t) = t
+                        && i64::from(t) >= depth
+                    {
+                        return ReturnShape::NeedsWrapper;
+                    }
+                }
             }
             _ => {}
         }
@@ -339,11 +383,16 @@ fn classify_returns(body: &[wasmparser::Operator]) -> ReturnShape {
 ///   depth computed by tracking `block`/`loop`/`if`/`end` nesting as the
 ///   callee's body is streamed through — the wrapper block is the outermost
 ///   frame of the spliced body, so a `return` at that top level becomes
-///   `br 0`. Every other `br`/`br_if`/`br_table` targets a label internal to
-///   the callee's own original nesting and is left unchanged, since wrapping
-///   the whole body in one more block adds no *additional* enclosing scope
-///   for anything but `return`. The callee body's own trailing `end` closes
-///   this wrapper — no extra `end` is ever appended for it.
+///   `br 0`. Every `br`/`br_if`/`br_table` is left unchanged: a branch
+///   targeting a label internal to the callee's own nesting still resolves
+///   to the same frame (the wrapper adds no enclosing scope between it and
+///   its target), and a branch targeting the callee's implicit
+///   function-level label — relative depth reaching past every frame open
+///   at that point — now resolves to the wrapper block, which is exactly
+///   that label's replacement (branching to it yields the callee's result
+///   at the wrapper's `end`, i.e. `return` semantics). The callee body's
+///   own trailing `end` closes this wrapper — no extra `end` is ever
+///   appended for it.
 /// - [`ReturnShape::NoReturn`] / [`ReturnShape::TrailingOnly`]: spliced bare,
 ///   with no wrapper block at all. The callee body's own trailing `end` is
 ///   always dropped in this case (there is no wrapper for it to close — left
@@ -615,6 +664,63 @@ mod tests {
         assert!(matches!(classify_returns(&body), ReturnShape::NeedsWrapper));
     }
 
+    #[test]
+    fn classify_returns_function_level_br_needs_wrapper() {
+        let body = vec![
+            Operator::I64Const { value: 1 },
+            Operator::Br { relative_depth: 0 },
+            Operator::End,
+        ];
+        assert!(matches!(classify_returns(&body), ReturnShape::NeedsWrapper));
+    }
+
+    #[test]
+    fn classify_returns_function_level_br_from_inside_block_needs_wrapper() {
+        let body = vec![
+            Operator::Block {
+                blockty: BlockType::Empty,
+            },
+            Operator::Br { relative_depth: 1 },
+            Operator::End, // closes block
+            Operator::End, // function end
+        ];
+        assert!(matches!(classify_returns(&body), ReturnShape::NeedsWrapper));
+    }
+
+    #[test]
+    fn classify_returns_function_level_br_if_needs_wrapper() {
+        let body = vec![
+            Operator::LocalGet { local_index: 0 },
+            Operator::BrIf { relative_depth: 0 },
+            Operator::I64Const { value: 0 },
+            Operator::End,
+        ];
+        assert!(matches!(classify_returns(&body), ReturnShape::NeedsWrapper));
+    }
+
+    #[test]
+    fn classify_returns_internal_br_stays_bare() {
+        let body = vec![
+            Operator::Block {
+                blockty: BlockType::Empty,
+            },
+            Operator::Br { relative_depth: 0 },
+            Operator::End, // closes block
+            Operator::End, // function end
+        ];
+        assert!(matches!(classify_returns(&body), ReturnShape::NoReturn));
+    }
+
+    #[test]
+    fn classify_returns_function_level_br_table_needs_wrapper() {
+        // `Operator::BrTable` borrows its target list from encoded bytes,
+        // so it is obtained by parsing a fixture.
+        let bytes = wasm(r#"(module (func (i32.const 0) (br_table 0)))"#);
+        let bodies = func_bodies(&bytes);
+        let ops = ops_of(&bodies[0]);
+        assert!(matches!(classify_returns(&ops), ReturnShape::NeedsWrapper));
+    }
+
     // -- Pass-level (wat) ---------------------------------------------------
 
     fn wasm(src: &str) -> Vec<u8> {
@@ -804,6 +910,32 @@ mod tests {
             msg.to_lowercase().contains("type-index") || msg.to_lowercase().contains("blocktype"),
             "{msg}"
         );
+    }
+
+    #[test]
+    fn table_or_element_input_errors() {
+        let src = r#"
+        (module
+          (table 1 funcref)
+          (func $hook (param i32) (result i64) (i64.const 0))
+          (export "hook" (func $hook)))
+        "#;
+        let err = flatten(&wasm(src)).unwrap_err();
+        assert!(err.to_string().contains("table or element"), "{err}");
+    }
+
+    #[test]
+    fn exception_handling_operator_errors() {
+        let src = r#"
+        (module
+          (func $hook (param i32) (result i64)
+            try_table
+            end
+            i64.const 0)
+          (export "hook" (func $hook)))
+        "#;
+        let err = flatten(&wasm(src)).unwrap_err();
+        assert!(err.to_string().contains("exception-handling"), "{err}");
     }
 
     #[test]

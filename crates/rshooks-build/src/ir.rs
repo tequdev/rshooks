@@ -313,6 +313,30 @@ pub(crate) struct BodyRefs {
 
 /// Scans a function body for direct `call` targets and `global.get`/
 /// `global.set` targets.
+/// Rejects operators from the exception-handling proposal. They open (or
+/// interact with) control frames that the flatten/unnest transforms do not
+/// model — letting one through would corrupt frame matching and branch
+/// depths silently, so the ban is enforced where those passes first
+/// collect a body's operators (the final MVP validation would reject the
+/// module anyway, but only after a transform had already mangled it).
+pub(crate) fn reject_eh_operator(op: &wasmparser::Operator, func_idx: u32) -> Result<()> {
+    use wasmparser::Operator as Op;
+    if matches!(
+        op,
+        Op::Try { .. }
+            | Op::Catch { .. }
+            | Op::CatchAll
+            | Op::Delegate { .. }
+            | Op::Rethrow { .. }
+            | Op::TryTable { .. }
+            | Op::Throw { .. }
+            | Op::ThrowRef
+    ) {
+        bail!("function {func_idx}: exception-handling operators (`{op:?}`) are not supported");
+    }
+    Ok(())
+}
+
 pub(crate) fn scan_refs(body: &wasmparser::FunctionBody) -> Result<BodyRefs> {
     let mut refs = BodyRefs {
         calls: BTreeSet::new(),

@@ -163,6 +163,18 @@ pub struct UnnestReport {
 /// function, import, global, or type; it only rewrites code bodies.
 pub fn unnest(wasm: &[u8]) -> Result<(Vec<u8>, UnnestReport)> {
     let m = ir::parse(wasm)?;
+
+    // Cleaned input never contains a table or an element segment (the
+    // cleaner drops both — `call_indirect` is banned). The re-encode below
+    // emits neither section, so accepting one here would silently drop it;
+    // reject instead.
+    if !m.tables.is_empty() || !m.elements.is_empty() {
+        anyhow::bail!(
+            "module has a table or element segment; the unnest pass requires cleaned input \
+             (run the cleaner first)"
+        );
+    }
+
     let n_imp_funcs = m.num_imported_funcs();
 
     // Resolves a `call` target's (param count, result count) iff it is an
@@ -192,7 +204,12 @@ pub fn unnest(wasm: &[u8]) -> Result<(Vec<u8>, UnnestReport)> {
         let mut ops = Vec::new();
         let mut reader = body.get_operators_reader().context("function body")?;
         while !reader.eof() {
-            ops.push(reader.read().context("function body operator")?);
+            let op = reader.read().context("function body operator")?;
+            // Exception-handling frames are not modeled by `analyze`'s
+            // frame matching; reject them before any rewrite can mis-pair
+            // an `end` or mis-count a branch depth.
+            ir::reject_eh_operator(&op, func_idx)?;
+            ops.push(op);
         }
 
         let depth_before = ir::DepthTracker::of_slice(&ops);
@@ -1095,6 +1112,32 @@ mod tests {
             }
         }
         panic!("no code section entry found")
+    }
+
+    #[test]
+    fn table_or_element_input_errors() {
+        let src = r#"
+        (module
+          (table 1 funcref)
+          (func $hook (param i32) (result i64) (i64.const 0))
+          (export "hook" (func $hook)))
+        "#;
+        let err = unnest(&wasm(src)).unwrap_err();
+        assert!(err.to_string().contains("table or element"), "{err}");
+    }
+
+    #[test]
+    fn exception_handling_operator_errors() {
+        let src = r#"
+        (module
+          (func $hook (param i32) (result i64)
+            try_table
+            end
+            i64.const 0)
+          (export "hook" (func $hook)))
+        "#;
+        let err = unnest(&wasm(src)).unwrap_err();
+        assert!(err.to_string().contains("exception-handling"), "{err}");
     }
 
     #[test]

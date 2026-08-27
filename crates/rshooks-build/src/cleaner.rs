@@ -21,8 +21,9 @@ use crate::ir::{self, IndexRemapper};
 /// table, element segments, unreachable code — dropped), and every active
 /// data segment trimmed to end at its last non-zero byte (or dropped
 /// entirely, if all-zero) — see [`trim_trailing_zeros`]. Trimming is
-/// skipped wholesale when segments overlap or use non-`i32.const` offsets
-/// (see [`data_trim_is_safe`]).
+/// skipped wholesale when segments overlap, use non-`i32.const` offsets,
+/// or reach out of the first memory's initial bounds (see
+/// [`data_trim_is_safe`]).
 ///
 /// Errors if the `hook` export is missing, or if `hook`/`cbak` do not have
 /// the required `(i32) -> i64` signature.
@@ -63,6 +64,13 @@ pub fn clean(wasm: &[u8], _opts: &Options) -> Result<Vec<u8>> {
         }
         if let Some(body) = m.defined_body(f) {
             let refs = ir::scan_refs(body)?;
+            // `call_indirect` is banned outright (its dynamic target defeats
+            // reachability, and the table it needs is dropped below); a kept
+            // body containing one must fail here, not survive as a dangling
+            // instruction over a dropped table.
+            if refs.has_call_indirect {
+                bail!("function {f} uses `call_indirect` (not allowed in a SetHook module)");
+            }
             for c in refs.calls {
                 stack.push(c);
             }
@@ -210,7 +218,7 @@ pub fn clean(wasm: &[u8], _opts: &Options) -> Result<Vec<u8>> {
 
     let mut data_sec = wasm_encoder::DataSection::new();
     {
-        let trim_safe = data_trim_is_safe(&m.datas);
+        let trim_safe = data_trim_is_safe(&m.datas, first_memory_byte_capacity(&m));
         let mut remapper = IndexRemapper::new(func_map, global_map);
         for d in &m.datas {
             match &d.kind {
@@ -231,10 +239,14 @@ pub fn clean(wasm: &[u8], _opts: &Options) -> Result<Vec<u8>> {
                     // and may legally OVERLAP, in which case a trailing zero
                     // can be a deliberate overwrite of an earlier segment's
                     // non-zero byte — trimming it would change memory
-                    // contents. LLVM/wasm-ld never emit overlapping segments,
-                    // but `clean` accepts arbitrary wasm, so trimming is
-                    // skipped unless every offset is a plain `i32.const` and
-                    // no two segment ranges intersect.
+                    // contents. An out-of-bounds segment traps at
+                    // instantiation, and trimming could shrink it into
+                    // bounds — turning that trap into success. LLVM/wasm-ld
+                    // emit neither shape, but `clean` accepts arbitrary
+                    // wasm, so trimming is skipped unless every offset is a
+                    // plain `i32.const`, every segment fits the first
+                    // memory's initial size, and no two segment ranges
+                    // intersect.
                     if trim_safe {
                         if let Some(trimmed) = trim_trailing_zeros(d.data) {
                             let expr = ir::remap_const_expr(offset_expr, &mut remapper)?;
@@ -274,13 +286,34 @@ fn const_expr_offset(expr: &wasmparser::ConstExpr) -> Option<u64> {
     matches!(r.read().ok()?, wasmparser::Operator::End).then_some(value as u32 as u64)
 }
 
+/// The module's first memory in the memory index space (imported memories
+/// precede defined ones), as a byte capacity — or `None` when there is no
+/// memory at all, or its page size is not the MVP 64 KiB.
+fn first_memory_byte_capacity(m: &ir::ParsedModule) -> Option<u64> {
+    let mt = m
+        .imports
+        .iter()
+        .find_map(|imp| match imp.ty {
+            wasmparser::TypeRef::Memory(mt) => Some(mt),
+            _ => None,
+        })
+        .or_else(|| m.memories.first().copied())?;
+    if mt.page_size_log2.is_some_and(|p| p != 16) {
+        return None;
+    }
+    mt.initial.checked_mul(65536)
+}
+
 /// Whether the trailing-zero trim may be applied: every active segment must
-/// have a plain `i32.const` offset, and no two segments' `[offset,
-/// offset+len)` ranges may intersect. Overlapping segments apply in
-/// declaration order, so a later segment's trailing zeros can be a
-/// deliberate overwrite of earlier non-zero bytes — trimming would then
-/// change memory contents.
-fn data_trim_is_safe(datas: &[wasmparser::Data<'_>]) -> bool {
+/// have a plain `i32.const` offset, every segment's `[offset, offset+len)`
+/// range must lie within `memory_capacity` bytes, and no two segments'
+/// ranges may intersect. Overlapping segments apply in declaration order,
+/// so a later segment's trailing zeros can be a deliberate overwrite of
+/// earlier non-zero bytes — trimming would then change memory contents. An
+/// out-of-bounds segment makes instantiation trap; trimming (or dropping)
+/// it could turn that trap into a successful instantiation, so it too
+/// disqualifies trimming.
+fn data_trim_is_safe(datas: &[wasmparser::Data<'_>], memory_capacity: Option<u64>) -> bool {
     let mut ranges: Vec<(u64, u64)> = Vec::new();
     for d in datas {
         match &d.kind {
@@ -288,7 +321,11 @@ fn data_trim_is_safe(datas: &[wasmparser::Data<'_>]) -> bool {
                 let Some(start) = const_expr_offset(offset_expr) else {
                     return false;
                 };
-                ranges.push((start, start.saturating_add(d.data.len() as u64)));
+                let end = start.saturating_add(d.data.len() as u64);
+                if memory_capacity.is_none_or(|cap| end > cap) {
+                    return false;
+                }
+                ranges.push((start, end));
             }
             wasmparser::DataKind::Passive => {}
         }
@@ -394,7 +431,7 @@ mod tests {
     #[test]
     fn data_trim_is_safe_for_non_overlapping_segments() {
         let datas = vec![active_data(&OFF0, b"AB"), active_data(&OFF4, b"CD")];
-        assert!(data_trim_is_safe(&datas));
+        assert!(data_trim_is_safe(&datas, Some(65536)));
     }
 
     #[test]
@@ -402,7 +439,7 @@ mod tests {
         // Segment at 0 of length 5 covers [0,5); segment at 4 covers [4,5)
         // -> overlap at byte 4.
         let datas = vec![active_data(&OFF0, b"ABCDE"), active_data(&OFF4, b"X")];
-        assert!(!data_trim_is_safe(&datas));
+        assert!(!data_trim_is_safe(&datas, Some(65536)));
     }
 
     #[test]
@@ -410,19 +447,33 @@ mod tests {
         // Segment at 0 of length 4 covers [0,4); segment at 4 starts exactly
         // where the first ends.
         let datas = vec![active_data(&OFF0, b"ABCD"), active_data(&OFF4, b"E")];
-        assert!(data_trim_is_safe(&datas));
+        assert!(data_trim_is_safe(&datas, Some(65536)));
     }
 
     #[test]
     fn data_trim_is_unsafe_with_a_global_get_offset() {
         let datas = vec![active_data(&GLOBAL_GET_OFFSET, b"AB")];
-        assert!(!data_trim_is_safe(&datas));
+        assert!(!data_trim_is_safe(&datas, Some(65536)));
+    }
+
+    #[test]
+    fn data_trim_is_unsafe_when_a_segment_reaches_out_of_memory_bounds() {
+        // An out-of-bounds segment traps at instantiation; trimming could
+        // shrink it into bounds and turn that trap into success.
+        let datas = vec![active_data(&OFF4, b"AB")];
+        assert!(!data_trim_is_safe(&datas, Some(5)));
+    }
+
+    #[test]
+    fn data_trim_is_unsafe_without_a_memory() {
+        let datas = vec![active_data(&OFF0, b"AB")];
+        assert!(!data_trim_is_safe(&datas, None));
     }
 
     #[test]
     fn data_trim_ignores_passive_segments() {
         let datas = vec![active_data(&OFF0, b"AB"), passive_data(b"anything")];
-        assert!(data_trim_is_safe(&datas));
+        assert!(data_trim_is_safe(&datas, Some(65536)));
     }
 
     // -- const_expr_offset --------------------------------------------------
@@ -543,6 +594,21 @@ mod tests {
             !import_names(&cleaned).contains(&"unused".to_string()),
             "unreachable import should have been GC'd"
         );
+    }
+
+    #[test]
+    fn call_indirect_in_a_kept_body_errors() {
+        let src = r#"
+        (module
+          (type $t (func))
+          (table 1 funcref)
+          (func $hook (param i32) (result i64)
+            (call_indirect (type $t) (i32.const 0))
+            (i64.const 0))
+          (export "hook" (func $hook)))
+        "#;
+        let err = clean(&wasm(src), &opts()).unwrap_err();
+        assert!(err.to_string().contains("call_indirect"), "{err}");
     }
 
     #[test]
