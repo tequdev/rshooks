@@ -21,8 +21,9 @@
 //! values this crate's own typed layer wrote), a completely different
 //! domain. A numeric protocol field read through the raw escapes must be
 //! decoded with an explicit `u64::from_be_bytes(...)` call at the use site
-//! (`examples/03_hook-params/src/lib.rs`'s `hook_param_exact` read of `MIN`
-//! is exactly that). [`otxn_field_typed`] does this decoding itself for
+//! (`examples/03_hook-params/src/lib.rs`'s native-`Amount` decode,
+//! `u64::from_be_bytes(n.0) & !NATIVE_AMOUNT_FLAG_BITS`, is exactly that).
+//! [`otxn_field_typed`] does this decoding itself for
 //! every field it models, so a field with a modeled type no longer needs the
 //! idiom at all — see its doc comment.
 

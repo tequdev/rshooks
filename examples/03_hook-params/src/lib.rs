@@ -3,9 +3,6 @@
 use rshooks::prelude::*;
 use rshooks::*;
 
-/// The big-endian minimum-amount parameter name.
-const MIN_PARAM: &[u8] = b"MIN";
-
 /// The default minimum amount in drops.
 const DEFAULT_MIN_DROPS: u64 = 1_000_000;
 
@@ -22,15 +19,42 @@ hook_errors! {
     }
 }
 
-/// Reads the configured minimum amount, or the default.
+/// The `MIN` Hook parameter's decoded shape: a single drops value. A
+/// one-field `ParamValue` wrapper (rather than reading a bare `[u8; 8]`)
+/// lets the parameter's meaning travel with its type, and decodes through
+/// this crate's little-endian `FromBytes`, matching `examples/12_typed-data`'s
+/// `CFG` convention (`FixedRead` is implemented for `[u8; N]`,
+/// `rshooks::types` newtypes, `XFL`, and `#[derive(ParamValue)]`/
+/// `#[derive(HookData)]` structs — not for a bare `u64`).
+#[derive(ParamValue)]
+struct MinDrops {
+    drops: u64,
+}
+
+/// The single source of the compiled-in fallback: both the declared
+/// `default = ..` and the malformed-value mask below go through it.
+impl Default for MinDrops {
+    fn default() -> Self {
+        Self {
+            drops: DEFAULT_MIN_DROPS,
+        }
+    }
+}
+
+/// Returns the configured `MIN` value, falling back to
+/// [`MinDrops::default`] when `MIN` is absent *or* present-but-malformed:
+/// `.unwrap_or_default()` masks any `Err` from
+/// [`HookParam::get_or_default`], not just the "absent" case.
 fn min_drops() -> u64 {
-    hook_param_exact(MIN_PARAM)
-        .map(u64::from_be_bytes)
-        .unwrap_or(DEFAULT_MIN_DROPS)
+    HookParams.min.get_or_default().unwrap_or_default().drops
 }
 
 #[hooks]
-pub struct HookParams;
+pub struct HookParams {
+    /// The minimum amount in drops, configured via the `MIN` Hook parameter.
+    #[hook_param(name = b"MIN", default = MinDrops::default())]
+    min: HookParam<MinDrops>,
+}
 
 #[hooks]
 impl HookParams {

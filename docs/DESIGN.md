@@ -1716,7 +1716,7 @@ digit) — see `examples/README.md`.
 |---|---|---|
 | 01 | `accept-all` | minimal hook: `accept` everything (starter template) |
 | 02 | `state-counter` | `state`/`state_set` round-trip, counter in hook state |
-| 03 | `hook-params` | `hook_param`-configurable threshold, with a compiled-in default |
+| 03 | `hook-params` | `#[hook_param]`-configurable threshold, with a compiled-in default |
 | 04 | `errors` | a meaningful `hook_errors!`-based rollback error-code system |
 | 05 | `firewall` | read `otxn_field(sfAccount)` + hook param blacklist → `rollback` |
 | 06 | `guard-patterns` | `guard!`/`guard_m!` correctness and the array-`==` memcmp-loop pitfall |

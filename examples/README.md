@@ -28,7 +28,7 @@ directory is prefixed) and matches what its own README, `Cargo.toml`, and
 |---|---|---|
 | 01 | [`accept-all`](01_accept-all) | minimal hook: `accept` everything (starter template) |
 | 02 | [`state-counter`](02_state-counter) | `state`/`state_set` round-trip, counter in hook state |
-| 03 | [`hook-params`](03_hook-params) | `hook_param`-configurable threshold, with a compiled-in default |
+| 03 | [`hook-params`](03_hook-params) | `#[hook_param]`-configurable threshold, with a compiled-in default |
 | 04 | [`errors`](04_errors) | a meaningful `hook_errors!`-based rollback error-code system, matched to `HookReturnCode` |
 | 05 | [`firewall`](05_firewall) | read `otxn_field(sfAccount)` + a hook parameter blacklist → `rollback` |
 | 06 | [`guard-patterns`](06_guard-patterns) | `guard!`/`guard_m!` correctness, choosing `maxiter`, and the array-`==` memcmp-loop pitfall |
