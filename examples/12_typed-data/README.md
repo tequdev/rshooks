@@ -77,13 +77,13 @@ pub struct TypedData {
 
 `deposits` is the **field** — the thing this hook operates on, and what
 carries the accessors once bound to a key via `.at(..)`. `main` declares a
-`&self` receiver, so it reaches its own chain's fields as `self.deposits` —
+`&self` receiver, so it reaches its own chain's fields as `self.state.deposits` —
 no manual byte packing anywhere:
 
 ```rust
 #[hook(0, on = [Invoke])]
 fn main(&self) -> HookResult {
-    let deposit = self.deposits.at(DepositKey { tag: DEPOSIT_TAG, owner });
+    let deposit = self.state.deposits.at(DepositKey { tag: DEPOSIT_TAG, owner });
     let current = match deposit.get() {
         Ok(existing) => existing.unwrap_or(EMPTY_DEPOSIT),
         Err(_) => rollback!(
@@ -105,11 +105,11 @@ fn main(&self) -> HookResult {
 methods on the bound `StateEntry` `.at(..)` returns, each an
 `#[inline(always)]` forward to `state::state_get`/`state_set_loose` — the
 same code, written in the order it reads best. The parameter side has the
-same shape: `self.instruction.get_required()`, resolving `Instruction`
+same shape: `self.otxn_param.instruction.get_required()`, resolving `Instruction`
 from the field's own declared value type — no turbofish, no independently
 inferred return type. (`config()` below reads `config` the same way, but
 from a free function outside the `#[hooks] impl`, so it reaches the field
-by its struct-name static instead: `TypedData.config.get_or_default()` —
+by its struct-name static instead: `TypedData.hook_param.config.get_or_default()` —
 see "`self` vs. the struct-name static" below.)
 
 ### `self` vs. the struct-name static
@@ -117,10 +117,10 @@ see "`self` vs. the struct-name static" below.)
 `&self` and `TypedData` name the exact same value — the single, zero-sized
 instance the `#[hooks]` struct macro generates as `static TypedData:
 TypedData`. An entry or helper declared *inside* the `#[hooks] impl` gets
-that instance handed to it as `&self` and writes `self.deposits`; code
+that instance handed to it as `&self` and writes `self.state.deposits`; code
 *outside* the impl — `config()`/`deposits_paused()` below are free
 functions, not impl members — has no `self` to borrow, so it names the
-same static directly: `TypedData.config`. Both forms are permanently legal
+same static directly: `TypedData.hook_param.config`. Both forms are permanently legal
 and measure byte-identical wasm (a reference to a zero-sized value
 optimizes away entirely); this crate's examples use `&self` inside the
 annotated impl and the struct-name static everywhere else.
@@ -160,7 +160,7 @@ struct-shaped value instead of a literal byte string.
 `#[hook_param(name = ..)]`/`#[otxn_param(name = ..)]` cover the fixed case
 (`CFG`/`INS` above); `#[hook_param(name_by = ..)]` covers a struct-shaped
 name constructed per call site (`AdminName` below, via
-`TypedData.admin_pause.at(ADMIN_PAUSE_NAME)`) — both read through the exact
+`TypedData.hook_param.admin_pause.at(ADMIN_PAUSE_NAME)`) — both read through the exact
 same `get()`/`get_or_default()`/`get_required()` path. Only a *plain,
 already-known-at-compile-time* name (`name = b"CFG"`) is free, though —
 its generated `ParamSpec::with_name_bytes` hands over the already-`'static`
@@ -372,11 +372,11 @@ pub struct TypedData {
 }
 ```
 
-`TypedData.admin_pause` is a **keyed** `HookParam` field: `name_by =
+`TypedData.hook_param.admin_pause` is a **keyed** `HookParam` field: `name_by =
 AdminName` means each call site binds its own name value via `.at(..)`
 (here always the one fixed `ADMIN_PAUSE_NAME`, since this name scheme is
 meant to accommodate *multiple* future administrative parameters, not just
-one canonical instance) — `TypedData.admin_pause.at(ADMIN_PAUSE_NAME)
+one canonical instance) — `TypedData.hook_param.admin_pause.at(ADMIN_PAUSE_NAME)
 .get_or_default()`, `PauseSwitch`'s type inferred from the field's own
 declared value type, no annotation.
 

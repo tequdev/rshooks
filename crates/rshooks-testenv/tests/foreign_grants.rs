@@ -50,7 +50,7 @@ impl ForeignWriter {
             Ok(_) => 0,
             Err(e) => e.code(),
         };
-        if self.scratch.set(&(first_code as u64)).is_err() {
+        if self.state.scratch.set(&(first_code as u64)).is_err() {
             rollback!(b"store failed", 1);
         }
         accept!(b"", second_code)
@@ -69,7 +69,7 @@ impl ForeignWriter {
             Ok(_) => 0,
             Err(e) => e.code(),
         };
-        if self.scratch.set(&(first_code as u64)).is_err() {
+        if self.state.scratch.set(&(first_code as u64)).is_err() {
             rollback!(b"store failed", 1);
         }
         accept!(b"", second_code)

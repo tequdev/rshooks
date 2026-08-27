@@ -256,13 +256,13 @@ fn check_cast_cleanup_loop(keylet: &Keylet) -> bool {
 /// accounts sorts low, which is an ordering this hook has no business
 /// depending on; the magnitude is the fact being checked.
 ///
-/// `SlotObjects.iss.get()` distinguishes absence from decode failure, but
-/// this check treats them alike: either case just means "this check group's
-/// precondition isn't met," so both fall through the same
+/// `SlotObjects.otxn_param.iss.get()` distinguishes absence from decode
+/// failure, but this check treats them alike: either case just means "this
+/// check group's precondition isn't met," so both fall through the same
 /// `else { return false }`.
 #[inline(never)]
 fn check_iou_amount(holder: &AccountId) -> bool {
-    let Ok(Some(issuer)) = SlotObjects.iss.get() else {
+    let Ok(Some(issuer)) = SlotObjects.otxn_param.iss.get() else {
         return false;
     };
     let mut currency = [0u8; 20];
@@ -352,6 +352,7 @@ const CHK_IOU: u8 = 5;
 /// decode failure too.
 fn selected_group() -> u8 {
     SlotObjects
+        .otxn_param
         .chk
         .get_or_default()
         .map(|v| v[0])

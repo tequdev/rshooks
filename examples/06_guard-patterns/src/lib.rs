@@ -25,7 +25,7 @@ hook_errors! {
 /// Treats a decode failure the same as an absent parameter: any read
 /// failure falls straight to "nothing to block", not just an unset `BL`.
 fn blocked_account() -> Option<AccountId> {
-    GuardPatterns.blocked.get().ok().flatten()
+    GuardPatterns.hook_param.blocked.get().ok().flatten()
 }
 
 #[hooks]

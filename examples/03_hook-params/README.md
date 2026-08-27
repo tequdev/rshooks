@@ -31,7 +31,12 @@ impl Default for MinDrops {
 }
 
 fn min_drops() -> u64 {
-    HookParams.min.get_or_default().unwrap_or_default().drops
+    HookParams
+        .hook_param
+        .min
+        .get_or_default()
+        .unwrap_or_default()
+        .drops
 }
 
 #[hooks]
