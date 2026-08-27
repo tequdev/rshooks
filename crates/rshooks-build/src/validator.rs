@@ -468,3 +468,288 @@ fn valtype_eq(a: wasmparser::ValType, b: wasm_encoder::ValType) -> bool {
             | (wasmparser::ValType::F64, wasm_encoder::ValType::F64)
     )
 }
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
+mod tests {
+    use super::*;
+
+    fn wasm(src: &str) -> Vec<u8> {
+        wat::parse_str(src).expect("fixture is valid wat")
+    }
+
+    fn opts_v0() -> Options {
+        Options::default()
+    }
+
+    fn opts_v1() -> Options {
+        Options {
+            api_version: ApiVersion::V1,
+            ..Options::default()
+        }
+    }
+
+    // R1: `_g` import required for every V0 module.
+    const NO_G_HOOK: &str = r#"
+    (module
+      (func $hook (param i32) (result i64) (i64.const 0))
+      (export "hook" (func $hook)))
+    "#;
+
+    #[test]
+    fn r1_v0_module_without_g_errors() {
+        let err = validate(&wasm(NO_G_HOOK), &opts_v0()).unwrap_err();
+        assert!(err.to_string().contains("R1"), "{err}");
+    }
+
+    #[test]
+    fn r1_does_not_apply_under_v1() {
+        validate(&wasm(NO_G_HOOK), &opts_v1()).expect("V1 has no R1 requirement");
+    }
+
+    // R2: every type must be an import's type or the entry-point type.
+    const STRAY_TYPE_HOOK: &str = r#"
+    (module
+      (import "env" "_g" (func $g (param i32 i32) (result i32)))
+      (func $unused_helper (param i32 i32 i32) (result i32) (i32.const 0))
+      (func $hook (param i32) (result i64) (i64.const 0))
+      (export "hook" (func $hook)))
+    "#;
+
+    #[test]
+    fn r2_v0_stray_type_errors() {
+        let err = validate(&wasm(STRAY_TYPE_HOOK), &opts_v0()).unwrap_err();
+        assert!(err.to_string().contains("R2"), "{err}");
+    }
+
+    #[test]
+    fn r2_does_not_apply_under_v1() {
+        validate(&wasm(STRAY_TYPE_HOOK), &opts_v1()).expect("V1 has no R2 requirement");
+    }
+
+    // -- Nesting depth --------------------------------------------------------
+
+    fn nested_hook_src(depth: u32) -> String {
+        let open = "(block ".repeat(depth as usize);
+        let close = ")".repeat(depth as usize);
+        format!(
+            r#"(module
+              (import "env" "_g" (func $g (param i32 i32) (result i32)))
+              (func $hook (param i32) (result i64)
+                {open} {close}
+                (i64.const 0))
+              (export "hook" (func $hook)))"#
+        )
+    }
+
+    #[test]
+    fn nesting_depth_33_is_a_hard_error_under_v0() {
+        let err = validate(&wasm(&nested_hook_src(33)), &opts_v0()).unwrap_err();
+        assert!(err.to_string().contains("nesting depth"), "{err}");
+    }
+
+    #[test]
+    fn nesting_depth_28_is_a_warning_under_v0() {
+        let report =
+            validate(&wasm(&nested_hook_src(28)), &opts_v0()).expect("28 is not a hard error");
+        assert!(
+            report.warnings.iter().any(|w| w.contains("approaching")),
+            "{:?}",
+            report.warnings
+        );
+    }
+
+    #[test]
+    fn nesting_depth_33_is_fine_under_v1_but_still_reported() {
+        let report =
+            validate(&wasm(&nested_hook_src(33)), &opts_v1()).expect("V1 has no depth limit");
+        assert_eq!(report.max_nesting_depth, 33);
+    }
+
+    // -- Structural section rules ----------------------------------------------
+
+    #[test]
+    fn passive_data_segment_errors() {
+        let src = r#"
+        (module
+          (import "env" "_g" (func $g (param i32 i32) (result i32)))
+          (memory 1)
+          (data $d "AB")
+          (func $hook (param i32) (result i64) (i64.const 0))
+          (export "hook" (func $hook)))
+        "#;
+        let err = validate(&wasm(src), &opts_v0()).unwrap_err();
+        assert!(err.to_string().to_lowercase().contains("passive"), "{err}");
+    }
+
+    #[test]
+    fn data_count_section_errors() {
+        // Build a module with an explicit data-count section (id 12) via
+        // wasm_encoder: `bulk-memory` is not among the wat-encoded
+        // fixtures elsewhere in this crate, so it's easiest to assemble the
+        // raw section directly rather than depend on wat emitting one.
+        let mut module = wasm_encoder::Module::new();
+        let mut types = wasm_encoder::TypeSection::new();
+        types
+            .ty()
+            .function([wasm_encoder::ValType::I32], [wasm_encoder::ValType::I64]);
+        types.ty().function(
+            [wasm_encoder::ValType::I32, wasm_encoder::ValType::I32],
+            [wasm_encoder::ValType::I32],
+        );
+        module.section(&types);
+        let mut imports = wasm_encoder::ImportSection::new();
+        imports.import("env", "_g", wasm_encoder::EntityType::Function(1));
+        module.section(&imports);
+        let mut funcs = wasm_encoder::FunctionSection::new();
+        funcs.function(0);
+        module.section(&funcs);
+        let mut mems = wasm_encoder::MemorySection::new();
+        mems.memory(wasm_encoder::MemoryType {
+            minimum: 1,
+            maximum: None,
+            memory64: false,
+            shared: false,
+            page_size_log2: None,
+        });
+        module.section(&mems);
+        let mut exports = wasm_encoder::ExportSection::new();
+        exports.export("hook", wasm_encoder::ExportKind::Func, 1);
+        module.section(&exports);
+        // Data-count section (id 12), count = 0 data segments.
+        module.section(&wasm_encoder::DataCountSection { count: 0 });
+        let mut code = wasm_encoder::CodeSection::new();
+        let mut f = wasm_encoder::Function::new([]);
+        f.instruction(&wasm_encoder::Instruction::I64Const(0));
+        f.instruction(&wasm_encoder::Instruction::End);
+        code.function(&f);
+        module.section(&code);
+        module.section(&wasm_encoder::DataSection::new());
+        let bytes = module.finish();
+
+        let err = validate(&bytes, &opts_v0()).unwrap_err();
+        assert!(
+            err.to_string().to_lowercase().contains("data-count"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn non_mvp_element_segment_errors() {
+        // A passive element segment (non-MVP form: MVP only allows active
+        // segments).
+        let mut module = wasm_encoder::Module::new();
+        let mut types = wasm_encoder::TypeSection::new();
+        types
+            .ty()
+            .function([wasm_encoder::ValType::I32], [wasm_encoder::ValType::I64]);
+        types.ty().function(
+            [wasm_encoder::ValType::I32, wasm_encoder::ValType::I32],
+            [wasm_encoder::ValType::I32],
+        );
+        module.section(&types);
+        let mut imports = wasm_encoder::ImportSection::new();
+        imports.import("env", "_g", wasm_encoder::EntityType::Function(1));
+        module.section(&imports);
+        let mut funcs = wasm_encoder::FunctionSection::new();
+        funcs.function(0);
+        module.section(&funcs);
+        let mut exports = wasm_encoder::ExportSection::new();
+        exports.export("hook", wasm_encoder::ExportKind::Func, 1);
+        module.section(&exports);
+        // Element sections are positioned after export (id 9, following the
+        // spec's fixed section order), and passive/declared kinds need a
+        // table to make any semantic sense, but `ir::parse`/`validate` don't
+        // require one to exist — only the MVP-shape check under test does.
+        let mut elems = wasm_encoder::ElementSection::new();
+        elems.segment(wasm_encoder::ElementSegment {
+            mode: wasm_encoder::ElementMode::Passive,
+            elements: wasm_encoder::Elements::Functions(std::borrow::Cow::Borrowed(&[1])),
+        });
+        module.section(&elems);
+        let mut code = wasm_encoder::CodeSection::new();
+        let mut f = wasm_encoder::Function::new([]);
+        f.instruction(&wasm_encoder::Instruction::I64Const(0));
+        f.instruction(&wasm_encoder::Instruction::End);
+        code.function(&f);
+        module.section(&code);
+        let bytes = module.finish();
+
+        let err = validate(&bytes, &opts_v0()).unwrap_err();
+        assert!(
+            err.to_string().to_lowercase().contains("element segment"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn more_than_one_mutable_defined_global_warns() {
+        let src = r#"
+        (module
+          (import "env" "_g" (func $g (param i32 i32) (result i32)))
+          (global $a (mut i32) (i32.const 0))
+          (global $b (mut i32) (i32.const 0))
+          (func $hook (param i32) (result i64)
+            (drop (global.get $a))
+            (drop (global.get $b))
+            (i64.const 0))
+          (export "hook" (func $hook)))
+        "#;
+        let report =
+            validate(&wasm(src), &opts_v0()).expect("multiple mutable globals is a warning");
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|w| w.contains("mutable globals")),
+            "{:?}",
+            report.warnings
+        );
+    }
+
+    #[test]
+    fn size_at_or_above_56kib_warns() {
+        // Just under the 65,535-byte hard limit, at/above the 56 KiB
+        // warning threshold: pad with a data segment (needs a memory).
+        let pad = "x".repeat(56 * 1024);
+        let src = format!(
+            r#"(module
+              (import "env" "_g" (func $g (param i32 i32) (result i32)))
+              (memory 2)
+              (data (i32.const 0) "{pad}")
+              (func $hook (param i32) (result i64) (i64.const 0))
+              (export "hook" (func $hook)))"#
+        );
+        let bytes = wasm(&src);
+        assert!(
+            bytes.len() < MAX_SIZE,
+            "fixture must stay under the hard limit"
+        );
+        assert!(bytes.len() >= SIZE_WARNING_THRESHOLD);
+        let report = validate(&bytes, &opts_v0()).expect("under the hard limit");
+        assert!(
+            report.warnings.iter().any(|w| w.contains("approaching")),
+            "{:?}",
+            report.warnings
+        );
+    }
+
+    #[test]
+    fn declared_float_local_errors_mentioning_floating_point_local() {
+        let src = r#"
+        (module
+          (import "env" "_g" (func $g (param i32 i32) (result i32)))
+          (func $hook (param i32) (result i64)
+            (local $f f32)
+            (i64.const 0))
+          (export "hook" (func $hook)))
+        "#;
+        let err = validate(&wasm(src), &opts_v0()).unwrap_err();
+        assert!(err.to_string().contains("floating-point local"), "{err}");
+    }
+}

@@ -10,6 +10,7 @@
 use anyhow::{Context, Result};
 
 use crate::Options;
+use crate::encode;
 use crate::ir::{self, IndexRemapper};
 
 /// One `loop` site found while scanning a function body.
@@ -169,7 +170,10 @@ pub(crate) fn scan_function_loops(
 }
 
 /// Peeks (without consuming `reader`) at the next few operators to check for
-/// the guard prologue `i32.const; i32.const; call $_g`.
+/// the guard prologue `i32.const; i32.const; call $_g`. The second constant
+/// (`maxiter`) must be non-zero: the upstream checker rejects a zero
+/// `maxiter` outright (`Guard.h` "Guard call cannot specify 0 maxiter"), so
+/// a zero-`maxiter` prologue counts as unguarded here too.
 fn is_guard_prologue(reader: &wasmparser::OperatorsReader, g_index: Option<u32>) -> Result<bool> {
     let Some(g_index) = g_index else {
         return Ok(false);
@@ -184,7 +188,7 @@ fn is_guard_prologue(reader: &wasmparser::OperatorsReader, g_index: Option<u32>)
     if r.eof() {
         return Ok(false);
     }
-    if !matches!(r.read()?, wasmparser::Operator::I32Const { .. }) {
+    if !matches!(r.read()?, wasmparser::Operator::I32Const { value } if value != 0) {
         return Ok(false);
     }
     if r.eof() {
@@ -217,6 +221,18 @@ pub(crate) fn find_g_index(m: &ir::ParsedModule) -> Option<u32> {
 /// re-encoding a module that needed no changes.
 pub fn auto_guard(wasm: &[u8], opts: &Options) -> Result<Vec<u8>> {
     let m = ir::parse(wasm)?;
+
+    // Cleaned input never contains a table or an element segment (the
+    // cleaner drops both — `call_indirect` is banned). The re-encode below
+    // emits neither section, so accepting one here would silently drop it;
+    // reject instead.
+    if !m.tables.is_empty() || !m.elements.is_empty() {
+        anyhow::bail!(
+            "module has a table or element segment; the guard pass requires cleaned input \
+             (run the cleaner first)"
+        );
+    }
+
     let existing_g_index = find_g_index(&m);
 
     // First pass: does anything actually need inserting? If not, return the
@@ -273,42 +289,11 @@ pub fn auto_guard(wasm: &[u8], opts: &Options) -> Result<Vec<u8>> {
 
     let mut module = wasm_encoder::Module::new();
 
-    let mut types_sec = wasm_encoder::TypeSection::new();
-    for ty in &types {
-        let (params, results) = ir::conv_functype(ty)?;
-        types_sec.ty().function(params, results);
-    }
-    module.section(&types_sec);
+    module.section(&encode::encode_type_section(&types)?);
 
-    let mut imports_sec = wasm_encoder::ImportSection::new();
-    for imp in &m.imports {
-        match imp.ty {
-            wasmparser::TypeRef::Func(type_idx) => {
-                imports_sec.import(
-                    imp.module,
-                    imp.name,
-                    wasm_encoder::EntityType::Function(type_idx),
-                );
-            }
-            wasmparser::TypeRef::Table(t) => {
-                imports_sec.import(imp.module, imp.name, ir::conv_tabletype(t)?);
-            }
-            wasmparser::TypeRef::Memory(mt) => {
-                imports_sec.import(imp.module, imp.name, ir::conv_memtype(mt));
-            }
-            wasmparser::TypeRef::Global(gt) => {
-                imports_sec.import(imp.module, imp.name, ir::conv_globaltype(gt)?);
-            }
-            wasmparser::TypeRef::Tag(_) => {
-                anyhow::bail!("unsupported import: tag imports are not supported");
-            }
-            wasmparser::TypeRef::FuncExact(_) => {
-                anyhow::bail!(
-                    "unsupported import: exact function-reference imports are not supported"
-                );
-            }
-        }
-    }
+    let mut imports_sec = encode::encode_import_section(&m.imports, |_ordinal, type_idx| {
+        Ok(Some(wasm_encoder::EntityType::Function(type_idx)))
+    })?;
     if let GImport::New { type_idx, .. } = g_import {
         imports_sec.import("env", "_g", wasm_encoder::EntityType::Function(type_idx));
     }
@@ -320,35 +305,14 @@ pub fn auto_guard(wasm: &[u8], opts: &Options) -> Result<Vec<u8>> {
     }
     module.section(&funcs_sec);
 
-    let mut mem_sec = wasm_encoder::MemorySection::new();
-    for &mem in &m.memories {
-        mem_sec.memory(ir::conv_memtype(mem));
-    }
-    module.section(&mem_sec);
+    module.section(&encode::encode_memory_section(&m.memories));
 
-    let mut globals_sec = wasm_encoder::GlobalSection::new();
-    {
-        let mut remapper = IndexRemapper::new(func_map, global_map);
-        for g in &m.globals {
-            let ty = ir::conv_globaltype(g.ty)?;
-            let expr = ir::remap_const_expr(&g.init_expr, &mut remapper)?;
-            globals_sec.global(ty, &expr);
-        }
-    }
-    module.section(&globals_sec);
+    let mut remapper = IndexRemapper::new(func_map, global_map);
+    module.section(&encode::encode_global_section(&m.globals, &mut remapper)?);
 
     let mut exports_sec = wasm_encoder::ExportSection::new();
     for e in &m.exports {
-        let kind = match e.kind {
-            wasmparser::ExternalKind::Func => wasm_encoder::ExportKind::Func,
-            wasmparser::ExternalKind::Table => wasm_encoder::ExportKind::Table,
-            wasmparser::ExternalKind::Memory => wasm_encoder::ExportKind::Memory,
-            wasmparser::ExternalKind::Global => wasm_encoder::ExportKind::Global,
-            wasmparser::ExternalKind::Tag => wasm_encoder::ExportKind::Tag,
-            wasmparser::ExternalKind::FuncExact => anyhow::bail!(
-                "unsupported export: exact function-reference exports are not supported"
-            ),
-        };
+        let kind = encode::conv_export_kind(e.kind)?;
         let index = if matches!(e.kind, wasmparser::ExternalKind::Func) {
             func_map(e.index)
         } else {
@@ -398,25 +362,347 @@ pub fn auto_guard(wasm: &[u8], opts: &Options) -> Result<Vec<u8>> {
     }
     module.section(&code_sec);
 
-    let mut data_sec = wasm_encoder::DataSection::new();
-    {
-        let mut remapper = IndexRemapper::new(func_map, global_map);
-        for d in &m.datas {
-            match &d.kind {
-                wasmparser::DataKind::Active {
-                    memory_index,
-                    offset_expr,
-                } => {
-                    let expr = ir::remap_const_expr(offset_expr, &mut remapper)?;
-                    data_sec.active(*memory_index, &expr, d.data.iter().copied());
-                }
-                wasmparser::DataKind::Passive => {
-                    data_sec.passive(d.data.iter().copied());
-                }
+    let mut remapper = IndexRemapper::new(func_map, global_map);
+    module.section(&encode::encode_data_section(&m.datas, &mut remapper)?);
+
+    Ok(module.finish())
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
+mod tests {
+    use super::*;
+
+    fn body_bytes(ops: &[wasm_encoder::Instruction]) -> Vec<u8> {
+        let mut f = wasm_encoder::Function::new(std::iter::empty::<(u32, wasm_encoder::ValType)>());
+        for op in ops {
+            f.instruction(op);
+        }
+        f.instruction(&wasm_encoder::Instruction::End);
+        f.into_raw_body()
+    }
+
+    fn parse_body(bytes: &[u8]) -> wasmparser::FunctionBody<'_> {
+        wasmparser::FunctionBody::new(wasmparser::BinaryReader::new(bytes, 0))
+    }
+
+    fn reader_after_loop<'a>(
+        body: &'a wasmparser::FunctionBody<'a>,
+    ) -> wasmparser::OperatorsReader<'a> {
+        let mut r = body.get_operators_reader().expect("operators");
+        loop {
+            match r.read().expect("op") {
+                wasmparser::Operator::Loop { .. } => return r,
+                _ => continue,
             }
         }
     }
-    module.section(&data_sec);
 
-    Ok(module.finish())
+    // -- is_guard_prologue --------------------------------------------------
+
+    #[test]
+    fn is_guard_prologue_valid_sequence_is_true() {
+        let bytes = body_bytes(&[
+            wasm_encoder::Instruction::Loop(wasm_encoder::BlockType::Empty),
+            wasm_encoder::Instruction::I32Const(1),
+            wasm_encoder::Instruction::I32Const(10),
+            wasm_encoder::Instruction::Call(3),
+            wasm_encoder::Instruction::End,
+        ]);
+        let body = parse_body(&bytes);
+        let r = reader_after_loop(&body);
+        assert!(is_guard_prologue(&r, Some(3)).expect("valid"));
+    }
+
+    #[test]
+    fn is_guard_prologue_call_to_different_import_is_false() {
+        let bytes = body_bytes(&[
+            wasm_encoder::Instruction::Loop(wasm_encoder::BlockType::Empty),
+            wasm_encoder::Instruction::I32Const(1),
+            wasm_encoder::Instruction::I32Const(10),
+            wasm_encoder::Instruction::Call(3),
+            wasm_encoder::Instruction::End,
+        ]);
+        let body = parse_body(&bytes);
+        let r = reader_after_loop(&body);
+        assert!(!is_guard_prologue(&r, Some(99)).expect("valid"));
+    }
+
+    #[test]
+    fn is_guard_prologue_only_one_i32_const_is_false() {
+        let bytes = body_bytes(&[
+            wasm_encoder::Instruction::Loop(wasm_encoder::BlockType::Empty),
+            wasm_encoder::Instruction::I32Const(1),
+            wasm_encoder::Instruction::Call(3),
+            wasm_encoder::Instruction::End,
+        ]);
+        let body = parse_body(&bytes);
+        let r = reader_after_loop(&body);
+        assert!(!is_guard_prologue(&r, Some(3)).expect("valid"));
+    }
+
+    #[test]
+    fn is_guard_prologue_loop_at_end_of_body_is_false() {
+        let bytes = body_bytes(&[wasm_encoder::Instruction::Loop(
+            wasm_encoder::BlockType::Empty,
+        )]);
+        let body = parse_body(&bytes);
+        let r = reader_after_loop(&body);
+        assert!(!is_guard_prologue(&r, Some(3)).expect("valid"));
+    }
+
+    #[test]
+    fn is_guard_prologue_zero_maxiter_is_false() {
+        // `Guard.h` rejects a zero `maxiter` outright ("Guard call cannot
+        // specify 0 maxiter"), so a zero-maxiter prologue must count as
+        // unguarded here too.
+        let bytes = body_bytes(&[
+            wasm_encoder::Instruction::Loop(wasm_encoder::BlockType::Empty),
+            wasm_encoder::Instruction::I32Const(1),
+            wasm_encoder::Instruction::I32Const(0),
+            wasm_encoder::Instruction::Call(3),
+            wasm_encoder::Instruction::End,
+        ]);
+        let body = parse_body(&bytes);
+        let r = reader_after_loop(&body);
+        assert!(!is_guard_prologue(&r, Some(3)).expect("valid"));
+    }
+
+    #[test]
+    fn is_guard_prologue_no_g_index_is_false() {
+        let bytes = body_bytes(&[
+            wasm_encoder::Instruction::Loop(wasm_encoder::BlockType::Empty),
+            wasm_encoder::Instruction::I32Const(1),
+            wasm_encoder::Instruction::I32Const(10),
+            wasm_encoder::Instruction::Call(3),
+            wasm_encoder::Instruction::End,
+        ]);
+        let body = parse_body(&bytes);
+        let r = reader_after_loop(&body);
+        assert!(!is_guard_prologue(&r, None).expect("valid"));
+    }
+
+    // -- guess_loop_body / guard_hint --------------------------------------------
+
+    fn guess_of(loop_body: &[wasm_encoder::Instruction]) -> LoopBodyGuess {
+        let mut ops = vec![wasm_encoder::Instruction::Loop(
+            wasm_encoder::BlockType::Empty,
+        )];
+        ops.extend_from_slice(loop_body);
+        ops.push(wasm_encoder::Instruction::End); // closes loop
+        // `body_bytes` appends its own trailing `End` for the function.
+        let bytes = body_bytes(&ops);
+        let body = parse_body(&bytes);
+        let r = reader_after_loop(&body);
+        guess_loop_body(&r).expect("valid")
+    }
+
+    #[test]
+    fn guess_load_only_loop_is_compare_like() {
+        let guess = guess_of(&[
+            wasm_encoder::Instruction::I32Const(0),
+            wasm_encoder::Instruction::I32Load(wasm_encoder::MemArg {
+                offset: 0,
+                align: 0,
+                memory_index: 0,
+            }),
+            wasm_encoder::Instruction::Drop,
+        ]);
+        assert_eq!(guess, LoopBodyGuess::CompareLike);
+        assert!(guard_hint(guess).expect("hint").contains("buf_eq"));
+    }
+
+    #[test]
+    fn guess_load_and_store_loop_is_copy_like() {
+        let guess = guess_of(&[
+            wasm_encoder::Instruction::I32Const(0),
+            wasm_encoder::Instruction::I32Load(wasm_encoder::MemArg {
+                offset: 0,
+                align: 0,
+                memory_index: 0,
+            }),
+            wasm_encoder::Instruction::I32Const(0),
+            wasm_encoder::Instruction::I32Store(wasm_encoder::MemArg {
+                offset: 0,
+                align: 0,
+                memory_index: 0,
+            }),
+        ]);
+        assert_eq!(guess, LoopBodyGuess::CopyLike);
+        assert!(guard_hint(guess).is_some());
+    }
+
+    #[test]
+    fn guess_store_only_loop_is_zero_init_like() {
+        let guess = guess_of(&[
+            wasm_encoder::Instruction::I32Const(0),
+            wasm_encoder::Instruction::I32Const(0),
+            wasm_encoder::Instruction::I32Store(wasm_encoder::MemArg {
+                offset: 0,
+                align: 0,
+                memory_index: 0,
+            }),
+        ]);
+        assert_eq!(guess, LoopBodyGuess::ZeroInitLike);
+        assert!(guard_hint(guess).is_some());
+    }
+
+    #[test]
+    fn guess_loop_with_any_call_is_unknown() {
+        let guess = guess_of(&[
+            wasm_encoder::Instruction::I32Const(0),
+            wasm_encoder::Instruction::I32Load(wasm_encoder::MemArg {
+                offset: 0,
+                align: 0,
+                memory_index: 0,
+            }),
+            wasm_encoder::Instruction::Drop,
+            wasm_encoder::Instruction::Call(0),
+            wasm_encoder::Instruction::Drop,
+        ]);
+        assert_eq!(guess, LoopBodyGuess::Unknown);
+        assert!(guard_hint(guess).is_none());
+    }
+
+    #[test]
+    fn guess_nested_if_inside_loop_still_classified() {
+        let guess = guess_of(&[
+            wasm_encoder::Instruction::I32Const(1),
+            wasm_encoder::Instruction::If(wasm_encoder::BlockType::Empty),
+            wasm_encoder::Instruction::I32Const(0),
+            wasm_encoder::Instruction::I32Load(wasm_encoder::MemArg {
+                offset: 0,
+                align: 0,
+                memory_index: 0,
+            }),
+            wasm_encoder::Instruction::Drop,
+            wasm_encoder::Instruction::End,
+        ]);
+        assert_eq!(guess, LoopBodyGuess::CompareLike);
+    }
+
+    // -- auto_guard pass-level -------------------------------------------------
+
+    fn wasm(src: &str) -> Vec<u8> {
+        wat::parse_str(src).expect("fixture is valid wat")
+    }
+
+    fn opts() -> Options {
+        Options::default()
+    }
+
+    const TWO_UNGUARDED_LOOPS: &str = r#"
+    (module
+      (func $hook (param i32) (result i64)
+        (local $i i32)
+        (loop $a
+          (local.set $i (i32.add (local.get $i) (i32.const 1)))
+          (br_if $a (i32.lt_u (local.get $i) (i32.const 10))))
+        (loop $b
+          (local.set $i (i32.sub (local.get $i) (i32.const 1)))
+          (br_if $b (i32.gt_u (local.get $i) (i32.const 0))))
+        (i64.const 0))
+      (export "hook" (func $hook)))
+    "#;
+
+    #[test]
+    fn table_or_element_input_errors() {
+        let src = r#"
+        (module
+          (table 1 funcref)
+          (func $hook (param i32) (result i64) (i64.const 0))
+          (export "hook" (func $hook)))
+        "#;
+        let err = auto_guard(&wasm(src), &opts()).unwrap_err();
+        assert!(err.to_string().contains("table or element"), "{err}");
+    }
+
+    #[test]
+    fn two_unguarded_loops_get_sequential_ids() {
+        let out = auto_guard(&wasm(TWO_UNGUARDED_LOOPS), &opts()).expect("auto_guard succeeds");
+        let m = ir::parse(&out).expect("re-parse");
+        let g_index = find_g_index(&m).expect("_g present");
+        let body = &m.code[0];
+        let sites = scan_function_loops(body, Some(g_index)).expect("scan");
+        assert_eq!(sites.len(), 2);
+
+        // Collect the two inserted `id` constants (first i32.const after
+        // each loop) by re-reading operators directly.
+        let mut ids = Vec::new();
+        let mut r = body.get_operators_reader().expect("operators");
+        while !r.eof() {
+            if let wasmparser::Operator::Loop { .. } = r.read().expect("op") {
+                let id_op = r.read().expect("id const");
+                if let wasmparser::Operator::I32Const { value } = id_op {
+                    ids.push(value as u32);
+                }
+                let maxiter_op = r.read().expect("maxiter const");
+                assert_eq!(
+                    maxiter_op,
+                    wasmparser::Operator::I32Const {
+                        value: opts().default_maxiter as i32
+                    }
+                );
+            }
+        }
+        assert_eq!(ids, vec![1u32 << 30, (1u32 << 30) + 1]);
+    }
+
+    #[test]
+    fn missing_g_is_appended_and_shifts_every_index() {
+        let out = auto_guard(&wasm(TWO_UNGUARDED_LOOPS), &opts()).expect("auto_guard succeeds");
+        let m = ir::parse(&out).expect("re-parse");
+        let g_index = find_g_index(&m).expect("_g present");
+        assert_eq!(g_index, 0, "_g appended as the only (thus first) import");
+        // `hook`'s function index must have shifted from 0 to 1.
+        let hook_export = m
+            .exports
+            .iter()
+            .find(|e| e.name == "hook")
+            .expect("hook export");
+        assert_eq!(hook_export.index, 1);
+    }
+
+    #[test]
+    fn fully_guarded_module_is_returned_unchanged() {
+        let src = r#"
+        (module
+          (import "env" "_g" (func $g (param i32 i32) (result i32)))
+          (func $hook (param i32) (result i64)
+            (local $i i32)
+            (loop $l
+              (call $g (i32.const 1) (i32.const 10))
+              drop
+              (local.set $i (i32.add (local.get $i) (i32.const 1)))
+              (br_if $l (i32.lt_u (local.get $i) (i32.const 10))))
+            (i64.const 0))
+          (export "hook" (func $hook)))
+        "#;
+        let input = wasm(src);
+        let out = auto_guard(&input, &opts()).expect("auto_guard succeeds");
+        assert_eq!(out, input, "already-guarded module must be byte-identical");
+    }
+
+    #[test]
+    fn existing_g_import_is_reused_not_duplicated() {
+        let src = r#"
+        (module
+          (import "env" "_g" (func $g (param i32 i32) (result i32)))
+          (func $hook (param i32) (result i64)
+            (local $i i32)
+            (loop $l
+              (local.set $i (i32.add (local.get $i) (i32.const 1)))
+              (br_if $l (i32.lt_u (local.get $i) (i32.const 10))))
+            (i64.const 0))
+          (export "hook" (func $hook)))
+        "#;
+        let out = auto_guard(&wasm(src), &opts()).expect("auto_guard succeeds");
+        let m = ir::parse(&out).expect("re-parse");
+        assert_eq!(m.num_imported_funcs(), 1, "no new import should be added");
+    }
 }

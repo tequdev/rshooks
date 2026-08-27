@@ -7,7 +7,7 @@
 //! [`wasm_encoder::reencode::Reencode`] to translate instruction streams
 //! rather than hand-rolling a match over every WebAssembly opcode.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
 
 use anyhow::{Context, Result, bail};
 use wasm_encoder::reencode::{self, Reencode};
@@ -313,6 +313,30 @@ pub(crate) struct BodyRefs {
 
 /// Scans a function body for direct `call` targets and `global.get`/
 /// `global.set` targets.
+/// Rejects operators from the exception-handling proposal. They open (or
+/// interact with) control frames that the flatten/unnest transforms do not
+/// model — letting one through would corrupt frame matching and branch
+/// depths silently, so the ban is enforced where those passes first
+/// collect a body's operators (the final MVP validation would reject the
+/// module anyway, but only after a transform had already mangled it).
+pub(crate) fn reject_eh_operator(op: &wasmparser::Operator, func_idx: u32) -> Result<()> {
+    use wasmparser::Operator as Op;
+    if matches!(
+        op,
+        Op::Try { .. }
+            | Op::Catch { .. }
+            | Op::CatchAll
+            | Op::Delegate { .. }
+            | Op::Rethrow { .. }
+            | Op::TryTable { .. }
+            | Op::Throw { .. }
+            | Op::ThrowRef
+    ) {
+        bail!("function {func_idx}: exception-handling operators (`{op:?}`) are not supported");
+    }
+    Ok(())
+}
+
 pub(crate) fn scan_refs(body: &wasmparser::FunctionBody) -> Result<BodyRefs> {
     let mut refs = BodyRefs {
         calls: BTreeSet::new(),
@@ -457,12 +481,10 @@ pub(crate) fn remap_const_expr(
 pub(crate) fn out_edges(m: &ParsedModule, idx: u32) -> Vec<u32> {
     match m.defined_body(idx) {
         Some(body) => match scan_refs(body) {
-            Ok(refs) => refs
-                .calls
-                .into_iter()
-                .collect::<HashSet<_>>()
-                .into_iter()
-                .collect(),
+            // `BodyRefs::calls` is already a `BTreeSet`; collecting it
+            // directly (rather than routing through a `HashSet`) keeps
+            // edge order deterministic (sorted ascending).
+            Ok(refs) => refs.calls.into_iter().collect(),
             Err(_) => Vec::new(),
         },
         None => Vec::new(),
@@ -529,34 +551,63 @@ pub(crate) fn find_call_cycle(m: &ParsedModule) -> Option<Vec<u32>> {
     None
 }
 
-/// Computes the maximum simultaneous `block`/`loop`/`if` nesting depth
-/// reached in a function body (0 if it contains no such construct at all).
-/// This matches the vendored upstream checker's own count (`Guard.h`
-/// `NESTING_LIMIT` / `GuardRuleDepth32` — see `docs/DESIGN.md` §6.2c/§6.4):
-/// depth starts at 0 at the function's top level and increments on every
-/// `block`/`loop`/`if` entered, decrementing on the matching `end` (`else`
-/// does not change depth — it stays inside the same `if` frame). Shared by
-/// the unnest pass (which reports before/after depth per function it
-/// rewrites) and the validator (which enforces the hard limit); the unnest
-/// pass keeps its own copy of this loop over an in-memory `Vec<Operator>`
-/// rather than a `FunctionBody` reader — the two must be kept in sync.
-pub(crate) fn max_nesting_depth(body: &wasmparser::FunctionBody) -> Result<u32> {
-    let mut depth: u32 = 0;
-    let mut max_depth: u32 = 0;
-    let mut reader = body.get_operators_reader().context("function body")?;
-    while !reader.eof() {
-        match reader.read().context("function body operator")? {
+/// Tracks `block`/`loop`/`if` nesting depth across a stream of operators fed
+/// one at a time via [`DepthTracker::step`]. This is the one place that
+/// counts nesting depth the way the vendored upstream checker does
+/// (`Guard.h` `NESTING_LIMIT` / `GuardRuleDepth32` — see `docs/DESIGN.md`
+/// §6.2c/§6.4): depth starts at 0 at the function's top level and
+/// increments on every `block`/`loop`/`if` entered, decrementing on the
+/// matching `end` (`else` does not change depth — it stays inside the same
+/// `if` frame). [`max_nesting_depth`] drives it from a `FunctionBody`
+/// reader; the unnest pass drives it from an in-memory `Vec<Operator>` via
+/// [`DepthTracker::of_slice`].
+#[derive(Default)]
+pub(crate) struct DepthTracker {
+    depth: u32,
+    max: u32,
+}
+
+impl DepthTracker {
+    pub fn step(&mut self, op: &wasmparser::Operator) {
+        match op {
             wasmparser::Operator::Block { .. }
             | wasmparser::Operator::Loop { .. }
             | wasmparser::Operator::If { .. } => {
-                depth += 1;
-                max_depth = max_depth.max(depth);
+                self.depth += 1;
+                self.max = self.max.max(self.depth);
             }
-            wasmparser::Operator::End => depth = depth.saturating_sub(1),
+            wasmparser::Operator::End => self.depth = self.depth.saturating_sub(1),
             _ => {}
         }
     }
-    Ok(max_depth)
+
+    pub fn max(&self) -> u32 {
+        self.max
+    }
+
+    /// Feeds an entire operator slice through [`step`](Self::step), in
+    /// order, returning the resulting maximum depth.
+    pub fn of_slice(ops: &[wasmparser::Operator]) -> u32 {
+        let mut tracker = Self::default();
+        for op in ops {
+            tracker.step(op);
+        }
+        tracker.max()
+    }
+}
+
+/// Computes the maximum simultaneous `block`/`loop`/`if` nesting depth
+/// reached in a function body (0 if it contains no such construct at all).
+/// Shared by the unnest pass (which reports before/after depth per function
+/// it rewrites) and the validator (which enforces the hard limit) — see
+/// [`DepthTracker`].
+pub(crate) fn max_nesting_depth(body: &wasmparser::FunctionBody) -> Result<u32> {
+    let mut tracker = DepthTracker::default();
+    let mut reader = body.get_operators_reader().context("function body")?;
+    while !reader.eof() {
+        tracker.step(&reader.read().context("function body operator")?);
+    }
+    Ok(tracker.max())
 }
 
 /// Finds a function type matching the given params/results exactly, or
@@ -579,4 +630,294 @@ pub(crate) fn find_or_insert_type(
         results.iter().copied(),
     ));
     idx
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
+mod tests {
+    use super::*;
+    use wasmparser::{BlockType, Operator, ValType};
+
+    /// Encodes `ops` (followed by an implicit `end`) into raw function-body
+    /// bytes (locals + operators), suitable for wrapping in a
+    /// `wasmparser::FunctionBody`. Stack-typing is never checked by the
+    /// readers these bytes feed (`scan_refs`, `DepthTracker`, ...), so the
+    /// instruction sequences below don't need to be valid in isolation.
+    fn body_bytes(ops: &[wasm_encoder::Instruction]) -> Vec<u8> {
+        let mut f = wasm_encoder::Function::new(std::iter::empty::<(u32, wasm_encoder::ValType)>());
+        for op in ops {
+            f.instruction(op);
+        }
+        f.instruction(&wasm_encoder::Instruction::End);
+        f.into_raw_body()
+    }
+
+    fn parse_body(bytes: &[u8]) -> wasmparser::FunctionBody<'_> {
+        wasmparser::FunctionBody::new(wasmparser::BinaryReader::new(bytes, 0))
+    }
+
+    /// A minimal `ParsedModule` for call-graph tests: `num_func_imports`
+    /// leaf imports (index 0..n), followed by one defined function per
+    /// entry in `bodies` (each already-encoded via `body_bytes`).
+    fn module_with_calls(num_func_imports: u32, bodies: &[Vec<u8>]) -> ParsedModule<'_> {
+        let imports = (0..num_func_imports)
+            .map(|_| wasmparser::Import {
+                module: "env",
+                name: "leaf",
+                ty: wasmparser::TypeRef::Func(0),
+            })
+            .collect();
+        let code = bodies.iter().map(|b| parse_body(b)).collect();
+        ParsedModule {
+            types: Vec::new(),
+            imports,
+            defined_func_types: vec![0; bodies.len()],
+            tables: Vec::new(),
+            memories: Vec::new(),
+            globals: Vec::new(),
+            exports: Vec::new(),
+            start: None,
+            elements: Vec::new(),
+            data_count: None,
+            datas: Vec::new(),
+            code,
+            had_custom_section: false,
+        }
+    }
+
+    fn call_body(targets: &[u32]) -> Vec<u8> {
+        let ops: Vec<wasm_encoder::Instruction> = targets
+            .iter()
+            .map(|&t| wasm_encoder::Instruction::Call(t))
+            .collect();
+        body_bytes(&ops)
+    }
+
+    // -- find_call_cycle --------------------------------------------------
+
+    #[test]
+    fn find_call_cycle_diamond_dag_has_no_cycle() {
+        // 0 -> {1, 2}, 1 -> 3, 2 -> 3, 3 -> {} (a DAG despite the shared
+        // descendant).
+        let bodies = vec![
+            call_body(&[1, 2]),
+            call_body(&[3]),
+            call_body(&[3]),
+            call_body(&[]),
+        ];
+        let m = module_with_calls(0, &bodies);
+        assert!(find_call_cycle(&m).is_none());
+    }
+
+    #[test]
+    fn find_call_cycle_detects_direct_self_recursion() {
+        let bodies = vec![call_body(&[0])];
+        let m = module_with_calls(0, &bodies);
+        let cycle = find_call_cycle(&m).expect("self-call is a cycle");
+        assert!(cycle.contains(&0));
+    }
+
+    #[test]
+    fn find_call_cycle_detects_mutual_recursion() {
+        let bodies = vec![call_body(&[1]), call_body(&[0])];
+        let m = module_with_calls(0, &bodies);
+        let cycle = find_call_cycle(&m).expect("mutual recursion is a cycle");
+        assert!(cycle.contains(&0) && cycle.contains(&1));
+    }
+
+    #[test]
+    fn find_call_cycle_treats_imports_as_leaves() {
+        // One import (index 0), one defined function (index 1) that calls
+        // it. The import has no body to recurse into, so this must not be
+        // reported as a cycle.
+        let bodies = vec![call_body(&[0])];
+        let m = module_with_calls(1, &bodies);
+        assert!(find_call_cycle(&m).is_none());
+        assert_eq!(out_edges(&m, 0), Vec::<u32>::new(), "import is a leaf");
+    }
+
+    // -- out_edges ----------------------------------------------------------
+
+    #[test]
+    fn out_edges_are_sorted_and_deduped() {
+        let bodies = vec![call_body(&[5, 1, 5, 3])];
+        let m = module_with_calls(0, &bodies);
+        assert_eq!(out_edges(&m, 0), vec![1, 3, 5]);
+    }
+
+    // -- DepthTracker / max_nesting_depth ------------------------------------
+
+    #[test]
+    fn depth_tracker_flat_body_has_zero_depth() {
+        let ops = vec![Operator::I32Const { value: 1 }, Operator::Drop];
+        assert_eq!(DepthTracker::of_slice(&ops), 0);
+    }
+
+    #[test]
+    fn depth_tracker_counts_nested_block_loop_if() {
+        let ops = vec![
+            Operator::Block {
+                blockty: BlockType::Empty,
+            },
+            Operator::Loop {
+                blockty: BlockType::Empty,
+            },
+            Operator::If {
+                blockty: BlockType::Empty,
+            },
+            Operator::End, // closes if
+            Operator::End, // closes loop
+            Operator::End, // closes block
+        ];
+        assert_eq!(DepthTracker::of_slice(&ops), 3);
+    }
+
+    #[test]
+    fn depth_tracker_else_does_not_change_depth() {
+        let ops = vec![
+            Operator::Block {
+                blockty: BlockType::Empty,
+            },
+            Operator::If {
+                blockty: BlockType::Empty,
+            },
+            Operator::Else,
+            Operator::End, // closes if
+            Operator::End, // closes block
+        ];
+        assert_eq!(DepthTracker::of_slice(&ops), 2);
+    }
+
+    #[test]
+    fn depth_tracker_sequential_blocks_do_not_accumulate() {
+        let ops = vec![
+            Operator::Block {
+                blockty: BlockType::Empty,
+            },
+            Operator::End,
+            Operator::Block {
+                blockty: BlockType::Empty,
+            },
+            Operator::End,
+        ];
+        assert_eq!(DepthTracker::of_slice(&ops), 1);
+    }
+
+    #[test]
+    fn max_nesting_depth_reads_from_a_function_body() {
+        let bytes = body_bytes(&[
+            wasm_encoder::Instruction::Block(wasm_encoder::BlockType::Empty),
+            wasm_encoder::Instruction::End,
+        ]);
+        let body = parse_body(&bytes);
+        assert_eq!(max_nesting_depth(&body).expect("valid body"), 1);
+    }
+
+    // -- find_or_insert_type --------------------------------------------------
+
+    #[test]
+    fn find_or_insert_type_dedupes_exact_match() {
+        let mut types = vec![wasmparser::FuncType::new([ValType::I32], [ValType::I64])];
+        let idx = find_or_insert_type(&mut types, &[ValType::I32], &[ValType::I64]);
+        assert_eq!(idx, 0);
+        assert_eq!(types.len(), 1, "no new type should have been appended");
+    }
+
+    #[test]
+    fn find_or_insert_type_appends_new_shape() {
+        let mut types = vec![wasmparser::FuncType::new([ValType::I32], [ValType::I64])];
+        let idx = find_or_insert_type(&mut types, &[ValType::I32, ValType::I32], &[ValType::I32]);
+        assert_eq!(idx, 1);
+        assert_eq!(types.len(), 2);
+    }
+
+    #[test]
+    fn find_or_insert_type_distinguishes_params_from_results() {
+        // Same shape as an existing entry with params/results swapped: must
+        // not be treated as a match.
+        let mut types = vec![wasmparser::FuncType::new([ValType::I32], [ValType::I64])];
+        let idx = find_or_insert_type(&mut types, &[ValType::I64], &[ValType::I32]);
+        assert_eq!(idx, 1);
+        assert_eq!(types.len(), 2);
+    }
+
+    // -- scan_refs ------------------------------------------------------------
+
+    #[test]
+    fn scan_refs_collects_calls_globals_and_flags_call_indirect() {
+        let bytes = body_bytes(&[
+            wasm_encoder::Instruction::Call(2),
+            wasm_encoder::Instruction::GlobalGet(3),
+            wasm_encoder::Instruction::GlobalSet(4),
+            wasm_encoder::Instruction::CallIndirect {
+                type_index: 0,
+                table_index: 0,
+            },
+        ]);
+        let body = parse_body(&bytes);
+        let refs = scan_refs(&body).expect("valid body");
+        assert_eq!(refs.calls, BTreeSet::from([2]));
+        assert_eq!(refs.globals, BTreeSet::from([3, 4]));
+        assert!(refs.has_call_indirect);
+    }
+
+    // -- const_expr_global_ref --------------------------------------------------
+
+    #[test]
+    fn const_expr_global_ref_global_get_is_some() {
+        // `global.get 0; end`.
+        let bytes = [0x23, 0x00, 0x0B];
+        let expr = wasmparser::ConstExpr::new(wasmparser::BinaryReader::new(&bytes, 0));
+        assert_eq!(const_expr_global_ref(&expr).expect("valid expr"), Some(0));
+    }
+
+    #[test]
+    fn const_expr_global_ref_i32_const_is_none() {
+        // `i32.const 5; end`.
+        let bytes = [0x41, 0x05, 0x0B];
+        let expr = wasmparser::ConstExpr::new(wasmparser::BinaryReader::new(&bytes, 0));
+        assert_eq!(const_expr_global_ref(&expr).expect("valid expr"), None);
+    }
+
+    // -- func_type_index --------------------------------------------------------
+
+    #[test]
+    fn func_type_index_covers_import_and_defined_ranges() {
+        let m = ParsedModule {
+            types: Vec::new(),
+            imports: vec![
+                wasmparser::Import {
+                    module: "env",
+                    name: "a",
+                    ty: wasmparser::TypeRef::Func(5),
+                },
+                wasmparser::Import {
+                    module: "env",
+                    name: "b",
+                    ty: wasmparser::TypeRef::Func(6),
+                },
+            ],
+            defined_func_types: vec![7, 8],
+            tables: Vec::new(),
+            memories: Vec::new(),
+            globals: Vec::new(),
+            exports: Vec::new(),
+            start: None,
+            elements: Vec::new(),
+            data_count: None,
+            datas: Vec::new(),
+            code: Vec::new(),
+            had_custom_section: false,
+        };
+        assert_eq!(m.func_type_index(0), Some(5), "import 0");
+        assert_eq!(m.func_type_index(1), Some(6), "import 1");
+        assert_eq!(m.func_type_index(2), Some(7), "defined function 0");
+        assert_eq!(m.func_type_index(3), Some(8), "defined function 1");
+        assert_eq!(m.func_type_index(4), None, "out of range");
+    }
 }
