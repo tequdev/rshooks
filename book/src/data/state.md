@@ -135,10 +135,10 @@ generates a `static` value named after the struct (`StateCounter`, same
 name, different namespace — see [Anatomy of a Hook](../concepts/anatomy.md#the-struct-has-no-runtime-instance-but-every-entry-borrows-it)).
 An entry (or a helper inside the same `#[hooks] impl`) declares `&self` to
 receive that static and calls the field's accessors as
-`self.counter.get()`; code outside the impl reaches the identical static by
-the struct's own name instead: `StateCounter.counter.get()`. `key` also
-accepts a `const` reference to something more structured than a literal, as
-long as it encodes:
+`self.state.counter.get()`; code outside the impl reaches the identical
+static by the struct's own name instead: `StateCounter.state.counter.get()`.
+`key` also accepts a `const` reference to something more structured than a
+literal, as long as it encodes:
 
 ```rust,ignore
 const ENABLED_KEY: StateKey = StateKey(pad!(b"enabled"));
@@ -172,12 +172,12 @@ pub struct TypedData {
 `deposits` on its own is the *field*, not yet addressed to a specific
 entry — call `.at(args)` to bind the key's runtime arguments and get a
 handle with the same accessor set. Inside the `#[hooks] impl`, an entry
-reaches it as `self.deposits`:
+reaches it as `self.state.deposits`:
 
 ```rust,ignore
 #[hook(0, on = [Invoke])]
 fn main(&self) -> HookResult {
-    let deposit = self.deposits.at(DepositKey { tag: DEPOSIT_TAG, owner });
+    let deposit = self.state.deposits.at(DepositKey { tag: DEPOSIT_TAG, owner });
     let current = match deposit.get() {
         Ok(existing) => existing.unwrap_or(EMPTY_DEPOSIT),
         Err(_) => rollback!(
@@ -243,10 +243,10 @@ pub struct StateCounter {
 impl StateCounter {
     #[hook(0, on = [Invoke])]
     fn main(&self) -> HookResult {
-        let count = self.counter.get().unwrap_or(Some(0)).unwrap_or(0);
+        let count = self.state.counter.get().unwrap_or(Some(0)).unwrap_or(0);
 
         let next = count.wrapping_add(1);
-        if self.counter.set(&next).is_err() {
+        if self.state.counter.set(&next).is_err() {
             rollback!(
                 b"state-counter: state_set failed",
                 StateCounterError::StateSetFailed
@@ -258,7 +258,7 @@ impl StateCounter {
 }
 ```
 
-`main` declares a `&self` receiver, so `self.counter.get()` returns
+`main` declares a `&self` receiver, so `self.state.counter.get()` returns
 `Result<Option<u64>>`: `Ok(None)` means "no entry yet" (see below), so the
 double `unwrap_or` handles both "never written" and "an unexpected read
 error" the same way, defaulting to zero either way.
@@ -321,7 +321,7 @@ pub struct StateForeign {
 impl StateForeign {
     #[hook(0, on = [Invoke])]
     fn main(&self) -> HookResult {
-        let Ok(target) = self.acct.get_required() else {
+        let Ok(target) = self.hook_param.acct.get_required() else {
             rollback!(
                 b"state-foreign: ACCT parameter not configured",
                 StateForeignError::AcctNotConfigured
@@ -329,6 +329,7 @@ impl StateForeign {
         };
 
         let flag = match self
+            .state
             .enabled
             .get_foreign(None, Some(target.as_ref()))
         {

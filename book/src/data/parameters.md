@@ -131,7 +131,7 @@ call site instead, the same way `examples/05_firewall` and
 
 ```rust,ignore
 fn blocked_account() -> Option<AccountId> {
-    Firewall.blocked.get().ok().flatten()
+    Firewall.hook_param.blocked.get().ok().flatten()
 }
 ```
 
@@ -153,7 +153,7 @@ pub struct StateForeign {
 ```
 
 ```rust,ignore
-let Ok(target) = self.acct.get_required() else {
+let Ok(target) = self.hook_param.acct.get_required() else {
     rollback!(
         b"state-foreign: ACCT parameter not configured",
         StateForeignError::AcctNotConfigured
@@ -229,6 +229,7 @@ const ADMIN_PAUSE_NAME: AdminName = AdminName { section: 0, field: 0 };
 
 fn deposits_paused() -> bool {
     TypedData
+        .hook_param
         .admin_pause
         .at(ADMIN_PAUSE_NAME)
         .get_or_default()
@@ -258,17 +259,17 @@ hook.
 ## Why this prevents name/value mismatches
 
 The loose `hook_param_exact::<T>(name)`/`otxn_param_exact::<T>(name)` calls
-take `name` and `T` as two independent arguments — a typo or a copy-paste
-error can pair the right name with the wrong type, or the wrong name with
-the right type, and both compile fine as long as `T: FixedRead`. A
-`#[hook_param(...)]`/`#[otxn_param(...)]` field removes that degree of
-freedom: the field's declared name is permanently tied to exactly one value
-type, so `TypedData.config.get_or_default()` (read from a free function
-outside the impl) and `self.instruction.get_required()` (read directly
-inside `examples/12_typed-data`'s `&self` entry) can never accidentally
-decode one parameter's bytes as the other's struct shape — the compiler
-resolves the return type from the field itself, with
-no independently-chosen type left for a mismatch to hide in. This is the
+take `name` and `T` as two independent arguments — a typo or a copy-paste error
+can pair the right name with the wrong type, or the wrong name with the right
+type, and both compile fine as long as `T: FixedRead`. A
+`#[hook_param(...)]`/`#[otxn_param(...)]` field removes that degree of freedom:
+the field's declared name is permanently tied to exactly one value type, so
+`TypedData.hook_param.config.get_or_default()` (read from a free function
+outside the impl) and `self.otxn_param.instruction.get_required()` (read
+directly inside `examples/12_typed-data`'s `&self` entry) can never
+accidentally decode one parameter's bytes as the other's struct shape — the
+compiler resolves the return type from the field itself, with no
+independently-chosen type left for a mismatch to hide in. This is the
 identical safety property [Hook State](state.md)'s `#[state(...)]` fields
 give the key/value side; see [Typed Data with Derives](typed-data.md) for
 the underlying `ParamName`/`ParamValue` derives both build on, and [Hook

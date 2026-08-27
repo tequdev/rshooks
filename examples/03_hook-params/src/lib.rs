@@ -46,7 +46,12 @@ impl Default for MinDrops {
 /// `.unwrap_or_default()` masks any `Err` from
 /// [`HookParam::get_or_default`], not just the "absent" case.
 fn min_drops() -> u64 {
-    HookParams.min.get_or_default().unwrap_or_default().drops
+    HookParams
+        .hook_param
+        .min
+        .get_or_default()
+        .unwrap_or_default()
+        .drops
 }
 
 #[hooks]

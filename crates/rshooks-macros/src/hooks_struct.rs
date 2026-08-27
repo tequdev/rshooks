@@ -4,11 +4,23 @@
 //! generated-output shape; this module implements it.
 //!
 //! A `#[hooks]` struct is a **declaration container**, never a runtime
-//! value with real fields (see the design doc §4.3): every field is a
-//! zero-sized handle (`State<V>` / `HookParam<V>` / `OtxnParam<V>`) whose
+//! value with real fields (see the design doc §4.3): every declared field is
+//! a zero-sized handle (`State<V>` / `HookParam<V>` / `OtxnParam<V>`) whose
 //! *type* the macro rewrites to carry a field-unique marker (§5.4) so that
 //! two fields sharing a value type still get distinct, statically-checked
 //! accessors.
+//!
+//! Declared fields are grouped by kind into per-kind namespace structs, and
+//! the outer struct holds one field per kind that has at least one declared
+//! entry: `{Struct}State` for `#[state]` fields (accessed as
+//! `self.state.<field>` / `{Struct}.state.<field>`), `{Struct}HookParams`
+//! for `#[hook_param]` fields (`self.hook_param.<field>`), and
+//! `{Struct}OtxnParams` for `#[otxn_param]` fields
+//! (`self.otxn_param.<field>`). A kind with no declared fields contributes
+//! no namespace struct and no outer field. The declaration syntax itself is
+//! unaffected by this grouping — a field's attribute (`#[state(..)]` /
+//! `#[hook_param(..)]` / `#[otxn_param(..)]`) is exactly what routes it into
+//! its namespace.
 //!
 //! # Why hand-rolled, not `syn`/`quote`
 //!
@@ -127,6 +139,68 @@ enum FieldDecl {
         param_kind: ParamKind,
         spec: ParamSpecDecl,
     },
+}
+
+/// The three per-kind namespaces a declared field is grouped into on the
+/// generated outer struct (module doc comment above).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Namespace {
+    State,
+    HookParam,
+    OtxnParam,
+}
+
+impl Namespace {
+    /// The namespace struct's name suffix: `{Struct}{suffix}`.
+    fn struct_suffix(self) -> &'static str {
+        match self {
+            Namespace::State => "State",
+            Namespace::HookParam => "HookParams",
+            Namespace::OtxnParam => "OtxnParams",
+        }
+    }
+
+    /// The outer struct's field name for this namespace.
+    fn field_name(self) -> &'static str {
+        match self {
+            Namespace::State => "state",
+            Namespace::HookParam => "hook_param",
+            Namespace::OtxnParam => "otxn_param",
+        }
+    }
+
+    /// The field-level attribute name that routes a field into this
+    /// namespace (`#[state]` / `#[hook_param]` / `#[otxn_param]`). Text-
+    /// identical to [`Namespace::field_name`] today, but sourced separately
+    /// so generated doc comments describing "the `#[..]` entries" name the
+    /// attribute, not the outer struct's field, even if the two ever
+    /// diverge.
+    fn attr_name(self) -> &'static str {
+        match self {
+            Namespace::State => "state",
+            Namespace::HookParam => "hook_param",
+            Namespace::OtxnParam => "otxn_param",
+        }
+    }
+
+    /// All namespaces, in the fixed order they appear on the outer struct.
+    const ALL: [Namespace; 3] = [Namespace::State, Namespace::HookParam, Namespace::OtxnParam];
+}
+
+impl FieldDecl {
+    fn namespace(&self) -> Namespace {
+        match self {
+            FieldDecl::State { .. } => Namespace::State,
+            FieldDecl::Param {
+                param_kind: ParamKind::HookParam,
+                ..
+            } => Namespace::HookParam,
+            FieldDecl::Param {
+                param_kind: ParamKind::OtxnParam,
+                ..
+            } => Namespace::OtxnParam,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -770,26 +844,76 @@ fn generate(parsed: &ParsedStruct, description: Option<&str>) -> TokenStream {
 
     let mut out = String::new();
 
-    // 1. The struct itself, fields rewritten to the marker-injected type.
-    out.push_str(&leading_attrs_text);
-    out.push('\n');
+    // 1. The namespace structs (one per non-empty kind) plus the outer
+    //    struct, whose fields are the non-empty namespaces (module doc
+    //    comment's shape). Fields keep their marker-injected type, keyed to
+    //    their ordinal in the original flat declaration (`field_index`) —
+    //    grouping into namespaces never renumbers markers. The struct
+    //    item's own leading attributes (doc comments, `#[cfg]`, `#[allow]`,
+    //    ...) attach to the OUTER struct only — emitted immediately before
+    //    its declaration, never before a namespace struct, which is a
+    //    macro-generated implementation detail the user's attributes were
+    //    never written against.
     match &parsed.body {
         StructBody::Unit => {
+            out.push_str(&leading_attrs_text);
+            out.push('\n');
             out.push_str(&format!("{vis_text} struct {struct_name};\n"));
         }
         StructBody::Named(fields) => {
-            out.push_str(&format!("{vis_text} struct {struct_name} {{\n"));
-            for (field_index, f) in fields.iter().enumerate() {
-                out.push_str(&tokens_to_string(&f.other_attrs));
-                out.push('\n');
-                out.push_str(&tokens_to_string(&f.vis));
-                out.push(' ');
-                out.push_str(&f.name.to_string());
-                out.push_str(": ");
-                out.push_str(&rewritten_field_type(&struct_name, field_index, f));
-                out.push_str(",\n");
+            let mut namespace_structs_text = String::new();
+            for ns in Namespace::ALL {
+                let ns_fields: Vec<(usize, &ParsedField)> = fields
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, f)| f.decl.namespace() == ns)
+                    .collect();
+                if ns_fields.is_empty() {
+                    continue;
+                }
+                let ns_name = format!("{struct_name}{}", ns.struct_suffix());
+                namespace_structs_text.push_str(&format!(
+                    "/// The `#[{attr}]` entries declared on [`{struct_name}`].\n\
+                     {vis_text} struct {ns_name} {{\n",
+                    attr = ns.attr_name(),
+                ));
+                for (field_index, f) in ns_fields {
+                    namespace_structs_text.push_str(&tokens_to_string(&f.other_attrs));
+                    namespace_structs_text.push('\n');
+                    namespace_structs_text.push_str(&tokens_to_string(&f.vis));
+                    namespace_structs_text.push(' ');
+                    namespace_structs_text.push_str(&f.name.to_string());
+                    namespace_structs_text.push_str(": ");
+                    namespace_structs_text.push_str(&rewritten_field_type(
+                        &struct_name,
+                        field_index,
+                        f,
+                    ));
+                    namespace_structs_text.push_str(",\n");
+                }
+                namespace_structs_text.push_str("}\n");
             }
-            out.push_str("}\n");
+
+            let mut outer_struct_text = format!("{vis_text} struct {struct_name} {{\n");
+            for ns in Namespace::ALL {
+                if !fields.iter().any(|f| f.decl.namespace() == ns) {
+                    continue;
+                }
+                outer_struct_text.push_str(&format!(
+                    "/// The `#[{attr}]` entries declared on this struct.\n\
+                     {vis_text} {field}: {struct_name}{suffix},\n",
+                    attr = ns.attr_name(),
+                    field = ns.field_name(),
+                    suffix = ns.struct_suffix(),
+                ));
+            }
+            outer_struct_text.push_str("}\n");
+
+            out.push_str(&assemble_named_body(
+                &leading_attrs_text,
+                &namespace_structs_text,
+                &outer_struct_text,
+            ));
         }
     }
 
@@ -804,21 +928,35 @@ fn generate(parsed: &ParsedStruct, description: Option<&str>) -> TokenStream {
         ));
     }
 
-    // 3. Named-field structs only: a same-name static value binding.
+    // 3. Named-field structs only: a same-name static value binding, one
+    //    nested namespace-struct literal per non-empty kind.
     if let StructBody::Named(fields) = &parsed.body {
         out.push_str(&format!(
             "#[doc(hidden)]\n#[allow(non_upper_case_globals)]\n\
              {vis_text} static {struct_name}: {struct_name} = {struct_name} {{\n"
         ));
-        for f in fields {
-            let wrapper = match &f.decl {
-                FieldDecl::State { .. } => "State",
-                FieldDecl::Param { param_kind, .. } => param_kind.wrapper(),
-            };
+        for ns in Namespace::ALL {
+            let ns_fields: Vec<&ParsedField> =
+                fields.iter().filter(|f| f.decl.namespace() == ns).collect();
+            if ns_fields.is_empty() {
+                continue;
+            }
             out.push_str(&format!(
-                "{field}: ::rshooks::decl::{wrapper}::new(),\n",
-                field = f.name
+                "{field}: {struct_name}{suffix} {{\n",
+                field = ns.field_name(),
+                suffix = ns.struct_suffix(),
             ));
+            for f in ns_fields {
+                let wrapper = match &f.decl {
+                    FieldDecl::State { .. } => "State",
+                    FieldDecl::Param { param_kind, .. } => param_kind.wrapper(),
+                };
+                out.push_str(&format!(
+                    "{field}: ::rshooks::decl::{wrapper}::new(),\n",
+                    field = f.name
+                ));
+            }
+            out.push_str("},\n");
         }
         out.push_str("};\n");
     }
@@ -870,6 +1008,32 @@ fn generate(parsed: &ParsedStruct, description: Option<&str>) -> TokenStream {
             "rshooks-macros: internal #[hooks] struct expansion failed to parse",
         )
     })
+}
+
+/// Assembles a named-field body's struct-declaration text: the namespace
+/// structs first, then the struct item's own leading attributes (doc
+/// comments, `#[cfg]`, `#[allow]`, ...) immediately followed by the outer
+/// struct's declaration. `leading_attrs_text` is placed here, right before
+/// `outer_struct_text`, and nowhere earlier — it must attach to the outer
+/// struct the user actually wrote `#[hooks]` on, never to a namespace
+/// struct, which is a macro-generated implementation detail the user's
+/// attributes were never written against. Kept `proc_macro`-free (plain
+/// strings only) so this ordering invariant can be pinned by a unit test —
+/// `proc_macro` types (`Span`/`Ident`/`TokenStream::parse`) panic outside an
+/// active macro invocation, which is why every other module in this crate
+/// with unit tests exercises a plain-Rust-typed core instead (see
+/// [`ChainFieldJson`]'s doc comment).
+fn assemble_named_body(
+    leading_attrs_text: &str,
+    namespace_structs_text: &str,
+    outer_struct_text: &str,
+) -> String {
+    let mut out = String::new();
+    out.push_str(namespace_structs_text);
+    out.push_str(leading_attrs_text);
+    out.push('\n');
+    out.push_str(outer_struct_text);
+    out
 }
 
 /// The rewritten field type text: `::rshooks::decl::<Wrapper><V, __Marker>`.
@@ -1184,6 +1348,45 @@ mod tests {
         assert_eq!(to_upper_camel("deposits"), "Deposits");
         assert_eq!(to_upper_camel("max_len"), "MaxLen");
         assert_eq!(to_upper_camel("a_b_c"), "ABC");
+    }
+
+    /// Pins the ordering `assemble_named_body` exists to guarantee: the
+    /// struct item's own leading attributes appear directly before the
+    /// outer struct's declaration (with nothing but a newline between
+    /// them), and never before a namespace struct.
+    #[test]
+    fn leading_attrs_attach_only_to_the_outer_struct() {
+        let rendered = assemble_named_body(
+            "#[allow(dead_code)]",
+            "struct VaultState {\nfoo: i32,\n}\n",
+            "struct Vault {\nstate: VaultState,\n}\n",
+        );
+
+        let ns_pos = rendered
+            .find("struct VaultState")
+            .expect("namespace struct present");
+        let attrs_pos = rendered
+            .find("#[allow(dead_code)]")
+            .expect("leading attrs present");
+        let outer_pos = rendered
+            .find("struct Vault {")
+            .expect("outer struct present");
+
+        assert!(
+            ns_pos < attrs_pos,
+            "the namespace struct must be emitted before the leading attrs, \
+             not after: {rendered}"
+        );
+        assert!(
+            attrs_pos < outer_pos,
+            "the leading attrs must precede the outer struct: {rendered}"
+        );
+        assert_eq!(
+            &rendered[attrs_pos + "#[allow(dead_code)]".len()..outer_pos],
+            "\n",
+            "only a newline may separate the leading attrs from the outer \
+             struct they attach to: {rendered}"
+        );
     }
 
     #[test]

@@ -45,9 +45,9 @@ impl Payments {
     /// if the store itself fails.
     #[hook(0, on = [Payment])]
     fn on_payment(&self) -> HookResult {
-        let count = self.counter.get().unwrap_or(None).unwrap_or(0);
+        let count = self.state.counter.get().unwrap_or(None).unwrap_or(0);
         let next = count.wrapping_add(1);
-        if self.counter.set(&next).is_err() {
+        if self.state.counter.set(&next).is_err() {
             rollback!(b"counter: store failed", 1);
         }
         accept!(b"counted", next as i64)
@@ -57,7 +57,7 @@ impl Payments {
     /// state write is undone (design §5's "rollback reverts state" rule).
     #[hook(1, on = [Invoke])]
     fn write_then_force_rollback(&self) -> HookResult {
-        let _ = self.counter.set(&999u64);
+        let _ = self.state.counter.set(&999u64);
         rollback!(b"forced rollback", 42)
     }
 

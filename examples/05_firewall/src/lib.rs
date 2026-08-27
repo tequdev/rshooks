@@ -26,7 +26,7 @@ hook_errors! {
 /// collapsing both `Err` and `Ok(None)` to `None`): any read failure falls
 /// straight to "nothing to block", not just an unset `BL`.
 fn blocked_account() -> Option<AccountId> {
-    Firewall.blocked.get().ok().flatten()
+    Firewall.hook_param.blocked.get().ok().flatten()
 }
 
 #[hooks]

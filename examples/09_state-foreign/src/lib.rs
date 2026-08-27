@@ -36,14 +36,14 @@ pub struct StateForeign {
 impl StateForeign {
     #[hook(0, on = [Invoke])]
     fn main(&self) -> HookResult {
-        let Ok(target) = self.acct.get_required() else {
+        let Ok(target) = self.hook_param.acct.get_required() else {
             rollback!(
                 b"state-foreign: ACCT parameter not configured",
                 StateForeignError::AcctNotConfigured
             )
         };
 
-        let flag = match self.enabled.get_foreign(None, Some(target.as_ref())) {
+        let flag = match self.state.enabled.get_foreign(None, Some(target.as_ref())) {
             Ok(Some(v)) => v,
             Ok(None) => rollback!(
                 b"state-foreign: not configured on target account",

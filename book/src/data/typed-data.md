@@ -221,7 +221,7 @@ the `#[hooks] impl` via a `&self` entry, with no manual byte packing
 anywhere:
 
 ```rust,ignore
-let deposit = self.deposits.at(DepositKey { tag: DEPOSIT_TAG, owner });
+let deposit = self.state.deposits.at(DepositKey { tag: DEPOSIT_TAG, owner });
 let current = deposit.get()?.unwrap_or(EMPTY_DEPOSIT);
 // ...
 deposit.set(&next)?;
