@@ -47,12 +47,17 @@
 //!    since the removed frame was never "between" it and its target).
 //! 4. **Iterate to fixpoint.** Steps 1–3 repeat until a full pass rewrites
 //!    and removes nothing. This terminates because every non-trivial pass
-//!    either splices at least one tail (which immediately makes its target
-//!    block unreferenced, guaranteeing at least one removal in the very
-//!    same pass) or removes at least one pre-existing unreferenced block —
-//!    either way the count of `block` tokens remaining strictly decreases,
-//!    bounded below by 0. In practice a single ladder (of any depth) is
-//!    fully collapsed in one pass: every level's continuation is
+//!    strictly decreases one of two bounded quantities: a rewrite removes at
+//!    least one `br`/`br_if` (the spliced tail is branch-free and opens no
+//!    frame — see step 1's qualification — so no pass ever adds a branch or
+//!    a `block`), and a removal drops at least one `block` token. Both
+//!    counts start bounded by the body's length and are bounded below by 0.
+//!    A rewrite does not always enable a removal in the same pass: a
+//!    qualifying block whose span contains a `br_table` can be rewritten
+//!    yet is never removable (see "`br_table` safety" below), so the
+//!    `block` count alone is not a valid bound. In practice a single
+//!    ladder (of any depth) is fully collapsed in one pass: every level's
+//!    continuation is
 //!    independent of the others (each qualifies purely from what follows
 //!    its *own* `end`), so all of them are found, rewritten, and removed
 //!    together.
@@ -459,11 +464,13 @@ fn unnest_function<'a>(
     let mut stats = FuncStats::default();
 
     // Safety bound on the fixpoint loop: every iteration that changes
-    // anything strictly reduces the number of `block` tokens remaining (see
-    // the module doc comment's termination argument), so this can never
-    // legitimately be exceeded — it only guards against a logic bug turning
-    // into an infinite loop instead of a silently half-transformed body (see
-    // the `converged` check below).
+    // anything strictly reduces either the `br`/`br_if` count or the
+    // `block` count (see the module doc comment's termination argument),
+    // both initially bounded by `ops.len()`, plus one final iteration to
+    // detect the fixpoint — so `2 * len + 16` can never legitimately be
+    // exceeded. It only guards against a logic bug turning into an infinite
+    // loop instead of a silently half-transformed body (see the `converged`
+    // check below).
     let max_iters = ops.len().saturating_mul(2).saturating_add(16);
     let mut converged = false;
 
@@ -855,12 +862,9 @@ mod tests {
 
     #[test]
     fn adjust_depth_one_removed_frame_between_branch_and_target() {
-        // Stack (outer..inner): [removed, kept, kept]; branch at
-        // relative_depth 2 targets the outermost (removed) frame — wait, we
-        // want a frame *between* the branch and its target to be removed.
-        // Stack positions 0(outer)..2(inner). Target at position 0 (outer),
-        // removed frame at position 1 (between branch at position 2 and
-        // target at 0).
+        // Stack positions 0(outer)..2(inner): target at position 0, removed
+        // frame at position 1 — between the branch (at position 2) and its
+        // target — so the branch's depth decrements by 1.
         let skip_stack = vec![false, true, false];
         // relative_depth 2 -> target_pos = len-1-2 = 0. Frame at position 1
         // (removed) is > 0, so it counts: decrement by 1.
@@ -960,7 +964,27 @@ mod tests {
 
     #[test]
     fn eliminate_dead_code_br_return_br_table_also_start_dead_runs() {
-        for terminator in [Operator::Br { relative_depth: 0 }, Operator::Return] {
+        // `Operator::BrTable` borrows its target list from encoded bytes, so
+        // it is obtained by parsing a fixture rather than constructed
+        // directly.
+        let bytes = wasm(
+            r#"
+        (module
+          (func (block (i32.const 0) (br_table 0 0))))
+        "#,
+        );
+        let parsed = hook_ops(&bytes);
+        let br_table = parsed
+            .iter()
+            .find(|op| matches!(op, Operator::BrTable { .. }))
+            .expect("fixture contains a br_table")
+            .clone();
+
+        for terminator in [
+            Operator::Br { relative_depth: 0 },
+            Operator::Return,
+            br_table,
+        ] {
             let ops = vec![
                 terminator.clone(),
                 Operator::I32Const { value: 1 },
@@ -1035,18 +1059,22 @@ mod tests {
 
     #[test]
     fn remove_frames_never_removes_loop_or_if_frames() {
-        // `removable` names a `Loop`'s start position; `remove_frames` only
-        // special-cases `Block`, so a Loop frame is never dropped even if
-        // its start position appears in `removable`.
-        let ops = vec![
+        // `removable` names the frame's start position; `remove_frames`
+        // only special-cases `Block`, so `Loop` and `If` frames are never
+        // dropped even if their start positions appear in `removable`.
+        for opener in [
             Operator::Loop {
                 blockty: BlockType::Empty,
             },
-            Operator::End,
-        ];
-        let removable = HashSet::from([0]);
-        let out = remove_frames(&ops, &removable);
-        assert_eq!(out, ops);
+            Operator::If {
+                blockty: BlockType::Empty,
+            },
+        ] {
+            let ops = vec![opener, Operator::End];
+            let removable = HashSet::from([0]);
+            let out = remove_frames(&ops, &removable);
+            assert_eq!(out, ops);
+        }
     }
 
     // -- Pass-level (wat) ---------------------------------------------------

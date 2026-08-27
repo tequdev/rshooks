@@ -399,9 +399,8 @@ mod tests {
 
     #[test]
     fn data_trim_is_unsafe_for_overlapping_segments() {
-        // [0, 4) and [4, ...) don't overlap, but [0,4) and OFF... let's make
-        // an actual overlap: segment at 0 of length 5 covers [0,5), segment
-        // at 4 covers [4, ...) -> overlap at byte 4.
+        // Segment at 0 of length 5 covers [0,5); segment at 4 covers [4,5)
+        // -> overlap at byte 4.
         let datas = vec![active_data(&OFF0, b"ABCDE"), active_data(&OFF4, b"X")];
         assert!(!data_trim_is_safe(&datas));
     }
@@ -510,20 +509,24 @@ mod tests {
     }
 
     #[test]
-    fn data_segment_offset_via_imported_global_keeps_it() {
-        // Imported globals are always kept regardless of reachability.
+    fn data_segment_offset_global_survives_gc() {
+        // A defined global referenced only by an active data segment's
+        // offset expression is a GC root: active segments are always
+        // retained, so their offset globals must survive even though no
+        // kept function touches them.
         let src = r#"
         (module
-          (import "env" "g" (global $g (mut i32)))
+          (global $off i32 (i32.const 8))
           (memory 1)
-          (data (global.get $g) "AB")
+          (data (offset (global.get $off)) "AB")
           (func $hook (param i32) (result i64) (i64.const 0))
           (export "hook" (func $hook)))
         "#;
         let cleaned = clean(&wasm(src), &opts()).expect("clean succeeds");
-        assert!(
-            import_names(&cleaned).contains(&"g".to_string()),
-            "imported global referenced by a data segment offset must be kept"
+        assert_eq!(
+            global_count(&cleaned),
+            1,
+            "data-offset global must survive GC"
         );
     }
 
@@ -552,7 +555,7 @@ mod tests {
         let err = clean(&wasm(src), &opts()).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("hook"), "{msg}");
-        assert!(msg.contains("i32) -> i64") || msg.contains("i64"), "{msg}");
+        assert!(msg.contains("(i32) -> i64"), "{msg}");
     }
 
     #[test]

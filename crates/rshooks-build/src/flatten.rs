@@ -81,6 +81,16 @@ pub fn flatten(wasm: &[u8]) -> Result<(Vec<u8>, FlattenReport)> {
             .types
             .get(type_idx as usize)
             .with_context(|| format!("function {old_idx} has an invalid type index"))?;
+        // A multi-result function type (non-MVP multi-value) cannot be
+        // expressed as a wrapper block's `BlockType::Type` when the function
+        // is inlined; reject loudly rather than truncate to the first result
+        // and emit invalid output.
+        if ty.results().len() > 1 {
+            bail!(
+                "function {old_idx}: multi-result function type (non-MVP multi-value) is not \
+                 supported by the flatten pass"
+            );
+        }
         let mut extra_locals = Vec::new();
         for l in body.get_locals_reader().context("function locals")? {
             let (count, ty) = l.context("function locals")?;
@@ -794,6 +804,28 @@ mod tests {
             msg.to_lowercase().contains("type-index") || msg.to_lowercase().contains("blocktype"),
             "{msg}"
         );
+    }
+
+    #[test]
+    fn multi_result_function_type_errors_naming_the_function() {
+        // A multi-result (non-MVP multi-value) helper cannot be inlined
+        // under a single-typed wrapper block; flatten refuses it rather
+        // than truncating the type to its first result.
+        let src = r#"
+        (module
+          (func $two (result i32 i32)
+            (i32.const 1)
+            (i32.const 2))
+          (func $hook (param i32) (result i64)
+            (drop (call $two))
+            (drop)
+            (i64.const 0))
+          (export "hook" (func $hook)))
+        "#;
+        let err = flatten(&wasm(src)).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("function 0"), "{msg}");
+        assert!(msg.to_lowercase().contains("multi-result"), "{msg}");
     }
 
     #[test]
