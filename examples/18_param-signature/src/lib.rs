@@ -62,7 +62,7 @@ impl Increment {
     /// invocation.
     #[hook(0, on = [Invoke])]
     fn increment(&self, account: AccountId, count: u16) -> HookResult {
-        let counter = self.counters.at(CounterKey { account });
+        let counter = self.state.counters.at(CounterKey { account });
         let current = counter.get().unwrap_or(Some(0)).unwrap_or(0);
         let next = current.wrapping_add(u64::from(count));
 

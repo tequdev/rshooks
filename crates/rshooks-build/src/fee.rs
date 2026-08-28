@@ -35,3 +35,45 @@ pub fn estimate_fee(size_bytes: usize) -> FeeEstimate {
         drops: bytes.saturating_mul(DROPS_PER_BYTE),
     }
 }
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn estimate_fee_is_bytes_times_5000() {
+        let fee = estimate_fee(1234);
+        assert_eq!(fee.bytes, 1234);
+        assert_eq!(fee.drops, 1234 * 5000);
+    }
+
+    #[test]
+    fn xah_string_zero_pads_the_fraction() {
+        // 1 byte = 5000 drops = "0.005000".
+        let fee = estimate_fee(1);
+        assert_eq!(fee.xah_string(), "0.005000");
+    }
+
+    #[test]
+    fn xah_string_exact_multiple_of_a_million_drops() {
+        // 200 bytes = 1,000,000 drops = exactly 1 XAH, fraction is 0.
+        let fee = estimate_fee(200);
+        assert_eq!(fee.drops % DROPS_PER_XAH, 0);
+        assert_eq!(fee.xah_string(), "1.000000");
+    }
+
+    // `usize::MAX * 5000` only overflows `u64` on a 64-bit host; on a
+    // 32-bit host the product is exact and nothing saturates.
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn estimate_fee_saturates_on_overflow() {
+        let fee = estimate_fee(usize::MAX);
+        assert_eq!(fee.drops, u64::MAX);
+    }
+}

@@ -18,7 +18,7 @@ with a digit, so only the directory is prefixed).
 |---|---|---|---|
 | 01 | `accept-all` | minimal hook: `accept` everything (starter template) | [Anatomy of a Hook](../concepts/anatomy.md) |
 | 02 | `state-counter` | `state`/`state_set` round-trip, counter in hook state | [Hook State](../data/state.md) |
-| 03 | `hook-params` | `hook_param`-configurable threshold, with a compiled-in default | [Hook and Transaction Parameters](../data/parameters.md) |
+| 03 | `hook-params` | `#[hook_param]`-configurable threshold, with a compiled-in default | [Hook and Transaction Parameters](../data/parameters.md) |
 | 04 | `errors` | a meaningful `hook_errors!`-based rollback error-code system, matched to `HookReturnCode` | [Accept, Rollback, and Errors](../concepts/errors.md) |
 | 05 | `firewall` | read `otxn_field(sfAccount)` + a hook parameter blacklist → `rollback` | [Reading the Originating Transaction](../data/otxn.md) |
 | 06 | `guard-patterns` | `guard!`/`guard_m!` correctness, choosing `maxiter`, and the array-`==` memcmp-loop pitfall | [Guards and Loops](../concepts/guards.md) |

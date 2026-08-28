@@ -490,10 +490,13 @@ span-preservation contract.
 
 - For a **struct with named fields**, the macro generates
   `static Vault: Vault` (a static with the same name as the struct), and
-  it's accessed as a value, e.g. `Vault.deposits.get(&acct)`. Type names and
-  value names live in separate namespaces, so there's no collision. Since
-  every field is a ZST that is `Sync` and const-constructible, the static's
-  requirements are trivially satisfied.
+  it's accessed as a value, e.g. `Vault.state.deposits.get(&acct)` — `Vault`
+  holds one field per declared kind (`state`, `hook_param`, `otxn_param`,
+  each present only if at least one field of that kind was declared), and
+  each of those in turn holds the fields declared under that attribute.
+  Type names and value names live in separate namespaces, so there's no
+  collision. Since every field is a ZST that is `Sync` and
+  const-constructible, the statics' requirements are trivially satisfied.
 - A **unit struct** has no fields, so **no static is generated** (it would
   collide with the unit constructor of the same name, `E0428`). An empty
   named-field struct (`struct X {}`) may generate a static, but since
@@ -824,7 +827,7 @@ impl Vault {
     #[hook(0, name = "deposit", on_incoming = [Payment], on_outgoing = [], can_emit = [])]
     fn deposit(&self) -> i64 {
         // On absence, the default expression's value; a decode failure is Err (§5.6)
-        let Ok(cfg) = self.config.get_or_default() else {
+        let Ok(cfg) = self.hook_param.config.get_or_default() else {
             rollback!(b"vault: bad CFG", 1);
         };
         // ...

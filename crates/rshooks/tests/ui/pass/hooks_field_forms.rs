@@ -50,15 +50,15 @@ impl Vault {
 }
 
 fn main() {
-    assert!(Vault.reward_rate.get().is_err());
-    assert!(Vault.counter.get().is_err());
-    assert!(Vault.balances.at([0u8; 20]).get().is_err());
-    assert!(Vault.cfg.get().is_err());
-    assert!(Vault.seat.at([0u8]).get().is_err());
-    assert!(Vault.required_param.get_required().is_err());
+    assert!(Vault.state.reward_rate.get().is_err());
+    assert!(Vault.state.counter.get().is_err());
+    assert!(Vault.state.balances.at([0u8; 20]).get().is_err());
+    assert!(Vault.hook_param.cfg.get().is_err());
+    assert!(Vault.hook_param.seat.at([0u8]).get().is_err());
+    assert!(Vault.hook_param.required_param.get_required().is_err());
     // `NotImplemented` (the host stub every Hook API call returns on a host
     // build) is a decode/host error, not absence — so `default` is never
     // substituted here; see `decl`'s module doc comment, "Params: absence
     // vs. decode failure".
-    assert!(Vault.default_param.get_or_default().is_err());
+    assert!(Vault.otxn_param.default_param.get_or_default().is_err());
 }

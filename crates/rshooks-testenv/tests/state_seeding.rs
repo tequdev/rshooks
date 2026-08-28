@@ -35,9 +35,9 @@ impl Seeded {
     /// (not just via `TestEnv::state`).
     #[hook(0, on = [Invoke])]
     fn read_own_seed(&self) -> HookResult {
-        match self.seeded.get() {
+        match self.state.seeded.get() {
             Ok(Some(v)) => {
-                if self.seen.set(&v).is_err() {
+                if self.state.seen.set(&v).is_err() {
                     rollback!(b"store failed", 1);
                 }
                 accept!(b"", 0)
@@ -56,7 +56,7 @@ impl Seeded {
             match rshooks::api::state::state_foreign(&mut out, b"F", &FOREIGN_NS, &FOREIGN_ACC) {
                 Ok(_) => {
                     let v = u64::from_le_bytes(out);
-                    if self.seen.set(&v).is_err() {
+                    if self.state.seen.set(&v).is_err() {
                         rollback!(b"store failed", 1);
                     }
                     0

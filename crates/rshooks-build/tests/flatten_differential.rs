@@ -388,3 +388,28 @@ fn shared_helper_across_two_entries() {
         report.notes
     );
 }
+
+// ---------------------------------------------------------------------
+// A callee that exits through a `br` targeting its implicit function-level
+// label (`return` semantics) instead of `return`. A bare splice would leave
+// the branch's depth unchanged and retarget it at the caller's enclosing
+// block — skipping the addition below while still producing valid wasm —
+// so this callee must be spliced under a wrapper block.
+// ---------------------------------------------------------------------
+
+const FUNCTION_LEVEL_BRANCH_CALLEE: &str = r#"
+(module
+  (import "env" "obs" (func $obs (param i32 i32) (result i32)))
+  (func $one (result i64)
+    (br 0 (i64.const 1)))
+  (func $hook (param i32) (result i64)
+    (drop (call $obs (local.get 0) (i32.const 9)))
+    (block (result i64)
+      (i64.add (call $one) (i64.const 2))))
+  (export "hook" (func $hook)))
+"#;
+
+#[test]
+fn function_level_branch_in_callee_keeps_return_semantics() {
+    assert_differential(FUNCTION_LEVEL_BRANCH_CALLEE, &[("hook", 5), ("hook", 0)]);
+}

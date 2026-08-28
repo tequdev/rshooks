@@ -25,8 +25,8 @@
 //! doc comment; using raw calls at these call sites costs nothing there,
 //! since they still use the field's own declared key bytes.
 //! `RR`/`RD` reads in `reward` (2 call sites total — `reward` is the only
-//! caller) stay on the typed [`crate::Governance::reward_rate`]/
-//! [`crate::Governance::reward_delay`] accessors: low enough call-site
+//! caller) stay on the typed [`crate::GovernanceState::reward_rate`]/
+//! [`crate::GovernanceState::reward_delay`] accessors: low enough call-site
 //! density to fit comfortably, and the clearest demonstration of the
 //! "one declaration, shared by both hooks" story. Governance's own setup
 //! writes to the same keys still go through raw `state_set` (see

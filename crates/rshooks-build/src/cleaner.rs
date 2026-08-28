@@ -12,6 +12,7 @@ use std::collections::{BTreeSet, HashMap};
 use anyhow::{Context, Result, bail};
 
 use crate::Options;
+use crate::encode;
 use crate::ir::{self, IndexRemapper};
 
 /// Cleans `wasm`, producing a module whose only exports are `hook` (and
@@ -20,8 +21,9 @@ use crate::ir::{self, IndexRemapper};
 /// table, element segments, unreachable code — dropped), and every active
 /// data segment trimmed to end at its last non-zero byte (or dropped
 /// entirely, if all-zero) — see [`trim_trailing_zeros`]. Trimming is
-/// skipped wholesale when segments overlap or use non-`i32.const` offsets
-/// (see [`data_trim_is_safe`]).
+/// skipped wholesale when segments overlap, use non-`i32.const` offsets,
+/// or reach out of the first memory's initial bounds (see
+/// [`data_trim_is_safe`]).
 ///
 /// Errors if the `hook` export is missing, or if `hook`/`cbak` do not have
 /// the required `(i32) -> i64` signature.
@@ -62,6 +64,13 @@ pub fn clean(wasm: &[u8], _opts: &Options) -> Result<Vec<u8>> {
         }
         if let Some(body) = m.defined_body(f) {
             let refs = ir::scan_refs(body)?;
+            // `call_indirect` is banned outright (its dynamic target defeats
+            // reachability, and the table it needs is dropped below); a kept
+            // body containing one must fail here, not survive as a dangling
+            // instruction over a dropped table.
+            if refs.has_call_indirect {
+                bail!("function {f} uses `call_indirect` (not allowed in a SetHook module)");
+            }
             for c in refs.calls {
                 stack.push(c);
             }
@@ -136,45 +145,15 @@ pub fn clean(wasm: &[u8], _opts: &Options) -> Result<Vec<u8>> {
     // --- Emit the cleaned module. ---
     let mut module = wasm_encoder::Module::new();
 
-    let mut types_sec = wasm_encoder::TypeSection::new();
-    for ty in &m.types {
-        let (params, results) = ir::conv_functype(ty)?;
-        types_sec.ty().function(params, results);
-    }
-    module.section(&types_sec);
+    module.section(&encode::encode_type_section(&m.types)?);
 
-    let mut imports_sec = wasm_encoder::ImportSection::new();
-    let mut func_import_counter = 0u32;
-    for imp in &m.imports {
-        match imp.ty {
-            wasmparser::TypeRef::Func(type_idx) => {
-                let old_idx = func_import_counter;
-                func_import_counter += 1;
-                if reachable_funcs.contains(&old_idx) {
-                    imports_sec.import(
-                        imp.module,
-                        imp.name,
-                        wasm_encoder::EntityType::Function(type_idx),
-                    );
-                }
-            }
-            wasmparser::TypeRef::Table(t) => {
-                imports_sec.import(imp.module, imp.name, ir::conv_tabletype(t)?);
-            }
-            wasmparser::TypeRef::Memory(mt) => {
-                imports_sec.import(imp.module, imp.name, ir::conv_memtype(mt));
-            }
-            wasmparser::TypeRef::Global(gt) => {
-                imports_sec.import(imp.module, imp.name, ir::conv_globaltype(gt)?);
-            }
-            wasmparser::TypeRef::Tag(_) => {
-                bail!("unsupported import: tag imports are not supported");
-            }
-            wasmparser::TypeRef::FuncExact(_) => {
-                bail!("unsupported import: exact function-reference imports are not supported");
-            }
+    let imports_sec = encode::encode_import_section(&m.imports, |ordinal, type_idx| {
+        if reachable_funcs.contains(&ordinal) {
+            Ok(Some(wasm_encoder::EntityType::Function(type_idx)))
+        } else {
+            Ok(None)
         }
-    }
+    })?;
     module.section(&imports_sec);
 
     let n_imp_funcs = m.num_imported_funcs();
@@ -192,11 +171,7 @@ pub fn clean(wasm: &[u8], _opts: &Options) -> Result<Vec<u8>> {
     // Tables and element segments are always dropped (call_indirect is
     // banned, so a table can never be a legitimate reachability root).
 
-    let mut mem_sec = wasm_encoder::MemorySection::new();
-    for &mem in &m.memories {
-        mem_sec.memory(ir::conv_memtype(mem));
-    }
-    module.section(&mem_sec);
+    module.section(&encode::encode_memory_section(&m.memories));
 
     let mut globals_sec = wasm_encoder::GlobalSection::new();
     {
@@ -243,7 +218,7 @@ pub fn clean(wasm: &[u8], _opts: &Options) -> Result<Vec<u8>> {
 
     let mut data_sec = wasm_encoder::DataSection::new();
     {
-        let trim_safe = data_trim_is_safe(&m.datas);
+        let trim_safe = data_trim_is_safe(&m.datas, first_memory_byte_capacity(&m));
         let mut remapper = IndexRemapper::new(func_map, global_map);
         for d in &m.datas {
             match &d.kind {
@@ -264,10 +239,14 @@ pub fn clean(wasm: &[u8], _opts: &Options) -> Result<Vec<u8>> {
                     // and may legally OVERLAP, in which case a trailing zero
                     // can be a deliberate overwrite of an earlier segment's
                     // non-zero byte — trimming it would change memory
-                    // contents. LLVM/wasm-ld never emit overlapping segments,
-                    // but `clean` accepts arbitrary wasm, so trimming is
-                    // skipped unless every offset is a plain `i32.const` and
-                    // no two segment ranges intersect.
+                    // contents. An out-of-bounds segment traps at
+                    // instantiation, and trimming could shrink it into
+                    // bounds — turning that trap into success. LLVM/wasm-ld
+                    // emit neither shape, but `clean` accepts arbitrary
+                    // wasm, so trimming is skipped unless every offset is a
+                    // plain `i32.const`, every segment fits the first
+                    // memory's initial size, and no two segment ranges
+                    // intersect.
                     if trim_safe {
                         if let Some(trimmed) = trim_trailing_zeros(d.data) {
                             let expr = ir::remap_const_expr(offset_expr, &mut remapper)?;
@@ -307,13 +286,34 @@ fn const_expr_offset(expr: &wasmparser::ConstExpr) -> Option<u64> {
     matches!(r.read().ok()?, wasmparser::Operator::End).then_some(value as u32 as u64)
 }
 
+/// The module's first memory in the memory index space (imported memories
+/// precede defined ones), as a byte capacity — or `None` when there is no
+/// memory at all, or its page size is not the MVP 64 KiB.
+fn first_memory_byte_capacity(m: &ir::ParsedModule) -> Option<u64> {
+    let mt = m
+        .imports
+        .iter()
+        .find_map(|imp| match imp.ty {
+            wasmparser::TypeRef::Memory(mt) => Some(mt),
+            _ => None,
+        })
+        .or_else(|| m.memories.first().copied())?;
+    if mt.page_size_log2.is_some_and(|p| p != 16) {
+        return None;
+    }
+    mt.initial.checked_mul(65536)
+}
+
 /// Whether the trailing-zero trim may be applied: every active segment must
-/// have a plain `i32.const` offset, and no two segments' `[offset,
-/// offset+len)` ranges may intersect. Overlapping segments apply in
-/// declaration order, so a later segment's trailing zeros can be a
-/// deliberate overwrite of earlier non-zero bytes — trimming would then
-/// change memory contents.
-fn data_trim_is_safe(datas: &[wasmparser::Data<'_>]) -> bool {
+/// have a plain `i32.const` offset, every segment's `[offset, offset+len)`
+/// range must lie within `memory_capacity` bytes, and no two segments'
+/// ranges may intersect. Overlapping segments apply in declaration order,
+/// so a later segment's trailing zeros can be a deliberate overwrite of
+/// earlier non-zero bytes — trimming would then change memory contents. An
+/// out-of-bounds segment makes instantiation trap; trimming (or dropping)
+/// it could turn that trap into a successful instantiation, so it too
+/// disqualifies trimming.
+fn data_trim_is_safe(datas: &[wasmparser::Data<'_>], memory_capacity: Option<u64>) -> bool {
     let mut ranges: Vec<(u64, u64)> = Vec::new();
     for d in datas {
         match &d.kind {
@@ -321,7 +321,11 @@ fn data_trim_is_safe(datas: &[wasmparser::Data<'_>]) -> bool {
                 let Some(start) = const_expr_offset(offset_expr) else {
                     return false;
                 };
-                ranges.push((start, start.saturating_add(d.data.len() as u64)));
+                let end = start.saturating_add(d.data.len() as u64);
+                if memory_capacity.is_none_or(|cap| end > cap) {
+                    return false;
+                }
+                ranges.push((start, end));
             }
             wasmparser::DataKind::Passive => {}
         }
@@ -359,4 +363,276 @@ fn check_entry_signature(m: &ir::ParsedModule, idx: u32, export_name: &str) -> R
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
+mod tests {
+    use super::*;
+
+    // -- trim_trailing_zeros --------------------------------------------------
+
+    #[test]
+    fn trim_trailing_zeros_empty_is_none() {
+        assert_eq!(trim_trailing_zeros(&[]), None);
+    }
+
+    #[test]
+    fn trim_trailing_zeros_all_zero_is_none() {
+        assert_eq!(trim_trailing_zeros(&[0, 0, 0]), None);
+    }
+
+    #[test]
+    fn trim_trailing_zeros_no_trailing_zeros_is_unchanged() {
+        assert_eq!(trim_trailing_zeros(b"ABC"), Some(b"ABC".as_slice()));
+    }
+
+    #[test]
+    fn trim_trailing_zeros_trims_at_last_nonzero() {
+        assert_eq!(trim_trailing_zeros(b"AB\0\0\0"), Some(b"AB".as_slice()));
+    }
+
+    // -- data_trim_is_safe ------------------------------------------------------
+
+    fn active_data<'a>(offset_bytes: &'a [u8], data: &'a [u8]) -> wasmparser::Data<'a> {
+        wasmparser::Data {
+            kind: wasmparser::DataKind::Active {
+                memory_index: 0,
+                offset_expr: wasmparser::ConstExpr::new(wasmparser::BinaryReader::new(
+                    offset_bytes,
+                    0,
+                )),
+            },
+            data,
+            range: 0..0,
+        }
+    }
+
+    fn passive_data(data: &[u8]) -> wasmparser::Data<'_> {
+        wasmparser::Data {
+            kind: wasmparser::DataKind::Passive,
+            data,
+            range: 0..0,
+        }
+    }
+
+    // `i32.const N; end` const-expr encodings, for a handful of small N.
+    const OFF0: [u8; 3] = [0x41, 0x00, 0x0B];
+    const OFF4: [u8; 3] = [0x41, 0x04, 0x0B];
+    const OFF5: [u8; 3] = [0x41, 0x05, 0x0B];
+    // `global.get 0; end`.
+    const GLOBAL_GET_OFFSET: [u8; 3] = [0x23, 0x00, 0x0B];
+
+    #[test]
+    fn data_trim_is_safe_for_non_overlapping_segments() {
+        let datas = vec![active_data(&OFF0, b"AB"), active_data(&OFF4, b"CD")];
+        assert!(data_trim_is_safe(&datas, Some(65536)));
+    }
+
+    #[test]
+    fn data_trim_is_unsafe_for_overlapping_segments() {
+        // Segment at 0 of length 5 covers [0,5); segment at 4 covers [4,5)
+        // -> overlap at byte 4.
+        let datas = vec![active_data(&OFF0, b"ABCDE"), active_data(&OFF4, b"X")];
+        assert!(!data_trim_is_safe(&datas, Some(65536)));
+    }
+
+    #[test]
+    fn data_trim_is_safe_for_exactly_adjacent_segments() {
+        // Segment at 0 of length 4 covers [0,4); segment at 4 starts exactly
+        // where the first ends.
+        let datas = vec![active_data(&OFF0, b"ABCD"), active_data(&OFF4, b"E")];
+        assert!(data_trim_is_safe(&datas, Some(65536)));
+    }
+
+    #[test]
+    fn data_trim_is_unsafe_with_a_global_get_offset() {
+        let datas = vec![active_data(&GLOBAL_GET_OFFSET, b"AB")];
+        assert!(!data_trim_is_safe(&datas, Some(65536)));
+    }
+
+    #[test]
+    fn data_trim_is_unsafe_when_a_segment_reaches_out_of_memory_bounds() {
+        // An out-of-bounds segment traps at instantiation; trimming could
+        // shrink it into bounds and turn that trap into success.
+        let datas = vec![active_data(&OFF4, b"AB")];
+        assert!(!data_trim_is_safe(&datas, Some(5)));
+    }
+
+    #[test]
+    fn data_trim_is_unsafe_without_a_memory() {
+        let datas = vec![active_data(&OFF0, b"AB")];
+        assert!(!data_trim_is_safe(&datas, None));
+    }
+
+    #[test]
+    fn data_trim_ignores_passive_segments() {
+        let datas = vec![active_data(&OFF0, b"AB"), passive_data(b"anything")];
+        assert!(data_trim_is_safe(&datas, Some(65536)));
+    }
+
+    // -- const_expr_offset --------------------------------------------------
+
+    #[test]
+    fn const_expr_offset_plain_i32_const() {
+        let expr = wasmparser::ConstExpr::new(wasmparser::BinaryReader::new(&OFF5, 0));
+        assert_eq!(const_expr_offset(&expr), Some(5));
+    }
+
+    #[test]
+    fn const_expr_offset_global_get_is_none() {
+        let expr = wasmparser::ConstExpr::new(wasmparser::BinaryReader::new(&GLOBAL_GET_OFFSET, 0));
+        assert_eq!(const_expr_offset(&expr), None);
+    }
+
+    #[test]
+    fn const_expr_offset_negative_i32_const_wraps_to_u32() {
+        // `i32.const -1; end`.
+        let bytes = [0x41, 0x7F, 0x0B];
+        let expr = wasmparser::ConstExpr::new(wasmparser::BinaryReader::new(&bytes, 0));
+        assert_eq!(const_expr_offset(&expr), Some(u64::from(u32::MAX)));
+    }
+
+    // -- Module-level (wat) ---------------------------------------------------
+
+    fn wasm(src: &str) -> Vec<u8> {
+        wat::parse_str(src).expect("fixture is valid wat")
+    }
+
+    fn opts() -> Options {
+        Options::default()
+    }
+
+    fn global_count(wasm: &[u8]) -> u32 {
+        let mut count = 0;
+        for payload in wasmparser::Parser::new(0).parse_all(wasm) {
+            if let wasmparser::Payload::GlobalSection(r) = payload.expect("valid wasm") {
+                count = r.count();
+            }
+        }
+        count
+    }
+
+    fn import_names(wasm: &[u8]) -> Vec<String> {
+        let mut names = Vec::new();
+        for payload in wasmparser::Parser::new(0).parse_all(wasm) {
+            if let wasmparser::Payload::ImportSection(r) = payload.expect("valid wasm") {
+                for imp in r.into_imports() {
+                    names.push(imp.expect("valid import").name.to_string());
+                }
+            }
+        }
+        names
+    }
+
+    #[test]
+    fn kept_global_referencing_another_global_keeps_both() {
+        // `hook` reads global $b (via a helper), whose initializer
+        // references global $a — both must survive the fixed-point GC.
+        let src = r#"
+        (module
+          (global $a i32 (i32.const 1))
+          (global $b i32 (global.get $a))
+          (func $hook (param i32) (result i64)
+            (drop (global.get $b))
+            (i64.const 0))
+          (export "hook" (func $hook)))
+        "#;
+        let cleaned = clean(&wasm(src), &opts()).expect("clean succeeds");
+        assert_eq!(global_count(&cleaned), 2, "both globals must be kept");
+    }
+
+    #[test]
+    fn unreferenced_global_is_dropped() {
+        let src = r#"
+        (module
+          (global $unused i32 (i32.const 1))
+          (func $hook (param i32) (result i64) (i64.const 0))
+          (export "hook" (func $hook)))
+        "#;
+        let cleaned = clean(&wasm(src), &opts()).expect("clean succeeds");
+        assert_eq!(global_count(&cleaned), 0);
+    }
+
+    #[test]
+    fn data_segment_offset_global_survives_gc() {
+        // A defined global referenced only by an active data segment's
+        // offset expression is a GC root: active segments are always
+        // retained, so their offset globals must survive even though no
+        // kept function touches them.
+        let src = r#"
+        (module
+          (global $off i32 (i32.const 8))
+          (memory 1)
+          (data (offset (global.get $off)) "AB")
+          (func $hook (param i32) (result i64) (i64.const 0))
+          (export "hook" (func $hook)))
+        "#;
+        let cleaned = clean(&wasm(src), &opts()).expect("clean succeeds");
+        assert_eq!(
+            global_count(&cleaned),
+            1,
+            "data-offset global must survive GC"
+        );
+    }
+
+    #[test]
+    fn unused_function_import_is_gcd() {
+        let src = r#"
+        (module
+          (import "env" "unused" (func $unused (param i32) (result i64)))
+          (func $hook (param i32) (result i64) (i64.const 0))
+          (export "hook" (func $hook)))
+        "#;
+        let cleaned = clean(&wasm(src), &opts()).expect("clean succeeds");
+        assert!(
+            !import_names(&cleaned).contains(&"unused".to_string()),
+            "unreachable import should have been GC'd"
+        );
+    }
+
+    #[test]
+    fn call_indirect_in_a_kept_body_errors() {
+        let src = r#"
+        (module
+          (type $t (func))
+          (table 1 funcref)
+          (func $hook (param i32) (result i64)
+            (call_indirect (type $t) (i32.const 0))
+            (i64.const 0))
+          (export "hook" (func $hook)))
+        "#;
+        let err = clean(&wasm(src), &opts()).unwrap_err();
+        assert!(err.to_string().contains("call_indirect"), "{err}");
+    }
+
+    #[test]
+    fn hook_with_wrong_signature_errors_naming_the_signature() {
+        let src = r#"
+        (module
+          (func $hook (param i32) (result i32) (i32.const 0))
+          (export "hook" (func $hook)))
+        "#;
+        let err = clean(&wasm(src), &opts()).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("hook"), "{msg}");
+        assert!(msg.contains("(i32) -> i64"), "{msg}");
+    }
+
+    #[test]
+    fn data_segments_with_no_memory_errors() {
+        let src = r#"
+        (module
+          (func $hook (param i32) (result i64) (i64.const 0))
+          (export "hook" (func $hook))
+          (data (i32.const 0) "AB"))
+        "#;
+        let err = clean(&wasm(src), &opts()).unwrap_err();
+        assert!(err.to_string().contains("memory"), "{err}");
+    }
 }

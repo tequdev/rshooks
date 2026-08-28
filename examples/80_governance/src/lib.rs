@@ -262,8 +262,8 @@ impl Governance {
         // `member_count_or_setup`/`member_seat_of`/`read_topic`/
         // `read_layer_required` read `"MC"`/member-reverse/`T`/`L`
         // through the raw `state`/`otxn_param` API using
-        // [`Governance::member_count`]/[`Governance::member_reverse`]/
-        // [`Governance::topic`]/[`Governance::layer`]'s own declared key/
+        // [`GovernanceState::member_count`]/[`GovernanceState::member_reverse`]/
+        // [`GovernanceOtxnParams::topic`]/[`GovernanceOtxnParams::layer`]'s own declared key/
         // name bytes, rather than those fields' typed accessors — see
         // [`keys`]'s module doc comment for why (`action_seat`/`setup`/
         // `push_l1_seat_entries`'s combined call-site density would push
@@ -473,11 +473,13 @@ impl Governance {
         }
 
         let rr = self
+            .state
             .reward_rate
             .get()
             .unwrap_or(None)
             .unwrap_or(DEFAULT_REWARD_RATE);
         let rd = self
+            .state
             .reward_delay
             .get()
             .unwrap_or(None)
@@ -625,7 +627,7 @@ impl Governance {
 
 /// Reads `"MC"` state, or runs [`setup`] if it doesn't exist yet.
 ///
-/// Raw `state_u64` read, not [`Governance::member_count`]'s typed
+/// Raw `state_u64` read, not [`GovernanceState::member_count`]'s typed
 /// accessor — see [`keys`]'s module doc comment. `Err(_)`, not
 /// `Err(HookError::DoesntExist)`: `state_u64`, not `state_i64` (the host
 /// packs whatever bytes *are* stored into the return value, regardless of
@@ -651,8 +653,8 @@ fn member_seat_of(sender: &AccountId) -> i64 {
 
 /// Reads the `T` otxn parameter: `(was it present and well-formed, the
 /// value or `[0, 0]` on failure)`. Raw `otxn_param` read, not
-/// [`Governance::topic`]'s typed accessor — see [`keys`]'s module doc
-/// comment.
+/// [`GovernanceOtxnParams::topic`]'s typed accessor — see [`keys`]'s module
+/// doc comment.
 fn read_topic() -> (bool, [u8; 2]) {
     let mut buf = [0u8; 2];
     let ok = otxn_param(&mut buf, b"T") == Ok(2);
@@ -660,8 +662,8 @@ fn read_topic() -> (bool, [u8; 2]) {
 }
 
 /// Reads the `L` otxn parameter (L2 tables only). Raw `otxn_param` read,
-/// not [`Governance::layer`]'s typed accessor — see [`keys`]'s module doc
-/// comment.
+/// not [`GovernanceOtxnParams::layer`]'s typed accessor — see [`keys`]'s
+/// module doc comment.
 fn read_layer_required() -> core::result::Result<[u8; 1], ()> {
     let mut buf = [0u8; 1];
     if otxn_param(&mut buf, b"L") == Ok(1) {
@@ -672,9 +674,10 @@ fn read_layer_required() -> core::result::Result<[u8; 1], ()> {
 }
 
 // The setup-only hook parameters below are read through the raw
-// `hook_param_exact` API — the same bytes `Governance`'s own declared
-// fields (`initial_member`/`initial_member_count`/`initial_reward_rate`/
-// `initial_reward_delay`) use — instead of those fields' typed accessors:
+// `hook_param_exact` API — the same bytes `GovernanceHookParams`'s own
+// declared fields (`initial_member`/`initial_member_count`/
+// `initial_reward_rate`/`initial_reward_delay`) use — instead of those
+// fields' typed accessors:
 // see [`keys`]'s module doc comment. Going through the typed accessors here
 // was measured to push `setup`'s compiled nesting from 22 to 63 of the Hook
 // API's 32-level guard-checker limit, so this stays on the raw API exactly
@@ -684,9 +687,9 @@ fn read_layer_required() -> core::result::Result<[u8; 1], ()> {
 /// Kept in its own `#[inline(never)]` function: reading both inline inside
 /// `setup` pushes `setup`'s own compiled nesting close to the 32-level
 /// limit — this function boundary keeps it well under. Raw `state_set`
-/// writes, not [`Governance::reward_rate`]/
-/// [`Governance::reward_delay`]'s typed `.set()` — see [`keys`]'s module
-/// doc comment.
+/// writes, not [`GovernanceState::reward_rate`]/
+/// [`GovernanceState::reward_delay`]'s typed `.set()` — see [`keys`]'s
+/// module doc comment.
 #[inline(never)]
 fn setup_initial_reward_rate_and_delay() {
     let Ok(irr) = hook_param_exact::<XFL>(b"IRR") else {
@@ -755,16 +758,17 @@ fn setup(is_l1_table: bool) -> ! {
 /// Actions a reward-rate/delay topic (`t == 'R'`): writes the voted value
 /// directly under the `"RR"`/`"RD"` key. Diverges.
 ///
-/// Deliberately bypasses [`Governance::reward_rate`]/
-/// [`Governance::reward_delay`]'s typed `.set()` and writes the raw voted
-/// bytes straight through [`rshooks::api::state::state_set`] instead: the
-/// voted value is arbitrary member-supplied bytes with no format check
-/// anywhere in this path (matching govern.c exactly — it never validates a
-/// voted reward-rate/delay value either), and this call site should not
-/// pick up a dependency on `XFL`'s decode step just because it happens not
-/// to validate today. The key bytes (`b"RR"`/`b"RD"`) are exactly
-/// [`Governance::reward_rate`]/[`Governance::reward_delay`]'s own declared
-/// keys, so this hits the identical ledger slot either way.
+/// Deliberately bypasses
+/// [`GovernanceState::reward_rate`]/[`GovernanceState::reward_delay`]'s
+/// typed `.set()` and writes the raw voted bytes straight through
+/// [`rshooks::api::state::state_set`] instead: the voted value is arbitrary
+/// member-supplied bytes with no format check anywhere in this path
+/// (matching govern.c exactly — it never validates a voted
+/// reward-rate/delay value either), and this call site should not pick up a
+/// dependency on `XFL`'s decode step just because it happens not to
+/// validate today. The key bytes (`b"RR"`/`b"RD"`) are exactly
+/// [`GovernanceState::reward_rate`]/[`GovernanceState::reward_delay`]'s own
+/// declared keys, so this hits the identical ledger slot either way.
 #[inline(never)]
 fn action_reward(_t: u8, n: u8, padding: usize, topic_data: &[u8; 32]) -> ! {
     let Some(value) = topic_data.get(padding..) else {
@@ -841,10 +845,10 @@ fn action_seat(n: u8, topic_data_zero: bool, topic_data: &[u8; 32]) -> ! {
         GovernError::AssertionFailed.nope(b"govern: bad topic data");
     };
 
-    // `Governance.seat_forward`/`member_reverse`'s own declared key bytes
-    // (`keys::seat_forward_key`/`keys::member_reverse_key`), read/written
-    // through the raw `state`/`state_set` API rather than those fields'
-    // typed accessors — see [`keys`]'s module doc comment.
+    // `Governance.state.seat_forward`/`Governance.state.member_reverse`'s own
+    // declared key bytes (`keys::seat_forward_key`/`keys::member_reverse_key`),
+    // read/written through the raw `state`/`state_set` API rather than those
+    // fields' typed accessors — see [`keys`]'s module doc comment.
     let previous_member = take_scratch(&PREVIOUS_MEMBER);
     let previous_present = {
         let Some(dst) = previous_member.get_mut(12..32) else {
@@ -1110,8 +1114,8 @@ fn read_reward_fields(keylet: &Keylet) -> RewardFieldRead {
 /// which treats the whole `UNLReport`-driven L1 distribution as
 /// best-effort and always proceeds to emit at least the rewardee entry).
 ///
-/// Reads the seat/member state [`Governance::member_reverse`]/
-/// [`Governance::seat_forward`] declare — the two fields governance
+/// Reads the seat/member state [`GovernanceState::member_reverse`]/
+/// [`GovernanceState::seat_forward`] declare — the two fields governance
 /// itself writes — through the raw `state` API rather than those fields'
 /// typed accessors; see [`keys`]'s module doc comment and the crate
 /// module doc comment.

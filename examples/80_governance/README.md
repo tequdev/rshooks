@@ -97,8 +97,9 @@ paths in this crate (`setup`, `action_seat`, `push_l1_seat_entries`, and
 bytes through the raw `state`/`state_set`/`otxn_param`/`hook_param_exact`
 API instead.
 `reward_rate`/`reward_delay` are a partial exception: `reward` *does* use
-the typed `.reward_rate`/`.reward_delay` accessors, at their only 2 call
-sites — both reads, `self.reward_rate`/`self.reward_delay` under
+the typed `.state.reward_rate`/`.state.reward_delay` accessors, at their
+only 2 call sites — both reads, `self.state.reward_rate`/
+`self.state.reward_delay` under
 `reward`'s `&self` receiver. Governance's own setup still writes the same
 `"RR"`/`"RD"` keys through raw `state_set` (`setup_initial_reward_rate_and_delay`
 in `src/lib.rs`), for the same call-site-density reason as `setup`'s other

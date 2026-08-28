@@ -139,10 +139,14 @@ pub struct TypedData {
 /// `CFG` is absent *or* present-but-malformed: `.unwrap_or(..)` masks any
 /// `Err` from [`HookParam::get_or_default`], not just the "absent" case.
 fn config() -> Config {
-    TypedData.config.get_or_default().unwrap_or(Config {
-        min_amount: DEFAULT_MIN_AMOUNT,
-        lock_ledgers: DEFAULT_LOCK_LEDGERS,
-    })
+    TypedData
+        .hook_param
+        .config
+        .get_or_default()
+        .unwrap_or(Config {
+            min_amount: DEFAULT_MIN_AMOUNT,
+            lock_ledgers: DEFAULT_LOCK_LEDGERS,
+        })
 }
 
 /// Returns whether new deposits are paused. Masks any read failure to
@@ -150,6 +154,7 @@ fn config() -> Config {
 /// default.
 fn deposits_paused() -> bool {
     TypedData
+        .hook_param
         .admin_pause
         .at(ADMIN_PAUSE_NAME)
         .get_or_default()
@@ -186,7 +191,7 @@ impl TypedData {
             )
         };
 
-        let deposit = self.deposits.at(DepositKey {
+        let deposit = self.state.deposits.at(DepositKey {
             tag: DEPOSIT_TAG,
             owner,
         });

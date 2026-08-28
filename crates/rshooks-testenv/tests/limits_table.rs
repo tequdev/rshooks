@@ -127,7 +127,7 @@ impl Limits {
         match hook_hash_buf(0) {
             Ok(h) => {
                 let n = u64::from(h[0]);
-                if self.scratch.set(&n).is_err() {
+                if self.state.scratch.set(&n).is_err() {
                     rollback!(b"store failed", 1);
                 }
                 accept!(b"", 0)

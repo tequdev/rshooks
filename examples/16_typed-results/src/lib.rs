@@ -32,9 +32,10 @@ pub struct TypedResults {
 // optimize away through a two-hop `?`.
 #[inline(always)]
 fn bump_counter(t: &TypedResults, amount: u64) -> Result<u64, DepositError> {
-    let count = t.counter.get().unwrap_or(Some(0)).unwrap_or(0);
+    let count = t.state.counter.get().unwrap_or(Some(0)).unwrap_or(0);
     let next = count.wrapping_add(amount);
-    t.counter
+    t.state
+        .counter
         .set(&next)
         .map_err(|_| DepositError::StateSetFailed)?;
     Ok(next)
@@ -63,7 +64,7 @@ impl TypedResults {
     /// declared `-> HookResult` like every other entry.
     #[hook(1, name = "reset", on = [Invoke])]
     fn reset(&self) -> HookResult {
-        if self.counter.set(&0u64).is_err() {
+        if self.state.counter.set(&0u64).is_err() {
             rollback!(b"typed-results: reset failed", DepositError::StateSetFailed);
         }
         accept!(b"typed-results: reset", 0)

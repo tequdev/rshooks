@@ -41,33 +41,39 @@ let written = hook_param(&mut buf, b"CFG")?;
 
 `hook_param_exact`/`otxn_param_exact` require the parameter to be exactly
 `T`'s length (any `FixedRead` type), with `T` inferred from context, not a
-turbofish. `examples/03_hook-params` uses exactly this for a compiled-in
-default when the operator hasn't configured a minimum:
+turbofish. A typical use is a compiled-in default when the operator hasn't
+configured a minimum:
 
 ```rust,ignore
-const MIN_PARAM: &[u8] = b"MIN";
-const DEFAULT_MIN_DROPS: u64 = 1_000_000;
+const THRESH_PARAM: &[u8] = b"THRESH";
+const DEFAULT_THRESHOLD: u64 = 1_000_000;
 
-fn min_drops() -> u64 {
-    hook_param_exact(MIN_PARAM)
+fn threshold() -> u64 {
+    hook_param_exact(THRESH_PARAM)
         .map(u64::from_be_bytes)
-        .unwrap_or(DEFAULT_MIN_DROPS)
+        .unwrap_or(DEFAULT_THRESHOLD)
 }
 ```
 
 `hook_param_exact`'s return type is inferred as `[u8; 8]` from the
 `.map(u64::from_be_bytes)` call — no turbofish needed. Note the
 `from_be_bytes`, not this crate's `FromBytes` trait: a raw parameter byte
-buffer is whatever the caller who set it chose to write, conventionally
-matching Xahau Binary's big-endian numeric encoding for a value like this,
-the same convention [Reading the Originating Transaction](otxn.md)
-describes for raw protocol fields. `.unwrap_or(DEFAULT_MIN_DROPS)`
-collapses "not configured at all" and "configured with a value of the
-wrong size" into the same fallback, without treating a malformed parameter
-as a hard error. This tier needs no field declaration on the `#[hooks]`
-struct at all — reach for it for a one-off read, or as the escape hatch
-[Hook Chains](../concepts/chains.md#a-real-limit-typed-accessor-density-inside-one-entry)
-covers when accessor density at one call site outgrows the nesting budget.
+buffer is whatever the caller who set it chose to write, and this tier
+leaves that byte convention entirely up to whatever wrote it — here
+chosen (by this snippet, not the crate) to match Xahau Binary's
+big-endian numeric encoding, the same convention [Reading the Originating
+Transaction](otxn.md) describes for raw protocol fields.
+`.unwrap_or(DEFAULT_THRESHOLD)` collapses "not configured at all" and
+"configured with a value of the wrong size" into the same fallback,
+without treating a malformed parameter as a hard error. This tier needs
+no field declaration on the `#[hooks]` struct at all — reach for it for a
+one-off read, or as the escape hatch [Hook
+Chains](../concepts/chains.md#a-real-limit-typed-accessor-density-inside-one-entry)
+covers when accessor density at one call site outgrows the nesting
+budget. The declared-field tier below decodes every value through this
+crate's `FromBytes` trait instead, so its byte convention is always
+little-endian, fixed by the crate rather than chosen per call site — see
+`examples/03_hook-params`'s `MIN` parameter for a worked example.
 
 ## Struct fields: `#[hook_param(...)]` / `#[otxn_param(...)]`
 
@@ -125,7 +131,7 @@ call site instead, the same way `examples/05_firewall` and
 
 ```rust,ignore
 fn blocked_account() -> Option<AccountId> {
-    Firewall.blocked.get().ok().flatten()
+    Firewall.hook_param.blocked.get().ok().flatten()
 }
 ```
 
@@ -147,7 +153,7 @@ pub struct StateForeign {
 ```
 
 ```rust,ignore
-let Ok(target) = self.acct.get_required() else {
+let Ok(target) = self.hook_param.acct.get_required() else {
     rollback!(
         b"state-foreign: ACCT parameter not configured",
         StateForeignError::AcctNotConfigured
@@ -218,6 +224,7 @@ const ADMIN_PAUSE_NAME: AdminName = AdminName { section: 0, field: 0 };
 
 fn deposits_paused() -> bool {
     TypedData
+        .hook_param
         .admin_pause
         .at(ADMIN_PAUSE_NAME)
         .get_or_default()
@@ -394,17 +401,17 @@ field (covered earlier on this page) still never appears there.
 ## Why this prevents name/value mismatches
 
 The loose `hook_param_exact::<T>(name)`/`otxn_param_exact::<T>(name)` calls
-take `name` and `T` as two independent arguments — a typo or a copy-paste
-error can pair the right name with the wrong type, or the wrong name with
-the right type, and both compile fine as long as `T: FixedRead`. A
-`#[hook_param(...)]`/`#[otxn_param(...)]` field removes that degree of
-freedom: the field's declared name is permanently tied to exactly one value
-type, so `TypedData.config.get_or_default()` (read from a free function
-outside the impl) and `self.acct.get_required()` (read directly inside
-`examples/09_state-foreign`'s `&self` entry) can never accidentally decode
-one parameter's bytes as the other's struct shape — the compiler
-resolves the return type from the field itself, with
-no independently-chosen type left for a mismatch to hide in. This is the
+take `name` and `T` as two independent arguments — a typo or a copy-paste error
+can pair the right name with the wrong type, or the wrong name with the right
+type, and both compile fine as long as `T: FixedRead`. A
+`#[hook_param(...)]`/`#[otxn_param(...)]` field removes that degree of freedom:
+the field's declared name is permanently tied to exactly one value type, so
+`TypedData.hook_param.config.get_or_default()` (read from a free function
+outside the impl) and `self.hook_param.acct.get_required()` (read directly
+inside `examples/09_state-foreign`'s `&self` entry) can never accidentally
+decode one parameter's bytes as the other's struct shape — the compiler
+resolves the return type from the field itself, with no
+independently-chosen type left for a mismatch to hide in. This is the
 identical safety property [Hook State](state.md)'s `#[state(...)]` fields
 give the key/value side; see [Typed Data with Derives](typed-data.md) for
 the underlying `ParamName`/`ParamValue` derives both build on, and [Hook

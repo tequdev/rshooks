@@ -23,6 +23,6 @@ impl Vault {
 }
 
 fn main() {
-    assert!(Vault.cfg.get().is_err());
-    assert!(Vault.def.get().is_err());
+    assert!(Vault.hook_param.cfg.get().is_err());
+    assert!(Vault.otxn_param.def.get().is_err());
 }

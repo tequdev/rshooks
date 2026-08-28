@@ -22,7 +22,7 @@ accessed via a **static with the same name as the struct**:
 impl Vault {
     #[hook(0, on = [Invoke])]
     fn deposit() -> i64 {
-        let Ok(cfg) = Vault.config.get_or_default() else { /* ... */ };
+        let Ok(cfg) = Vault.hook_param.config.get_or_default() else { /* ... */ };
         // ...
     }
 }
@@ -35,7 +35,7 @@ This proposal makes it possible to write the same thing with a `&self` receiver:
 impl Vault {
     #[hook(0, on = [Invoke])]
     fn deposit(&self) -> i64 {
-        let Ok(cfg) = self.config.get_or_default() else { /* ... */ };
+        let Ok(cfg) = self.hook_param.config.get_or_default() else { /* ... */ };
         // ...
     }
 }
