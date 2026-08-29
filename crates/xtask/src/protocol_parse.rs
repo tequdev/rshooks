@@ -199,7 +199,16 @@ pub const PSEUDO_STI_MIN: u32 = 10_000;
 /// preserving newlines so byte offsets keep mapping to the original line
 /// numbers. Character and string literals are copied through untouched, so a
 /// `'/'` or `"//"` inside one cannot start a comment.
-pub fn strip_comments(src: &str) -> String {
+///
+/// An **unterminated** `/*` is a hard error, not a comment running to the
+/// end of the file. Blanking the rest of the input would delete every
+/// declaration after it and leave the parsers with nothing to complain
+/// about — precisely the silent drop this module's "why unrecognized input
+/// is a hard error" rule exists to prevent. An unterminated *literal* is
+/// different and is still deferred: [`end_of_literal`] already rejects it
+/// from inside [`match_delimiter`]/[`split_top_level`], where the parser can
+/// say which declaration it was in.
+pub fn strip_comments(src: &str) -> Result<String> {
     let bytes = src.as_bytes();
     let mut out = String::with_capacity(src.len());
     let mut i = 0usize;
@@ -212,12 +221,15 @@ pub fn strip_comments(src: &str) -> String {
                 }
             }
             b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                let opened = i;
                 out.push_str("  ");
                 i += 2;
+                let mut closed = false;
                 while i < bytes.len() {
                     if bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/') {
                         out.push_str("  ");
                         i += 2;
+                        closed = true;
                         break;
                     }
                     // One space per *byte*, so byte offsets — and with them
@@ -225,6 +237,13 @@ pub fn strip_comments(src: &str) -> String {
                     // even across the non-ASCII bytes in a license header.
                     out.push(if bytes[i] == b'\n' { '\n' } else { ' ' });
                     i += 1;
+                }
+                if !closed {
+                    bail!(
+                        "unterminated block comment opened on line {} — everything after it \
+                         would be silently dropped",
+                        line_of(src, opened)
+                    );
                 }
             }
             b'\'' | b'"' => {
@@ -247,7 +266,7 @@ pub fn strip_comments(src: &str) -> String {
             }
         }
     }
-    out
+    Ok(out)
 }
 
 /// Blanks out every preprocessor directive (a line whose first non-whitespace
@@ -285,9 +304,9 @@ pub fn strip_directives(src: &str) -> String {
 }
 
 /// [`strip_comments`] then [`strip_directives`], the input every parser in
-/// this module works on.
-pub fn preprocess(src: &str) -> String {
-    strip_directives(&strip_comments(src))
+/// this module works on. Fallible only because the first pass is.
+pub fn preprocess(src: &str) -> Result<String> {
+    Ok(strip_directives(&strip_comments(src)?))
 }
 
 // ---------------------------------------------------------------------
@@ -543,7 +562,7 @@ pub fn parse_type_value(text: &str) -> Result<u16> {
 
 /// Parses `sfields.macro` into every declared field, in file order.
 pub fn parse_sfields(src: &str) -> Result<Vec<SFieldDecl>> {
-    let src = preprocess(src);
+    let src = preprocess(src)?;
     let mut out = Vec::new();
     for inv in scan_invocations(&src)? {
         let typed = match inv.name.as_str() {
@@ -584,7 +603,7 @@ pub fn parse_sfields(src: &str) -> Result<Vec<SFieldDecl>> {
 /// Parses `transactions.macro` into every `TRANSACTION` declaration, in file
 /// order.
 pub fn parse_transactions(src: &str) -> Result<Vec<TxDecl>> {
-    let src = preprocess(src);
+    let src = preprocess(src)?;
     let mut out = Vec::new();
     for inv in scan_invocations(&src)? {
         if inv.name != "TRANSACTION" {
@@ -616,7 +635,7 @@ pub fn parse_transactions(src: &str) -> Result<Vec<TxDecl>> {
 /// Parses `ledger_entries.macro` into every `LEDGER_ENTRY` /
 /// `LEDGER_ENTRY_DUPLICATE` declaration, in file order.
 pub fn parse_ledger_entries(src: &str) -> Result<Vec<LedgerEntryDecl>> {
-    let src = preprocess(src);
+    let src = preprocess(src)?;
     let mut out = Vec::new();
     for inv in scan_invocations(&src)? {
         let duplicate = match inv.name.as_str() {
@@ -659,7 +678,7 @@ pub fn parse_ledger_entries(src: &str) -> Result<Vec<LedgerEntryDecl>> {
 /// not silently yield an empty common-field list.
 pub fn parse_common_fields(src: &str, what: &str) -> Result<Vec<FieldEntry>> {
     const ANCHOR: &str = "commonFields";
-    let src = preprocess(src);
+    let src = preprocess(src)?;
     let mut found: Option<usize> = None;
     let mut from = 0usize;
     while let Some(rel) = src.get(from..).unwrap_or_default().find(ANCHOR) {
@@ -701,7 +720,7 @@ pub fn parse_common_fields(src: &str, what: &str) -> Result<Vec<FieldEntry>> {
 /// error; text outside those calls (the constructor boilerplate, the two
 /// accessor definitions below it) is ignored.
 pub fn parse_inner_objects(src: &str) -> Result<Vec<InnerObjectDecl>> {
-    let src = preprocess(src);
+    let src = preprocess(src)?;
     let bytes = src.as_bytes();
     let mut out = Vec::new();
     let mut from = 0usize;
@@ -797,10 +816,39 @@ mod tests {
     #[test]
     fn strips_comments_but_keeps_line_numbers_and_literals() {
         let src = "a // gone\nb /* also\ngone */ c\n'/'\n";
-        let stripped = strip_comments(src);
+        let stripped = strip_comments(src).unwrap_or_else(|e| panic!("{e:#}"));
         assert_eq!(stripped.lines().count(), src.lines().count());
         assert!(!stripped.contains("gone"));
         assert!(stripped.contains("'/'"));
+    }
+
+    /// An unterminated `/*` blanks everything after it, so accepting one
+    /// would delete declarations with nothing left to complain about — the
+    /// silent drop this module's hard-error rule exists to prevent. The
+    /// fixture is a real format file whose second declaration would vanish.
+    #[test]
+    fn an_unterminated_block_comment_is_an_error() {
+        let src = "\
+TYPED_SFIELD(sfAmount, AMOUNT, 1)
+/* a comment nobody closed
+TYPED_SFIELD(sfFlags, UINT32, 2)
+";
+        let msg = match strip_comments(src) {
+            Ok(_) => panic!("expected an unterminated-block-comment failure"),
+            Err(e) => format!("{e:#}"),
+        };
+        assert!(
+            msg.contains("unterminated block comment") && msg.contains("line 2"),
+            "{msg}"
+        );
+
+        // And the parsers inherit it rather than silently returning the one
+        // declaration that survived the blanking.
+        let msg = match parse_sfields(src) {
+            Ok(decls) => panic!("expected a failure, parsed {} declarations", decls.len()),
+            Err(e) => format!("{e:#}"),
+        };
+        assert!(msg.contains("unterminated block comment"), "{msg}");
     }
 
     #[test]

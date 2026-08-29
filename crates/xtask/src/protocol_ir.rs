@@ -459,7 +459,7 @@ mod tests {
     /// Lower bounds, not exact counts: the point is that the parser has not
     /// silently dropped whole swathes of the corpus, and an upstream sync
     /// that *adds* a type should not need a test edit. (On the currently
-    /// vendored `release` snapshot the real numbers are 74 / 34 / 329 / 26 —
+    /// vendored `release` snapshot the real numbers are 74 / 34 / 329 / 28 —
     /// the design doc's "≥75 / ≥40" predated a look at the actual files.)
     #[test]
     fn the_real_corpus_parses_completely() {

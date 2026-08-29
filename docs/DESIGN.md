@@ -295,9 +295,11 @@ unsafe extern "C" {
   wire code — under `--check` like every other generated file, and with its
   own parity test. The parse is cross-validated against the vendored
   `sfcodes.h`: a field the two groups disagree about fails generation
-  naming the field, so the groups cannot drift apart silently. Nothing
-  consumes the artifact yet; it is the input to the generated typed views
-  described in §5.
+  naming the field, so the groups cannot drift apart silently. Three
+  generators consume it: `rshooks-core`'s raw `lt*` codes, `rshooks`'
+  `LedgerEntryType` enum, and the typed read views of §5.9 — whose three
+  `rshooks/src/views/*.rs` modules `gen-core` renders from this artifact
+  rather than from a second parse of the vendored files.
 
 ## 5. rshooks
 
@@ -1172,7 +1174,7 @@ reads make unnecessary.
 
 ### 5.9 Generated format views: `views::{tx, ledger, inner}`
 
-Upstream declares 74 transaction types, 34 ledger entry types and 26
+Upstream declares 74 transaction types, 34 ledger entry types and 28
 inner-object formats, and amendments change their field lists. Hand-writing
 one read view per type does not scale, so all of them are **generated** —
 the same pattern §4 already applies to `sfcodes.h → sfield.rs` and

@@ -54,6 +54,17 @@ hand-edited.
   `(type << 16) | field` code, or generation fails naming the field. The two
   vendor groups therefore cannot drift out of sync with each other silently:
   re-syncing one without the other is a build failure.
+
+  **One exemption, by upstream's design:** the four fields whose serialized
+  type names a whole container rather than a value — `sfTransaction`,
+  `sfLedgerEntry`, `sfValidation`, `sfMetadata`, serialized type IDs
+  10001–10004 — are declared in `sfields.macro` but deliberately absent
+  from `sfcodes.h`, which is written from the Hook API's point of view and
+  has no reason to name a field no hook can read. Those four skip the code
+  comparison (`protocol_ir::cross_validate`, gated on
+  `protocol_parse::PSEUDO_STI_MIN`); they are still carried in the artifact
+  with the code the macro implies. Every other field, without exception, is
+  checked.
 - **Parity test** (`../../tests/protocol_formats_parity.rs`) re-parses the
   three `.macro` files at test time with a deliberately independent minimal
   parser — independent of `xtask`'s for the same reason the header parity

@@ -3,7 +3,7 @@
 //!
 //! One struct per transaction type, ledger entry type and inner-object
 //! format; one accessor per field the format declares. Upstream declares 74
-//! transactions, 34 ledger entries and 26 inner objects on the currently
+//! transactions, 34 ledger entries and 28 inner objects on the currently
 //! vendored snapshot, so this is the largest generator in the pipeline by an
 //! order of magnitude — and the one whose output would be least maintainable
 //! by hand, which is the point.
