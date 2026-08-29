@@ -58,9 +58,10 @@ writes, under `out/current/`:
 | `sethook.template.json` | a `SetHook` template covering **both** positions in one `Hooks` array (`Account`/`HookNamespace` left as placeholders) |
 | `sethook.template.meta.json` | generation info: hook hashes, declared/gap positions, required amendments |
 
-Measured this build: `0.govern.wasm` is 13821 bytes (WCE 27751, max
-nesting 23/32); `1.reward.wasm` is 7385 bytes (WCE 12881, max nesting
-22/32). Both stay well under the 65,535-byte SetHook `CreateCode` limit.
+Current size, WCE, and max nesting for each artifact live in
+[`metrics.json`](./metrics.json) (refreshed by
+`mise run record-example-metrics`). Both stay well under the 65,535-byte
+SetHook `CreateCode` limit.
 
 ## Shared declaration: what's actually consolidated
 

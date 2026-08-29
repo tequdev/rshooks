@@ -1,0 +1,27 @@
+{
+  "schema": "rshooks-example-metrics-v1",
+  "entries": [
+    {
+      "artifact": "0.govern.wasm",
+      "index": 0,
+      "hook_fn": "govern",
+      "bytes": 14475,
+      "wce": {
+        "hook": 27475,
+        "cbak": 0
+      },
+      "max_nesting": 23
+    },
+    {
+      "artifact": "1.reward.wasm",
+      "index": 1,
+      "hook_fn": "reward",
+      "bytes": 7385,
+      "wce": {
+        "hook": 12881,
+        "cbak": 0
+      },
+      "max_nesting": 22
+    }
+  ]
+}
