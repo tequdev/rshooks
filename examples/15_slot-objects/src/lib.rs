@@ -262,9 +262,7 @@ fn check_cast_cleanup_loop(keylet: &Keylet) -> bool {
 #[inline(never)]
 fn check_iou_amount(holder: &AccountId) -> bool {
     /// `USD` in the standard 20-byte currency encoding.
-    const USD: CurrencyCode = CurrencyCode([
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, b'U', b'S', b'D', 0, 0, 0, 0, 0,
-    ]);
+    const USD: CurrencyCode = CurrencyCode::from_iso(b"USD");
 
     let Ok(Some(issuer)) = SlotObjects.otxn_param.iss.get() else {
         return false;

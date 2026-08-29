@@ -144,3 +144,21 @@ rshooks::account_id!("rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTH");
 Reach for `account_id!` whenever a keylet argument, a hard-coded genesis
 account, or any other fixed r-address needs to become an `AccountId` — it
 replaces hand-computing or hex-pasting the 20 bytes yourself.
+
+## `CurrencyCode::from_iso` for 3-character currencies
+
+`keylet_line` takes a `&CurrencyCode`. Standard ISO-style codes (`USD`,
+`EUR`, ...) are only 3 ASCII bytes, but the on-ledger encoding is always
+20 bytes: twelve zeros, the three characters, five more zeros. A
+160-bit non-standard currency still uses the 20-byte tuple constructor;
+the 3-character form is `from_iso`, usable in `const`/`static` position:
+
+```rust,ignore
+use rshooks::prelude::*;
+
+const USD: CurrencyCode = CurrencyCode::from_iso(b"USD");
+```
+
+The argument is `&[u8; 3]`, so `b"US"` or `b"USDT"` is a type error
+rather than a silently-wrong encoding. Native XRP/XAH is a native amount,
+not `from_iso(b"XRP")`.
