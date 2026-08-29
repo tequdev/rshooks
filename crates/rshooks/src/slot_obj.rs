@@ -407,12 +407,9 @@ impl<T> SlotObject<T> {
     /// Reads exactly `N` bytes, erroring if the slot is not exactly that
     /// size. Consumes the handle.
     ///
-    /// `N` is yours to choose, and so is the consequence: this allocates
-    /// `[0u8; N]` on the stack, and a large `N` makes rustc emit a `memset`
-    /// call instead of inlined stores — an unguarded loop the Hook API's
-    /// guard checker rejects. The built-in typed reads all stay at or under
-    /// 48 bytes for that reason; if you need more, check the built output
-    /// (see this module's "Stack buffers" section).
+    /// `N` is yours to choose: this reads into uninitialized scratch, so
+    /// there is no zero-init cost and no `memset` risk at any size (see this
+    /// module's "Stack buffers" section).
     #[inline(always)]
     pub fn raw_exact<const N: usize>(self) -> Result<[u8; N]> {
         let no = self.no;
@@ -427,8 +424,8 @@ impl<T> SlotObject<T> {
     /// because the read's result is the one the caller asked for and a
     /// failed clear cannot be acted on usefully here.
     ///
-    /// Same `N` caveat as [`raw_exact`](Self::raw_exact): the buffer is
-    /// yours to size, and a large one reintroduces `memset`.
+    /// Same as [`raw_exact`](Self::raw_exact): `N` is yours to choose, with
+    /// no zero-init cost or `memset` risk at any size.
     #[inline(always)]
     pub fn take_raw_exact<const N: usize>(self) -> Result<[u8; N]> {
         let no = self.no;
@@ -494,12 +491,14 @@ impl<T> SlotObject<T> {
 ///
 /// The caller must read the returned slice only over the range a prior write
 /// into it actually covered — never past what [`api::slot::slot`] itself
-/// reported writing. `u8` has no invalid bit patterns and no padding, so
-/// forming the `&mut [u8]` here is sound unconditionally; the requirement is
-/// entirely about what the caller does with it afterward. [`api::slot::slot`]
-/// is itself an `unsafe` `extern` host call already fully trusted by every
-/// other line of this crate, so trusting its reported byte count adds no new
-/// trust boundary.
+/// reported writing. No bit pattern is invalid for `u8`, so forming the
+/// `&mut [u8]` here is the standard pre-`BorrowedBuf` I/O shape over
+/// `MaybeUninit` storage — relied on throughout this crate rather than
+/// unconditionally guaranteed by the language; the requirement is entirely
+/// about what the caller does with it afterward. [`api::slot::slot`] is
+/// itself an `unsafe` `extern` host call already fully trusted by every
+/// other line of this crate, so trusting its reported byte count is the
+/// same FFI trust boundary, not a new one.
 #[inline(always)]
 unsafe fn uninit_slice_mut<const N: usize>(buf: &mut MaybeUninit<[u8; N]>) -> &mut [u8] {
     // SAFETY: `buf` is `N` bytes of live, properly aligned storage (a

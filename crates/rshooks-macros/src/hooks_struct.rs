@@ -1066,26 +1066,24 @@ fn marker_name(struct_name: &str, field_index: usize, field_name: &str) -> Strin
     )
 }
 
-/// `Some(decoded byte length)` when `expr` is exactly one byte-string
-/// literal token (`b"..."`/`br"..."`) — the `KeySpec::Const` shape
+/// `true` when `expr` is exactly one byte-string literal token
+/// (`b"..."`/`br"..."`) — the `KeySpec::Const` shape
 /// [`field_marker_and_impls`] promotes to a compile-time, `'static`
 /// `EncodedStateKey` via `EncodedStateKey::from_short` instead of
-/// re-encoding at runtime on every access. `None` for any other key
+/// re-encoding at runtime on every access. `false` for any other key
 /// expression (a non-literal expression, or a literal that isn't a byte
 /// string) — those keep the existing runtime `StateKeyEncode::encode` path
 /// via `StateSpec::with_key`'s default. Unlike
 /// [`crate::hooks_shared::parse_byte_string_value`], a mismatch here is not
 /// an error — a non-byte-string const key expression is a normal,
 /// supported shape.
-fn byte_string_literal_len(expr: &[TokenTree]) -> Option<usize> {
+fn is_byte_string_literal(expr: &[TokenTree]) -> bool {
     let [TokenTree::Literal(lit)] = expr else {
-        return None;
+        return false;
     };
     let mut stream = TokenStream::new();
     stream.extend([TokenTree::Literal(lit.clone())]);
-    syn::parse::<syn::LitByteStr>(stream)
-        .ok()
-        .map(|l| l.value().len())
+    syn::parse::<syn::LitByteStr>(stream).is_ok()
 }
 
 /// The marker ZST declaration plus its `StateSpec`/`ParamSpec` (+
@@ -1131,7 +1129,7 @@ fn field_marker_and_impls(
                     // literal at runtime on every access; any other const
                     // expression (e.g. a `HookKey`-derived value) keeps the
                     // runtime `encode_key` path via `with_key`'s default.
-                    let override_method = byte_string_literal_len(expr).map(|_| {
+                    let override_method = is_byte_string_literal(expr).then(|| {
                         format!(
                             "#[inline(always)]\n\
                              fn with_key<__R>(_args: &Self::KeyArgs, f: impl ::core::ops::FnOnce(&::rshooks::state::EncodedStateKey) -> __R) -> __R {{\n\

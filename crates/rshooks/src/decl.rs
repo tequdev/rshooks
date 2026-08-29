@@ -406,8 +406,10 @@ where
 /// An encoded-key view of a [`State`] entry, bound to concrete key
 /// arguments via [`State::at`] — same accessor set as [`State`]'s
 /// constant-key inherent impls, forwarding to the same
-/// [`mod@crate::state`] free functions through the already-computed
-/// [`EncodedStateKey`] this holds.
+/// [`mod@crate::state`] `_encoded`-suffixed funnels (`state_get_encoded`,
+/// `state_set_encoded`, `state_update_encoded`, `state_delete_encoded`,
+/// `state_foreign_get_encoded`, `state_foreign_set_encoded`) through the
+/// already-computed [`EncodedStateKey`] this holds.
 ///
 /// `PhantomData<fn() -> V>` rather than `PhantomData<V>` so this view is
 /// `Send`/`Sync`/`Copy` regardless of what `V` is — see

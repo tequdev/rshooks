@@ -214,11 +214,20 @@ use crate::types::{STATE_KEY_LEN, StateKey};
 ///
 /// The returned slice must only ever be read over the range a prior write
 /// into it actually covered — here, no further than [`decode_read`]'s own
-/// `n = res(code)?` prefix, which [`crate::api::state::state_raw_code`]/
-/// [`crate::api::state::state_foreign_raw_code`] guarantee is at most the
-/// buffer's own length. `u8` has no invalid bit patterns and no padding, so
-/// forming the `&mut [u8]` here is sound unconditionally — the requirement
-/// is entirely about what the caller does with it afterward.
+/// `n = res(code)?` prefix. The bound on `n` is enforced by `decode_read`
+/// itself, not by the raw host-call wrappers: `raw.get(..n).ok_or(HookError::TooSmall)?`
+/// errors rather than reading past the buffer if the host ever reports a
+/// larger `n` than the buffer holds. What remains is the FFI trust
+/// boundary common to this whole crate — the host must actually have
+/// written the `n` bytes it reports, since [`crate::api::state::state_raw_code`]/
+/// [`crate::api::state::state_foreign_raw_code`] are `unsafe` `extern` calls
+/// already fully trusted by every other line here.
+///
+/// No bit pattern is invalid for `u8`, so forming the `&mut [u8]` here is
+/// the standard pre-`BorrowedBuf` I/O shape over `MaybeUninit` storage —
+/// relied on throughout this crate rather than unconditionally guaranteed
+/// by the language. The host-writes-what-it-reports assumption above is the
+/// actual trust boundary.
 #[inline(always)]
 unsafe fn uninit_slice_mut<const N: usize>(buf: &mut core::mem::MaybeUninit<[u8; N]>) -> &mut [u8] {
     // SAFETY: `buf` is `N` bytes of live, properly aligned storage (a
@@ -525,9 +534,9 @@ pub(crate) fn state_get_encoded<T: FromBytes>(key: &EncodedStateKey) -> Result<O
     // SAFETY: see `uninit_slice_mut`'s doc comment; `state_raw_code` cannot
     // report writing more bytes than the buffer it was handed, and
     // `decode_read` only ever reads the `..n` prefix that count reports.
-    let code = crate::api::state::state_raw_code(unsafe { uninit_slice_mut(&mut storage) }, key);
-    // SAFETY: same contract as above.
-    decode_read(code, unsafe { uninit_slice_mut(&mut storage) })
+    let buf = unsafe { uninit_slice_mut(&mut storage) };
+    let code = crate::api::state::state_raw_code(buf, key);
+    decode_read(code, buf)
 }
 
 /// Read this hook's own state entry for `key`, decoded as `T`.
@@ -684,14 +693,9 @@ pub(crate) fn state_foreign_get_encoded<T: FromBytes>(
     // SAFETY: see `uninit_slice_mut`'s doc comment; `state_foreign_raw_code`
     // cannot report writing more bytes than the buffer it was handed, and
     // `decode_read` only ever reads the `..n` prefix that count reports.
-    let code = crate::api::state::state_foreign_raw_code(
-        unsafe { uninit_slice_mut(&mut storage) },
-        key,
-        namespace,
-        account,
-    );
-    // SAFETY: same contract as above.
-    decode_read(code, unsafe { uninit_slice_mut(&mut storage) })
+    let buf = unsafe { uninit_slice_mut(&mut storage) };
+    let code = crate::api::state::state_foreign_raw_code(buf, key, namespace, account);
+    decode_read(code, buf)
 }
 
 /// Write a state entry belonging to another namespace/account, encoding
@@ -1138,6 +1142,35 @@ mod tests {
         let encoded = key.encode();
         assert_eq!(encoded.as_ref(), &raw[..]);
         assert_eq!(encoded.as_ref().len(), STATE_KEY_LEN);
+    }
+
+    /// Asserts [`EncodedStateKey::from_short`] and `<[u8; N] as
+    /// StateKeyEncode>::encode` produce byte-identical results for the same
+    /// key — both the [`AsRef<[u8]>`] prefix a host call actually sees and
+    /// the full `buf`/`len` representation, since the `#[hooks]` macro's
+    /// literal `#[state(key = b"...")]` codegen picks `from_short` over
+    /// `encode` purely as a compile-time-vs-runtime optimization (see
+    /// `rshooks-macros::hooks_struct::is_byte_string_literal`'s doc
+    /// comment) and must never observe a different result from doing so.
+    fn assert_from_short_matches_array_encode<const N: usize>(key: &[u8; N]) {
+        let from_short = EncodedStateKey::from_short(key);
+        let encoded = key.encode();
+        assert_eq!(from_short.as_ref(), encoded.as_ref());
+        assert_eq!(from_short.buf, encoded.buf);
+        assert_eq!(from_short.len, encoded.len);
+    }
+
+    #[test]
+    fn from_short_matches_array_encode_byte_identical() {
+        assert_from_short_matches_array_encode(&[0xAAu8; 1]);
+        assert_from_short_matches_array_encode(&[0u8, 0xFF]);
+        assert_from_short_matches_array_encode(&[0u8, 1, 2, 3, 4, 5, 0]);
+        assert_from_short_matches_array_encode(&{
+            let mut key = [0xCDu8; STATE_KEY_LEN];
+            key[0] = 0;
+            key[STATE_KEY_LEN - 1] = 0;
+            key
+        });
     }
 
     #[test]
