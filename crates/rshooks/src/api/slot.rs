@@ -157,6 +157,29 @@ pub fn slot_subfield(parent_slot: u32, field_id: impl Into<u32>, new_slot: u32) 
     res(unsafe { rshooks_core::slot_subfield(parent_slot, field_id, new_slot) }).map(|v| v as u32)
 }
 
+/// [`slot_subfield`], returning the **undecoded** `i64` the host call
+/// produced instead of a decoded [`Result`].
+///
+/// A missing field is reported here as `DOESNT_EXIST`, so this is where a
+/// caller distinguishing "absent" from "failed" has to look — before any
+/// [`crate::error::HookError`] is constructed, per `docs/DESIGN.md` §5.6's
+/// nesting-depth rule. Backs
+/// [`SlotObject::get_opt`](crate::slot_obj::SlotObject::get_opt), which the
+/// generated views' optional-field accessors use.
+///
+/// Body duplicated rather than shared with [`slot_subfield`], for the
+/// reason `api::state`'s `state_raw_code` documents.
+#[inline(always)]
+pub(crate) fn slot_subfield_raw_code(parent_slot: u32, field_id: u32, new_slot: u32) -> i64 {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) =
+        rshooks_core::backend::with_backend(|b| b.slot_subfield(parent_slot, field_id, new_slot))
+    {
+        return v;
+    }
+    unsafe { rshooks_core::slot_subfield(parent_slot, field_id, new_slot) }
+}
+
 /// The type of the object in `slot_no`: with `flags = 0`, the field code;
 /// with `flags = 1`, whether it is a native (XRP/XAH) amount.
 #[inline(always)]

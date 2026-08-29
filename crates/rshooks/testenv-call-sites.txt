@@ -35,12 +35,15 @@ api/ledger.rs::ledger_nonce -> ledger_nonce
 api/ledger.rs::ledger_seq -> ledger_seq
 api/otxn.rs::otxn_burden -> otxn_burden
 api/otxn.rs::otxn_field -> otxn_field
+api/otxn.rs::otxn_field_raw_code -> otxn_field
 api/otxn.rs::otxn_field_u64 -> otxn_field
+api/otxn.rs::otxn_field_u64_raw_code -> otxn_field
 api/otxn.rs::otxn_generation -> otxn_generation
 api/otxn.rs::otxn_id -> otxn_id
 api/otxn.rs::otxn_param -> otxn_param
 api/otxn.rs::otxn_param_raw_code -> otxn_param
 api/otxn.rs::otxn_type -> otxn_type
+api/otxn.rs::otxn_type_code -> otxn_type
 api/state.rs::state -> state
 api/state.rs::state_foreign -> state_foreign
 api/state.rs::state_foreign_raw_code -> state_foreign
@@ -102,6 +105,7 @@ api/slot.rs::slot_set -> slot_set
 api/slot.rs::slot_size -> slot_size
 api/slot.rs::slot_subarray -> slot_subarray
 api/slot.rs::slot_subfield -> slot_subfield
+api/slot.rs::slot_subfield_raw_code -> slot_subfield
 api/slot.rs::slot_type -> slot_type
 api/slot.rs::slot_u64 -> slot
 api/slot.rs::xpop_slot -> xpop_slot

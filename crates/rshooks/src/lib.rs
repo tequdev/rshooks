@@ -24,6 +24,7 @@ pub(crate) mod testenv_bridge;
 pub mod tx_type;
 pub mod txn;
 pub mod types;
+pub mod views;
 pub mod xfl;
 pub mod xfl_unchecked;
 

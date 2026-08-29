@@ -1170,6 +1170,94 @@ raw `slot_set` took a slice. `07_xfl-math` and `08_slot-ledger` got
 *cheaper* (−10 and −12), having dropped `slot_clear` calls the consuming
 reads make unnecessary.
 
+### 5.9 Generated format views: `views::{tx, ledger, inner}`
+
+Upstream declares 74 transaction types, 34 ledger entry types and 26
+inner-object formats, and amendments change their field lists. Hand-writing
+one read view per type does not scale, so all of them are **generated** —
+the same pattern §4 already applies to `sfcodes.h → sfield.rs` and
+`tts.h → tx_type.rs`, applied to a third vendor group
+(`crates/rshooks-core/vendor/xahaud-protocol/`: `sfields.macro`,
+`transactions.macro`, `ledger_entries.macro`, `TxFormats.cpp`,
+`LedgerFormats.cpp`, `InnerObjectFormats.cpp`). Those six files are parsed
+once into the checked-in `crates/rshooks-core/protocol_formats.json`, and
+every renderer reads that artifact rather than re-parsing — so a future
+transaction-*builder* renderer consumes a stable, versioned input.
+
+```rust
+let p = views::tx::Payment::otxn()?;            // checks otxn_type == ttPAYMENT
+let dest: AccountId = p.destination()?;          // soeREQUIRED -> Result<T>
+let tag: Option<u32> = p.destination_tag()?;     // soeOPTIONAL -> Result<Option<T>>
+
+let line = views::ledger::RippleState::from_keylet(&keylet_line(a, b, cur)?)?;
+let bal: AmountBytes = line.balance()?;
+```
+
+The decisions behind it:
+
+- **This supersedes §5.5's "no library-owned shapes" rationale, narrowly.**
+  That argument was about release lag on *hand-maintained* shapes;
+  `scripts/sync-vendor.sh` + `cargo xtask gen-core` refreshes every shape at
+  once and `gen-core --check` fails CI on drift. Hand-written
+  shape-specific code stays banned. See `txn.rs`'s module doc comment.
+- **Generic over a sealed `FieldSource`.** A transaction view reads either
+  the originating transaction (`OtxnSource`, a ZST over `otxn_field` — one
+  host call per access, no slot consumed) or an already-loaded slot
+  (`SlotSource`). Both are monomorphized and every accessor is
+  `#[inline(always)]`, so the abstraction compiles away to the host call it
+  wraps. Ledger and inner views are slot-only and not generic. A third impl
+  over parsed bytes could be added without touching a line of generated
+  code.
+- **Constructors verify, by raw `u16` compare.** `Payment::otxn()` checks
+  `otxn_type` against `rshooks_core::ttPAYMENT`; `RippleState::from_slot`
+  checks `sfLedgerEntryType` against `ltRIPPLE_STATE`. Never a `TxType`/
+  `LedgerEntryType` decode — those are ~74- and ~34-arm matches with
+  §5.6's nesting cost, and a view checks its type on every construction. A
+  failed check consumes and clears the slot, like `try_cast`.
+- **Absence is decided on the raw return code.** `soeOPTIONAL`/`soeDEFAULT`
+  fields read as `Result<Option<T>>`, with `Ok(None)` decided by comparing
+  the undecoded `i64` against `DOESNT_EXIST` — never by matching
+  `HookError::DoesntExist`, per §5.6's rule for rshooks's own internals. A
+  view emits one optional read per optional field, so a single
+  specific-variant match here would blow the nesting budget on its own.
+  `soeDEFAULT` reads as `Option` too: upstream encodes "may be omitted",
+  not a default value.
+- **Slot-backed accessors are get → read → clear.** Every one navigates to
+  a child slot, performs a terminal read, and releases the child before
+  returning, through the `take_*` family (`SlotObject::take_raw` was added
+  for the variable-length case). A view's accessors can be called any
+  number of times and consume zero slots beyond the view's own root — the
+  only place a hook pays a `slot_clear` the C idiom skips, and the reason
+  a thirty-field ledger view is usable at all. The `*_slot` subobject
+  accessors are the documented exception: they hand the child's ownership
+  to the caller.
+- **Value types are keyed on the serialized type ID**, matching the
+  `SField<T>` §5.8's table already carries — with the two wire markers
+  reading back as values (`Amount` → `AmountBytes`, `Issue` → `IssueData`).
+  Unmodeled types (`Blob`, `PathSet`, `Vector256`, `Number`, `Hash128`,
+  `Hash160`, `XChainBridge`, …) get a raw `…_into` byte accessor documented
+  as raw access, not typed access; `Number` is explicitly not an `XFL`.
+  `STObject`/`STArray` fields get that raw accessor on every source, plus a
+  `…_slot` child-slot accessor on the slot-backed views only — `otxn_field`
+  cannot navigate into a container.
+- **Code, not data.** The renderer emits no `static`, no export, no
+  function pointer and no registration table, because §6.2's cleaner drops
+  unreachable *functions* but retains active data segments regardless of
+  reachability — a lookup table would land in every hook's wasm whether it
+  used a view or not. An xtask test asserts the rendered text contains none
+  of them. Measured: with the views unused, all 19 example binaries are
+  byte-identical in size and worst-case instructions to the build before
+  this layer existed.
+- **All logic lives in the hand-written `views/source.rs`.** The generated
+  files are declarations that call into it — one struct and one accessor
+  per upstream declaration, no branching of their own — so the reviewable
+  surface is one module rather than 34k lines.
+- **Not generated (v1):** `STArray` iteration sugar (compose the slot API
+  with `views::inner`), builders (the artifact carries what they need;
+  no builder code yet), and keylet construction, which stays in
+  `api::keylet` because keylet parameterization is per-type knowledge the
+  format macros do not encode — `from_keylet` just composes.
+
 ## 6. rshooks-build
 
 `std` crate: `src/main.rs` (clap CLI) + `src/lib.rs` (pipeline as pure

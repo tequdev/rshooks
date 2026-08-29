@@ -34,6 +34,9 @@ pub mod ledger_entry_type;
 /// `tts.h` — one of the generators in this module whose output lands
 /// outside `rshooks-core`; see its own module doc comment for why.
 pub mod tx_type;
+/// Generates `crates/rshooks/src/views/{tx,ledger,inner}.rs` (typed read
+/// views over every declared format) from `protocol_formats.json`.
+pub mod views;
 
 /// Prepends the required `// @generated ...` marker to a module's `//!`
 /// doc-comment body, per `docs/DESIGN.md` §4 / the xtask spec: every

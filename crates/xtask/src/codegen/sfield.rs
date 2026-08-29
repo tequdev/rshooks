@@ -95,7 +95,11 @@ fn value_type(type_id: u32) -> Option<&'static str> {
 
 /// A human-readable name for a serialized type ID, for the generated
 /// per-constant doc comment. Unknown IDs are rendered numerically.
-fn type_id_name(type_id: u32) -> String {
+///
+/// Shared with [`super::views`], whose accessor docs name the same types —
+/// one spelling of `Hash256`/`Blob`/`STArray`, so the two generated layers
+/// describe a field identically.
+pub fn type_id_name(type_id: u32) -> String {
     match type_id {
         1 => "UInt16".into(),
         2 => "UInt32".into(),

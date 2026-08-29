@@ -102,7 +102,7 @@ use core::mem::MaybeUninit;
 
 use crate::api;
 use crate::convert::FixedRead;
-use crate::error::{HookError, Result};
+use crate::error::{HookError, Result, res};
 use crate::types::{
     AccountId, Amount, CurrencyCode, Hash, IouAmount, Issue, IssuedAsset, Keylet, NativeAmount,
     Opaque, SField, STArray, STObject,
@@ -381,6 +381,31 @@ impl<T> SlotObject<T> {
         <K as private::Resolve>::resolve(key, self.no).map(SlotObject::wrap)
     }
 
+    /// [`get`](Self::get) for a field that may be absent: `Ok(None)` when
+    /// the object has no such field, `Err` for a real failure.
+    ///
+    /// The distinction is made on the **raw** host return code, before any
+    /// [`HookError`] exists — `docs/DESIGN.md` §5.6 requires that of
+    /// `rshooks`'s own internals, since matching `HookError::DoesntExist`
+    /// would drag that enum's ~40-block decode into every inlined call site.
+    /// Deliberately not public: a hook author reading one optional field
+    /// pays one specific-variant match and is within the documented budget,
+    /// whereas the generated views ([`crate::views`]) emit an optional read
+    /// per optional field of every type and would blow through it.
+    #[inline(always)]
+    pub(crate) fn get_opt<U>(&self, field: SField<U>) -> Result<Option<SlotObject<U>>>
+    where
+        SField<U>: SlotKey<T>,
+    {
+        // `0` asks the host to auto-assign the child slot, matching
+        // `Resolve for SField<T>`.
+        let code = api::slot::slot_subfield_raw_code(self.no, field.code(), 0);
+        if code == rshooks_core::DOESNT_EXIST {
+            return Ok(None);
+        }
+        res(code).map(|no| Some(SlotObject::wrap(no as u32)))
+    }
+
     /// Releases the slot, consuming the handle.
     ///
     /// The only way to give a slot back before the hook ends. Fallible
@@ -402,6 +427,29 @@ impl<T> SlotObject<T> {
     #[inline(always)]
     pub fn raw<B: AsMut<[u8]> + ?Sized>(self, buf: &mut B) -> Result<usize> {
         api::slot::slot(buf, self.no)
+    }
+
+    /// [`raw`](Self::raw), then clears the slot — on the success path *and*
+    /// the failure path.
+    ///
+    /// The variable-length member of the read-and-clear family, alongside
+    /// [`take_value`](Self::value)/[`take_xfl`](SlotObject::<Amount>::take_xfl)/
+    /// [`take_raw_exact`](Self::take_raw_exact): [`raw`](Self::raw) consumes
+    /// the handle but leaves the slot allocated, which is the right cost
+    /// model for a one-shot read and the wrong one for anything that
+    /// navigates repeatedly. Generated views read every raw field through
+    /// this, so calling their accessors any number of times costs no slots
+    /// beyond the view's own root.
+    ///
+    /// The clear's own result is discarded: the read's result is what the
+    /// caller asked for, and a failed clear cannot be acted on usefully
+    /// here.
+    #[inline(always)]
+    pub fn take_raw<B: AsMut<[u8]> + ?Sized>(self, buf: &mut B) -> Result<usize> {
+        let no = self.no;
+        let out = api::slot::slot(buf, no);
+        let _ = api::slot::slot_clear(no);
+        out
     }
 
     /// Reads exactly `N` bytes, erroring if the slot is not exactly that

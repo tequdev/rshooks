@@ -166,5 +166,8 @@ echo "Done. Review any changes with:  git diff crates/rshooks-build/vendor/ crat
 echo "If the hook-headers or protocol-formats group changed, regenerate"
 echo "rshooks-core's translated sources and format artifacts:"
 echo "  cargo xtask gen-core"
+echo "That rewrites protocol_formats.json plus every generated source it"
+echo "feeds, including rshooks' typed views (src/views/{tx,ledger,inner}.rs),"
+echo "so a protocol-formats change shows up there as a reviewable diff."
 echo "Then run the test suite (vendored behavior/translations may have changed):"
 echo "  cargo test --workspace"

@@ -5,8 +5,9 @@
 //! # Why there is no library-owned `PaymentTemplate` here
 //!
 //! `rshooks` does not hard-code a `PaymentTemplate` (or any other
-//! transaction-shaped type): any new field or transaction type a hook author
-//! wanted would require a `rshooks` release. Instead, mirroring xahaud's
+//! hand-written transaction-shaped type): any new field or transaction type
+//! a hook author wanted would require a `rshooks` release. Instead,
+//! mirroring xahaud's
 //! own C "Tx Builder" split (template bytes pasted into the *hook's own
 //! source*, with only generic helpers like `SET_UINT32`/`SET_NATIVE_AMOUNT`/
 //! `COPY_20` shared):
@@ -31,6 +32,32 @@
 //! macro generate `prepare_for_emit()` itself, replicating xahaud's C
 //! `PREPARE_TXN()`/`PREPARE_PAYMENT_SIMPLE` semantics exactly — see
 //! `examples/10_emit-txn` for the worked example.
+//!
+//! ## What [`crate::views`] changed about that argument, and what it did not
+//!
+//! The release-lag premise above — "any new field or transaction type would
+//! require a `rshooks` release" — is true of a *hand-maintained* shape and
+//! false of a **generated** one. [`crate::views`] therefore does ship
+//! library-owned per-transaction and per-ledger-entry shapes: they are
+//! rendered from xahaud's own vendored format macros, so an amendment that
+//! adds a field is picked up by `scripts/sync-vendor.sh` plus `cargo xtask
+//! gen-core`, and `cargo xtask gen-core --check` fails CI when the
+//! checked-in output has drifted. Nobody hand-writes or hand-maintains
+//! them.
+//!
+//! Everything else this section says still holds, unchanged:
+//!
+//! - **Hand-written shape-specific code remains banned in this crate.** The
+//!   exemption is for generated shapes only, and only because generation
+//!   removes the maintenance cost that motivated the ban.
+//! - **The split of responsibilities is unchanged.** [`codec`]'s primitives
+//!   stay transaction-shape-agnostic, and [`txn_template!`] stays the way a
+//!   hook author declares the emitted-transaction layout they want.
+//! - **[`crate::views`] is read-only.** It does not emit, and it does not
+//!   own emit plumbing: `sfEmitDetails` and the host-only fields are still
+//!   written by `prepare_for_emit`/[`crate::sto_writer`], which upstream's
+//!   format macros say nothing about. A future generated *builder* layer
+//!   would compose with that machinery rather than replace it.
 
 /// Generic, panic-free STObject field-header and value-encoding primitives.
 ///

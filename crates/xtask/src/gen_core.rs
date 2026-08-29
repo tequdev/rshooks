@@ -45,10 +45,23 @@ const GENERATED_FILES: &[&str] = &[
 /// The set of `rshooks/src/`-relative `.rs` files this generator owns —
 /// disjoint from [`GENERATED_FILES`] (which are all `rshooks-core/src/`-
 /// relative): [`codegen::tx_type`]'s typed `TxType` enum,
-/// [`codegen::ledger_entry_type`]'s typed `LedgerEntryType` enum and
-/// [`codegen::sfield`]'s typed `SField` constants are the generated files
-/// that land in `rshooks` instead of `rshooks-core`.
-const GENERATED_FILES_HOOKS_LIB: &[&str] = &["sfield.rs", "tx_type.rs", "ledger_entry_type.rs"];
+/// [`codegen::ledger_entry_type`]'s typed `LedgerEntryType` enum,
+/// [`codegen::sfield`]'s typed `SField` constants and [`codegen::views`]'s
+/// three view modules are the generated files that land in `rshooks`
+/// instead of `rshooks-core`.
+///
+/// The three `views/` entries are the only paths here with a directory
+/// component; `views/mod.rs` and `views/source.rs` are hand-written and
+/// deliberately absent, exactly as `rshooks-core`'s `lib.rs` is absent from
+/// [`GENERATED_FILES`].
+const GENERATED_FILES_HOOKS_LIB: &[&str] = &[
+    "sfield.rs",
+    "tx_type.rs",
+    "ledger_entry_type.rs",
+    "views/tx.rs",
+    "views/ledger.rs",
+    "views/inner.rs",
+];
 
 /// The generated intermediate-representation file, checked in at the
 /// `rshooks-core` crate root (not under `src/`, since it isn't Rust source):
@@ -226,8 +239,9 @@ fn generate_rust_files(
 /// Generates every `rshooks`-targeted file's *unformatted* content, keyed
 /// by its `rshooks/src/`-relative filename, from the same two artifact texts
 /// [`generate_rust_files`] consumes — [`codegen::sfield`]'s `sfield.rs`,
-/// [`codegen::tx_type`]'s `tx_type.rs` and
-/// [`codegen::ledger_entry_type`]'s `ledger_entry_type.rs`.
+/// [`codegen::tx_type`]'s `tx_type.rs`,
+/// [`codegen::ledger_entry_type`]'s `ledger_entry_type.rs` and
+/// [`codegen::views`]'s three `views/*.rs` modules.
 fn generate_rshooks_files(
     hook_api_json: &str,
     protocol_formats_json: &str,
@@ -244,6 +258,12 @@ fn generate_rshooks_files(
         "ledger_entry_type.rs",
         codegen::ledger_entry_type::generate(&formats.ledger_entries)?,
     );
+    out.insert("views/tx.rs", codegen::views::generate_tx(&formats)?);
+    out.insert(
+        "views/ledger.rs",
+        codegen::views::generate_ledger(&formats)?,
+    );
+    out.insert("views/inner.rs", codegen::views::generate_inner(&formats)?);
 
     for name in GENERATED_FILES_HOOKS_LIB {
         if !out.contains_key(name) {
@@ -277,8 +297,14 @@ impl FmtScratch {
 
     /// Writes `content` under `filename` in the scratch dir and runs
     /// `rustfmt` on it in place, returning the formatted text.
+    ///
+    /// The scratch dir is flat: a `filename` carrying a directory component
+    /// (`views/tx.rs`) is flattened to `views_tx.rs` rather than creating
+    /// the directory, since `rustfmt` cares only about the extension and
+    /// the `--edition` flag. Flattening keeps names unique because the
+    /// target lists are themselves unique paths.
     fn format(&self, filename: &str, content: &str) -> Result<String> {
-        let path = self.0.join(filename);
+        let path = self.0.join(filename.replace('/', "_"));
         fs::write(&path, content).with_context(|| format!("writing {}", path.display()))?;
 
         // `unsafe extern "C" { ... }` (used in api.rs) requires 2024-edition
@@ -411,7 +437,7 @@ pub fn run_check() -> Result<()> {
 
     if mismatched.is_empty() {
         println!(
-            "cargo xtask gen-core --check: crates/rshooks-core/hook_api.json, crates/rshooks-core/protocol_formats.json, crates/rshooks-core/src/*.rs, and crates/rshooks/src/sfield.rs + tx_type.rs + ledger_entry_type.rs are up to date"
+            "cargo xtask gen-core --check: crates/rshooks-core/hook_api.json, crates/rshooks-core/protocol_formats.json, crates/rshooks-core/src/*.rs, and crates/rshooks/src/sfield.rs + tx_type.rs + ledger_entry_type.rs + views/{{tx,ledger,inner}}.rs are up to date"
         );
         Ok(())
     } else {

@@ -775,6 +775,21 @@ mod tests {
                 crate::codegen::ledger_entry_type::generate(&f.ledger_entries),
                 crate::codegen::ledger_entry_type::generate(&round_tripped.ledger_entries),
             ),
+            (
+                "views/tx.rs",
+                crate::codegen::views::generate_tx(&f),
+                crate::codegen::views::generate_tx(&round_tripped),
+            ),
+            (
+                "views/ledger.rs",
+                crate::codegen::views::generate_ledger(&f),
+                crate::codegen::views::generate_ledger(&round_tripped),
+            ),
+            (
+                "views/inner.rs",
+                crate::codegen::views::generate_inner(&f),
+                crate::codegen::views::generate_inner(&round_tripped),
+            ),
         ] {
             let direct = direct.unwrap_or_else(|e| panic!("{label}: {e:#}"));
             let hopped = hopped.unwrap_or_else(|e| panic!("{label}: {e:#}"));

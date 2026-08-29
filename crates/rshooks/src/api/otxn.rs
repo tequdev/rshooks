@@ -73,6 +73,62 @@ pub fn otxn_field_u64(field_id: impl Into<u32>) -> Result<u64> {
     res(unsafe { rshooks_core::otxn_field(0, 0, field_id) }).map(|v| v as u64)
 }
 
+/// [`otxn_field`], returning the **undecoded** `i64` the host call
+/// produced instead of a decoded [`Result`].
+///
+/// Exists for the same reason `api::state`'s `state_raw_code` does
+/// (`docs/DESIGN.md` §5.6, the nesting-depth rule): a caller that needs to
+/// tell "this field is absent" from "this read failed" must compare the raw
+/// code against `rshooks_core::DOESNT_EXIST` *before* any [`HookError`] is
+/// constructed, or it pays that enum's ~40-block decode. The generated
+/// views' optional-field accessors ([`crate::views`]) are that caller.
+///
+/// Deliberately **not** implemented by having [`otxn_field`] call this (or
+/// vice versa): `state_raw_code`'s doc comment records why routing an
+/// existing wrapper through a second function perturbs `rshooks-build`'s
+/// unnest pass even when both are `#[inline(always)]`. The body is
+/// duplicated instead, so [`otxn_field`]'s compiled output is provably
+/// unaffected.
+#[inline(always)]
+pub(crate) fn otxn_field_raw_code<B: AsMut<[u8]> + ?Sized>(out: &mut B, field_id: u32) -> i64 {
+    let out = out.as_mut();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.otxn_field(field_id)) {
+        return crate::testenv_bridge::write_bytes_code(out, r);
+    }
+    unsafe { rshooks_core::otxn_field(out.as_mut_ptr() as u32, out.len() as u32, field_id) }
+}
+
+/// [`otxn_field_u64`]'s raw-code counterpart (as-int64 mode). See
+/// [`otxn_field_raw_code`] for why this exists and why its body is
+/// duplicated rather than shared.
+#[inline(always)]
+pub(crate) fn otxn_field_u64_raw_code(field_id: u32) -> i64 {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.otxn_field(field_id)) {
+        return crate::testenv_bridge::as_int64_code(r);
+    }
+    unsafe { rshooks_core::otxn_field(0, 0, field_id) }
+}
+
+/// The originating transaction's type as the raw `u16` `tt*` code, without
+/// decoding it into a [`TxType`].
+///
+/// [`otxn_type`] is the one to reach for in hook code. This exists because
+/// `TxType::from` is a ~74-arm match with the same nesting cost as
+/// `HookError::from` (`docs/DESIGN.md` §5.6 spells out the analogy), and
+/// the generated views' constructors check the type on *every* view they
+/// build — comparing against a raw `rshooks_core::tt*` constant costs one
+/// integer compare instead.
+#[inline(always)]
+pub(crate) fn otxn_type_code() -> u16 {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.otxn_type()) {
+        return v as u16;
+    }
+    unsafe { rshooks_core::otxn_type() as u16 }
+}
+
 /// Read field `field_id` from the originating transaction, requiring it to
 /// be exactly `T`'s length — any [`crate::convert::FixedRead`] type, most
 /// commonly a `rshooks::types` newtype or a raw `[u8; N]`. A field longer
