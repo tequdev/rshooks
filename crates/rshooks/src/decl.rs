@@ -30,16 +30,17 @@
 //!
 //! # `State` vs. [`mod@crate::state`]
 //!
-//! [`State<V, S>`]'s accessors are thin forwards onto
-//! [`mod@crate::state`]'s existing free functions (`state_get`,
-//! `state_set_loose`, `state_update_loose`, `state_delete`,
-//! `state_foreign_get`, `state_foreign_set_loose`) — this module adds no
-//! new decode logic of its own. The routing goes through
-//! [`EncodedStateKey`]'s identity [`StateKeyEncode`] impl (see that impl's
-//! doc comment in `state.rs`): [`StateSpec::encode_key`] produces an
-//! already-encoded key once, and every accessor here hands that same
-//! [`EncodedStateKey`] straight to the existing free functions, which are
-//! generic over `&impl StateKeyEncode`.
+//! [`State<V, S>`]'s accessors are thin forwards onto [`mod@crate::state`]'s
+//! internal `_encoded`-suffixed funnels (`state_get_encoded`,
+//! `state_set_encoded`, `state_update_encoded`, `state_delete_encoded`,
+//! `state_foreign_get_encoded`, `state_foreign_set_encoded`) — this module
+//! adds no new decode logic of its own. [`StateSpec::with_key`] produces an
+//! already-encoded key once (via [`StateSpec::encode_key`] by default, or a
+//! `'static`-promoted literal for a macro-generated constant key — see
+//! [`StateSpec::with_key`]'s doc comment) and hands it straight to the
+//! matching funnel, so no [`StateKeyEncode::encode`] call happens on this
+//! path at all — [`StateEntry`] (bound via [`State::at`]) calls the same
+//! funnels directly with its own already-encoded key.
 //!
 //! # Params: absence vs. decode failure
 //!
@@ -216,6 +217,19 @@ pub trait StateSpec {
 
     /// Computes this spec's [`EncodedStateKey`] from `args`.
     fn encode_key(args: &Self::KeyArgs) -> EncodedStateKey;
+
+    /// Computes this spec's key (via [`Self::encode_key`] by default) and
+    /// hands it to `f`, returning whatever `f` returns. [`State`]'s
+    /// constant-key accessors all route through this method rather than
+    /// [`Self::encode_key`] directly, so a macro-generated literal
+    /// `#[state(key = b"...")]` marker can override it to hand `f` a
+    /// compile-time-computed, `'static`-promoted [`EncodedStateKey`]
+    /// instead of re-encoding the same literal at runtime on every call —
+    /// see [`crate::state::EncodedStateKey::from_short`].
+    #[inline(always)]
+    fn with_key<R>(args: &Self::KeyArgs, f: impl FnOnce(&EncodedStateKey) -> R) -> R {
+        f(&Self::encode_key(args))
+    }
 }
 
 /// Declares how a [`HookParam`]/[`OtxnParam`] marker `S` encodes its
@@ -324,14 +338,14 @@ where
     /// vs. decode failure" contract this forwards to unchanged.
     #[inline(always)]
     pub fn get(&self) -> Result<Option<V>> {
-        crate::state::state_get::<V>(&S::encode_key(&()))
+        S::with_key(&(), crate::state::state_get_encoded::<V>)
     }
 
     /// Writes this entry, encoding `value` as `V`. Returns the number of
     /// bytes written.
     #[inline(always)]
     pub fn set(&self, value: &V) -> Result<usize> {
-        crate::state::state_set_loose::<V>(&S::encode_key(&()), value)
+        S::with_key(&(), |key| crate::state::state_set_encoded::<V>(key, value))
     }
 
     /// Read-modify-writes this entry: reads the current value (or `None` if
@@ -339,14 +353,16 @@ where
     /// returns the number of bytes written.
     #[inline(always)]
     pub fn update(&self, f: impl FnOnce(Option<V>) -> V) -> Result<usize> {
-        crate::state::state_update_loose::<V, _>(&S::encode_key(&()), f)
+        S::with_key(&(), |key| {
+            crate::state::state_update_encoded::<V, _>(key, f)
+        })
     }
 
     /// Deletes this entry. See [`crate::state::state_delete`]'s doc comment
     /// for why deletion has no distinct "not found" failure.
     #[inline(always)]
     pub fn delete(&self) -> Result<()> {
-        crate::state::state_delete(&S::encode_key(&()))
+        S::with_key(&(), crate::state::state_delete_encoded)
     }
 
     /// Reads this entry belonging to another namespace/account, decoded as
@@ -354,7 +370,9 @@ where
     /// `Option` convention. `Ok(None)` means no entry exists.
     #[inline(always)]
     pub fn get_foreign(&self, ns: Option<&[u8]>, acct: Option<&[u8]>) -> Result<Option<V>> {
-        crate::state::state_foreign_get::<V>(&S::encode_key(&()), ns, acct)
+        S::with_key(&(), |key| {
+            crate::state::state_foreign_get_encoded::<V>(key, ns, acct)
+        })
     }
 
     /// Writes this entry belonging to another namespace/account, encoding
@@ -363,7 +381,9 @@ where
     /// the number of bytes written.
     #[inline(always)]
     pub fn set_foreign(&self, value: &V, ns: Option<&[u8]>, acct: Option<&[u8]>) -> Result<usize> {
-        crate::state::state_foreign_set_loose::<V>(&S::encode_key(&()), value, ns, acct)
+        S::with_key(&(), |key| {
+            crate::state::state_foreign_set_encoded::<V>(key, value, ns, acct)
+        })
     }
 }
 
@@ -386,8 +406,10 @@ where
 /// An encoded-key view of a [`State`] entry, bound to concrete key
 /// arguments via [`State::at`] — same accessor set as [`State`]'s
 /// constant-key inherent impls, forwarding to the same
-/// [`mod@crate::state`] free functions through the already-computed
-/// [`EncodedStateKey`] this holds.
+/// [`mod@crate::state`] `_encoded`-suffixed funnels (`state_get_encoded`,
+/// `state_set_encoded`, `state_update_encoded`, `state_delete_encoded`,
+/// `state_foreign_get_encoded`, `state_foreign_set_encoded`) through the
+/// already-computed [`EncodedStateKey`] this holds.
 ///
 /// `PhantomData<fn() -> V>` rather than `PhantomData<V>` so this view is
 /// `Send`/`Sync`/`Copy` regardless of what `V` is — see
@@ -411,14 +433,14 @@ impl<V: ToBytes + FromBytes> StateEntry<V> {
     /// Reads this entry, decoded as `V`. `Ok(None)` means no entry exists.
     #[inline(always)]
     pub fn get(&self) -> Result<Option<V>> {
-        crate::state::state_get::<V>(&self.key)
+        crate::state::state_get_encoded::<V>(&self.key)
     }
 
     /// Writes this entry, encoding `value` as `V`. Returns the number of
     /// bytes written.
     #[inline(always)]
     pub fn set(&self, value: &V) -> Result<usize> {
-        crate::state::state_set_loose::<V>(&self.key, value)
+        crate::state::state_set_encoded::<V>(&self.key, value)
     }
 
     /// Read-modify-writes this entry: reads the current value (or `None` if
@@ -426,13 +448,13 @@ impl<V: ToBytes + FromBytes> StateEntry<V> {
     /// returns the number of bytes written.
     #[inline(always)]
     pub fn update(&self, f: impl FnOnce(Option<V>) -> V) -> Result<usize> {
-        crate::state::state_update_loose::<V, _>(&self.key, f)
+        crate::state::state_update_encoded::<V, _>(&self.key, f)
     }
 
     /// Deletes this entry.
     #[inline(always)]
     pub fn delete(&self) -> Result<()> {
-        crate::state::state_delete(&self.key)
+        crate::state::state_delete_encoded(&self.key)
     }
 
     /// Reads this entry belonging to another namespace/account, decoded as
@@ -440,7 +462,7 @@ impl<V: ToBytes + FromBytes> StateEntry<V> {
     /// `Option` convention. `Ok(None)` means no entry exists.
     #[inline(always)]
     pub fn get_foreign(&self, ns: Option<&[u8]>, acct: Option<&[u8]>) -> Result<Option<V>> {
-        crate::state::state_foreign_get::<V>(&self.key, ns, acct)
+        crate::state::state_foreign_get_encoded::<V>(&self.key, ns, acct)
     }
 
     /// Writes this entry belonging to another namespace/account, encoding
@@ -449,7 +471,7 @@ impl<V: ToBytes + FromBytes> StateEntry<V> {
     /// the number of bytes written.
     #[inline(always)]
     pub fn set_foreign(&self, value: &V, ns: Option<&[u8]>, acct: Option<&[u8]>) -> Result<usize> {
-        crate::state::state_foreign_set_loose::<V>(&self.key, value, ns, acct)
+        crate::state::state_foreign_set_encoded::<V>(&self.key, value, ns, acct)
     }
 }
 
