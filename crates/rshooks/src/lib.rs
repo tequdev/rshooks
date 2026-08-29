@@ -12,6 +12,7 @@ pub mod decl;
 pub mod error;
 mod errors;
 pub mod exit;
+pub mod ledger_entry_type;
 mod macros;
 pub mod sfield;
 pub mod slot_obj;
@@ -947,6 +948,7 @@ pub mod prelude {
     pub use crate::decl::{HookParam, OtxnParam, State};
     pub use crate::error::{HookError, Result};
     pub use crate::exit::{Accept, HookResult, Rollback};
+    pub use crate::ledger_entry_type::LedgerEntryType;
     pub use crate::macros::no_unroll;
     pub use crate::sfield::*;
     pub use crate::slot_obj::{AmountBytes, CastTarget, IssueData, SlotKey, SlotObject};
@@ -970,7 +972,7 @@ pub mod prelude {
     // `sfcodes::*` is deliberately absent: `crate::sfield`'s typed `sfXxx`
     // constants take those names. The raw `u32` table is still there for
     // const contexts that need it — `rshooks::raw::sfcodes::*`.
-    pub use rshooks_core::{consts::*, ls_flags::*, tts::*, tx_flags::*};
+    pub use rshooks_core::{consts::*, lets::*, ls_flags::*, tts::*, tx_flags::*};
 }
 
 /// Distinctive negative code used by the panic handler below when rolling

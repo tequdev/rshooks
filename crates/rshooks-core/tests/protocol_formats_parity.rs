@@ -25,12 +25,15 @@
     clippy::arithmetic_side_effects
 )]
 
+mod common;
+
 use serde_json::Value;
 
 const TRANSACTIONS: &str = include_str!("../vendor/xahaud-protocol/transactions.macro");
 const LEDGER_ENTRIES: &str = include_str!("../vendor/xahaud-protocol/ledger_entries.macro");
 const SFIELDS: &str = include_str!("../vendor/xahaud-protocol/sfields.macro");
 const ARTIFACT: &str = include_str!("../protocol_formats.json");
+const LETS_RS: &str = include_str!("../src/lets.rs");
 
 /// One format as this file's own parser sees it: the header arguments before
 /// the field list, then `{sfX, soeY, ...}` entries flattened to
@@ -406,6 +409,43 @@ fn known_formats_read_the_way_the_upstream_sources_do() {
         artifact_fields(emit).first().map(Vec::as_slice),
         Some(["sfEmitGeneration".to_string(), "soeREQUIRED".to_string()].as_slice())
     );
+}
+
+/// The other parity tests in this directory close the loop from a vendored
+/// upstream file to the generated Rust it produces; this does the same for
+/// `src/lets.rs`, whose "header" side is the `LEDGER_ENTRY` invocations
+/// rather than a list of `#define`s. The Rust side is read with the same
+/// `common` helpers `tts_parity.rs` uses, so only the upstream-side parser
+/// is this file's own.
+#[test]
+fn lets_rs_matches_ledger_entries_macro() {
+    let parsed = scan_formats(
+        LEDGER_ENTRIES,
+        &["LEDGER_ENTRY_DUPLICATE", "LEDGER_ENTRY"],
+        4,
+    );
+    let macro_defs: Vec<(String, String)> = parsed
+        .iter()
+        .map(|f| (f.head[1].clone(), value_of(&f.head[2]).to_string()))
+        .collect();
+    let macro_env = common::build_env(&macro_defs);
+
+    let rust_consts = common::extract_rust_consts(LETS_RS);
+    assert_eq!(
+        rust_consts.len(),
+        parsed.len(),
+        "ledger_entries.macro declares {} types, lets.rs has {} constants",
+        parsed.len(),
+        rust_consts.len()
+    );
+    for (name, ty, _) in &rust_consts {
+        assert_eq!(ty, "u16", "{name}: expected type u16, found {ty}");
+    }
+    let rust_defs: Vec<(String, String)> =
+        rust_consts.into_iter().map(|(n, _, e)| (n, e)).collect();
+    let rust_env = common::build_env(&rust_defs);
+
+    common::assert_maps_match("ledger_entries.macro", &macro_env, "lets.rs", &rust_env);
 }
 
 #[test]

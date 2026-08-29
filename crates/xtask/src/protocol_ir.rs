@@ -665,6 +665,124 @@ mod tests {
         );
     }
 
+    /// The artifact's central promise to a future transaction-builder
+    /// renderer: declared macro order is not canonical wire order, but the
+    /// artifact carries enough to derive the latter by sorting on
+    /// [`SFieldDef::code`] — and that sort is total, because no format names
+    /// the same field twice, not even across the common-field split.
+    #[test]
+    fn canonical_sfcode_order_is_derivable_by_sorting() {
+        let f = corpus();
+        let code: BTreeMap<&str, u32> = f
+            .sfields
+            .iter()
+            .map(|s| (s.name.as_str(), s.code))
+            .collect();
+
+        let formats = f
+            .transactions
+            .iter()
+            .map(|t| (t.name.as_str(), &t.fields, &f.tx_common))
+            .chain(
+                f.ledger_entries
+                    .iter()
+                    .map(|l| (l.name.as_str(), &l.fields, &f.le_common)),
+            );
+
+        let mut checked = 0usize;
+        let mut saw_non_canonical_declaration = false;
+        for (label, specific, common) in formats {
+            // The field set a renderer sees: type-specific fields plus the
+            // common ones, deduplicated by name with the type-specific entry
+            // winning.
+            let mut names: Vec<&str> = specific.iter().map(|s| s.sfield.as_str()).collect();
+            for c in common {
+                if !names.contains(&c.sfield.as_str()) {
+                    names.push(c.sfield.as_str());
+                }
+            }
+            let declared: Vec<u32> = names
+                .iter()
+                .map(|n| {
+                    *code
+                        .get(n)
+                        .unwrap_or_else(|| panic!("{label} references unknown field {n}"))
+                })
+                .collect();
+            let mut sorted = declared.clone();
+            sorted.sort_unstable();
+            assert!(
+                sorted.windows(2).all(|w| w[0] < w[1]),
+                "{label}: sorting field codes does not yield a strict order — a field \
+                 appears twice, so canonical order is not derivable"
+            );
+            if declared != sorted {
+                saw_non_canonical_declaration = true;
+            }
+            checked += 1;
+        }
+        assert_eq!(checked, f.transactions.len() + f.ledger_entries.len());
+        assert!(
+            saw_non_canonical_declaration,
+            "no format declares its fields out of canonical order — the test is no longer \
+             exercising the distinction it exists to pin"
+        );
+    }
+
+    /// The versioning and additive-extension contract from the module docs:
+    /// a consumer compiled against today's shape must keep deserializing an
+    /// artifact that has *grown* fields, and must ignore rather than absorb
+    /// them.
+    #[test]
+    fn the_version_and_additive_extension_contract_hold() {
+        let f = corpus();
+        assert_eq!(f.version, PROTOCOL_FORMATS_VERSION);
+
+        let text = serde_json::to_string(&f).unwrap_or_else(|e| panic!("{e}"));
+        let mut json: serde_json::Value =
+            serde_json::from_str(&text).unwrap_or_else(|e| panic!("{e}"));
+        json["a_future_top_level_field"] = serde_json::json!(true);
+        json["sfields"][0]["a_future_sfield_field"] = serde_json::json!("x");
+        json["tx_common"][0]["a_future_field_spec_field"] = serde_json::json!(1);
+
+        let extended: ProtocolFormats = serde_json::from_value(json)
+            .unwrap_or_else(|e| panic!("an additive extension broke deserialization: {e}"));
+        assert_eq!(
+            extended, f,
+            "unknown fields must be ignored, not absorbed into known ones"
+        );
+    }
+
+    /// Rendering is a pure function of the artifact, and the artifact
+    /// survives the JSON hop the real pipeline takes: generating from the
+    /// in-memory IR and from the same IR round-tripped through JSON produces
+    /// byte-identical output.
+    #[test]
+    fn generated_sources_are_deterministic() {
+        let f = corpus();
+        let text = serde_json::to_string(&f).unwrap_or_else(|e| panic!("{e}"));
+        let round_tripped: ProtocolFormats =
+            serde_json::from_str(&text).unwrap_or_else(|e| panic!("{e}"));
+
+        for (label, direct, hopped) in [
+            (
+                "lets.rs",
+                crate::codegen::lets::generate(&f.ledger_entries),
+                crate::codegen::lets::generate(&round_tripped.ledger_entries),
+            ),
+            (
+                "ledger_entry_type.rs",
+                crate::codegen::ledger_entry_type::generate(&f.ledger_entries),
+                crate::codegen::ledger_entry_type::generate(&round_tripped.ledger_entries),
+            ),
+        ] {
+            let direct = direct.unwrap_or_else(|e| panic!("{label}: {e:#}"));
+            let hopped = hopped.unwrap_or_else(|e| panic!("{label}: {e:#}"));
+            assert_eq!(direct, hopped, "{label} is not deterministic");
+            assert!(!direct.is_empty(), "{label} rendered empty");
+        }
+    }
+
     #[test]
     fn checked_in_artifact_matches_the_vendored_sources() {
         let on_disk = include_str!("../../rshooks-core/protocol_formats.json");
