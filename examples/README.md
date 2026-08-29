@@ -115,6 +115,23 @@ cargo run -p rshooks-build -- check examples/02_state-counter/out/current/0.main
 See each example's own README for its exact command — none currently need
 `--auto-guard` (see below for why, and when it would still be needed).
 
+## Recorded cost (WCE / size / nesting)
+
+Each crate records its current `rshooks build`/`check` numbers in
+[`metrics.json`](./01_accept-all/metrics.json) next to `src/` — worst-case
+instruction count (`WCE.hook` / `WCE.cbak`), wasm size in bytes, and max
+block-nesting depth. After a library or example change that moves those
+numbers, refresh the snapshots instead of editing README prose:
+
+```sh
+mise run record-example-metrics
+```
+
+CI rebuilds every example and fails the job if `metrics.json` would
+change, so a forgotten refresh cannot land. Historical comparison tables
+in a crate's own README (typed vs raw, a one-off probe) stay as frozen
+probe results; they are not this snapshot and are not checked.
+
 ## Source style rules
 
 These are enforced by the examples workspace's `[lints]` (mirroring the
