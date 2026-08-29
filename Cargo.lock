@@ -577,6 +577,7 @@ dependencies = [
 name = "rshooks-core"
 version = "0.1.1"
 dependencies = [
+ "serde_json",
  "sha2",
 ]
 

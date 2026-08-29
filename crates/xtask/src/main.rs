@@ -10,6 +10,8 @@ mod codegen;
 mod gen_core;
 mod ir;
 mod parse;
+mod protocol_ir;
+mod protocol_parse;
 mod render;
 
 use clap::{Parser, Subcommand};

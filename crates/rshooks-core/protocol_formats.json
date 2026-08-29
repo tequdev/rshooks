@@ -1,0 +1,7510 @@
+{
+  "version": 1,
+  "sfields": [
+    {
+      "name": "sfLedgerEntry",
+      "sti": "LEDGERENTRY",
+      "sti_code": 10002,
+      "field_code": 257,
+      "code": 655491329,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfTransaction",
+      "sti": "TRANSACTION",
+      "sti_code": 10001,
+      "field_code": 257,
+      "code": 655425793,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfValidation",
+      "sti": "VALIDATION",
+      "sti_code": 10003,
+      "field_code": 257,
+      "code": 655556865,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfMetadata",
+      "sti": "METADATA",
+      "sti_code": 10004,
+      "field_code": 257,
+      "code": 655622401,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfCloseResolution",
+      "sti": "UINT8",
+      "sti_code": 16,
+      "field_code": 1,
+      "code": 1048577,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfMethod",
+      "sti": "UINT8",
+      "sti_code": 16,
+      "field_code": 2,
+      "code": 1048578,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfTransactionResult",
+      "sti": "UINT8",
+      "sti_code": 16,
+      "field_code": 3,
+      "code": 1048579,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfScale",
+      "sti": "UINT8",
+      "sti_code": 16,
+      "field_code": 4,
+      "code": 1048580,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfAssetScale",
+      "sti": "UINT8",
+      "sti_code": 16,
+      "field_code": 5,
+      "code": 1048581,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfTickSize",
+      "sti": "UINT8",
+      "sti_code": 16,
+      "field_code": 16,
+      "code": 1048592,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfUNLModifyDisabling",
+      "sti": "UINT8",
+      "sti_code": 16,
+      "field_code": 17,
+      "code": 1048593,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHookResult",
+      "sti": "UINT8",
+      "sti_code": 16,
+      "field_code": 18,
+      "code": 1048594,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfWasLockingChainSend",
+      "sti": "UINT8",
+      "sti_code": 16,
+      "field_code": 19,
+      "code": 1048595,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfLedgerEntryType",
+      "sti": "UINT16",
+      "sti_code": 1,
+      "field_code": 1,
+      "code": 65537,
+      "typed": true,
+      "extras": [
+        "SField::sMD_Never"
+      ]
+    },
+    {
+      "name": "sfTransactionType",
+      "sti": "UINT16",
+      "sti_code": 1,
+      "field_code": 2,
+      "code": 65538,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfSignerWeight",
+      "sti": "UINT16",
+      "sti_code": 1,
+      "field_code": 3,
+      "code": 65539,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfTransferFee",
+      "sti": "UINT16",
+      "sti_code": 1,
+      "field_code": 4,
+      "code": 65540,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfTradingFee",
+      "sti": "UINT16",
+      "sti_code": 1,
+      "field_code": 5,
+      "code": 65541,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfDiscountedFee",
+      "sti": "UINT16",
+      "sti_code": 1,
+      "field_code": 6,
+      "code": 65542,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfVersion",
+      "sti": "UINT16",
+      "sti_code": 1,
+      "field_code": 16,
+      "code": 65552,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHookStateChangeCount",
+      "sti": "UINT16",
+      "sti_code": 1,
+      "field_code": 17,
+      "code": 65553,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHookEmitCount",
+      "sti": "UINT16",
+      "sti_code": 1,
+      "field_code": 18,
+      "code": 65554,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHookExecutionIndex",
+      "sti": "UINT16",
+      "sti_code": 1,
+      "field_code": 19,
+      "code": 65555,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHookApiVersion",
+      "sti": "UINT16",
+      "sti_code": 1,
+      "field_code": 20,
+      "code": 65556,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHookStateScale",
+      "sti": "UINT16",
+      "sti_code": 1,
+      "field_code": 21,
+      "code": 65557,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfLedgerFixType",
+      "sti": "UINT16",
+      "sti_code": 1,
+      "field_code": 22,
+      "code": 65558,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfNetworkID",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 1,
+      "code": 131073,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfFlags",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 2,
+      "code": 131074,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfSourceTag",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 3,
+      "code": 131075,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfSequence",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 4,
+      "code": 131076,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfPreviousTxnLgrSeq",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 5,
+      "code": 131077,
+      "typed": true,
+      "extras": [
+        "SField::sMD_DeleteFinal"
+      ]
+    },
+    {
+      "name": "sfLedgerSequence",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 6,
+      "code": 131078,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfCloseTime",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 7,
+      "code": 131079,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfParentCloseTime",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 8,
+      "code": 131080,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfSigningTime",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 9,
+      "code": 131081,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfExpiration",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 10,
+      "code": 131082,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfTransferRate",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 11,
+      "code": 131083,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfWalletSize",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 12,
+      "code": 131084,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfOwnerCount",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 13,
+      "code": 131085,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfDestinationTag",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 14,
+      "code": 131086,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfLastUpdateTime",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 15,
+      "code": 131087,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHighQualityIn",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 16,
+      "code": 131088,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHighQualityOut",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 17,
+      "code": 131089,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfLowQualityIn",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 18,
+      "code": 131090,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfLowQualityOut",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 19,
+      "code": 131091,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfQualityIn",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 20,
+      "code": 131092,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfQualityOut",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 21,
+      "code": 131093,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfStampEscrow",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 22,
+      "code": 131094,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfBondAmount",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 23,
+      "code": 131095,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfLoadFee",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 24,
+      "code": 131096,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfOfferSequence",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 25,
+      "code": 131097,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfFirstLedgerSequence",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 26,
+      "code": 131098,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfLastLedgerSequence",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 27,
+      "code": 131099,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfTransactionIndex",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 28,
+      "code": 131100,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfOperationLimit",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 29,
+      "code": 131101,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfReferenceFeeUnits",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 30,
+      "code": 131102,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfReserveBase",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 31,
+      "code": 131103,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfReserveIncrement",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 32,
+      "code": 131104,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfSetFlag",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 33,
+      "code": 131105,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfClearFlag",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 34,
+      "code": 131106,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfSignerQuorum",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 35,
+      "code": 131107,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfCancelAfter",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 36,
+      "code": 131108,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfFinishAfter",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 37,
+      "code": 131109,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfSignerListID",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 38,
+      "code": 131110,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfSettleDelay",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 39,
+      "code": 131111,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfTicketCount",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 40,
+      "code": 131112,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfTicketSequence",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 41,
+      "code": 131113,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfNFTokenTaxon",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 42,
+      "code": 131114,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfMintedNFTokens",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 43,
+      "code": 131115,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfBurnedNFTokens",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 44,
+      "code": 131116,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHookStateCount",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 45,
+      "code": 131117,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfEmitGeneration",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 46,
+      "code": 131118,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfVoteWeight",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 48,
+      "code": 131120,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfLockCount",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 49,
+      "code": 131121,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfFirstNFTokenSequence",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 50,
+      "code": 131122,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfOracleDocumentID",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 51,
+      "code": 131123,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfStartTime",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 93,
+      "code": 131165,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfRepeatCount",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 94,
+      "code": 131166,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfDelaySeconds",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 95,
+      "code": 131167,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfXahauActivationLgrSeq",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 96,
+      "code": 131168,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfImportSequence",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 97,
+      "code": 131169,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfRewardTime",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 98,
+      "code": 131170,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfRewardLgrFirst",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 99,
+      "code": 131171,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfRewardLgrLast",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 100,
+      "code": 131172,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfIndexNext",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 1,
+      "code": 196609,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfIndexPrevious",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 2,
+      "code": 196610,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfBookNode",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 3,
+      "code": 196611,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfOwnerNode",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 4,
+      "code": 196612,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfBaseFee",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 5,
+      "code": 196613,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfExchangeRate",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 6,
+      "code": 196614,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfLowNode",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 7,
+      "code": 196615,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHighNode",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 8,
+      "code": 196616,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfDestinationNode",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 9,
+      "code": 196617,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfCookie",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 10,
+      "code": 196618,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfServerVersion",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 11,
+      "code": 196619,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfNFTokenOfferNode",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 12,
+      "code": 196620,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfEmitBurden",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 13,
+      "code": 196621,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHookInstructionCount",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 17,
+      "code": 196625,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHookReturnCode",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 18,
+      "code": 196626,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfReferenceCount",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 19,
+      "code": 196627,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfXChainClaimID",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 20,
+      "code": 196628,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfXChainAccountCreateCount",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 21,
+      "code": 196629,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfXChainAccountClaimCount",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 22,
+      "code": 196630,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfAssetPrice",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 23,
+      "code": 196631,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfMaximumAmount",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 24,
+      "code": 196632,
+      "typed": true,
+      "extras": [
+        "SField::sMD_BaseTen|SField::sMD_Default"
+      ]
+    },
+    {
+      "name": "sfOutstandingAmount",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 25,
+      "code": 196633,
+      "typed": true,
+      "extras": [
+        "SField::sMD_BaseTen|SField::sMD_Default"
+      ]
+    },
+    {
+      "name": "sfMPTAmount",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 26,
+      "code": 196634,
+      "typed": true,
+      "extras": [
+        "SField::sMD_BaseTen|SField::sMD_Default"
+      ]
+    },
+    {
+      "name": "sfIssuerNode",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 27,
+      "code": 196635,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfSubjectNode",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 28,
+      "code": 196636,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfTouchCount",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 97,
+      "code": 196705,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfAccountIndex",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 98,
+      "code": 196706,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfAccountCount",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 99,
+      "code": 196707,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfRewardAccumulator",
+      "sti": "UINT64",
+      "sti_code": 3,
+      "field_code": 100,
+      "code": 196708,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfEmailHash",
+      "sti": "UINT128",
+      "sti_code": 4,
+      "field_code": 1,
+      "code": 262145,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfTakerPaysCurrency",
+      "sti": "UINT160",
+      "sti_code": 17,
+      "field_code": 1,
+      "code": 1114113,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfTakerPaysIssuer",
+      "sti": "UINT160",
+      "sti_code": 17,
+      "field_code": 2,
+      "code": 1114114,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfTakerGetsCurrency",
+      "sti": "UINT160",
+      "sti_code": 17,
+      "field_code": 3,
+      "code": 1114115,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfTakerGetsIssuer",
+      "sti": "UINT160",
+      "sti_code": 17,
+      "field_code": 4,
+      "code": 1114116,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfMPTokenIssuanceID",
+      "sti": "UINT192",
+      "sti_code": 21,
+      "field_code": 1,
+      "code": 1376257,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfLedgerHash",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 1,
+      "code": 327681,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfParentHash",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 2,
+      "code": 327682,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfTransactionHash",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 3,
+      "code": 327683,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfAccountHash",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 4,
+      "code": 327684,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfPreviousTxnID",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 5,
+      "code": 327685,
+      "typed": true,
+      "extras": [
+        "SField::sMD_DeleteFinal"
+      ]
+    },
+    {
+      "name": "sfLedgerIndex",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 6,
+      "code": 327686,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfWalletLocator",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 7,
+      "code": 327687,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfRootIndex",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 8,
+      "code": 327688,
+      "typed": true,
+      "extras": [
+        "SField::sMD_Always"
+      ]
+    },
+    {
+      "name": "sfAccountTxnID",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 9,
+      "code": 327689,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfNFTokenID",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 10,
+      "code": 327690,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfEmitParentTxnID",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 11,
+      "code": 327691,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfEmitNonce",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 12,
+      "code": 327692,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfEmitHookHash",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 13,
+      "code": 327693,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfObjectID",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 14,
+      "code": 327694,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfAMMID",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 15,
+      "code": 327695,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfBookDirectory",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 16,
+      "code": 327696,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfInvoiceID",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 17,
+      "code": 327697,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfNickname",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 18,
+      "code": 327698,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfAmendment",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 19,
+      "code": 327699,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHookOn",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 20,
+      "code": 327700,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfDigest",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 21,
+      "code": 327701,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfChannel",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 22,
+      "code": 327702,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfConsensusHash",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 23,
+      "code": 327703,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfCheckID",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 24,
+      "code": 327704,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfValidatedHash",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 25,
+      "code": 327705,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfPreviousPageMin",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 26,
+      "code": 327706,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfNextPageMin",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 27,
+      "code": 327707,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfNFTokenBuyOffer",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 28,
+      "code": 327708,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfNFTokenSellOffer",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 29,
+      "code": 327709,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHookStateKey",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 30,
+      "code": 327710,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHookHash",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 31,
+      "code": 327711,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHookNamespace",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 32,
+      "code": 327712,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHookSetTxnID",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 33,
+      "code": 327713,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfOfferID",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 34,
+      "code": 327714,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfEscrowID",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 35,
+      "code": 327715,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfURITokenID",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 36,
+      "code": 327716,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfDomainID",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 37,
+      "code": 327717,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHookOnOutgoing",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 93,
+      "code": 327773,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHookOnIncoming",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 94,
+      "code": 327774,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfCron",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 95,
+      "code": 327775,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHookCanEmit",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 96,
+      "code": 327776,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfEmittedTxnID",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 97,
+      "code": 327777,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfGovernanceMarks",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 98,
+      "code": 327778,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfGovernanceFlags",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 99,
+      "code": 327779,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfNumber",
+      "sti": "NUMBER",
+      "sti_code": 9,
+      "field_code": 1,
+      "code": 589825,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfAmount",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 1,
+      "code": 393217,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfBalance",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 2,
+      "code": 393218,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfLimitAmount",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 3,
+      "code": 393219,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfTakerPays",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 4,
+      "code": 393220,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfTakerGets",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 5,
+      "code": 393221,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfLowLimit",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 6,
+      "code": 393222,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHighLimit",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 7,
+      "code": 393223,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfFee",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 8,
+      "code": 393224,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfSendMax",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 9,
+      "code": 393225,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfDeliverMin",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 10,
+      "code": 393226,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfAmount2",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 11,
+      "code": 393227,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfBidMin",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 12,
+      "code": 393228,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfBidMax",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 13,
+      "code": 393229,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfMinimumOffer",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 16,
+      "code": 393232,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfRippleEscrow",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 17,
+      "code": 393233,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfDeliveredAmount",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 18,
+      "code": 393234,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfNFTokenBrokerFee",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 19,
+      "code": 393235,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHookCallbackFee",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 20,
+      "code": 393236,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfLockedBalance",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 21,
+      "code": 393237,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfBaseFeeDrops",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 22,
+      "code": 393238,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfReserveBaseDrops",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 23,
+      "code": 393239,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfReserveIncrementDrops",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 24,
+      "code": 393240,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfLPTokenOut",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 25,
+      "code": 393241,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfLPTokenIn",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 26,
+      "code": 393242,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfEPrice",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 27,
+      "code": 393243,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfPrice",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 28,
+      "code": 393244,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfSignatureReward",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 29,
+      "code": 393245,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfMinAccountCreateAmount",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 30,
+      "code": 393246,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfLPTokenBalance",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 31,
+      "code": 393247,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfTrustLineRewardAccumulator",
+      "sti": "AMOUNT",
+      "sti_code": 6,
+      "field_code": 99,
+      "code": 393315,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfPublicKey",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 1,
+      "code": 458753,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfMessageKey",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 2,
+      "code": 458754,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfSigningPubKey",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 3,
+      "code": 458755,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfTxnSignature",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 4,
+      "code": 458756,
+      "typed": true,
+      "extras": [
+        "SField::sMD_Default",
+        "SField::notSigning"
+      ]
+    },
+    {
+      "name": "sfURI",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 5,
+      "code": 458757,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfSignature",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 6,
+      "code": 458758,
+      "typed": true,
+      "extras": [
+        "SField::sMD_Default",
+        "SField::notSigning"
+      ]
+    },
+    {
+      "name": "sfDomain",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 7,
+      "code": 458759,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfFundCode",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 8,
+      "code": 458760,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfRemoveCode",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 9,
+      "code": 458761,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfExpireCode",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 10,
+      "code": 458762,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfCreateCode",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 11,
+      "code": 458763,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfMemoType",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 12,
+      "code": 458764,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfMemoData",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 13,
+      "code": 458765,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfMemoFormat",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 14,
+      "code": 458766,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfFulfillment",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 16,
+      "code": 458768,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfCondition",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 17,
+      "code": 458769,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfMasterSignature",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 18,
+      "code": 458770,
+      "typed": true,
+      "extras": [
+        "SField::sMD_Default",
+        "SField::notSigning"
+      ]
+    },
+    {
+      "name": "sfUNLModifyValidator",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 19,
+      "code": 458771,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfValidatorToDisable",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 20,
+      "code": 458772,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfValidatorToReEnable",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 21,
+      "code": 458773,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHookStateData",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 22,
+      "code": 458774,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHookReturnString",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 23,
+      "code": 458775,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHookParameterName",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 24,
+      "code": 458776,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHookParameterValue",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 25,
+      "code": 458777,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfBlob",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 26,
+      "code": 458778,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfDIDDocument",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 27,
+      "code": 458779,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfData",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 28,
+      "code": 458780,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfAssetClass",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 29,
+      "code": 458781,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfProvider",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 30,
+      "code": 458782,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfMPTokenMetadata",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 31,
+      "code": 458783,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfCredentialType",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 32,
+      "code": 458784,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHookName",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 97,
+      "code": 458849,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfRemarkValue",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 98,
+      "code": 458850,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfRemarkName",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 99,
+      "code": 458851,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfAccount",
+      "sti": "ACCOUNT",
+      "sti_code": 8,
+      "field_code": 1,
+      "code": 524289,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfOwner",
+      "sti": "ACCOUNT",
+      "sti_code": 8,
+      "field_code": 2,
+      "code": 524290,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfDestination",
+      "sti": "ACCOUNT",
+      "sti_code": 8,
+      "field_code": 3,
+      "code": 524291,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfIssuer",
+      "sti": "ACCOUNT",
+      "sti_code": 8,
+      "field_code": 4,
+      "code": 524292,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfAuthorize",
+      "sti": "ACCOUNT",
+      "sti_code": 8,
+      "field_code": 5,
+      "code": 524293,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfUnauthorize",
+      "sti": "ACCOUNT",
+      "sti_code": 8,
+      "field_code": 6,
+      "code": 524294,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfRegularKey",
+      "sti": "ACCOUNT",
+      "sti_code": 8,
+      "field_code": 8,
+      "code": 524296,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfNFTokenMinter",
+      "sti": "ACCOUNT",
+      "sti_code": 8,
+      "field_code": 9,
+      "code": 524297,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfEmitCallback",
+      "sti": "ACCOUNT",
+      "sti_code": 8,
+      "field_code": 10,
+      "code": 524298,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHolder",
+      "sti": "ACCOUNT",
+      "sti_code": 8,
+      "field_code": 11,
+      "code": 524299,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHookAccount",
+      "sti": "ACCOUNT",
+      "sti_code": 8,
+      "field_code": 16,
+      "code": 524304,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfOtherChainSource",
+      "sti": "ACCOUNT",
+      "sti_code": 8,
+      "field_code": 18,
+      "code": 524306,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfOtherChainDestination",
+      "sti": "ACCOUNT",
+      "sti_code": 8,
+      "field_code": 19,
+      "code": 524307,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfAttestationSignerAccount",
+      "sti": "ACCOUNT",
+      "sti_code": 8,
+      "field_code": 20,
+      "code": 524308,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfAttestationRewardAccount",
+      "sti": "ACCOUNT",
+      "sti_code": 8,
+      "field_code": 21,
+      "code": 524309,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfLockingChainDoor",
+      "sti": "ACCOUNT",
+      "sti_code": 8,
+      "field_code": 22,
+      "code": 524310,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfIssuingChainDoor",
+      "sti": "ACCOUNT",
+      "sti_code": 8,
+      "field_code": 23,
+      "code": 524311,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfSubject",
+      "sti": "ACCOUNT",
+      "sti_code": 8,
+      "field_code": 24,
+      "code": 524312,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfInform",
+      "sti": "ACCOUNT",
+      "sti_code": 8,
+      "field_code": 99,
+      "code": 524387,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfIndexes",
+      "sti": "VECTOR256",
+      "sti_code": 19,
+      "field_code": 1,
+      "code": 1245185,
+      "typed": true,
+      "extras": [
+        "SField::sMD_Never"
+      ]
+    },
+    {
+      "name": "sfHashes",
+      "sti": "VECTOR256",
+      "sti_code": 19,
+      "field_code": 2,
+      "code": 1245186,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfAmendments",
+      "sti": "VECTOR256",
+      "sti_code": 19,
+      "field_code": 3,
+      "code": 1245187,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfNFTokenOffers",
+      "sti": "VECTOR256",
+      "sti_code": 19,
+      "field_code": 4,
+      "code": 1245188,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfHookNamespaces",
+      "sti": "VECTOR256",
+      "sti_code": 19,
+      "field_code": 5,
+      "code": 1245189,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfCredentialIDs",
+      "sti": "VECTOR256",
+      "sti_code": 19,
+      "field_code": 6,
+      "code": 1245190,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfURITokenIDs",
+      "sti": "VECTOR256",
+      "sti_code": 19,
+      "field_code": 99,
+      "code": 1245283,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfPaths",
+      "sti": "PATHSET",
+      "sti_code": 18,
+      "field_code": 1,
+      "code": 1179649,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfBaseAsset",
+      "sti": "CURRENCY",
+      "sti_code": 26,
+      "field_code": 1,
+      "code": 1703937,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfQuoteAsset",
+      "sti": "CURRENCY",
+      "sti_code": 26,
+      "field_code": 2,
+      "code": 1703938,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfLockingChainIssue",
+      "sti": "ISSUE",
+      "sti_code": 24,
+      "field_code": 1,
+      "code": 1572865,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfIssuingChainIssue",
+      "sti": "ISSUE",
+      "sti_code": 24,
+      "field_code": 2,
+      "code": 1572866,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfAsset",
+      "sti": "ISSUE",
+      "sti_code": 24,
+      "field_code": 3,
+      "code": 1572867,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfAsset2",
+      "sti": "ISSUE",
+      "sti_code": 24,
+      "field_code": 4,
+      "code": 1572868,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfClaimCurrency",
+      "sti": "ISSUE",
+      "sti_code": 24,
+      "field_code": 5,
+      "code": 1572869,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfXChainBridge",
+      "sti": "XCHAIN_BRIDGE",
+      "sti_code": 25,
+      "field_code": 1,
+      "code": 1638401,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfTransactionMetaData",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 2,
+      "code": 917506,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfCreatedNode",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 3,
+      "code": 917507,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfDeletedNode",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 4,
+      "code": 917508,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfModifiedNode",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 5,
+      "code": 917509,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfPreviousFields",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 6,
+      "code": 917510,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfFinalFields",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 7,
+      "code": 917511,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfNewFields",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 8,
+      "code": 917512,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfTemplateEntry",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 9,
+      "code": 917513,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfMemo",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 10,
+      "code": 917514,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfSignerEntry",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 11,
+      "code": 917515,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfNFToken",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 12,
+      "code": 917516,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfEmitDetails",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 13,
+      "code": 917517,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfHook",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 14,
+      "code": 917518,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfSigner",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 16,
+      "code": 917520,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfMajority",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 18,
+      "code": 917522,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfDisabledValidator",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 19,
+      "code": 917523,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfEmittedTxn",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 20,
+      "code": 917524,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfHookExecution",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 21,
+      "code": 917525,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfHookParameter",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 23,
+      "code": 917527,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfHookGrant",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 24,
+      "code": 917528,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfVoteEntry",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 25,
+      "code": 917529,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfAuctionSlot",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 26,
+      "code": 917530,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfAuthAccount",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 27,
+      "code": 917531,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfXChainClaimProofSig",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 28,
+      "code": 917532,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfXChainCreateAccountProofSig",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 29,
+      "code": 917533,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfXChainClaimAttestationCollectionElement",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 30,
+      "code": 917534,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfXChainCreateAccountAttestationCollectionElement",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 31,
+      "code": 917535,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfPriceData",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 32,
+      "code": 917536,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfCredential",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 33,
+      "code": 917537,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfAmountEntry",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 91,
+      "code": 917595,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfMintURIToken",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 92,
+      "code": 917596,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfHookEmission",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 93,
+      "code": 917597,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfImportVLKey",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 94,
+      "code": 917598,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfActiveValidator",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 95,
+      "code": 917599,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfGenesisMint",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 96,
+      "code": 917600,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfRemark",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 97,
+      "code": 917601,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfHighReward",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 98,
+      "code": 917602,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfLowReward",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 99,
+      "code": 917603,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfSigners",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 3,
+      "code": 983043,
+      "typed": false,
+      "extras": [
+        "SField::sMD_Default",
+        "SField::notSigning"
+      ]
+    },
+    {
+      "name": "sfSignerEntries",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 4,
+      "code": 983044,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfTemplate",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 5,
+      "code": 983045,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfNecessary",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 6,
+      "code": 983046,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfSufficient",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 7,
+      "code": 983047,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfAffectedNodes",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 8,
+      "code": 983048,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfMemos",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 9,
+      "code": 983049,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfNFTokens",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 10,
+      "code": 983050,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfHooks",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 11,
+      "code": 983051,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfVoteSlots",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 12,
+      "code": 983052,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfMajorities",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 16,
+      "code": 983056,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfDisabledValidators",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 17,
+      "code": 983057,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfHookExecutions",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 18,
+      "code": 983058,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfHookParameters",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 19,
+      "code": 983059,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfHookGrants",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 20,
+      "code": 983060,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfXChainClaimAttestations",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 21,
+      "code": 983061,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfXChainCreateAccountAttestations",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 22,
+      "code": 983062,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfPriceDataSeries",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 24,
+      "code": 983064,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfAuthAccounts",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 25,
+      "code": 983065,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfAuthorizeCredentials",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 26,
+      "code": 983066,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfUnauthorizeCredentials",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 27,
+      "code": 983067,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfAcceptedCredentials",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 28,
+      "code": 983068,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfAmounts",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 92,
+      "code": 983132,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfHookEmissions",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 93,
+      "code": 983133,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfImportVLKeys",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 94,
+      "code": 983134,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfActiveValidators",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 95,
+      "code": 983135,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfGenesisMints",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 96,
+      "code": 983136,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfRemarks",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 97,
+      "code": 983137,
+      "typed": false,
+      "extras": []
+    }
+  ],
+  "tx_common": [
+    {
+      "sfield": "sfTransactionType",
+      "presence": "required",
+      "extras": []
+    },
+    {
+      "sfield": "sfFlags",
+      "presence": "optional",
+      "extras": []
+    },
+    {
+      "sfield": "sfSourceTag",
+      "presence": "optional",
+      "extras": []
+    },
+    {
+      "sfield": "sfAccount",
+      "presence": "required",
+      "extras": []
+    },
+    {
+      "sfield": "sfSequence",
+      "presence": "required",
+      "extras": []
+    },
+    {
+      "sfield": "sfPreviousTxnID",
+      "presence": "optional",
+      "extras": []
+    },
+    {
+      "sfield": "sfLastLedgerSequence",
+      "presence": "optional",
+      "extras": []
+    },
+    {
+      "sfield": "sfAccountTxnID",
+      "presence": "optional",
+      "extras": []
+    },
+    {
+      "sfield": "sfFee",
+      "presence": "required",
+      "extras": []
+    },
+    {
+      "sfield": "sfOperationLimit",
+      "presence": "optional",
+      "extras": []
+    },
+    {
+      "sfield": "sfMemos",
+      "presence": "optional",
+      "extras": []
+    },
+    {
+      "sfield": "sfSigningPubKey",
+      "presence": "required",
+      "extras": []
+    },
+    {
+      "sfield": "sfTicketSequence",
+      "presence": "optional",
+      "extras": []
+    },
+    {
+      "sfield": "sfTxnSignature",
+      "presence": "optional",
+      "extras": []
+    },
+    {
+      "sfield": "sfSigners",
+      "presence": "optional",
+      "extras": []
+    },
+    {
+      "sfield": "sfEmitDetails",
+      "presence": "optional",
+      "extras": []
+    },
+    {
+      "sfield": "sfFirstLedgerSequence",
+      "presence": "optional",
+      "extras": []
+    },
+    {
+      "sfield": "sfNetworkID",
+      "presence": "optional",
+      "extras": []
+    },
+    {
+      "sfield": "sfHookParameters",
+      "presence": "optional",
+      "extras": []
+    },
+    {
+      "sfield": "sfHookName",
+      "presence": "optional",
+      "extras": []
+    }
+  ],
+  "le_common": [
+    {
+      "sfield": "sfLedgerIndex",
+      "presence": "optional",
+      "extras": []
+    },
+    {
+      "sfield": "sfLedgerEntryType",
+      "presence": "required",
+      "extras": []
+    },
+    {
+      "sfield": "sfFlags",
+      "presence": "required",
+      "extras": []
+    },
+    {
+      "sfield": "sfRemarks",
+      "presence": "optional",
+      "extras": []
+    }
+  ],
+  "transactions": [
+    {
+      "tag": "ttPAYMENT",
+      "value": 0,
+      "name": "Payment",
+      "fields": [
+        {
+          "sfield": "sfDestination",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "required",
+          "extras": [
+            "soeMPTSupported"
+          ]
+        },
+        {
+          "sfield": "sfSendMax",
+          "presence": "optional",
+          "extras": [
+            "soeMPTSupported"
+          ]
+        },
+        {
+          "sfield": "sfPaths",
+          "presence": "default",
+          "extras": []
+        },
+        {
+          "sfield": "sfInvoiceID",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestinationTag",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfDeliverMin",
+          "presence": "optional",
+          "extras": [
+            "soeMPTSupported"
+          ]
+        },
+        {
+          "sfield": "sfCredentialIDs",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttESCROW_CREATE",
+      "value": 1,
+      "name": "EscrowCreate",
+      "fields": [
+        {
+          "sfield": "sfDestination",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfCondition",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfCancelAfter",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfFinishAfter",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestinationTag",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttESCROW_FINISH",
+      "value": 2,
+      "name": "EscrowFinish",
+      "fields": [
+        {
+          "sfield": "sfOwner",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfOfferSequence",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfEscrowID",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfFulfillment",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfCondition",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfCredentialIDs",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttACCOUNT_SET",
+      "value": 3,
+      "name": "AccountSet",
+      "fields": [
+        {
+          "sfield": "sfEmailHash",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfWalletLocator",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfWalletSize",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfMessageKey",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfDomain",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfTransferRate",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfSetFlag",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfClearFlag",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfTickSize",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfNFTokenMinter",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookStateScale",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttESCROW_CANCEL",
+      "value": 4,
+      "name": "EscrowCancel",
+      "fields": [
+        {
+          "sfield": "sfOwner",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfOfferSequence",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfEscrowID",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttREGULAR_KEY_SET",
+      "value": 5,
+      "name": "SetRegularKey",
+      "fields": [
+        {
+          "sfield": "sfRegularKey",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttOFFER_CREATE",
+      "value": 7,
+      "name": "OfferCreate",
+      "fields": [
+        {
+          "sfield": "sfTakerPays",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfTakerGets",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfExpiration",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfOfferSequence",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfOfferID",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttOFFER_CANCEL",
+      "value": 8,
+      "name": "OfferCancel",
+      "fields": [
+        {
+          "sfield": "sfOfferSequence",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfOfferID",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttTICKET_CREATE",
+      "value": 10,
+      "name": "TicketCreate",
+      "fields": [
+        {
+          "sfield": "sfTicketCount",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttSIGNER_LIST_SET",
+      "value": 12,
+      "name": "SignerListSet",
+      "fields": [
+        {
+          "sfield": "sfSignerQuorum",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSignerEntries",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttPAYCHAN_CREATE",
+      "value": 13,
+      "name": "PaymentChannelCreate",
+      "fields": [
+        {
+          "sfield": "sfDestination",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSettleDelay",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPublicKey",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfCancelAfter",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestinationTag",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttPAYCHAN_FUND",
+      "value": 14,
+      "name": "PaymentChannelFund",
+      "fields": [
+        {
+          "sfield": "sfChannel",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfExpiration",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttPAYCHAN_CLAIM",
+      "value": 15,
+      "name": "PaymentChannelClaim",
+      "fields": [
+        {
+          "sfield": "sfChannel",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfBalance",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfSignature",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfPublicKey",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfCredentialIDs",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttCHECK_CREATE",
+      "value": 16,
+      "name": "CheckCreate",
+      "fields": [
+        {
+          "sfield": "sfDestination",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSendMax",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfExpiration",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestinationTag",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfInvoiceID",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttCHECK_CASH",
+      "value": 17,
+      "name": "CheckCash",
+      "fields": [
+        {
+          "sfield": "sfCheckID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfDeliverMin",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttCHECK_CANCEL",
+      "value": 18,
+      "name": "CheckCancel",
+      "fields": [
+        {
+          "sfield": "sfCheckID",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttDEPOSIT_PREAUTH",
+      "value": 19,
+      "name": "DepositPreauth",
+      "fields": [
+        {
+          "sfield": "sfAuthorize",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfUnauthorize",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfAuthorizeCredentials",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfUnauthorizeCredentials",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttTRUST_SET",
+      "value": 20,
+      "name": "TrustSet",
+      "fields": [
+        {
+          "sfield": "sfLimitAmount",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfQualityIn",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfQualityOut",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttACCOUNT_DELETE",
+      "value": 21,
+      "name": "AccountDelete",
+      "fields": [
+        {
+          "sfield": "sfDestination",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestinationTag",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfCredentialIDs",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttHOOK_SET",
+      "value": 22,
+      "name": "SetHook",
+      "fields": [
+        {
+          "sfield": "sfHooks",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttNFTOKEN_MINT",
+      "value": 25,
+      "name": "NFTokenMint",
+      "fields": [
+        {
+          "sfield": "sfNFTokenTaxon",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfTransferFee",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfIssuer",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfURI",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestination",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfExpiration",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttNFTOKEN_BURN",
+      "value": 26,
+      "name": "NFTokenBurn",
+      "fields": [
+        {
+          "sfield": "sfNFTokenID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfOwner",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttNFTOKEN_CREATE_OFFER",
+      "value": 27,
+      "name": "NFTokenCreateOffer",
+      "fields": [
+        {
+          "sfield": "sfNFTokenID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestination",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfOwner",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfExpiration",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttNFTOKEN_CANCEL_OFFER",
+      "value": 28,
+      "name": "NFTokenCancelOffer",
+      "fields": [
+        {
+          "sfield": "sfNFTokenOffers",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttNFTOKEN_ACCEPT_OFFER",
+      "value": 29,
+      "name": "NFTokenAcceptOffer",
+      "fields": [
+        {
+          "sfield": "sfNFTokenBuyOffer",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfNFTokenSellOffer",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfNFTokenBrokerFee",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttCLAWBACK",
+      "value": 30,
+      "name": "Clawback",
+      "fields": [
+        {
+          "sfield": "sfAmount",
+          "presence": "required",
+          "extras": [
+            "soeMPTSupported"
+          ]
+        },
+        {
+          "sfield": "sfHolder",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttAMM_CLAWBACK",
+      "value": 31,
+      "name": "AMMClawback",
+      "fields": [
+        {
+          "sfield": "sfHolder",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAsset",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAsset2",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttAMM_CREATE",
+      "value": 35,
+      "name": "AMMCreate",
+      "fields": [
+        {
+          "sfield": "sfAmount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount2",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfTradingFee",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttAMM_DEPOSIT",
+      "value": 36,
+      "name": "AMMDeposit",
+      "fields": [
+        {
+          "sfield": "sfAsset",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAsset2",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount2",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfEPrice",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfLPTokenOut",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfTradingFee",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttAMM_WITHDRAW",
+      "value": 37,
+      "name": "AMMWithdraw",
+      "fields": [
+        {
+          "sfield": "sfAsset",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAsset2",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount2",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfEPrice",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfLPTokenIn",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttAMM_VOTE",
+      "value": 38,
+      "name": "AMMVote",
+      "fields": [
+        {
+          "sfield": "sfAsset",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAsset2",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfTradingFee",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttAMM_BID",
+      "value": 39,
+      "name": "AMMBid",
+      "fields": [
+        {
+          "sfield": "sfAsset",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAsset2",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfBidMin",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfBidMax",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfAuthAccounts",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttAMM_DELETE",
+      "value": 40,
+      "name": "AMMDelete",
+      "fields": [
+        {
+          "sfield": "sfAsset",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAsset2",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttURITOKEN_MINT",
+      "value": 45,
+      "name": "URITokenMint",
+      "fields": [
+        {
+          "sfield": "sfURI",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfDigest",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestination",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttURITOKEN_BURN",
+      "value": 46,
+      "name": "URITokenBurn",
+      "fields": [
+        {
+          "sfield": "sfURITokenID",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttURITOKEN_BUY",
+      "value": 47,
+      "name": "URITokenBuy",
+      "fields": [
+        {
+          "sfield": "sfURITokenID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttURITOKEN_CREATE_SELL_OFFER",
+      "value": 48,
+      "name": "URITokenCreateSellOffer",
+      "fields": [
+        {
+          "sfield": "sfURITokenID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestination",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttURITOKEN_CANCEL_SELL_OFFER",
+      "value": 49,
+      "name": "URITokenCancelSellOffer",
+      "fields": [
+        {
+          "sfield": "sfURITokenID",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttXCHAIN_CREATE_CLAIM_ID",
+      "value": 50,
+      "name": "XChainCreateClaimID",
+      "fields": [
+        {
+          "sfield": "sfXChainBridge",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSignatureReward",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfOtherChainSource",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttXCHAIN_COMMIT",
+      "value": 51,
+      "name": "XChainCommit",
+      "fields": [
+        {
+          "sfield": "sfXChainBridge",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfXChainClaimID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfOtherChainDestination",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttXCHAIN_CLAIM",
+      "value": 52,
+      "name": "XChainClaim",
+      "fields": [
+        {
+          "sfield": "sfXChainBridge",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfXChainClaimID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestination",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestinationTag",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttXCHAIN_ACCOUNT_CREATE_COMMIT",
+      "value": 53,
+      "name": "XChainAccountCreateCommit",
+      "fields": [
+        {
+          "sfield": "sfXChainBridge",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestination",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSignatureReward",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttXCHAIN_ADD_CLAIM_ATTESTATION",
+      "value": 54,
+      "name": "XChainAddClaimAttestation",
+      "fields": [
+        {
+          "sfield": "sfXChainBridge",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAttestationSignerAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPublicKey",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSignature",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfOtherChainSource",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAttestationRewardAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfWasLockingChainSend",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfXChainClaimID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestination",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttXCHAIN_ADD_ACCOUNT_CREATE_ATTESTATION",
+      "value": 55,
+      "name": "XChainAddAccountCreateAttestation",
+      "fields": [
+        {
+          "sfield": "sfXChainBridge",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAttestationSignerAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPublicKey",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSignature",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfOtherChainSource",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAttestationRewardAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfWasLockingChainSend",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfXChainAccountCreateCount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestination",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSignatureReward",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttXCHAIN_MODIFY_BRIDGE",
+      "value": 56,
+      "name": "XChainModifyBridge",
+      "fields": [
+        {
+          "sfield": "sfXChainBridge",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSignatureReward",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfMinAccountCreateAmount",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttXCHAIN_CREATE_BRIDGE",
+      "value": 57,
+      "name": "XChainCreateBridge",
+      "fields": [
+        {
+          "sfield": "sfXChainBridge",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSignatureReward",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfMinAccountCreateAmount",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttDID_SET",
+      "value": 58,
+      "name": "DIDSet",
+      "fields": [
+        {
+          "sfield": "sfDIDDocument",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfURI",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfData",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttDID_DELETE",
+      "value": 59,
+      "name": "DIDDelete",
+      "fields": []
+    },
+    {
+      "tag": "ttORACLE_SET",
+      "value": 60,
+      "name": "OracleSet",
+      "fields": [
+        {
+          "sfield": "sfOracleDocumentID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfProvider",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfURI",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfAssetClass",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfLastUpdateTime",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPriceDataSeries",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttORACLE_DELETE",
+      "value": 61,
+      "name": "OracleDelete",
+      "fields": [
+        {
+          "sfield": "sfOracleDocumentID",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttLEDGER_STATE_FIX",
+      "value": 62,
+      "name": "LedgerStateFix",
+      "fields": [
+        {
+          "sfield": "sfLedgerFixType",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfOwner",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttMPTOKEN_ISSUANCE_CREATE",
+      "value": 63,
+      "name": "MPTokenIssuanceCreate",
+      "fields": [
+        {
+          "sfield": "sfAssetScale",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfTransferFee",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfMaximumAmount",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfMPTokenMetadata",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttMPTOKEN_ISSUANCE_DESTROY",
+      "value": 64,
+      "name": "MPTokenIssuanceDestroy",
+      "fields": [
+        {
+          "sfield": "sfMPTokenIssuanceID",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttMPTOKEN_ISSUANCE_SET",
+      "value": 65,
+      "name": "MPTokenIssuanceSet",
+      "fields": [
+        {
+          "sfield": "sfMPTokenIssuanceID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfHolder",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttMPTOKEN_AUTHORIZE",
+      "value": 66,
+      "name": "MPTokenAuthorize",
+      "fields": [
+        {
+          "sfield": "sfMPTokenIssuanceID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfHolder",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttCREDENTIAL_CREATE",
+      "value": 67,
+      "name": "CredentialCreate",
+      "fields": [
+        {
+          "sfield": "sfSubject",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfCredentialType",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfExpiration",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfURI",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttCREDENTIAL_ACCEPT",
+      "value": 68,
+      "name": "CredentialAccept",
+      "fields": [
+        {
+          "sfield": "sfIssuer",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfCredentialType",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttCREDENTIAL_DELETE",
+      "value": 69,
+      "name": "CredentialDelete",
+      "fields": [
+        {
+          "sfield": "sfSubject",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfIssuer",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfCredentialType",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttNFTOKEN_MODIFY",
+      "value": 70,
+      "name": "NFTokenModify",
+      "fields": [
+        {
+          "sfield": "sfNFTokenID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfOwner",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfURI",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttPERMISSIONED_DOMAIN_SET",
+      "value": 71,
+      "name": "PermissionedDomainSet",
+      "fields": [
+        {
+          "sfield": "sfDomainID",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfAcceptedCredentials",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttPERMISSIONED_DOMAIN_DELETE",
+      "value": 72,
+      "name": "PermissionedDomainDelete",
+      "fields": [
+        {
+          "sfield": "sfDomainID",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttCRON",
+      "value": 92,
+      "name": "Cron",
+      "fields": [
+        {
+          "sfield": "sfOwner",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfLedgerSequence",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttCRON_SET",
+      "value": 93,
+      "name": "CronSet",
+      "fields": [
+        {
+          "sfield": "sfDelaySeconds",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfRepeatCount",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfStartTime",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttREMARKS_SET",
+      "value": 94,
+      "name": "SetRemarks",
+      "fields": [
+        {
+          "sfield": "sfObjectID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfRemarks",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttREMIT",
+      "value": 95,
+      "name": "Remit",
+      "fields": [
+        {
+          "sfield": "sfDestination",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmounts",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfURITokenIDs",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfMintURIToken",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfInvoiceID",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestinationTag",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfBlob",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfInform",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttGENESIS_MINT",
+      "value": 96,
+      "name": "GenesisMint",
+      "fields": [
+        {
+          "sfield": "sfGenesisMints",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttIMPORT",
+      "value": 97,
+      "name": "Import",
+      "fields": [
+        {
+          "sfield": "sfBlob",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfIssuer",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttCLAIM_REWARD",
+      "value": 98,
+      "name": "ClaimReward",
+      "fields": [
+        {
+          "sfield": "sfIssuer",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfClaimCurrency",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttINVOKE",
+      "value": 99,
+      "name": "Invoke",
+      "fields": [
+        {
+          "sfield": "sfBlob",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestination",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfInvoiceID",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestinationTag",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttAMENDMENT",
+      "value": 100,
+      "name": "EnableAmendment",
+      "fields": [
+        {
+          "sfield": "sfLedgerSequence",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmendment",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttFEE",
+      "value": 101,
+      "name": "SetFee",
+      "fields": [
+        {
+          "sfield": "sfLedgerSequence",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfBaseFee",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfReferenceFeeUnits",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfReserveBase",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfReserveIncrement",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfBaseFeeDrops",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfReserveBaseDrops",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfReserveIncrementDrops",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttUNL_MODIFY",
+      "value": 102,
+      "name": "UNLModify",
+      "fields": [
+        {
+          "sfield": "sfUNLModifyDisabling",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfLedgerSequence",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfUNLModifyValidator",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttEMIT_FAILURE",
+      "value": 103,
+      "name": "EmitFailure",
+      "fields": [
+        {
+          "sfield": "sfLedgerSequence",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfTransactionHash",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttUNL_REPORT",
+      "value": 104,
+      "name": "UNLReport",
+      "fields": [
+        {
+          "sfield": "sfLedgerSequence",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfActiveValidator",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfImportVLKey",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    }
+  ],
+  "ledger_entries": [
+    {
+      "tag": "ltNFTOKEN_OFFER",
+      "value": 55,
+      "name": "NFTokenOffer",
+      "rpc_name": "nft_offer",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfOwner",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfNFTokenID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfOwnerNode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfNFTokenOfferNode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestination",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfExpiration",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltCRON",
+      "value": 65,
+      "name": "Cron",
+      "rpc_name": "cron",
+      "duplicate": true,
+      "fields": [
+        {
+          "sfield": "sfOwner",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfStartTime",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfDelaySeconds",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfRepeatCount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfOwnerNode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltCHECK",
+      "value": 67,
+      "name": "Check",
+      "rpc_name": "check",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestination",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSendMax",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSequence",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfOwnerNode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestinationNode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfExpiration",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfInvoiceID",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfSourceTag",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestinationTag",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltHOOK_DEFINITION",
+      "value": 68,
+      "name": "HookDefinition",
+      "rpc_name": "hook_definition",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfHookHash",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookOn",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookOnIncoming",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookOnOutgoing",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookCanEmit",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookNamespace",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookParameters",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookApiVersion",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfCreateCode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookSetTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfReferenceCount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfFee",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookCallbackFee",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltEMITTED_TXN",
+      "value": 69,
+      "name": "EmittedTxn",
+      "rpc_name": "emitted_txn",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfEmittedTxn",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfOwnerNode",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltHOOK",
+      "value": 72,
+      "name": "Hook",
+      "rpc_name": "hook",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfAccount",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfOwnerNode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfHooks",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltIMPORT_VLSEQ",
+      "value": 73,
+      "name": "ImportVLSequence",
+      "rpc_name": "import_vlseq",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfPublicKey",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfImportSequence",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltNEGATIVE_UNL",
+      "value": 78,
+      "name": "NegativeUNL",
+      "rpc_name": "nunl",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfDisabledValidators",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfValidatorToDisable",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfValidatorToReEnable",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltNFTOKEN_PAGE",
+      "value": 80,
+      "name": "NFTokenPage",
+      "rpc_name": "nft_page",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfPreviousPageMin",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfNextPageMin",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfNFTokens",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltUNL_REPORT",
+      "value": 82,
+      "name": "UNLReport",
+      "rpc_name": "unl_report",
+      "duplicate": true,
+      "fields": [
+        {
+          "sfield": "sfImportVLKeys",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfActiveValidators",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltSIGNER_LIST",
+      "value": 83,
+      "name": "SignerList",
+      "rpc_name": "signer_list",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfOwnerNode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSignerQuorum",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSignerEntries",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSignerListID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltTICKET",
+      "value": 84,
+      "name": "Ticket",
+      "rpc_name": "ticket",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfOwnerNode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfTicketSequence",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltURI_TOKEN",
+      "value": 85,
+      "name": "URIToken",
+      "rpc_name": "uri_token",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfOwner",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfOwnerNode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfIssuer",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfURI",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfDigest",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestination",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltACCOUNT_ROOT",
+      "value": 97,
+      "name": "AccountRoot",
+      "rpc_name": "account",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSequence",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfBalance",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfOwnerCount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAccountTxnID",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfRegularKey",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfEmailHash",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfWalletLocator",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfWalletSize",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfMessageKey",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfTransferRate",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfDomain",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfTickSize",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfTicketCount",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfNFTokenMinter",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfMintedNFTokens",
+          "presence": "default",
+          "extras": []
+        },
+        {
+          "sfield": "sfBurnedNFTokens",
+          "presence": "default",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookStateCount",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookNamespaces",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfRewardLgrFirst",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfRewardLgrLast",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfRewardTime",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfRewardAccumulator",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfFirstNFTokenSequence",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfImportSequence",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfGovernanceFlags",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfGovernanceMarks",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfAccountIndex",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfTouchCount",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookStateScale",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfCron",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfAMMID",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltDIR_NODE",
+      "value": 100,
+      "name": "DirectoryNode",
+      "rpc_name": "directory",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfOwner",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfTakerPaysCurrency",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfTakerPaysIssuer",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfTakerGetsCurrency",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfTakerGetsIssuer",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfExchangeRate",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfReferenceCount",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfIndexes",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfRootIndex",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfIndexNext",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfIndexPrevious",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfNFTokenID",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltAMENDMENTS",
+      "value": 102,
+      "name": "Amendments",
+      "rpc_name": "amendments",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfAmendments",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfMajorities",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltLEDGER_HASHES",
+      "value": 104,
+      "name": "LedgerHashes",
+      "rpc_name": "hashes",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfFirstLedgerSequence",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfLastLedgerSequence",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfHashes",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltBRIDGE",
+      "value": 105,
+      "name": "Bridge",
+      "rpc_name": "bridge",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSignatureReward",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfMinAccountCreateAmount",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfXChainBridge",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfXChainClaimID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfXChainAccountCreateCount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfXChainAccountClaimCount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfOwnerNode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltOFFER",
+      "value": 111,
+      "name": "Offer",
+      "rpc_name": "offer",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSequence",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfTakerPays",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfTakerGets",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfBookDirectory",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfBookNode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfOwnerNode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfExpiration",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltDEPOSIT_PREAUTH",
+      "value": 112,
+      "name": "DepositPreauth",
+      "rpc_name": "deposit_preauth",
+      "duplicate": true,
+      "fields": [
+        {
+          "sfield": "sfAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAuthorize",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfOwnerNode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAuthorizeCredentials",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltXCHAIN_OWNED_CLAIM_ID",
+      "value": 113,
+      "name": "XChainOwnedClaimID",
+      "rpc_name": "xchain_owned_claim_id",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfXChainBridge",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfXChainClaimID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfOtherChainSource",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfXChainClaimAttestations",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSignatureReward",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfOwnerNode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltRIPPLE_STATE",
+      "value": 114,
+      "name": "RippleState",
+      "rpc_name": "state",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfBalance",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfLowLimit",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfHighLimit",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfLowNode",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfLowQualityIn",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfLowQualityOut",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfHighNode",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfHighQualityIn",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfHighQualityOut",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfLockedBalance",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfLockCount",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfHighReward",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfLowReward",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltFEE_SETTINGS",
+      "value": 115,
+      "name": "FeeSettings",
+      "rpc_name": "fee",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfBaseFee",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfReferenceFeeUnits",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfReserveBase",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfReserveIncrement",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfBaseFeeDrops",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfReserveBaseDrops",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfReserveIncrementDrops",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfXahauActivationLgrSeq",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfAccountCount",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfNetworkID",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltXCHAIN_OWNED_CREATE_ACCOUNT_CLAIM_ID",
+      "value": 116,
+      "name": "XChainOwnedCreateAccountClaimID",
+      "rpc_name": "xchain_owned_create_account_claim_id",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfXChainBridge",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfXChainAccountCreateCount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfXChainCreateAccountAttestations",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfOwnerNode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltESCROW",
+      "value": 117,
+      "name": "Escrow",
+      "rpc_name": "escrow",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestination",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfTransferRate",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfCondition",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfCancelAfter",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfFinishAfter",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfSourceTag",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestinationTag",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfOwnerNode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestinationNode",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltHOOK_STATE",
+      "value": 118,
+      "name": "HookState",
+      "rpc_name": "hook_state",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfOwnerNode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookStateKey",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookStateData",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltPAYCHAN",
+      "value": 120,
+      "name": "PayChannel",
+      "rpc_name": "payment_channel",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestination",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfBalance",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPublicKey",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSettleDelay",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfTransferRate",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfExpiration",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfCancelAfter",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfSourceTag",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestinationTag",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfOwnerNode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestinationNode",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltAMM",
+      "value": 121,
+      "name": "AMM",
+      "rpc_name": "amm",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfTradingFee",
+          "presence": "default",
+          "extras": []
+        },
+        {
+          "sfield": "sfVoteSlots",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfAuctionSlot",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfLPTokenBalance",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAsset",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAsset2",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfOwnerNode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltORACLE",
+      "value": 128,
+      "name": "Oracle",
+      "rpc_name": "oracle",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfOwner",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfProvider",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPriceDataSeries",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAssetClass",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfLastUpdateTime",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfURI",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfOwnerNode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltMPTOKEN_ISSUANCE",
+      "value": 126,
+      "name": "MPTokenIssuance",
+      "rpc_name": "mpt_issuance",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfIssuer",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSequence",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfTransferFee",
+          "presence": "default",
+          "extras": []
+        },
+        {
+          "sfield": "sfOwnerNode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAssetScale",
+          "presence": "default",
+          "extras": []
+        },
+        {
+          "sfield": "sfMaximumAmount",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfOutstandingAmount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfMPTokenMetadata",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltMPTOKEN",
+      "value": 127,
+      "name": "MPToken",
+      "rpc_name": "mptoken",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfMPTokenIssuanceID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfMPTAmount",
+          "presence": "default",
+          "extras": []
+        },
+        {
+          "sfield": "sfOwnerNode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltCREDENTIAL",
+      "value": 129,
+      "name": "Credential",
+      "rpc_name": "credential",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfSubject",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfIssuer",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfCredentialType",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfExpiration",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfURI",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfIssuerNode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSubjectNode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltPERMISSIONED_DOMAIN",
+      "value": 130,
+      "name": "PermissionedDomain",
+      "rpc_name": "permissioned_domain",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfOwner",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSequence",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAcceptedCredentials",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfOwnerNode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltDID",
+      "value": 141,
+      "name": "DID",
+      "rpc_name": "did",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfDIDDocument",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfURI",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfData",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfOwnerNode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    }
+  ],
+  "inner_objects": [
+    {
+      "sfield": "sfEmitDetails",
+      "fields": [
+        {
+          "sfield": "sfEmitGeneration",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfEmitBurden",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfEmitParentTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfEmitNonce",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfEmitCallback",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfEmitHookHash",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfSignerEntry",
+      "fields": [
+        {
+          "sfield": "sfAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSignerWeight",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfWalletLocator",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfSigner",
+      "fields": [
+        {
+          "sfield": "sfAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSigningPubKey",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfTxnSignature",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfMajority",
+      "fields": [
+        {
+          "sfield": "sfAmendment",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfCloseTime",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfDisabledValidator",
+      "fields": [
+        {
+          "sfield": "sfPublicKey",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfFirstLedgerSequence",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfHookExecution",
+      "fields": [
+        {
+          "sfield": "sfHookResult",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookHash",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookReturnCode",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookReturnString",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookInstructionCount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookExecutionIndex",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookStateChangeCount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookEmitCount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfFlags",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfHookEmission",
+      "fields": [
+        {
+          "sfield": "sfHookHash",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfEmittedTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfEmitNonce",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfHook",
+      "fields": [
+        {
+          "sfield": "sfHookHash",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfCreateCode",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookGrants",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookNamespace",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookParameters",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookOn",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookOnIncoming",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookOnOutgoing",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookCanEmit",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookApiVersion",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookName",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfFlags",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfHookGrant",
+      "fields": [
+        {
+          "sfield": "sfHookHash",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAuthorize",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfFlags",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfHookParameter",
+      "fields": [
+        {
+          "sfield": "sfHookParameterName",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfHookParameterValue",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfNFToken",
+      "fields": [
+        {
+          "sfield": "sfNFTokenID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfURI",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfGenesisMint",
+      "fields": [
+        {
+          "sfield": "sfDestination",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfGovernanceFlags",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfGovernanceMarks",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfActiveValidator",
+      "fields": [
+        {
+          "sfield": "sfPublicKey",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAccount",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfImportVLKey",
+      "fields": [
+        {
+          "sfield": "sfPublicKey",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAccount",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfAmountEntry",
+      "fields": [
+        {
+          "sfield": "sfAmount",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfMintURIToken",
+      "fields": [
+        {
+          "sfield": "sfURI",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfDigest",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfFlags",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfRemark",
+      "fields": [
+        {
+          "sfield": "sfRemarkName",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfRemarkValue",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfFlags",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfVoteEntry",
+      "fields": [
+        {
+          "sfield": "sfAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfTradingFee",
+          "presence": "default",
+          "extras": []
+        },
+        {
+          "sfield": "sfVoteWeight",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfAuctionSlot",
+      "fields": [
+        {
+          "sfield": "sfAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfExpiration",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfDiscountedFee",
+          "presence": "default",
+          "extras": []
+        },
+        {
+          "sfield": "sfPrice",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAuthAccounts",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfXChainClaimAttestationCollectionElement",
+      "fields": [
+        {
+          "sfield": "sfAttestationSignerAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPublicKey",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSignature",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAttestationRewardAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfWasLockingChainSend",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfXChainClaimID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestination",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfXChainCreateAccountAttestationCollectionElement",
+      "fields": [
+        {
+          "sfield": "sfAttestationSignerAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPublicKey",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSignature",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAttestationRewardAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfWasLockingChainSend",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfXChainAccountCreateCount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestination",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSignatureReward",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfXChainClaimProofSig",
+      "fields": [
+        {
+          "sfield": "sfAttestationSignerAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPublicKey",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAttestationRewardAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfWasLockingChainSend",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestination",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfXChainCreateAccountProofSig",
+      "fields": [
+        {
+          "sfield": "sfAttestationSignerAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPublicKey",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAmount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSignatureReward",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAttestationRewardAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfWasLockingChainSend",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfDestination",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfAuthAccount",
+      "fields": [
+        {
+          "sfield": "sfAccount",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfPriceData",
+      "fields": [
+        {
+          "sfield": "sfBaseAsset",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfQuoteAsset",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAssetPrice",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfScale",
+          "presence": "default",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfCredential",
+      "fields": [
+        {
+          "sfield": "sfIssuer",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfCredentialType",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfHighReward",
+      "fields": [
+        {
+          "sfield": "sfRewardLgrFirst",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfRewardLgrLast",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfRewardTime",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfTrustLineRewardAccumulator",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfLowReward",
+      "fields": [
+        {
+          "sfield": "sfRewardLgrFirst",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfRewardLgrLast",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfRewardTime",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfTrustLineRewardAccumulator",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    }
+  ]
+}

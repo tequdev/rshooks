@@ -284,6 +284,20 @@ unsafe extern "C" {
   gen-core` → tests → commit. The xtask parser is deliberately independent
   from the parity tests' parser — the parity tests are the generator's
   correctness oracle, so they must not share code.
+- **A second vendor group carries the protocol *formats***: xahaud's
+  `sfields.macro`, `transactions.macro`, `ledger_entries.macro` and the
+  three `*Formats.cpp` files live verbatim in
+  `crates/rshooks-core/vendor/xahaud-protocol/` (own `VENDOR.md` +
+  `SHA256SUMS`, same sync script and drift workflow). The same `gen-core`
+  run parses them into a checked-in, versioned
+  `crates/rshooks-core/protocol_formats.json` — the declared shape of every
+  transaction, ledger entry and inner object, with each field's presence and
+  wire code — under `--check` like every other generated file, and with its
+  own parity test. The parse is cross-validated against the vendored
+  `sfcodes.h`: a field the two groups disagree about fails generation
+  naming the field, so the groups cannot drift apart silently. Nothing
+  consumes the artifact yet; it is the input to the generated typed views
+  described in §5.
 
 ## 5. rshooks
 
