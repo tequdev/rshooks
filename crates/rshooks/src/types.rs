@@ -286,10 +286,67 @@ fixed_bytes_type!(
 );
 fixed_bytes_type!(
     /// A 20-byte currency code.
+    ///
+    /// Two on-ledger encodings share this 20-byte slot:
+    ///
+    /// - **Standard 3-character codes** (`USD`, `EUR`, ...) — twelve zero
+    ///   bytes, the three ASCII characters, then five trailing zeros.
+    ///   Construct with [`CurrencyCode::from_iso`]:
+    ///   `const USD: CurrencyCode = CurrencyCode::from_iso(b"USD");`.
+    ///   The argument is `&[u8; 3]`, so a byte string of any other length
+    ///   (`b"US"`, `b"USDT"`) is a type error, not a runtime check.
+    /// - **Non-standard 160-bit codes** — any other 20-byte pattern.
+    ///   Construct with the tuple field:
+    ///   `CurrencyCode([0xAB; CURRENCY_CODE_LEN])`.
+    ///
+    /// Native XRP/XAH is not a `CurrencyCode`; it is a native amount, not
+    /// `from_iso(b"XRP")`.
     CurrencyCode,
     CURRENCY_CODE_LEN,
     crate::buf_eq::buf_eq_20
 );
+
+impl CurrencyCode {
+    /// Encode a standard 3-character currency code into the 20-byte wire
+    /// form: twelve zero bytes, the three ASCII bytes, then five trailing
+    /// zeros.
+    ///
+    /// `code` is `&[u8; 3]`, so the length is part of the type — a 3-byte
+    /// literal `b"USD"` compiles, a 2- or 4-byte literal does not. Usable
+    /// in `const`/`static` initializers. Non-standard 160-bit currencies
+    /// still go through the [`CurrencyCode`]`( [u8; 20] )` tuple
+    /// constructor.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rshooks::types::CurrencyCode;
+    ///
+    /// const USD: CurrencyCode = CurrencyCode::from_iso(b"USD");
+    /// assert_eq!(
+    ///     USD.0,
+    ///     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, b'U', b'S', b'D', 0, 0, 0, 0, 0],
+    /// );
+    /// ```
+    ///
+    /// A 2-byte literal is a type error:
+    /// ```compile_fail
+    /// const _: rshooks::types::CurrencyCode =
+    ///     rshooks::types::CurrencyCode::from_iso(b"US");
+    /// ```
+    ///
+    /// A 4-byte literal is a type error:
+    /// ```compile_fail
+    /// const _: rshooks::types::CurrencyCode =
+    ///     rshooks::types::CurrencyCode::from_iso(b"USDT");
+    /// ```
+    #[inline(always)]
+    #[must_use]
+    pub const fn from_iso(code: &[u8; 3]) -> Self {
+        let [a, b, c] = *code;
+        Self([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, a, b, c, 0, 0, 0, 0, 0])
+    }
+}
 fixed_bytes_type!(
     /// An 8-byte serialized native (XRP/XAH) amount.
     NativeAmount,
@@ -598,10 +655,38 @@ mod tests {
     const _CONST_ZEROED: AccountId = AccountId::zeroed();
     static _STATIC_ZEROED: Hash = Hash::zeroed();
 
+    // `from_iso` must be usable in a `const`/`static` initializer — the
+    // point of taking `&[u8; 3]` rather than a runtime `&[u8]`.
+    const _CONST_USD: CurrencyCode = CurrencyCode::from_iso(b"USD");
+    static _STATIC_EUR: CurrencyCode = CurrencyCode::from_iso(b"EUR");
+
     #[test]
     fn zeroed_works_in_const_and_static_context() {
         assert_eq!(_CONST_ZEROED, AccountId([0u8; ACC_ID_LEN]));
         assert_eq!(_STATIC_ZEROED, Hash([0u8; HASH_LEN]));
+    }
+
+    #[test]
+    fn from_iso_encodes_three_ascii_bytes_at_offset_12() {
+        assert_eq!(
+            _CONST_USD.0,
+            [
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, b'U', b'S', b'D', 0, 0, 0, 0, 0
+            ],
+        );
+        assert_eq!(
+            _STATIC_EUR.0,
+            [
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, b'E', b'U', b'R', 0, 0, 0, 0, 0
+            ],
+        );
+    }
+
+    #[test]
+    fn from_iso_does_not_change_the_20_byte_tuple_constructor() {
+        let nonstandard = CurrencyCode([0x11; CURRENCY_CODE_LEN]);
+        assert_eq!(nonstandard.0, [0x11; CURRENCY_CODE_LEN]);
+        assert_ne!(nonstandard, CurrencyCode::from_iso(b"USD"));
     }
 
     #[test]
