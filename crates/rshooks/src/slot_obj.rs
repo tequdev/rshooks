@@ -78,24 +78,27 @@
 //!
 //! # Stack buffers and the optimization profile
 //!
-//! Every **built-in typed decoder** here uses a fixed stack buffer of at most
-//! 48 bytes — the widest thing this layer decodes is an IOU amount, and the
-//! issue path reads 44. At `opt-level` 1–3 rustc lowers a `[0u8; 48]`
-//! zero-init to a handful of inlined stores; below that it can emit a
-//! `memset` call, which is an unguarded loop the Hook API's guard checker
-//! rejects. Examples in this repo build at `opt-level = 3`; a hook crate
-//! that lowers its profile needs to re-check its own output, the same caveat
-//! [`crate::api::keylet`] documents.
+//! The `Amount`/`Issue` decoders use a fixed, zero-initialized stack buffer
+//! of at most 48 bytes — the widest thing this layer decodes is an IOU
+//! amount, and the issue path reads 44. At `opt-level` 1–3 rustc lowers a
+//! `[0u8; 48]` zero-init to a handful of inlined stores; below that it can
+//! emit a `memset` call, which is an unguarded loop the Hook API's guard
+//! checker rejects. Examples in this repo build at `opt-level = 3`; a hook
+//! crate that lowers its profile needs to re-check its own output, the same
+//! caveat [`crate::api::keylet`] documents.
 //!
-//! The raw escapes are the caller's responsibility:
-//! [`raw_exact::<N>`](SlotObject::raw_exact) and
-//! [`take_raw_exact::<N>`](SlotObject::take_raw_exact) allocate `[0u8; N]`
-//! for whatever `N` you name, so a large one reintroduces exactly that
-//! `memset` and the guard rejection with it. [`raw`](SlotObject::raw) writes
-//! into a buffer you supply and so has the same property. Keep `N` small, or
-//! check the built output.
+//! Every other fixed-size read here — [`raw_exact::<N>`](SlotObject::raw_exact),
+//! [`take_raw_exact::<N>`](SlotObject::take_raw_exact), and the built-in
+//! `u64`/`Hash`/`AccountId`/`CurrencyCode` reads — instead reads into an
+//! uninitialized scratch buffer: the host call always overwrites what it is
+//! handed, and these reads only accept the result when it reports writing
+//! the buffer's *entire* length, so nothing here is ever read uninitialized.
+//! There is no zero-init to lower, so no `memset` risk at any `N` or
+//! optimization level. [`raw`](SlotObject::raw) writes into a buffer you
+//! supply, so any zero-init cost there is the caller's own to manage.
 
 use core::marker::PhantomData;
+use core::mem::MaybeUninit;
 
 use crate::api;
 use crate::convert::FixedRead;
@@ -476,6 +479,38 @@ impl<T> SlotObject<T> {
     }
 }
 
+/// Forms a `&mut [u8]` view over `buf`'s storage without requiring it to be
+/// initialized first.
+///
+/// [`read_exact_bytes`] hands a scratch buffer straight to
+/// [`api::slot::slot`], which always *completely overwrites* it on the only
+/// path its contents are read afterward (the exact-length check below).
+/// Zero-initializing that buffer first is dead work the Hook API's guard
+/// checker still charges for, because a zeroed buffer whose address escapes
+/// into an `extern` call is a store LLVM cannot prove dead across the FFI
+/// boundary.
+///
+/// # Safety
+///
+/// The caller must read the returned slice only over the range a prior write
+/// into it actually covered — never past what [`api::slot::slot`] itself
+/// reported writing. `u8` has no invalid bit patterns and no padding, so
+/// forming the `&mut [u8]` here is sound unconditionally; the requirement is
+/// entirely about what the caller does with it afterward. [`api::slot::slot`]
+/// is itself an `unsafe` `extern` host call already fully trusted by every
+/// other line of this crate, so trusting its reported byte count adds no new
+/// trust boundary.
+#[inline(always)]
+unsafe fn uninit_slice_mut<const N: usize>(buf: &mut MaybeUninit<[u8; N]>) -> &mut [u8] {
+    // SAFETY: `buf` is `N` bytes of live, properly aligned storage (a
+    // `MaybeUninit<[u8; N]>` has the same size and alignment as `[u8; N]`).
+    // `u8` has no invalid bit patterns and no padding, so a `&mut [u8]` over
+    // that storage is well-formed the instant it is created, whether or not
+    // the storage has been written to yet — only reading through it before
+    // it is written would be unsound, and that burden is on the caller.
+    unsafe { core::slice::from_raw_parts_mut(buf.as_mut_ptr().cast::<u8>(), N) }
+}
+
 /// Reads exactly `N` bytes out of `no`, erroring when the slot's size is not
 /// exactly `N`.
 ///
@@ -483,10 +518,16 @@ impl<T> SlotObject<T> {
 /// so the two share one definition of "exact".
 #[inline(always)]
 fn read_exact_bytes<const N: usize>(no: u32) -> Result<[u8; N]> {
-    let mut buf = [0u8; N];
-    let written = api::slot::slot(&mut buf, no)?;
+    let mut buf = MaybeUninit::<[u8; N]>::uninit();
+    // SAFETY: the returned slice is read only via `assume_init` below, and
+    // only once `written == N` confirms the host call just wrote every byte
+    // of it — honoring `uninit_slice_mut`'s contract.
+    let written = api::slot::slot(unsafe { uninit_slice_mut(&mut buf) }, no)?;
     if written == N {
-        Ok(buf)
+        // SAFETY: `written == N` means `api::slot::slot` reported writing
+        // all `N` bytes of `buf`'s storage, so `buf` is now fully
+        // initialized.
+        Ok(unsafe { buf.assume_init() })
     } else {
         Err(HookError::TooSmall)
     }
