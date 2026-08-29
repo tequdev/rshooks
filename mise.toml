@@ -58,6 +58,10 @@ cargo run -p rshooks-build -- check examples/80_governance/out/current/0.govern.
 cargo run -p rshooks-build -- check examples/80_governance/out/current/1.reward.wasm
 """
 
+[tasks."record-example-metrics"]
+description = "Rebuild every example and write examples/*/metrics.json (WCE / size / nesting). Pass --check to fail instead of writing; --skip-build to reuse out/current"
+run = "python3 scripts/record-example-metrics.py"
+
 [tasks."probe:testenv-parity"]
 description = "Continuous zero-wasm-impact check: build every example twice (as-committed vs test-wiring stripped) and diff every wasm plus WCE/size/nesting (design doc §7)"
 run = "bash scripts/probe-testenv-parity.sh"

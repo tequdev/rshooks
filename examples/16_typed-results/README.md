@@ -101,21 +101,16 @@ entry can exit with (`reset` reuses `StateSetFailed` directly, via
 
 ## Cost of the typed form, here
 
-Measured (`rshooks build`/`check`, this workspace's `opt-level = 3`
-profile):
-
-| entry | form | worst-case instructions | size | max nesting depth |
-|---|---|---:|---:|---:|
-| `deposit` (index 0) | typed, idiomatic (`HookResult`, `?`, msg-clause `hook_errors!`) | 134 | 581 bytes | 1 |
-| `reset` (index 1) | typed, raw (`HookResult`, `accept!`/`rollback!`) | 45 | 320 bytes | 1 |
-
-Both are well within the 32-level nesting budget and the 65,535-byte
-SetHook size limit — `deposit`'s higher numbers versus `reset` reflect it
-doing strictly more work (a required-parameter read plus a state
-read-modify-write, versus `reset`'s single unconditional write), not a cost
-the typed form itself imposes; see the design doc's T-1 probe table for the
-apples-to-apples comparison (`P1`/`p2fix`/`P3-typed` vs. their
-`accept!`/`rollback!` twins at matched logic) that this example's numbers
-corroborate rather than repeat.
+Current WCE, wasm size, and max nesting depth for each entry live in
+[`metrics.json`](./metrics.json) (refreshed by
+`mise run record-example-metrics`). Both entries stay well within the
+32-level nesting budget and the 65,535-byte SetHook size limit —
+`deposit`'s higher numbers versus `reset` reflect it doing strictly more
+work (a required-parameter read plus a state read-modify-write, versus
+`reset`'s single unconditional write), not a cost the typed form itself
+imposes; see the design doc's T-1 probe table for the apples-to-apples
+comparison (`P1`/`p2fix`/`P3-typed` vs. their `accept!`/`rollback!`
+twins at matched logic) that this example's numbers corroborate rather
+than repeat.
 
 [`rshooks::exit::Rollback`]: ../../crates/rshooks/src/exit.rs
