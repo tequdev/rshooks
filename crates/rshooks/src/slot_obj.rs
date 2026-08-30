@@ -57,7 +57,8 @@
 //! When a loop would otherwise burn through the 255-slot budget, the
 //! opt-in [`take_value`](SlotObject::take_value) /
 //! [`take_xfl`](SlotObject::take_xfl) /
-//! [`take_raw_exact`](SlotObject::take_raw_exact) family reads *and* clears,
+//! [`take_raw_exact`](SlotObject::take_raw_exact) /
+//! [`take_raw`](SlotObject::take_raw) family reads *and* clears,
 //! on both the success and the failure path. Budget math: one slot per
 //! `get`, 255 per execution; a 300-iteration loop that derives one child per
 //! iteration must use `take_*` (or clear explicitly) or it will run out.
@@ -94,8 +95,9 @@
 //! handed, and these reads only accept the result when it reports writing
 //! the buffer's *entire* length, so nothing here is ever read uninitialized.
 //! There is no zero-init to lower, so no `memset` risk at any `N` or
-//! optimization level. [`raw`](SlotObject::raw) writes into a buffer you
-//! supply, so any zero-init cost there is the caller's own to manage.
+//! optimization level. [`raw`](SlotObject::raw) and
+//! [`take_raw`](SlotObject::take_raw) write into a buffer you supply, so any
+//! zero-init cost there is the caller's own to manage.
 
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
@@ -547,8 +549,13 @@ impl<T> SlotObject<T> {
 /// itself an `unsafe` `extern` host call already fully trusted by every
 /// other line of this crate, so trusting its reported byte count is the
 /// same FFI trust boundary, not a new one.
+///
+/// `pub(crate)` rather than private: [`crate::views::source`]'s fixed-size
+/// otxn reads have the identical shape (read into scratch, accept only on a
+/// reported full-length write) and share this helper rather than repeating
+/// the `unsafe` block.
 #[inline(always)]
-unsafe fn uninit_slice_mut<const N: usize>(buf: &mut MaybeUninit<[u8; N]>) -> &mut [u8] {
+pub(crate) unsafe fn uninit_slice_mut<const N: usize>(buf: &mut MaybeUninit<[u8; N]>) -> &mut [u8] {
     // SAFETY: `buf` is `N` bytes of live, properly aligned storage (a
     // `MaybeUninit<[u8; N]>` has the same size and alignment as `[u8; N]`).
     // `u8` has no invalid bit patterns and no padding, so a `&mut [u8]` over
