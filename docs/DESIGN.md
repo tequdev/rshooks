@@ -1260,6 +1260,59 @@ The decisions behind it:
   `api::keylet` because keylet parameterization is per-type knowledge the
   format macros do not encode — `from_keylet` just composes.
 
+### 5.10 Format availability: `active` / `pending` / `dormant`
+
+Upstream's format tables are inherited wholesale from rippled, so
+§5.9 would otherwise generate views for a great deal Xahau cannot run —
+an `AMMBid`, an `XChainCommit` — offering a hook author an API no real
+transaction can match. `crates/rshooks-core/format_availability.json`
+classifies every declared format, and the generator follows it.
+
+| tier | meaning | generated |
+|---|---|---|
+| `active` | activated on Xahau mainnet | normally |
+| `pending` | supported by xahaud, not yet activated | behind the `pending-amendments` cargo feature |
+| `dormant` | gated by an amendment xahaud marks `Supported::no` (or depending on one), so it cannot activate without a node upgrade | not at all |
+
+The decisions behind it:
+
+- **Curated, not derived, and not vendor data.** The `dormant` half is
+  objective — `features.macro` (vendored alongside the format definitions,
+  as evidence only) states `Supported::no` — but the active/pending split
+  is a fact about ledger state that no file in this repository can answer.
+  So it is a hand-maintained list, checked in beside `protocol_formats.json`
+  and outside `vendor/`.
+- **One automatic mutation, in the safe direction.** `gen-core` appends any
+  newly declared format as `dormant` and does nothing else; moving an entry
+  between tiers is a human decision. A newly vendored format is therefore
+  unusable until somebody looks at it, rather than silently exposed.
+  `gen-core --check` fails on an unclassified format (pointing at
+  `gen-core`) and on a classification naming a format upstream no longer
+  declares, so the two files cannot drift apart in either direction.
+- **The ergonomic layer follows availability; the raw layers do not.** A
+  `rshooks::sfield` constant exists only for a field some usable format
+  references — best tier among the referencing formats, so one active
+  format is enough to keep a field. `rshooks-core`'s `sfcodes`/`tts`/`lets`
+  stay complete 1:1 mirrors, and `TxType`/`LedgerEntryType` stay exhaustive.
+  That line is deliberate: those decode wire values rather than offer
+  capability, and a decoder that cannot name a code it might receive is
+  strictly worse than one that can. Nothing is unreachable either way —
+  `rshooks::raw::sfcodes::sfXxx` is always there and every field-code
+  parameter takes `impl Into<u32>`.
+- **A field no format references stays active.** Those are structural, not
+  amendment-borne: metadata fields, hash and index plumbing, the four
+  container-typed pseudo-fields. The imprecision this accepts is that a
+  field reachable only from inside an opaque wire type
+  (`sfLockingChainIssue` inside `sfXChainBridge`) looks structural and
+  survives as a typed constant no Xahau object will contain.
+- **Pending views and their fields share one gate**, so a `pending` view
+  compiles together with the `pending`-only constants it reads, or not at
+  all. `mise run lint`/`test` each run one extra invocation with the
+  feature on, because it is a genuinely different tree of code.
+- **Measured:** classification removes and gates only code nothing used, so
+  all 20 example binaries are byte-identical to the pre-classification
+  build.
+
 ## 6. rshooks-build
 
 `std` crate: `src/main.rs` (clap CLI) + `src/lib.rs` (pipeline as pure
