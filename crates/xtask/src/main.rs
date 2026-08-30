@@ -6,6 +6,7 @@
 #![allow(clippy::arithmetic_side_effects, clippy::indexing_slicing)]
 #![allow(clippy::print_stderr)]
 
+mod availability;
 mod codegen;
 mod gen_core;
 mod ir;

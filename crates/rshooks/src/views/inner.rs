@@ -739,10 +739,17 @@ impl HookParameter {
 ///
 /// Wrap a child slot with [`NFToken::from_slot`] — typically one an
 /// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct NFToken {
     src: crate::views::source::SlotSource,
 }
 
+#[cfg(feature = "all-amendments")]
 impl NFToken {
     /// Views an already-navigated child slot as `NFToken`, taking ownership of
     /// the slot.
@@ -1105,10 +1112,17 @@ impl Remark {
 ///
 /// Wrap a child slot with [`VoteEntry::from_slot`] — typically one an
 /// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct VoteEntry {
     src: crate::views::source::SlotSource,
 }
 
+#[cfg(feature = "all-amendments")]
 impl VoteEntry {
     /// Views an already-navigated child slot as `VoteEntry`, taking ownership of
     /// the slot.
@@ -1157,10 +1171,17 @@ impl VoteEntry {
 ///
 /// Wrap a child slot with [`AuctionSlot::from_slot`] — typically one an
 /// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct AuctionSlot {
     src: crate::views::source::SlotSource,
 }
 
+#[cfg(feature = "all-amendments")]
 impl AuctionSlot {
     /// Views an already-navigated child slot as `AuctionSlot`, taking ownership of
     /// the slot.
@@ -1247,10 +1268,17 @@ impl AuctionSlot {
 ///
 /// Wrap a child slot with [`XChainClaimAttestationCollectionElement::from_slot`] — typically one an
 /// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct XChainClaimAttestationCollectionElement {
     src: crate::views::source::SlotSource,
 }
 
+#[cfg(feature = "all-amendments")]
 impl XChainClaimAttestationCollectionElement {
     /// Views an already-navigated child slot as `XChainClaimAttestationCollectionElement`, taking ownership of
     /// the slot.
@@ -1345,10 +1373,17 @@ impl XChainClaimAttestationCollectionElement {
 ///
 /// Wrap a child slot with [`XChainCreateAccountAttestationCollectionElement::from_slot`] — typically one an
 /// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct XChainCreateAccountAttestationCollectionElement {
     src: crate::views::source::SlotSource,
 }
 
+#[cfg(feature = "all-amendments")]
 impl XChainCreateAccountAttestationCollectionElement {
     /// Views an already-navigated child slot as `XChainCreateAccountAttestationCollectionElement`, taking ownership of
     /// the slot.
@@ -1447,10 +1482,17 @@ impl XChainCreateAccountAttestationCollectionElement {
 ///
 /// Wrap a child slot with [`XChainClaimProofSig::from_slot`] — typically one an
 /// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct XChainClaimProofSig {
     src: crate::views::source::SlotSource,
 }
 
+#[cfg(feature = "all-amendments")]
 impl XChainClaimProofSig {
     /// Views an already-navigated child slot as `XChainClaimProofSig`, taking ownership of
     /// the slot.
@@ -1521,10 +1563,17 @@ impl XChainClaimProofSig {
 ///
 /// Wrap a child slot with [`XChainCreateAccountProofSig::from_slot`] — typically one an
 /// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct XChainCreateAccountProofSig {
     src: crate::views::source::SlotSource,
 }
 
+#[cfg(feature = "all-amendments")]
 impl XChainCreateAccountProofSig {
     /// Views an already-navigated child slot as `XChainCreateAccountProofSig`, taking ownership of
     /// the slot.
@@ -1599,10 +1648,17 @@ impl XChainCreateAccountProofSig {
 ///
 /// Wrap a child slot with [`AuthAccount::from_slot`] — typically one an
 /// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct AuthAccount {
     src: crate::views::source::SlotSource,
 }
 
+#[cfg(feature = "all-amendments")]
 impl AuthAccount {
     /// Views an already-navigated child slot as `AuthAccount`, taking ownership of
     /// the slot.
@@ -1695,10 +1751,17 @@ impl PriceData {
 ///
 /// Wrap a child slot with [`Credential::from_slot`] — typically one an
 /// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct Credential {
     src: crate::views::source::SlotSource,
 }
 
+#[cfg(feature = "all-amendments")]
 impl Credential {
     /// Views an already-navigated child slot as `Credential`, taking ownership of
     /// the slot.

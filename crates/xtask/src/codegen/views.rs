@@ -25,6 +25,12 @@
 //!   and this output is production `no_std` code under the same lint wall as
 //!   everything else in the crate.
 //! - **Deterministic**: a pure function of the artifact, in artifact order.
+//! - **Availability-aware.** A format's tier in
+//!   [`crate::availability`] decides whether it is rendered at all: a
+//!   `dormant` format gets no struct, a `pending` one gets its whole item
+//!   set behind `#[cfg(feature = "…")]`. The cfg goes on every item of the
+//!   view — the struct, each `impl` block — so a pending view and the
+//!   pending `sfield` constants it reads compile together or not at all.
 //!
 //! # Value types are keyed on the serialized type ID
 //!
@@ -42,6 +48,7 @@ use anyhow::{Context, Result, anyhow, bail};
 
 use super::sfield::type_id_name;
 use super::with_generated_marker_in;
+use crate::availability::{FormatAvailability, Tier};
 use crate::protocol_ir::{
     FieldSpec, InnerObjectFormat, LedgerEntryFormat, Presence, ProtocolFormats, SFieldDef, TxFormat,
 };
@@ -271,12 +278,21 @@ struct Accessor<'a> {
     def: &'a SFieldDef,
     name: String,
     access: Access,
+    /// This *field's* tier, which is not always the view's.
+    ///
+    /// A derived field tier is the best among the formats using it, so it is
+    /// normally at least as available as any view carrying it — and then a
+    /// `field_overrides` entry can make it scarcer (`sfCredentialIDs` on an
+    /// active `Payment`). When that happens the accessor, not the view, is
+    /// what has to disappear or gain a `#[cfg]`.
+    tier: Tier,
 }
 
 fn resolve<'a>(
     fields: &[&'a FieldSpec],
     sfields: &BTreeMap<&str, &'a SFieldDef>,
     view: &str,
+    field_tiers: &BTreeMap<String, Tier>,
 ) -> Result<Vec<Accessor<'a>>> {
     let mut out = Vec::with_capacity(fields.len());
     let mut taken: BTreeSet<String> = BTreeSet::new();
@@ -288,6 +304,10 @@ fn resolve<'a>(
                 spec.sfield
             )
         })?;
+        let tier = field_tiers
+            .get(&spec.sfield)
+            .copied()
+            .unwrap_or(Tier::Active);
         let name = method_name(&spec.sfield)
             .with_context(|| format!("naming `{}`'s accessor on view `{view}`", spec.sfield))?;
         let access = access(def.sti_code);
@@ -315,6 +335,7 @@ fn resolve<'a>(
             def,
             name,
             access,
+            tier,
         });
     }
     Ok(out)
@@ -326,13 +347,67 @@ fn resolve<'a>(
 
 /// The shared prefix of every accessor's doc comment: which upstream field
 /// it is, what its serialized type is, and how the format declares it.
-fn field_doc(a: &Accessor<'_>) -> String {
-    format!(
+///
+/// Includes the note explaining a field gated more tightly than the view
+/// around it, but **not** the `#[cfg]` itself — that is [`field_cfg`], and
+/// it has to come after the whole doc block. Splicing an attribute into the
+/// middle of a doc comment compiles, but reads as a stray line in the
+/// generated source and puts everything after it outside the attribute's
+/// apparent scope to a human skimming the file.
+fn field_doc(a: &Accessor<'_>, view_tier: Tier) -> String {
+    let mut out = format!(
         "/// `{name}` — {ty}, `{presence}`.\n",
         name = a.def.name,
         ty = type_id_name(a.def.sti_code),
         presence = presence_token(a.spec.presence),
-    )
+    );
+    if a.tier > view_tier {
+        out.push_str(&tier_field_doc(a.tier));
+    }
+    out
+}
+
+/// The field's own `#[cfg]` line, emitted after the accessor's complete doc
+/// block and immediately before `#[inline(always)]`.
+///
+/// Present only when the field is *strictly scarcer* than the view carrying
+/// it — which only a `field_overrides` entry can produce, since a derived
+/// field tier is the best over its formats and so never worse than any view
+/// listing it. When the field is as available as the view (or more), the
+/// view's own attribute already covers the accessor and repeating it would
+/// be noise.
+fn field_cfg(a: &Accessor<'_>, view_tier: Tier) -> String {
+    if a.tier > view_tier {
+        a.tier
+            .cfg_attr()
+            .map(|c| format!("{c}\n"))
+            .unwrap_or_default()
+    } else {
+        String::new()
+    }
+}
+
+/// The rustdoc note explaining why one accessor is gated more tightly than
+/// the view around it.
+fn tier_field_doc(tier: Tier) -> String {
+    match tier {
+        Tier::Active => String::new(),
+        Tier::Pending => format!(
+            "///\n\
+             /// **Amendment not yet active** as of the vendored snapshot. The enclosing\n\
+             /// format is available but this field is not, so the accessor is excluded\n\
+             /// under the `{narrow}` cargo feature.\n",
+            narrow = crate::availability::ACTIVE_ONLY_FEATURE,
+        ),
+        Tier::Dormant => format!(
+            "///\n\
+             /// **Gated by an amendment xahaud marks `Supported::no`.** The enclosing\n\
+             /// format is available, but this field is not: a validated Xahau\n\
+             /// transaction can never carry it, so the accessor needs the `{all}` cargo\n\
+             /// feature.\n",
+            all = crate::availability::ALL_FEATURE,
+        ),
+    }
 }
 
 /// The sentence explaining an `Option` return, appended where the field is
@@ -350,11 +425,11 @@ fn optional_doc(p: Presence) -> &'static str {
 }
 
 /// Renders the value/raw accessors — the ones every source can serve.
-fn push_shared_accessor(buf: &mut String, a: &Accessor<'_>) -> Result<()> {
+fn push_shared_accessor(buf: &mut String, a: &Accessor<'_>, view_tier: Tier) -> Result<()> {
     let opt = is_optional(a.spec.presence);
     match a.access {
         Access::Value(ty) => {
-            buf.push_str(&field_doc(a));
+            buf.push_str(&field_doc(a, view_tier));
             if opt {
                 buf.push_str(optional_doc(a.spec.presence));
             }
@@ -364,6 +439,7 @@ fn push_shared_accessor(buf: &mut String, a: &Accessor<'_>) -> Result<()> {
                 format!("crate::error::Result<{ty}>")
             };
             let call = if opt { "read_opt" } else { "read" };
+            buf.push_str(&field_cfg(a, view_tier));
             writeln!(
                 buf,
                 "#[inline(always)]\n\
@@ -377,7 +453,7 @@ fn push_shared_accessor(buf: &mut String, a: &Accessor<'_>) -> Result<()> {
         }
         Access::Raw | Access::Container(_) => {
             let container = matches!(a.access, Access::Container(_));
-            buf.push_str(&field_doc(a));
+            buf.push_str(&field_doc(a, view_tier));
             buf.push_str(
                 "///\n\
                  /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,\n\
@@ -406,6 +482,7 @@ fn push_shared_accessor(buf: &mut String, a: &Accessor<'_>) -> Result<()> {
                 "crate::error::Result<usize>"
             };
             let call = if opt { "read_raw_opt" } else { "read_raw" };
+            buf.push_str(&field_cfg(a, view_tier));
             writeln!(
                 buf,
                 "#[inline(always)]\n\
@@ -423,12 +500,12 @@ fn push_shared_accessor(buf: &mut String, a: &Accessor<'_>) -> Result<()> {
 
 /// Renders the `*_slot` child-slot accessor a container field gets on a
 /// slot-backed view. Writes nothing for a non-container field.
-fn push_slot_accessor(buf: &mut String, a: &Accessor<'_>) -> Result<()> {
+fn push_slot_accessor(buf: &mut String, a: &Accessor<'_>, view_tier: Tier) -> Result<()> {
     let Access::Container(slot_ty) = a.access else {
         return Ok(());
     };
     let opt = is_optional(a.spec.presence);
-    buf.push_str(&field_doc(a));
+    buf.push_str(&field_doc(a, view_tier));
     buf.push_str(
         "///\n\
          /// Navigates to the field and hands its **child slot** to the caller, who\n\
@@ -448,6 +525,7 @@ fn push_slot_accessor(buf: &mut String, a: &Accessor<'_>) -> Result<()> {
     } else {
         (format!("crate::error::Result<{inner}>"), "subobject")
     };
+    buf.push_str(&field_cfg(a, view_tier));
     writeln!(
         buf,
         "#[inline(always)]\n\
@@ -459,6 +537,37 @@ fn push_slot_accessor(buf: &mut String, a: &Accessor<'_>) -> Result<()> {
     )
     .context("writing a slot accessor")?;
     Ok(())
+}
+
+/// The `#[cfg]` line (if any) plus the rustdoc note a tier adds to a
+/// generated view, as `(attr, doc_lines)`.
+///
+/// Every item of a pending view carries the attribute, not just the struct:
+/// an `impl` block for a struct that does not exist is a compile error, so
+/// the gate has to be uniform across the whole view.
+fn tier_prelude(tier: Tier) -> (String, String) {
+    let Some(attr) = tier.cfg_attr() else {
+        return (String::new(), String::new());
+    };
+    let doc = match tier {
+        Tier::Active => String::new(),
+        Tier::Pending => format!(
+            "///\n/// **Amendment not yet active** as of the vendored snapshot. Available\n\
+             /// by default so a hook can be written and tested against the shape in\n\
+             /// advance; excluded under the `{narrow}` cargo feature, which restricts\n\
+             /// this crate to what is live on Xahau today. Nothing on-ledger will match\n\
+             /// it until the amendment activates.\n",
+            narrow = crate::availability::ACTIVE_ONLY_FEATURE,
+        ),
+        Tier::Dormant => format!(
+            "///\n/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot\n\
+             /// appear on Xahau mainnet — activating it would amendment-block the node.\n\
+             /// Needs the `{all}` cargo feature, which is there for a custom network\n\
+             /// whose operator knows otherwise. Enable it at your own judgment.\n",
+            all = crate::availability::ALL_FEATURE,
+        ),
+    };
+    (format!("{attr}\n"), doc)
 }
 
 /// The one `use` any generated view file needs.
@@ -513,8 +622,9 @@ const TX_MODULE_DOC: &str = "\
 ";
 
 /// Renders `crates/rshooks/src/views/tx.rs`.
-pub fn generate_tx(formats: &ProtocolFormats) -> Result<String> {
+pub fn generate_tx(formats: &ProtocolFormats, availability: &FormatAvailability) -> Result<String> {
     let sfields = sfield_index(formats);
+    let field_tiers = availability.field_tiers(formats);
     check_unique(
         formats.transactions.iter().map(|t| t.name.clone()),
         "transaction",
@@ -522,7 +632,8 @@ pub fn generate_tx(formats: &ProtocolFormats) -> Result<String> {
 
     let mut body = String::from("\n");
     for tx in &formats.transactions {
-        push_tx_view(&mut body, tx, formats, &sfields)
+        let tier = availability.tx(&tx.name);
+        push_tx_view(&mut body, tx, formats, &sfields, tier, &field_tiers)
             .with_context(|| format!("rendering the `{}` transaction view", tx.name))?;
     }
     Ok(with_generated_marker_in("xahaud-protocol", "transactions.macro", TX_MODULE_DOC) + &body)
@@ -533,10 +644,13 @@ fn push_tx_view(
     tx: &TxFormat,
     formats: &ProtocolFormats,
     sfields: &BTreeMap<&str, &SFieldDef>,
+    tier: Tier,
+    field_tiers: &BTreeMap<String, Tier>,
 ) -> Result<()> {
     let fields = merged_fields(&tx.fields, &formats.tx_common);
-    let accessors = resolve(&fields, sfields, &tx.name)?;
+    let accessors = resolve(&fields, sfields, &tx.name, field_tiers)?;
     let name = &tx.name;
+    let (cfg, tier_doc) = tier_prelude(tier);
 
     writeln!(
         buf,
@@ -545,7 +659,7 @@ fn push_tx_view(
          /// Build one with [`{name}::otxn`] (the originating transaction) or\n\
          /// [`{name}::from_slot`] (an already-loaded transaction slot); both check the\n\
          /// transaction type before handing the view back.\n\
-         pub struct {name}<S: crate::views::source::FieldSource> {{\n\
+         {tier_doc}{cfg}pub struct {name}<S: crate::views::source::FieldSource> {{\n\
          src: S,\n\
          }}\n",
         tag = tx.tag,
@@ -555,7 +669,7 @@ fn push_tx_view(
 
     writeln!(
         buf,
-        "impl {name}<crate::views::source::OtxnSource> {{\n\
+        "{cfg}impl {name}<crate::views::source::OtxnSource> {{\n\
          /// Views the originating transaction as `{name}`.\n\
          ///\n\
          /// One `otxn_type` host call and one integer compare against `{tag}`;\n\
@@ -608,18 +722,18 @@ fn push_tx_view(
 
     let mut shared = String::new();
     for a in &accessors {
-        push_shared_accessor(&mut shared, a)?;
-        push_slot_accessor(&mut slot_only, a)?;
+        push_shared_accessor(&mut shared, a, tier)?;
+        push_slot_accessor(&mut slot_only, a, tier)?;
     }
 
     writeln!(
         buf,
-        "impl {name}<crate::views::source::SlotSource> {{\n{slot_only}}}\n"
+        "{cfg}impl {name}<crate::views::source::SlotSource> {{\n{slot_only}}}\n"
     )
     .context("writing the slot impl")?;
     writeln!(
         buf,
-        "impl<S: crate::views::source::FieldSource> {name}<S> {{\n{shared}}}\n"
+        "{cfg}impl<S: crate::views::source::FieldSource> {name}<S> {{\n{shared}}}\n"
     )
     .context("writing the shared impl")?;
     Ok(())
@@ -651,8 +765,12 @@ const LEDGER_MODULE_DOC: &str = "\
 ";
 
 /// Renders `crates/rshooks/src/views/ledger.rs`.
-pub fn generate_ledger(formats: &ProtocolFormats) -> Result<String> {
+pub fn generate_ledger(
+    formats: &ProtocolFormats,
+    availability: &FormatAvailability,
+) -> Result<String> {
     let sfields = sfield_index(formats);
+    let field_tiers = availability.field_tiers(formats);
     check_unique(
         formats.ledger_entries.iter().map(|l| l.name.clone()),
         "ledger entry",
@@ -660,7 +778,8 @@ pub fn generate_ledger(formats: &ProtocolFormats) -> Result<String> {
 
     let mut body = String::from(SOURCE_TRAIT_IMPORT);
     for le in &formats.ledger_entries {
-        push_ledger_view(&mut body, le, formats, &sfields)
+        let tier = availability.ledger_entry(&le.name);
+        push_ledger_view(&mut body, le, formats, &sfields, tier, &field_tiers)
             .with_context(|| format!("rendering the `{}` ledger entry view", le.name))?;
     }
     Ok(
@@ -674,10 +793,13 @@ fn push_ledger_view(
     le: &LedgerEntryFormat,
     formats: &ProtocolFormats,
     sfields: &BTreeMap<&str, &SFieldDef>,
+    tier: Tier,
+    field_tiers: &BTreeMap<String, Tier>,
 ) -> Result<()> {
     let fields = merged_fields(&le.fields, &formats.le_common);
-    let accessors = resolve(&fields, sfields, &le.name)?;
+    let accessors = resolve(&fields, sfields, &le.name, field_tiers)?;
     let name = &le.name;
+    let (cfg, tier_doc) = tier_prelude(tier);
 
     writeln!(
         buf,
@@ -686,11 +808,11 @@ fn push_ledger_view(
          ///\n\
          /// Build one with [`{name}::from_keylet`] or [`{name}::from_slot`]; both\n\
          /// check `sfLedgerEntryType` before handing the view back.\n\
-         pub struct {name} {{\n\
+         {tier_doc}{cfg}pub struct {name} {{\n\
          src: crate::views::source::SlotSource,\n\
          }}\n\
          \n\
-         impl {name} {{\n\
+         {cfg}impl {name} {{\n\
          /// Loads the ledger object a keylet points at and views it as `{name}`.\n\
          ///\n\
          /// `slot_set` followed by the same check [`{name}::from_slot`] makes.\n\
@@ -729,8 +851,8 @@ fn push_ledger_view(
     .context("writing the view struct and constructors")?;
 
     for a in &accessors {
-        push_shared_accessor(buf, a)?;
-        push_slot_accessor(buf, a)?;
+        push_shared_accessor(buf, a, tier)?;
+        push_slot_accessor(buf, a, tier)?;
     }
     buf.push_str("}\n\n");
     Ok(())
@@ -756,8 +878,12 @@ const INNER_MODULE_DOC: &str = "\
 ";
 
 /// Renders `crates/rshooks/src/views/inner.rs`.
-pub fn generate_inner(formats: &ProtocolFormats) -> Result<String> {
+pub fn generate_inner(
+    formats: &ProtocolFormats,
+    availability: &FormatAvailability,
+) -> Result<String> {
     let sfields = sfield_index(formats);
+    let field_tiers = availability.field_tiers(formats);
     let names = formats
         .inner_objects
         .iter()
@@ -767,7 +893,8 @@ pub fn generate_inner(formats: &ProtocolFormats) -> Result<String> {
 
     let mut body = String::from(SOURCE_TRAIT_IMPORT);
     for obj in &formats.inner_objects {
-        push_inner_view(&mut body, obj, &sfields)
+        let tier = availability.inner_object(&inner_name(&obj.sfield)?);
+        push_inner_view(&mut body, obj, &sfields, tier, &field_tiers)
             .with_context(|| format!("rendering the `{}` inner-object view", obj.sfield))?;
     }
     Ok(with_generated_marker_in(
@@ -790,10 +917,13 @@ fn push_inner_view(
     buf: &mut String,
     obj: &InnerObjectFormat,
     sfields: &BTreeMap<&str, &SFieldDef>,
+    tier: Tier,
+    field_tiers: &BTreeMap<String, Tier>,
 ) -> Result<()> {
     let name = inner_name(&obj.sfield)?;
+    let (cfg, tier_doc) = tier_prelude(tier);
     let fields: Vec<&FieldSpec> = obj.fields.iter().collect();
-    let accessors = resolve(&fields, sfields, &name)?;
+    let accessors = resolve(&fields, sfields, &name, field_tiers)?;
     let ty = type_id_name(
         sfields
             .get(obj.sfield.as_str())
@@ -807,11 +937,11 @@ fn push_inner_view(
          ///\n\
          /// Wrap a child slot with [`{name}::from_slot`] — typically one an\n\
          /// enclosing view's `…_slot` accessor handed back, or an `STArray` element.\n\
-         pub struct {name} {{\n\
+         {tier_doc}{cfg}pub struct {name} {{\n\
          src: crate::views::source::SlotSource,\n\
          }}\n\
          \n\
-         impl {name} {{\n\
+         {cfg}impl {name} {{\n\
          /// Views an already-navigated child slot as `{name}`, taking ownership of\n\
          /// the slot.\n\
          ///\n\
@@ -836,8 +966,8 @@ fn push_inner_view(
     .context("writing the view struct and constructors")?;
 
     for a in &accessors {
-        push_shared_accessor(buf, a)?;
-        push_slot_accessor(buf, a)?;
+        push_shared_accessor(buf, a, tier)?;
+        push_slot_accessor(buf, a, tier)?;
     }
     buf.push_str("}\n\n");
     Ok(())
@@ -857,6 +987,30 @@ mod tests {
     fn corpus() -> ProtocolFormats {
         let json = include_str!("../../../rshooks-core/protocol_formats.json");
         serde_json::from_str(json).unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    /// The checked-in curated classification — what `gen-core` actually
+    /// renders with.
+    fn availability() -> FormatAvailability {
+        let json = include_str!("../../../rshooks-core/format_availability.json");
+        serde_json::from_str(json).unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    /// Everything `active`, for the tests that assert on rendering shape
+    /// rather than on availability: those want every format present.
+    fn all_active(f: &ProtocolFormats) -> FormatAvailability {
+        let mut a = FormatAvailability::empty();
+        for t in &f.transactions {
+            a.transactions.insert(t.name.clone(), Tier::Active);
+        }
+        for l in &f.ledger_entries {
+            a.ledger_entries.insert(l.name.clone(), Tier::Active);
+        }
+        for i in &f.inner_objects {
+            a.inner_objects
+                .insert(inner_name(&i.sfield).unwrap_or_default(), Tier::Active);
+        }
+        a
     }
 
     #[test]
@@ -947,7 +1101,8 @@ mod tests {
             ledger_entries: Vec::new(),
             inner_objects: Vec::new(),
         };
-        let msg = format!("{:#}", generate_tx(&formats).unwrap_err());
+        let av = all_active(&formats);
+        let msg = format!("{:#}", generate_tx(&formats, &av).unwrap_err());
         assert!(
             msg.contains("memos_slot") && msg.contains("already claims"),
             "{msg}"
@@ -961,10 +1116,11 @@ mod tests {
     #[test]
     fn the_generated_code_has_no_statics_exports_or_function_pointers() {
         let formats = corpus();
+        let av = availability();
         for (label, text) in [
-            ("tx.rs", generate_tx(&formats).unwrap()),
-            ("ledger.rs", generate_ledger(&formats).unwrap()),
-            ("inner.rs", generate_inner(&formats).unwrap()),
+            ("tx.rs", generate_tx(&formats, &av).unwrap()),
+            ("ledger.rs", generate_ledger(&formats, &av).unwrap()),
+            ("inner.rs", generate_inner(&formats, &av).unwrap()),
         ] {
             for needle in [
                 "static ",
@@ -986,20 +1142,28 @@ mod tests {
     #[test]
     fn rendering_is_deterministic_and_covers_the_whole_corpus() {
         let formats = corpus();
+        let av = all_active(&formats);
+        let real = availability();
+        type Render = fn(&ProtocolFormats, &FormatAvailability) -> Result<String>;
         for (label, render) in [
-            (
-                "tx.rs",
-                generate_tx as fn(&ProtocolFormats) -> Result<String>,
-            ),
+            ("tx.rs", generate_tx as Render),
             ("ledger.rs", generate_ledger),
             ("inner.rs", generate_inner),
         ] {
-            let once = render(&formats).unwrap();
-            let twice = render(&formats).unwrap();
+            let once = render(&formats, &av).unwrap();
+            let twice = render(&formats, &av).unwrap();
             assert_eq!(once, twice, "{label} is not deterministic");
+            // Determinism has to hold under the curated classification too:
+            // the `#[cfg]` attributes are part of the rendered text.
+            assert_eq!(
+                render(&formats, &real).unwrap(),
+                render(&formats, &real).unwrap(),
+                "{label} is not deterministic under the curated classification"
+            );
         }
 
-        let tx = generate_tx(&formats).unwrap();
+        // With everything active, every declared format is rendered.
+        let tx = generate_tx(&formats, &av).unwrap();
         for t in &formats.transactions {
             assert!(
                 tx.contains(&format!("pub struct {}<", t.name)),
@@ -1007,7 +1171,7 @@ mod tests {
                 t.name
             );
         }
-        let ledger = generate_ledger(&formats).unwrap();
+        let ledger = generate_ledger(&formats, &av).unwrap();
         for l in &formats.ledger_entries {
             assert!(
                 ledger.contains(&format!("pub struct {} {{", l.name)),
@@ -1015,7 +1179,7 @@ mod tests {
                 l.name
             );
         }
-        let inner = generate_inner(&formats).unwrap();
+        let inner = generate_inner(&formats, &av).unwrap();
         for i in &formats.inner_objects {
             let name = inner_name(&i.sfield).unwrap();
             assert!(inner.contains(&format!("pub struct {name} {{")), "{name}");
@@ -1026,7 +1190,8 @@ mod tests {
     /// is stable and recognizable rather than on all 74.
     #[test]
     fn the_payment_view_maps_presence_and_value_types_as_specified() {
-        let tx = generate_tx(&corpus()).unwrap();
+        let formats = corpus();
+        let tx = generate_tx(&formats, &all_active(&formats)).unwrap();
         let payment = tx
             .split("pub struct ")
             .find(|s| s.starts_with("Payment<"))
@@ -1062,9 +1227,10 @@ mod tests {
     #[test]
     fn the_whole_corpus_names_and_resolves_without_collisions() {
         let formats = corpus();
-        assert!(generate_tx(&formats).is_ok());
-        assert!(generate_ledger(&formats).is_ok());
-        assert!(generate_inner(&formats).is_ok());
+        let av = all_active(&formats);
+        assert!(generate_tx(&formats, &av).is_ok());
+        assert!(generate_ledger(&formats, &av).is_ok());
+        assert!(generate_inner(&formats, &av).is_ok());
 
         // The vendored sfields file is the authority on which names exist;
         // check the namer copes with every one of them, not only the ones

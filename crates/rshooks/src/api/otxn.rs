@@ -615,7 +615,7 @@ mod tests {
             Err(HookError::NotImplemented)
         );
         assert_eq!(
-            otxn_field_typed(crate::sfield::sfLockingChainIssue),
+            otxn_field_typed(crate::sfield::sfClaimCurrency),
             Err(HookError::NotImplemented)
         );
         assert_eq!(otxn_param(&mut buf, b"x"), Err(HookError::NotImplemented));

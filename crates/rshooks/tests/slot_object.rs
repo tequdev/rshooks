@@ -43,7 +43,7 @@ fn surface() {
     let _: SField<u8> = sfCloseResolution;
     let _: SField<u16> = sfTransactionType;
     let _: SField<STObject> = sfMemo;
-    let _: SField<Issue> = sfAsset;
+    let _: SField<Issue> = sfClaimCurrency;
     // Blob / Hash160 / PathSet -> Opaque
     let _: SField<Opaque> = sfSigningPubKey;
     let _: SField<Opaque> = sfTakerPaysCurrency;
@@ -98,7 +98,7 @@ fn navigation_types() {
             .assume_type::<CurrencyCode>()
             .value()?;
         let _: AmountBytes = root.get(sfBalance)?.value()?;
-        let _: IssueData = root.get(sfAsset)?.value()?;
+        let _: IssueData = root.get(sfClaimCurrency)?.value()?;
         // take_* recycling
         let _: u32 = root.get(sfSequence)?.take_value()?;
         let _: XFL = root.get(sfBalance)?.take_xfl()?;
@@ -134,33 +134,111 @@ fn slot_path_shapes() {
 // Field-table parity
 // ---------------------------------------------------------------------------
 //
-// The full 325-name `typed.code() == raw` comparison is *generated* into
-// `sfield.rs` alongside the table it checks (`cargo xtask gen-core`), so it
-// cannot drift when upstream adds a field — run it with
-// `cargo test -p rshooks --lib parity`. What is left here is the shape
-// check the generated test cannot make: that both files declare the same
-// set of names in the first place.
+// The `typed.code() == raw` comparison is *generated* into `sfield.rs`
+// alongside the table it checks (`cargo xtask gen-core`), so it cannot drift
+// when upstream adds a field — run it with
+// `cargo test -p rshooks --lib parity`. What is left here is the shape check
+// the generated test cannot make: that both tables name the same fields, and
+// that the typed one gates each name by its amendment availability.
+//
+// `rshooks-core::sfcodes` is a complete 1:1 mirror of the wire protocol and
+// is never gated. `rshooks::sfield` declares the same names but attaches a
+// `#[cfg]` from `crates/rshooks-core/format_availability.json`: `pending`
+// fields are in by default and out under `active-amendments`, `dormant`
+// fields need `all-amendments`. So the two tables agree on *names* and
+// differ on *what compiles*.
+
+/// Maps each `pub const` in a generated table to the `#[cfg]` on the line
+/// above it, if any.
+fn gated_names(src: &str) -> std::collections::BTreeMap<String, Option<String>> {
+    let lines: Vec<&str> = src.lines().collect();
+    let mut out = std::collections::BTreeMap::new();
+    for (i, line) in lines.iter().enumerate() {
+        let Some(rest) = line.trim().strip_prefix("pub const ") else {
+            continue;
+        };
+        let Some(name) = rest.split(':').next() else {
+            continue;
+        };
+        let cfg = i
+            .checked_sub(1)
+            .and_then(|j| lines.get(j))
+            .map(|l| l.trim())
+            .filter(|l| l.starts_with("#[cfg"))
+            .map(str::to_string);
+        out.insert(name.to_string(), cfg);
+    }
+    out
+}
 
 #[test]
-fn both_tables_declare_the_same_names() {
-    let typed = include_str!("../src/sfield.rs");
-    let raw = include_str!("../../rshooks-core/src/sfcodes.rs");
+fn both_tables_name_the_same_fields_and_the_typed_one_gates_by_availability() {
+    let typed = gated_names(include_str!("../src/sfield.rs"));
+    let raw = gated_names(include_str!("../../rshooks-core/src/sfcodes.rs"));
 
-    let names = |src: &str| -> std::collections::BTreeSet<String> {
-        src.lines()
-            .filter_map(|l| l.trim().strip_prefix("pub const "))
-            .filter_map(|l| l.split(':').next())
-            .map(str::to_string)
-            .collect()
-    };
-    let typed_names = names(typed);
-    let raw_names = names(raw);
-
-    assert_eq!(typed_names.len(), 325, "expected 325 typed constants");
+    assert_eq!(raw.len(), 325, "the raw table must stay complete");
     assert_eq!(
-        typed_names, raw_names,
-        "the typed and raw field tables declare different names",
+        typed.keys().collect::<Vec<_>>(),
+        raw.keys().collect::<Vec<_>>(),
+        "the two tables name different fields",
     );
+    assert!(
+        raw.values().all(Option::is_none),
+        "the raw table must never be gated — it mirrors the wire protocol",
+    );
+
+    let cfg_of = |n: &str| typed.get(n).cloned().flatten();
+    const PENDING: &str =
+        "#[cfg(any(not(feature = \"active-amendments\"), feature = \"all-amendments\"))]";
+    const DORMANT: &str = "#[cfg(feature = \"all-amendments\")]";
+
+    // Active: always available, never gated.
+    for n in [
+        "sfAccount",
+        "sfAmount",
+        "sfClaimCurrency",
+        "sfLedgerEntryType",
+    ] {
+        assert_eq!(cfg_of(n), None, "{n} is active and must not be gated");
+    }
+    // Pending: in by default, out under `active-amendments`. The `any(...)`
+    // form is what makes both-features-on resolve to "in" (widest wins). The
+    // tier is currently empty; every gated field below must carry one of the
+    // two known expressions, so a future pending field cannot invent a third.
+    for (n, cfg) in &typed {
+        if let Some(cfg) = cfg {
+            assert!(
+                cfg == PENDING || cfg == DORMANT,
+                "{n} carries an unknown gate: {cfg}",
+            );
+        }
+    }
+    // Dormant: only under `all-amendments`. `sfAsset`/`sfXChainBridge` get
+    // there by their formats; `sfNFTokenTaxon` by the NFToken family's
+    // curator judgment; `sfCredentialIDs` by a `field_overrides` entry,
+    // since `Payment` is active but `featureCredentials` is Supported::no.
+    for n in [
+        "sfAsset",
+        "sfAsset2",
+        "sfXChainBridge",
+        "sfNFTokenTaxon",
+        "sfCredentialIDs",
+    ] {
+        assert_eq!(cfg_of(n).as_deref(), Some(DORMANT), "{n} should be dormant");
+    }
+}
+
+// The checks above read source text. This one is the compile-time half: it
+// only exists in the feature state it describes, and `mise run test` runs
+// the suite in each state. (The pending tier is currently empty, so it has
+// no nameable-constant twin — restore one gated by the pending `any(...)`
+// expression if a field ever moves back to `pending`.)
+
+/// A dormant constant is not nameable until asked for.
+#[cfg(feature = "all-amendments")]
+#[test]
+fn a_dormant_constant_is_nameable_under_all_amendments() {
+    assert_eq!(sfAsset.code(), rshooks::raw::sfcodes::sfAsset);
 }
 
 // ---------------------------------------------------------------------------

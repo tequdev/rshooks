@@ -72,5 +72,5 @@ fn vendored_files_match_recorded_sha256() {
 /// definitions `protocol_formats.json` is generated from.
 #[test]
 fn vendored_protocol_files_match_recorded_sha256() {
-    assert_vendor_group("vendor/xahaud-protocol", 6);
+    assert_vendor_group("vendor/xahaud-protocol", 7);
 }

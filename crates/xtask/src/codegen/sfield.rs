@@ -21,15 +21,18 @@ use std::fmt::Write as _;
 
 use anyhow::{Context, Result};
 
+use std::collections::BTreeMap;
+
 use super::with_generated_marker;
+use crate::availability::Tier;
 use crate::ir::ConstSpec;
 use crate::render::render_shift_add;
 
 const MODULE_DOC: &str = "\
 //! Typed serialized-field constants ([`SField<T>`](crate::types::SField)).
 //!
-//! One constant per `sfXxx` code in [`rshooks_core::sfcodes`], carrying the
-//! Rust type that field's value reads back as. `sfSequence` is an
+//! One constant per **usable** `sfXxx` code, carrying the Rust type that
+//! field's value reads back as. `sfSequence` is an
 //! `SField<u32>`, `sfAccount` an `SField<AccountId>`, `sfBalance` an
 //! `SField<Amount>` — so
 //! [`SlotObject::get`](crate::slot_obj::SlotObject::get) can hand back an
@@ -46,6 +49,39 @@ const MODULE_DOC: &str = "\
 //! const SEQ: u32 = sfSequence.code();
 //! assert_eq!(SEQ, rshooks::raw::sfcodes::sfSequence);
 //! ```
+//!
+//! # Which fields are here
+//!
+//! Not all of them, deliberately. [`rshooks_core::sfcodes`] is the complete
+//! 1:1 mirror of the wire protocol; this table is the *ergonomic* layer, and
+//! it carries a constant only for a field some usable format references.
+//! `crates/rshooks-core/format_availability.json` classifies every format:
+//!
+//! - a field referenced by at least one **active** format is always here;
+//! - a field whose best format is **pending** (supported by xahaud, not yet
+//!   activated on Xahau) is here by default, alongside the views that read
+//!   it, and excluded under the `active-amendments` cargo feature;
+//! - a field referenced only by **dormant** formats — gated by an amendment
+//!   xahaud marks `Supported::no`, so no Xahau object can carry it — needs
+//!   the `all-amendments` feature. `sfAsset` (AMM) and `sfXChainBridge`
+//!   (XChainBridge) are the shape of that group;
+//! - a field **no** format references is usually structural rather than
+//!   amendment-borne — metadata, hash and index plumbing — and stays. Where
+//!   that inference is wrong in either direction,
+//!   `format_availability.json`'s `field_overrides` corrects it:
+//!   `sfCredentialIDs` sits on an active `Payment` but needs a
+//!   `Supported::no` amendment, so it is overridden to dormant.
+//!
+//! Nothing is lost in any state: the raw `u32` is always available as
+//! `rshooks::raw::sfcodes::sfXxx`, and every API that takes a field code
+//! takes `impl Into<u32>`. What the gating buys is that the default table
+//! cannot offer an autocomplete entry for a field no Xahau object can
+//! contain.
+//!
+//! [`crate::tx_type::TxType`] and [`crate::ledger_entry_type::LedgerEntryType`]
+//! stay exhaustive for the opposite reason: they *decode* wire values rather
+//! than offering capability, and a decoder that cannot name a code it might
+//! receive is strictly worse than one that can.
 //!
 //! # How the value type is chosen
 //!
@@ -133,11 +169,19 @@ pub fn type_id_name(type_id: u32) -> String {
 /// parse, and `typed.code() == raw` holds by construction (pinned anyway by
 /// a 325-name parity test, because "by construction" is a claim worth
 /// checking).
-pub fn generate(sfcodes: &[ConstSpec]) -> Result<String> {
+pub fn generate(sfcodes: &[ConstSpec], field_tiers: &BTreeMap<String, Tier>) -> Result<String> {
     let mut body =
         String::from("\n#![allow(non_upper_case_globals)]\n\nuse crate::types::SField;\n\n");
+    let mut rendered: Vec<&ConstSpec> = Vec::with_capacity(sfcodes.len());
 
     for d in sfcodes {
+        // A field no format references is not amendment-borne — it is
+        // structural (metadata, hash/index plumbing) — so it stays active.
+        // `crate::availability::FormatAvailability::field_tiers` documents
+        // that rule and the imprecision it accepts.
+        let tier = field_tiers.get(&d.name).copied().unwrap_or(Tier::Active);
+        rendered.push(d);
+
         let value = render_shift_add(&d.c_expr)?;
         let type_id = serialized_type_id(&value)
             .with_context(|| format!("deriving the serialized type ID of `{}`", d.name))?;
@@ -150,6 +194,29 @@ pub fn generate(sfcodes: &[ConstSpec]) -> Result<String> {
             id_name = type_id_name(type_id),
         )
         .context("writing constant doc")?;
+        match tier {
+            Tier::Active => {}
+            Tier::Pending => writeln!(
+                body,
+                "///\n\
+                 /// **Amendment not yet active** as of the vendored snapshot. Available by\n\
+                 /// default alongside the views declaring it; excluded under the `{narrow}`\n\
+                 /// cargo feature.",
+                narrow = crate::availability::ACTIVE_ONLY_FEATURE,
+            )
+            .context("writing a pending-tier doc note")?,
+            Tier::Dormant => writeln!(
+                body,
+                "///\n\
+                 /// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau\n\
+                 /// object can carry this field. Needs the `{all}` cargo feature.",
+                all = crate::availability::ALL_FEATURE,
+            )
+            .context("writing a dormant-tier doc note")?,
+        }
+        if let Some(attr) = tier.cfg_attr() {
+            writeln!(body, "{attr}").context("writing a tier cfg")?;
+        }
         writeln!(
             body,
             "pub const {name}: SField<{ty}> = SField::new({value});",
@@ -166,7 +233,13 @@ pub fn generate(sfcodes: &[ConstSpec]) -> Result<String> {
     body.push_str(
         "\n#[cfg(test)]\nmod parity {\n         //! Every typed constant equals the raw `sfcodes` constant of the\n         //! same name. Holds by construction — both tables are rendered\n         //! from one parse by `cargo xtask gen-core` — which is exactly why\n         //! it is worth asserting: \"by construction\" stops being true the\n         //! moment either generator changes shape.\n         \n    #[test]\n    fn typed_field_codes_match_raw() {\n",
     );
-    for d in sfcodes {
+    for d in &rendered {
+        let tier = field_tiers.get(&d.name).copied().unwrap_or(Tier::Active);
+        // The assertion needs the same gate as the constant it names, or the
+        // feature-off build fails to compile its own generated test.
+        if let Some(attr) = tier.cfg_attr() {
+            writeln!(body, "        {attr}").context("writing a parity-assertion cfg")?;
+        }
         writeln!(
             body,
             "        assert_eq!(super::{name}.code(), ::rshooks_core::sfcodes::{name}, \"{name}\");",
@@ -177,7 +250,7 @@ pub fn generate(sfcodes: &[ConstSpec]) -> Result<String> {
     writeln!(
         body,
         "        assert_eq!({count}, {count}, \"generated for {count} constants\");",
-        count = sfcodes.len(),
+        count = rendered.len(),
     )
     .context("writing parity count")?;
     body.push_str("    }\n}\n");

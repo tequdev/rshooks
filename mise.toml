@@ -16,15 +16,32 @@ cargo fmt --all --manifest-path examples/Cargo.toml
 """
 
 [tasks.lint]
-description = "Lint the root workspace (all targets) and the examples workspace (wasm32v1-none), denying warnings"
+description = "Lint the root workspace (all targets, plus rshooks in each amendment-availability state) and the examples workspace (wasm32v1-none), denying warnings"
 run = """
 cargo clippy --workspace --all-targets -- -D warnings
+# The amendment features gate generated view structs, their accessors and
+# sfield constants, so each state is a genuinely different tree of code. The
+# line above is the default (active + pending); these two are the others.
+# `--all-features` turns BOTH amendment features on at once, which is the
+# widest-wins precedence path; its *availability surface* is the same as
+# `all-amendments` alone (see availability::Tier::cfg_attr), so it covers
+# the third state and the interaction in one invocation. It also enables
+# the crate's unrelated features (testenv, trace, ...), which are
+# orthogonal to availability and lint fine alongside it.
+cargo clippy -p rshooks --all-targets --features active-amendments -- -D warnings
+cargo clippy -p rshooks --all-targets --all-features -- -D warnings
 cargo clippy --manifest-path examples/Cargo.toml --workspace --target wasm32v1-none -- -D warnings
 """
 
 [tasks.test]
-description = "Run all workspace tests"
-run = "cargo test --workspace"
+description = "Run all workspace tests, plus rshooks in each amendment-availability state"
+run = """
+cargo test --workspace
+# Same reason as `lint`: each amendment state has generated items the others
+# do not, including its own generated parity assertions.
+cargo test -p rshooks --features active-amendments
+cargo test -p rshooks --all-features
+"""
 
 [tasks.build-wasm]
 description = "Build the no_std crates for the wasm32v1-none Hook target"

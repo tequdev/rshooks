@@ -25,10 +25,17 @@ use crate::views::source::FieldSource as _;
 ///
 /// Build one with [`NFTokenOffer::from_keylet`] or [`NFTokenOffer::from_slot`]; both
 /// check `sfLedgerEntryType` before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct NFTokenOffer {
     src: crate::views::source::SlotSource,
 }
 
+#[cfg(feature = "all-amendments")]
 impl NFTokenOffer {
     /// Loads the ledger object a keylet points at and views it as `NFTokenOffer`.
     ///
@@ -1289,10 +1296,17 @@ impl NegativeUNL {
 ///
 /// Build one with [`NFTokenPage::from_keylet`] or [`NFTokenPage::from_slot`]; both
 /// check `sfLedgerEntryType` before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct NFTokenPage {
     src: crate::views::source::SlotSource,
 }
 
+#[cfg(feature = "all-amendments")]
 impl NFTokenPage {
     /// Loads the ledger object a keylet points at and views it as `NFTokenPage`.
     ///
@@ -2938,10 +2952,17 @@ impl LedgerHashes {
 ///
 /// Build one with [`Bridge::from_keylet`] or [`Bridge::from_slot`]; both
 /// check `sfLedgerEntryType` before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct Bridge {
     src: crate::views::source::SlotSource,
 }
 
+#[cfg(feature = "all-amendments")]
 impl Bridge {
     /// Loads the ledger object a keylet points at and views it as `Bridge`.
     ///
@@ -3417,10 +3438,17 @@ impl DepositPreauth {
 ///
 /// Build one with [`XChainOwnedClaimID::from_keylet`] or [`XChainOwnedClaimID::from_slot`]; both
 /// check `sfLedgerEntryType` before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct XChainOwnedClaimID {
     src: crate::views::source::SlotSource,
 }
 
+#[cfg(feature = "all-amendments")]
 impl XChainOwnedClaimID {
     /// Loads the ledger object a keylet points at and views it as `XChainOwnedClaimID`.
     ///
@@ -4037,10 +4065,17 @@ impl FeeSettings {
 ///
 /// Build one with [`XChainOwnedCreateAccountClaimID::from_keylet`] or [`XChainOwnedCreateAccountClaimID::from_slot`]; both
 /// check `sfLedgerEntryType` before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct XChainOwnedCreateAccountClaimID {
     src: crate::views::source::SlotSource,
 }
 
+#[cfg(feature = "all-amendments")]
 impl XChainOwnedCreateAccountClaimID {
     /// Loads the ledger object a keylet points at and views it as `XChainOwnedCreateAccountClaimID`.
     ///
@@ -4732,10 +4767,17 @@ impl PayChannel {
 ///
 /// Build one with [`AMM::from_keylet`] or [`AMM::from_slot`]; both
 /// check `sfLedgerEntryType` before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct AMM {
     src: crate::views::source::SlotSource,
 }
 
+#[cfg(feature = "all-amendments")]
 impl AMM {
     /// Loads the ledger object a keylet points at and views it as `AMM`.
     ///
@@ -5132,10 +5174,17 @@ impl Oracle {
 ///
 /// Build one with [`MPTokenIssuance::from_keylet`] or [`MPTokenIssuance::from_slot`]; both
 /// check `sfLedgerEntryType` before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct MPTokenIssuance {
     src: crate::views::source::SlotSource,
 }
 
+#[cfg(feature = "all-amendments")]
 impl MPTokenIssuance {
     /// Loads the ledger object a keylet points at and views it as `MPTokenIssuance`.
     ///
@@ -5305,10 +5354,17 @@ impl MPTokenIssuance {
 ///
 /// Build one with [`MPToken::from_keylet`] or [`MPToken::from_slot`]; both
 /// check `sfLedgerEntryType` before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct MPToken {
     src: crate::views::source::SlotSource,
 }
 
+#[cfg(feature = "all-amendments")]
 impl MPToken {
     /// Loads the ledger object a keylet points at and views it as `MPToken`.
     ///
@@ -5446,10 +5502,17 @@ impl MPToken {
 ///
 /// Build one with [`Credential::from_keylet`] or [`Credential::from_slot`]; both
 /// check `sfLedgerEntryType` before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct Credential {
     src: crate::views::source::SlotSource,
 }
 
+#[cfg(feature = "all-amendments")]
 impl Credential {
     /// Loads the ledger object a keylet points at and views it as `Credential`.
     ///
@@ -5611,10 +5674,17 @@ impl Credential {
 ///
 /// Build one with [`PermissionedDomain::from_keylet`] or [`PermissionedDomain::from_slot`]; both
 /// check `sfLedgerEntryType` before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct PermissionedDomain {
     src: crate::views::source::SlotSource,
 }
 
+#[cfg(feature = "all-amendments")]
 impl PermissionedDomain {
     /// Loads the ledger object a keylet points at and views it as `PermissionedDomain`.
     ///
@@ -5763,10 +5833,17 @@ impl PermissionedDomain {
 ///
 /// Build one with [`DID::from_keylet`] or [`DID::from_slot`]; both
 /// check `sfLedgerEntryType` before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct DID {
     src: crate::views::source::SlotSource,
 }
 
+#[cfg(feature = "all-amendments")]
 impl DID {
     /// Loads the ledger object a keylet points at and views it as `DID`.
     ///

@@ -31,6 +31,44 @@
 //! not — see `crate::txn`'s "Why there is no library-owned
 //! `PaymentTemplate` here", which this module amends rather than overturns.
 //!
+//! # Which views exist
+//!
+//! Upstream's format tables are inherited wholesale from rippled, so they
+//! declare a great deal Xahau cannot run. Generating all of it would offer
+//! you an `AMMBid` or an `XChainCommit` view that no real transaction can
+//! ever match, so `crates/rshooks-core/format_availability.json` classifies
+//! every format and the generator follows it:
+//!
+//! - **active** — activated on Xahau mainnet.
+//! - **pending** — supported by xahaud but not yet activated as of the
+//!   vendored snapshot.
+//! - **dormant** — gated by an amendment xahaud marks `Supported::no`, so it
+//!   cannot appear on Xahau **mainnet** (activating it there would
+//!   amendment-block the node). A custom network may still run it.
+//!
+//! Two cargo features decide which of those compile:
+//!
+//! | features on | active | pending | dormant |
+//! |---|---|---|---|
+//! | *(none)* — the default | yes | yes | no |
+//! | `active-amendments` | yes | no | no |
+//! | `all-amendments` | yes | yes | yes |
+//! | both | yes | yes | yes |
+//!
+//! So by default you get everything Xahau has or is expected to get. Add
+//! `active-amendments` to restrict the surface to what is live today; add
+//! `all-amendments` for a custom network where a `Supported::no` amendment
+//! is somehow in play. Both together behave as `all-amendments`: cargo
+//! unifies features across the dependency graph, so making the wider one
+//! win means a dependency can only ever *add* API, never remove it.
+//!
+//! The `sfield` constants a view reads follow the same tiers, so a pending
+//! view and its pending-only fields compile together or not at all. The raw
+//! layers are untouched: `rshooks::raw::sfcodes` stays a complete mirror,
+//! and [`crate::tx_type::TxType`]/[`crate::ledger_entry_type::LedgerEntryType`]
+//! stay exhaustive, because decoding a wire value is a different job from
+//! offering an API.
+//!
 //! [`source`] is hand-written: it holds the whole of the views' logic, so
 //! the generated files contain declarations and nothing else.
 //!

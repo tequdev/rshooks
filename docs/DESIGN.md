@@ -1260,6 +1260,107 @@ The decisions behind it:
   `api::keylet` because keylet parameterization is per-type knowledge the
   format macros do not encode — `from_keylet` just composes.
 
+### 5.10 Format availability: `active` / `pending` / `dormant`
+
+Upstream's format tables are inherited wholesale from rippled, so
+§5.9 would otherwise generate views for a great deal Xahau cannot run —
+an `AMMBid`, an `XChainCommit` — offering a hook author an API no real
+transaction can match. `crates/rshooks-core/format_availability.json`
+classifies every declared format, and the generator follows it.
+
+| tier | meaning |
+|---|---|
+| `active` | activated on Xahau mainnet |
+| `pending` | supported by xahaud, not yet activated |
+| `dormant` | not expected to activate on Xahau mainnet — gated by an amendment xahaud marks `Supported::no` (or depending on one), or a curator judgment that Xahau will not adopt it (the NFToken family; Xahau ships URIToken instead) — a custom network may still run it |
+
+Every tier is *generated*; two cargo features on `rshooks` decide which ones
+compile:
+
+| features on | active | pending | dormant |
+|---|---|---|---|
+| *(none)* — the default | yes | yes | no |
+| `active-amendments` | yes | no | no |
+| `all-amendments` | yes | yes | yes |
+| both | yes | yes | yes |
+
+The decisions behind it:
+
+- **Curated, not derived, and not vendor data.** The `dormant` half is
+  objective — `features.macro` (vendored alongside the format definitions,
+  as evidence only) states `Supported::no` — but the active/pending split
+  is a fact about ledger state that no file in this repository can answer.
+  So it is a hand-maintained list, checked in beside `protocol_formats.json`
+  and outside `vendor/`.
+- **Verified against the ledger, not guessed.** The current tiers were
+  checked against Xahau mainnet's `Amendments` object (validated ledger
+  25441901, 2026-08-30). The artifact's own `doc` block carries the
+  snapshot, the `sha512half(feature_name) ∈ Amendments` membership recipe
+  as a runnable one-liner, and the caveat that makes it safe: a **retired**
+  amendment is unconditionally on and absent from that object, so absence
+  is never grounds to demote a format to `dormant`. The ledger check only
+  separates `active` from `pending`; `Supported::no` remains the sole
+  `dormant` criterion.
+- **One automatic mutation, in the safe direction.** `gen-core` appends any
+  newly declared format as `dormant` and does nothing else; moving an entry
+  between tiers is a human decision. A newly vendored format is therefore
+  unusable until somebody looks at it, rather than silently exposed.
+  `gen-core --check` fails on an unclassified format (pointing at
+  `gen-core`) and on a classification naming a format upstream no longer
+  declares, so the two files cannot drift apart in either direction.
+- **The ergonomic layer follows availability; the raw layers do not.** A
+  `rshooks::sfield` constant exists only for a field some usable format
+  references — best tier among the referencing formats, so one active
+  format is enough to keep a field. `rshooks-core`'s `sfcodes`/`tts`/`lets`
+  stay complete 1:1 mirrors, and `TxType`/`LedgerEntryType` stay exhaustive.
+  That line is deliberate: those decode wire values rather than offer
+  capability, and a decoder that cannot name a code it might receive is
+  strictly worse than one that can. Nothing is unreachable either way —
+  `rshooks::raw::sfcodes::sfXxx` is always there and every field-code
+  parameter takes `impl Into<u32>`.
+- **A field no format references stays active.** Those are usually
+  structural, not amendment-borne: metadata fields, hash and index
+  plumbing, the four container-typed pseudo-fields.
+- **`field_overrides` corrects derivation where formats are the wrong
+  unit.** An amendment can gate a *field* rather than a format, and the
+  derivation is then wrong in both directions. `sfCredentialIDs` sits on
+  `Payment`, `EscrowFinish`, `PaymentChannelClaim` and `AccountDelete` —
+  all active — but needs `featureCredentials`, which xahaud marks
+  `Supported::no`; a validated Xahau `Payment` can never carry it, since
+  its transactor returns `temDISABLED` when it is present. Derivation says
+  active. Conversely `sfLockingChainIssue`/`sfIssuingChainIssue` live
+  inside the opaque `sfXChainBridge` wire type, so no format lists them and
+  the structural fallback keeps them. A curated `field_overrides` map,
+  applied after derivation, fixes both; `gen-core` never writes to it, and
+  it is seeded only with fields whose gating amendment is `Supported::no`.
+  Judgment cases (`sfHookName` and `NamedHooks`, say) are left to
+  deliberate manual curation rather than guessed at. An override that
+  makes a field scarcer than its view removes or `#[cfg]`s the *accessor*,
+  not the view.
+- **The default is the middle state**, not the narrowest. A `pending` shape
+  is something Xahau is expected to get, so writing against it early is a
+  reasonable thing to do without ceremony; a `dormant` shape cannot appear
+  on Xahau mainnet and stays out of the way. `active-amendments` is for a
+  hook that wants its surface to be exactly what is live today;
+  `all-amendments` is for a custom network whose operator knows better.
+- **Both features on is widest-wins**, and that is load-bearing rather than
+  a tie-break. Cargo unifies features across the whole dependency graph, so
+  a crate enabling `all-amendments` turns it on for every other user of
+  `rshooks` in that build. Making the wider feature dominate keeps enabling
+  a feature *additive in effect*: a dependency can give you more API than
+  you asked for, but it can never take API away — which would be a build
+  break you did not cause and cannot see. That is why the `pending` gate
+  reads `any(not(active-amendments), all-amendments)` rather than the more
+  obvious `not(active-amendments)`.
+- **A view and the constants it reads share a gate**, so they compile
+  together or not at all. Where a `field_overrides` entry makes a field
+  scarcer than its view, the *accessor* carries the field's own gate
+  instead. `mise run lint`/`test` each run the extra invocations, because
+  each state is a genuinely different tree of code.
+- **Measured:** classification removes and gates only code nothing used, so
+  all 20 example binaries are byte-identical to the pre-classification
+  build.
+
 ## 6. rshooks-build
 
 `std` crate: `src/main.rs` (clap CLI) + `src/lib.rs` (pipeline as pure
