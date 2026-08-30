@@ -56,26 +56,40 @@ hook_errors! {
 /// "did *we* freeze this, or did they" is not answerable from the flags
 /// alone; it needs to know which side we are.
 ///
-/// The answer is read off the line itself rather than re-derived: rippled
-/// stores `sfLowLimit` as an IOU amount **issued by the low account**, so
-/// its issuer field *is* the low account (`sfHighLimit` likewise carries
-/// the high one). Comparing that against the hook account is a fixed-size
-/// 20-byte equality test, [`buf_eq_20`].
+/// The answer is read off the line rather than re-derived: rippled stores
+/// `sfLowLimit` as an IOU amount **issued by the low account**, so its
+/// issuer field *is* the low account (`sfHighLimit` likewise carries the
+/// high one). Comparing that against the hook account is [`buf_eq_20`], a
+/// fixed-size 20-byte equality test.
 ///
-/// The alternative is to re-derive the protocol's canonicalization: this
-/// account and the issuer are both already in hand, so `me < issuer`
-/// answers the same question with **no host call at all**. That is a real
-/// option here — [`AccountId`]'s `Ord` goes through [`buf_cmp_20`], which
-/// is straight-line code, so it does not reintroduce the `memcmp` loop a
-/// raw `[u8; 20]` comparison would (`examples/06_guard-patterns` documents
-/// that pitfall, and `buf_cmp_20` exists precisely to avoid it).
+/// # Why not just compare the accounts
 ///
-/// This example reads the ledger anyway, on purpose: it takes the fact the
-/// object *records* over one it re-derives, so the hook stays correct even
-/// if its author has misremembered the canonicalization rule. The trade is
-/// three host calls (`slot_subfield` + read + clear) against one integer
-/// compare — and it is paid only on a rejection path, never on the accept
-/// path.
+/// The obvious alternative re-derives the canonicalization instead: both
+/// accounts are already in hand, so `me < asset.issuer` answers the same
+/// question with **three fewer host calls**. It is even loop-free —
+/// [`AccountId`]'s `Ord` goes through [`buf_cmp_20`] rather than a raw
+/// `[u8; 20]` compare, so it does not reintroduce the `memcmp` loop the
+/// guard checker rejects (`examples/06_guard-patterns` documents that
+/// pitfall).
+///
+/// It is nonetheless the more expensive option here, measurably:
+///
+/// | side determination | WCE | size | nesting |
+/// |---|---:|---:|---:|
+/// | this one (`low_limit()` + `buf_eq_20`) | 845 | 2559 | 3 |
+/// | `me < asset.issuer` (`buf_cmp_20`) | 980 | 2815 | 4 |
+///
+/// Fewer host calls, more instructions — and instructions are what Xahau
+/// budgets. A host call is a single `call` in the worst-case-instruction
+/// count, while [`buf_cmp_20`] inlines a three-stage early-exit ladder
+/// (8 bytes, 8 bytes, 4 bytes) whose branches cost far more than the three
+/// `call`s they replace, and add a nesting level besides. [`buf_eq_20`] has
+/// no such ladder: equality can OR the word differences together and test
+/// once, so it stays branch-free.
+///
+/// The lesson generalizes past this hook: "fewer host calls" and "fewer
+/// instructions" are different objectives, and on Xahau only the second one
+/// is metered. Measure rather than assume.
 ///
 /// `#[inline(never)]`: this is only reached on a rejection path, and keeping
 /// it out of line keeps its `match` out of `hook()`'s own nesting budget.
@@ -84,8 +98,8 @@ fn hook_is_low_side(line: &ledger::RippleState, me: &AccountId) -> bool {
     match line.low_limit() {
         Ok(AmountBytes::Iou(low)) => buf_eq_20(&low.issuer().0, &me.0),
         // A line whose `sfLowLimit` is unreadable or not an IOU amount is
-        // malformed. Reporting "not the low side" is only used to phrase a
-        // rollback message that is already happening.
+        // malformed. Reporting "not the low side" only phrases a rollback
+        // that is already happening.
         _ => false,
     }
 }
@@ -173,7 +187,8 @@ impl TypedViews {
         let Ok(me) = hook_account_buf() else {
             rollback!(b"typed-views: no hook account", ViewError::NoHookAccount)
         };
-        let Ok(keylet) = keylet_line_for_asset(&me, &iou.asset()) else {
+        let asset = iou.asset();
+        let Ok(keylet) = keylet_line_for_asset(&me, &asset) else {
             rollback!(b"typed-views: keylet_line failed", ViewError::KeyletFailed)
         };
         // `from_keylet` is `slot_set` plus the view's own
@@ -190,8 +205,8 @@ impl TypedViews {
             rollback!(b"typed-views: no line Flags", ViewError::NoLineFlags)
         };
         if flags & (lsfLowFreeze | lsfHighFreeze) != 0 {
-            // Only now is which-side-are-we worth a host call: the accept
-            // path never pays for it.
+            // Which freeze bit is *ours* depends on which side we are — one
+            // integer compare, no host call.
             let ours = if hook_is_low_side(&line, &me) {
                 lsfLowFreeze
             } else {
@@ -212,7 +227,7 @@ impl TypedViews {
         // The issuer's own account settings. `AccountRoot` is the second
         // generated ledger view; `from_keylet` checks
         // `sfLedgerEntryType == ltACCOUNT_ROOT` the same way.
-        let Ok(issuer_keylet) = keylet_account(&iou.asset().issuer) else {
+        let Ok(issuer_keylet) = keylet_account(&asset.issuer) else {
             rollback!(
                 b"typed-views: keylet_account failed",
                 ViewError::KeyletFailed

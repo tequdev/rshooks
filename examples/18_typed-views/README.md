@@ -92,20 +92,36 @@ match line.low_limit() {
 }
 ```
 
-The alternative is to re-derive the protocol's canonicalization rather
-than read it: this account and the issuer are both already in hand, so
-`me < issuer` answers the same question with **no host call at all**. That
-is a real option — `AccountId`'s `Ord` goes through
-`rshooks::buf_eq::buf_cmp_20`, which is straight-line code, so it does not
-reintroduce the `memcmp` loop a raw `[u8; 20]` comparison would. (That
-loop is a real hazard — an unguarded loop the guard checker rejects — and
-`buf_cmp_20` exists precisely to avoid it; `examples/06_guard-patterns`
-documents the pitfall in full.)
+### Fewer host calls is not the same as fewer instructions
 
-This example reads the ledger anyway, on purpose: it prefers the fact the
-object *records* to one it re-derives, so the hook stays correct even if
-its author has misremembered the canonicalization rule. The trade is three
-host calls against one integer compare, paid only on a rejection path.
+The obvious alternative re-derives the canonicalization instead of reading
+it: both accounts are already in hand, so `me < asset.issuer` answers the
+same question with **three fewer host calls**. It is even loop-free —
+`AccountId`'s `Ord` goes through `rshooks::buf_eq::buf_cmp_20` rather than
+a raw `[u8; 20]` compare, so it does not reintroduce the `memcmp` loop the
+guard checker rejects (`examples/06_guard-patterns` documents that pitfall
+in full).
+
+It is still the more expensive option here, and not marginally. Measured,
+changing nothing else:
+
+| side determination | WCE | size | max nesting |
+|---|---:|---:|---:|
+| `low_limit()` + `buf_eq_20` (what this hook does) | 845 | 2559 bytes | 3 |
+| `me < asset.issuer` (`buf_cmp_20`) | 980 | 2815 bytes | 4 |
+
++135 instructions and a nesting level, to save three host calls. The reason
+is that **a host call is one instruction** in the worst-case count, while
+`buf_cmp_20` inlines a three-stage early-exit ladder — eight bytes, eight
+bytes, four bytes, each stage branching — that costs far more than the
+three `call`s it replaces. `buf_eq_20` has no ladder: equality can OR the
+word differences together and test once, so it stays branch-free.
+
+That generalizes past this hook. "Fewer host calls" and "fewer
+instructions" are different objectives, and on Xahau only the second is
+metered. Measure rather than assume — this section originally argued the
+opposite, from exactly that assumption, until the two variants were built
+and compared.
 
 `tests/typed_views.rs` proves the direction actually flips: the same
 `lsfLowFreeze` bit reads as "we froze it" for a hook account that sorts
@@ -177,14 +193,16 @@ instruction count for nothing.
 
 The side determination (`low_limit()`, 3 more calls) is deliberately
 deferred into the freeze-rejection branch, so the accept path never pays
-for a fact it only needs in order to phrase an error message.
+for a fact it only needs in order to phrase an error message. See "Fewer
+host calls is not the same as fewer instructions" above for why those
+three calls are still the cheaper choice.
 
 Measured (`rshooks build`/`check`, this workspace's `opt-level = 3`
 profile):
 
 | | worst-case instructions | size | max nesting depth |
 |---|---:|---:|---:|
-| `main` (index 0) | 904 | 2691 bytes | 3 |
+| `main` (index 0) | 845 | 2559 bytes | 3 |
 
 Well inside the 32-level nesting budget, the 65,535-instruction WCE ceiling
 and the 65,535-byte `SetHook` size limit. Comparable to `17_sto-writer`
