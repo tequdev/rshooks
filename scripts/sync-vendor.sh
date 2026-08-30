@@ -142,12 +142,21 @@ sync_group "hook-headers" \
 # Protocol format definitions. These span two upstream directories, so the
 # group passes an empty upstream dir and full repo-relative paths; they land
 # flat in the vendor directory under their basenames.
+#
+# features.macro is not a format definition; it is the amendment table, and
+# it is vendored as supporting evidence for the curated
+# crates/rshooks-core/format_availability.json (which classifies every
+# format as active/pending/dormant). Nothing generates code from it — its
+# `Supported::no` rows are the objective half of that file's dormant tier,
+# and having it in-tree means a reviewer can check a classification without
+# a xahaud checkout.
 sync_group "protocol-formats" \
     "crates/rshooks-core/vendor/xahaud-protocol" \
     "" \
     include/xrpl/protocol/detail/sfields.macro \
     include/xrpl/protocol/detail/transactions.macro \
     include/xrpl/protocol/detail/ledger_entries.macro \
+    include/xrpl/protocol/detail/features.macro \
     src/libxrpl/protocol/TxFormats.cpp \
     src/libxrpl/protocol/LedgerFormats.cpp \
     src/libxrpl/protocol/InnerObjectFormats.cpp

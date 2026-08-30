@@ -23,6 +23,7 @@ hand-edited.
   | `TxFormats.cpp` | `src/libxrpl/protocol/` | the `commonFields` list every transaction format shares |
   | `LedgerFormats.cpp` | `src/libxrpl/protocol/` | the `commonFields` list every ledger entry format shares |
   | `InnerObjectFormats.cpp` | `src/libxrpl/protocol/` | the inner-object formats (`sfEmitDetails`, `sfSigner`, `sfHookExecution`, …) |
+  | `features.macro` | `include/xrpl/protocol/detail/` | the amendment table, with each amendment's `Supported::yes\|no` — evidence only, see below |
 
   They span two upstream directories but are vendored flat, under their
   basenames.
@@ -43,7 +44,14 @@ hand-edited.
   `SHA256SUMS`. CI runs this on every push/PR and weekly on a schedule
   (`.github/workflows/vendor-sync.yml`), so upstream drift surfaces as a
   failing workflow instead of a silent divergence.
-- **`../../protocol_formats.json` is generated from these six files**, not
+- **`features.macro` generates nothing.** It is vendored as *evidence* for
+  the curated `../../format_availability.json`, which classifies every
+  format as `active` / `pending` / `dormant`. An amendment marked
+  `Supported::no` there cannot activate on Xahau without a node upgrade, so
+  the formats it gates are objectively `dormant` — having the table in-tree
+  lets a reviewer check that half of the classification without a xahaud
+  checkout. The parser never reads it.
+- **`../../protocol_formats.json` is generated from the other six files**, not
   hand-edited: `cargo xtask gen-core` (see `crates/xtask`) parses them into
   a versioned intermediate representation and writes it there, exactly as it
   writes `hook_api.json` from the Hook API headers. `cargo xtask gen-core
