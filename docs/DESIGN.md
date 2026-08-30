@@ -1272,7 +1272,7 @@ classifies every declared format, and the generator follows it.
 |---|---|
 | `active` | activated on Xahau mainnet |
 | `pending` | supported by xahaud, not yet activated |
-| `dormant` | gated by an amendment xahaud marks `Supported::no` (or depending on one), so it cannot activate without a node upgrade |
+| `dormant` | gated by an amendment xahaud marks `Supported::no` (or depending on one), so it cannot activate on Xahau mainnet without a node upgrade — a custom network may still run it |
 
 Every tier is *generated*; two cargo features on `rshooks` decide which ones
 compile:
@@ -1340,7 +1340,7 @@ The decisions behind it:
 - **The default is the middle state**, not the narrowest. A `pending` shape
   is something Xahau is expected to get, so writing against it early is a
   reasonable thing to do without ceremony; a `dormant` shape cannot appear
-  on Xahau at all and stays out of the way. `active-amendments` is for a
+  on Xahau mainnet and stays out of the way. `active-amendments` is for a
   hook that wants its surface to be exactly what is live today;
   `all-amendments` is for a custom network whose operator knows better.
 - **Both features on is widest-wins**, and that is load-bearing rather than

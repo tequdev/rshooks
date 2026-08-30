@@ -55,8 +55,8 @@ active-amendments = []
 
 # Everything, including formats gated by an amendment xahaud marks
 # Supported::no — they cannot appear on Xahau mainnet, where activating one
-# would amendment-block the node. There for custom networks whose operator
-# knows otherwise; enable at your own judgment.
+# would amendment-block the node. This feature exists for custom networks
+# whose operator knows otherwise; enable it at your own judgment.
 all-amendments = []
 # Enables the native mock-host bridge (`rshooks_core::backend`): wrapper
 # functions in `api/*` consult an installed `HostBackend` instead of the

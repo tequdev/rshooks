@@ -43,8 +43,8 @@
 //! - **pending** — supported by xahaud but not yet activated as of the
 //!   vendored snapshot.
 //! - **dormant** — gated by an amendment xahaud marks `Supported::no`, so it
-//!   cannot appear on Xahau at all (activating it would amendment-block the
-//!   node).
+//!   cannot appear on Xahau **mainnet** (activating it there would
+//!   amendment-block the node). A custom network may still run it.
 //!
 //! Two cargo features decide which of those compile:
 //!

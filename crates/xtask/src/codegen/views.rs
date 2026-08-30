@@ -348,12 +348,12 @@ fn resolve<'a>(
 /// The shared prefix of every accessor's doc comment: which upstream field
 /// it is, what its serialized type is, and how the format declares it.
 ///
-/// Includes the field's own `#[cfg]` when the field is *strictly scarcer*
-/// than the view carrying it — which only a `field_overrides` entry can
-/// produce, since a derived field tier is the best over its formats and so
-/// never worse than any view listing it. When the field is as available as
-/// the view (or more), the view's own attribute already covers the accessor
-/// and repeating it would be noise.
+/// Includes the note explaining a field gated more tightly than the view
+/// around it, but **not** the `#[cfg]` itself — that is [`field_cfg`], and
+/// it has to come after the whole doc block. Splicing an attribute into the
+/// middle of a doc comment compiles, but reads as a stray line in the
+/// generated source and puts everything after it outside the attribute's
+/// apparent scope to a human skimming the file.
 fn field_doc(a: &Accessor<'_>, view_tier: Tier) -> String {
     let mut out = format!(
         "/// `{name}` — {ty}, `{presence}`.\n",
@@ -363,12 +363,28 @@ fn field_doc(a: &Accessor<'_>, view_tier: Tier) -> String {
     );
     if a.tier > view_tier {
         out.push_str(&tier_field_doc(a.tier));
-        if let Some(attr) = a.tier.cfg_attr() {
-            out.push_str(&attr);
-            out.push('\n');
-        }
     }
     out
+}
+
+/// The field's own `#[cfg]` line, emitted after the accessor's complete doc
+/// block and immediately before `#[inline(always)]`.
+///
+/// Present only when the field is *strictly scarcer* than the view carrying
+/// it — which only a `field_overrides` entry can produce, since a derived
+/// field tier is the best over its formats and so never worse than any view
+/// listing it. When the field is as available as the view (or more), the
+/// view's own attribute already covers the accessor and repeating it would
+/// be noise.
+fn field_cfg(a: &Accessor<'_>, view_tier: Tier) -> String {
+    if a.tier > view_tier {
+        a.tier
+            .cfg_attr()
+            .map(|c| format!("{c}\n"))
+            .unwrap_or_default()
+    } else {
+        String::new()
+    }
 }
 
 /// The rustdoc note explaining why one accessor is gated more tightly than
@@ -423,6 +439,7 @@ fn push_shared_accessor(buf: &mut String, a: &Accessor<'_>, view_tier: Tier) -> 
                 format!("crate::error::Result<{ty}>")
             };
             let call = if opt { "read_opt" } else { "read" };
+            buf.push_str(&field_cfg(a, view_tier));
             writeln!(
                 buf,
                 "#[inline(always)]\n\
@@ -465,6 +482,7 @@ fn push_shared_accessor(buf: &mut String, a: &Accessor<'_>, view_tier: Tier) -> 
                 "crate::error::Result<usize>"
             };
             let call = if opt { "read_raw_opt" } else { "read_raw" };
+            buf.push_str(&field_cfg(a, view_tier));
             writeln!(
                 buf,
                 "#[inline(always)]\n\
@@ -507,6 +525,7 @@ fn push_slot_accessor(buf: &mut String, a: &Accessor<'_>, view_tier: Tier) -> Re
     } else {
         (format!("crate::error::Result<{inner}>"), "subobject")
     };
+    buf.push_str(&field_cfg(a, view_tier));
     writeln!(
         buf,
         "#[inline(always)]\n\

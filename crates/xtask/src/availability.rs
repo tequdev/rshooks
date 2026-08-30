@@ -22,9 +22,9 @@
 //!   excluded by the [`ACTIVE_ONLY_FEATURE`] cargo feature for a hook that
 //!   wants its surface restricted to what is live today.
 //! - [`Tier::Dormant`] — inherited from rippled with no activation prospect
-//!   on Xahau (in practice: gated by an amendment `features.macro` marks
-//!   `Supported::no`, or depending on one). Available only under
-//!   [`ALL_FEATURE`], for a custom network where the operator knows
+//!   on Xahau **mainnet** (in practice: gated by an amendment
+//!   `features.macro` marks `Supported::no`, or depending on one). Available
+//!   only under [`ALL_FEATURE`], for a custom network whose operator knows
 //!   otherwise.
 //!
 //! Nothing is *omitted* any more: every tier is rendered, and the `#[cfg]`
@@ -130,7 +130,7 @@ impl Tier {
     /// The default is deliberately the middle one: a `pending` shape is
     /// something Xahau is expected to get, so writing against it early is a
     /// reasonable thing to do without ceremony, while `dormant` shapes
-    /// cannot appear on Xahau at all and stay out of the way.
+    /// cannot appear on Xahau mainnet and stay out of the way.
     ///
     /// **Both features on is widest-wins**, which is not a detail — cargo
     /// unifies features across the whole dependency graph, so a crate that
@@ -198,7 +198,8 @@ const DOC: &[&str] = &[
     "  active   activated on Xahau mainnet.",
     "  pending  supported by the node, not yet activated.",
     "  dormant  gated by an amendment features.macro marks Supported::no",
-    "           (or depending on one), so it cannot activate on Xahau at all.",
+    "           (or depending on one), so it cannot activate on Xahau mainnet",
+    "           -- though a custom network may still run it.",
     "",
     "Every tier is generated. Two cargo features on the rshooks crate decide",
     "which ones compile:",

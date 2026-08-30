@@ -202,12 +202,12 @@ impl<S: crate::views::source::FieldSource> Payment<S> {
     /// format is available, but this field is not: a validated Xahau
     /// transaction can never carry it, so the accessor needs the `all-amendments` cargo
     /// feature.
-    #[cfg(feature = "all-amendments")]
     ///
     /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
     /// exactly as the host holds them. Returns the number of bytes written.
     ///
     /// `Ok(None)` when the field is absent.
+    #[cfg(feature = "all-amendments")]
     #[inline(always)]
     pub fn credential_ids_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -964,12 +964,12 @@ impl<S: crate::views::source::FieldSource> EscrowFinish<S> {
     /// format is available, but this field is not: a validated Xahau
     /// transaction can never carry it, so the accessor needs the `all-amendments` cargo
     /// feature.
-    #[cfg(feature = "all-amendments")]
     ///
     /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
     /// exactly as the host holds them. Returns the number of bytes written.
     ///
     /// `Ok(None)` when the field is absent.
+    #[cfg(feature = "all-amendments")]
     #[inline(always)]
     pub fn credential_ids_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -4527,12 +4527,12 @@ impl<S: crate::views::source::FieldSource> PaymentChannelClaim<S> {
     /// format is available, but this field is not: a validated Xahau
     /// transaction can never carry it, so the accessor needs the `all-amendments` cargo
     /// feature.
-    #[cfg(feature = "all-amendments")]
     ///
     /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
     /// exactly as the host holds them. Returns the number of bytes written.
     ///
     /// `Ok(None)` when the field is absent.
+    #[cfg(feature = "all-amendments")]
     #[inline(always)]
     pub fn credential_ids_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -6646,12 +6646,12 @@ impl<S: crate::views::source::FieldSource> AccountDelete<S> {
     /// format is available, but this field is not: a validated Xahau
     /// transaction can never carry it, so the accessor needs the `all-amendments` cargo
     /// feature.
-    #[cfg(feature = "all-amendments")]
     ///
     /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
     /// exactly as the host holds them. Returns the number of bytes written.
     ///
     /// `Ok(None)` when the field is absent.
+    #[cfg(feature = "all-amendments")]
     #[inline(always)]
     pub fn credential_ids_into<B: AsMut<[u8]> + ?Sized>(
         &self,
