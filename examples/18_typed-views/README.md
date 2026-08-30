@@ -92,12 +92,20 @@ match line.low_limit() {
 }
 ```
 
-That is not just tidier than the obvious alternative, it is the only one
-that builds. Sorting the two `AccountId`s to see which comes first is a
-lexicographic compare of two 20-byte arrays, which LLVM lowers to a
-`memcmp` loop — an unguarded loop the Hook API's guard checker rejects.
-`buf_eq_20` is straight-line code. `examples/06_guard-patterns` documents
-that pitfall in full.
+The alternative is to re-derive the protocol's canonicalization rather
+than read it: this account and the issuer are both already in hand, so
+`me < issuer` answers the same question with **no host call at all**. That
+is a real option — `AccountId`'s `Ord` goes through
+`rshooks::buf_eq::buf_cmp_20`, which is straight-line code, so it does not
+reintroduce the `memcmp` loop a raw `[u8; 20]` comparison would. (That
+loop is a real hazard — an unguarded loop the guard checker rejects — and
+`buf_cmp_20` exists precisely to avoid it; `examples/06_guard-patterns`
+documents the pitfall in full.)
+
+This example reads the ledger anyway, on purpose: it prefers the fact the
+object *records* to one it re-derives, so the hook stays correct even if
+its author has misremembered the canonicalization rule. The trade is three
+host calls against one integer compare, paid only on a rejection path.
 
 `tests/typed_views.rs` proves the direction actually flips: the same
 `lsfLowFreeze` bit reads as "we froze it" for a hook account that sorts
@@ -129,7 +137,10 @@ could not make that decision correctly. The same reasoning applies to
 Each accessor is one host call — the same call a hand-written hook would
 make — because the source types are monomorphized and every accessor is
 `#[inline(always)]`. The abstraction itself costs nothing; the accept path
-here is 18 host calls:
+here is **18 host calls when the issuer sets no `sfTransferRate`, and 20
+when it does** — an absent optional field costs only the `slot_subfield`
+that reports it missing, while a present one costs that plus the read and
+the clear:
 
 | step | calls | what |
 |---|---:|---|
@@ -142,7 +153,7 @@ here is 18 host calls:
 | `line.flags()` | 3 | `slot_subfield` + read + **clear** |
 | `keylet_account()` | 1 | `util_keylet` |
 | `AccountRoot::from_keylet()` | 4 | `slot_set`, then the `sfLedgerEntryType` check |
-| `transfer_rate()` | 1 | `slot_subfield` reports the field absent; no slot to read or clear |
+| `transfer_rate()` | 1 or 3 | absent: `slot_subfield` reports it missing, nothing to read or clear. Present: + read + clear |
 
 Two lines in that table are worth being explicit about, because they are
 the only places a view spends something a hand-written hook need not:
@@ -224,12 +235,12 @@ code for each failure this hook can exit with:
 |---|---|---|
 | `NotAPayment` | 1 | the originating transaction is not a `Payment` |
 | `MissingAmount` | 2 | `sfAmount` could not be read (malformed transaction) |
-| `MissingDestinationTag` | 3 | an IOU payment with no `sfDestinationTag` |
+| `MissingDestinationTag` | 3 | an IOU payment whose `sfDestinationTag` is missing or unreadable |
 | `NoHookAccount` | 4 | `hook_account` failed |
 | `KeyletFailed` | 5 | a keylet could not be built |
-| `NoTrustLine` | 6 | no `RippleState` between this account and the issuer |
+| `NoTrustLine` | 6 | no usable `RippleState` between this account and the issuer: absent, not an `ltRIPPLE_STATE`, or its type field unreadable |
 | `NoLineFlags` | 7 | the line's `sfFlags` could not be read |
 | `FrozenByUs` | 8 | this account froze the line |
 | `FrozenByCounterparty` | 9 | the counterparty froze the line |
-| `NoIssuerAccount` | 10 | the issuer has no `AccountRoot` |
+| `NoIssuerAccount` | 10 | no usable `AccountRoot` for the issuer: unfunded, not an `ltACCOUNT_ROOT`, or its type field unreadable |
 | `IssuerChargesFee` | 11 | the issuer's `sfTransferRate` is above 1.0 |

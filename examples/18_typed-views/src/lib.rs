@@ -19,14 +19,18 @@ hook_errors! {
         /// `sfAmount` could not be read. Required by the format, so this is
         /// a malformed transaction rather than an ordinary absence.
         MissingAmount = 2,
-        /// The payment carries no `sfDestinationTag`.
+        /// The payment's `sfDestinationTag` is missing or unreadable —
+        /// this arm takes both `Ok(None)` and a read error, since neither
+        /// lets the policy be satisfied.
         MissingDestinationTag = 3,
         /// The hook account's own address could not be read.
         NoHookAccount = 4,
         /// The trust line's keylet could not be built.
         KeyletFailed = 5,
-        /// No trust line exists between this account and the issuer for the
-        /// currency being paid.
+        /// No usable trust line between this account and the issuer for the
+        /// currency being paid: the object is absent, is not a
+        /// `ltRIPPLE_STATE` (the view's constructor check), or its type
+        /// field could not be read.
         NoTrustLine = 6,
         /// The line's `sfFlags` could not be read.
         NoLineFlags = 7,
@@ -34,7 +38,8 @@ hook_errors! {
         FrozenByUs = 8,
         /// The counterparty has frozen the line; the balance is unusable.
         FrozenByCounterparty = 9,
-        /// The issuer has no `AccountRoot` — it is not a funded account.
+        /// No usable `AccountRoot` for the issuer: unfunded, not an
+        /// `ltACCOUNT_ROOT`, or its type field could not be read.
         NoIssuerAccount = 10,
         /// The issuer charges a transfer fee.
         IssuerChargesFee = 11,
@@ -51,17 +56,26 @@ hook_errors! {
 /// "did *we* freeze this, or did they" is not answerable from the flags
 /// alone; it needs to know which side we are.
 ///
-/// The answer is read off the line itself rather than computed: rippled
+/// The answer is read off the line itself rather than re-derived: rippled
 /// stores `sfLowLimit` as an IOU amount **issued by the low account**, so
 /// its issuer field *is* the low account (`sfHighLimit` likewise carries
 /// the high one). Comparing that against the hook account is a fixed-size
-/// 20-byte equality test.
+/// 20-byte equality test, [`buf_eq_20`].
 ///
-/// That matters beyond tidiness. The obvious implementation — sort the two
-/// `AccountId`s and see which came first — is a lexicographic compare of
-/// two 20-byte arrays, which LLVM lowers to a `memcmp` loop: an unguarded
-/// loop the Hook API's guard checker rejects (`examples/06_guard-patterns`
-/// documents that pitfall in full). `buf_eq_20` is straight-line code.
+/// The alternative is to re-derive the protocol's canonicalization: this
+/// account and the issuer are both already in hand, so `me < issuer`
+/// answers the same question with **no host call at all**. That is a real
+/// option here — [`AccountId`]'s `Ord` goes through [`buf_cmp_20`], which
+/// is straight-line code, so it does not reintroduce the `memcmp` loop a
+/// raw `[u8; 20]` comparison would (`examples/06_guard-patterns` documents
+/// that pitfall, and `buf_cmp_20` exists precisely to avoid it).
+///
+/// This example reads the ledger anyway, on purpose: it takes the fact the
+/// object *records* over one it re-derives, so the hook stays correct even
+/// if its author has misremembered the canonicalization rule. The trade is
+/// three host calls (`slot_subfield` + read + clear) against one integer
+/// compare — and it is paid only on a rejection path, never on the accept
+/// path.
 ///
 /// `#[inline(never)]`: this is only reached on a rejection path, and keeping
 /// it out of line keeps its `match` out of `hook()`'s own nesting budget.
@@ -139,9 +153,11 @@ impl TypedViews {
         };
 
         // `sfDestinationTag` is `soeOPTIONAL`: absent is `Ok(None)`, not an
-        // error. That distinction is the whole reason optional accessors
-        // exist — a hook that cannot tell "no tag" from "the read failed"
-        // cannot implement this policy correctly.
+        // error. Being able to *see* that distinction is the whole reason
+        // optional accessors exist. This policy happens to reject both
+        // absence and a failed read — but it is choosing to, rather than
+        // being unable to tell them apart, which is what an accessor that
+        // folded absence into `Err` would leave you with.
         match payment.destination_tag() {
             Ok(Some(_)) => {}
             _ => rollback!(
