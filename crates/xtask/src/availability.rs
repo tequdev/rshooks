@@ -34,6 +34,17 @@
 //! membership recipe to re-verify them, along with the retired-amendment
 //! caveat that makes absence from that list *not* evidence of dormancy.
 //!
+//! # Formats are the unit, with a curated escape hatch for fields
+//!
+//! Tiers are per *format*, and a field's tier is derived from the formats
+//! referencing it. That is right almost always and wrong in one class of
+//! case: an amendment can gate a **field** of an otherwise available
+//! format. `sfCredentialIDs` sits on `Payment` — active — but needs
+//! `featureCredentials`, which xahaud marks `Supported::no`, so no
+//! validated Xahau `Payment` can carry it. [`FormatAvailability::field_overrides`]
+//! is the curated fix, applied after derivation;
+//! [`FormatAvailability::field_tiers`] documents the full rule.
+//!
 //! # The one automatic mutation
 //!
 //! `cargo xtask gen-core` appends any format present in the artifact but
@@ -125,6 +136,24 @@ pub struct FormatAvailability {
     /// Inner-object formats, keyed by the field name **without** its `sf`
     /// prefix (`EmitDetails`), matching the generated struct name.
     pub inner_objects: BTreeMap<String, Tier>,
+    /// Per-field tiers that **override** what the format-derivation rule
+    /// produces, applied afterwards and keyed by full `sfXxx` name.
+    ///
+    /// The escape hatch for the derivation rule's blind spot: it reasons
+    /// about formats, and an amendment can gate a *field* of an otherwise
+    /// available format. `sfCredentialIDs` is the worked example — `Payment`
+    /// is active, but the field is gated by `featureCredentials`, which
+    /// xahaud marks `Supported::no`, so a validated Xahau `Payment` can
+    /// never carry it (its transactor returns `temDISABLED` when it is
+    /// present). Derivation says active; the truth is dormant.
+    ///
+    /// Deliberately **not** auto-populated: nothing here derives what an
+    /// amendment gates at field level, so every entry is a human's
+    /// evidence-backed claim. [`FormatAvailability::auto_add`] never touches
+    /// this map, and [`FormatAvailability::validate`] rejects an entry
+    /// naming a field the artifact does not declare.
+    #[serde(default)]
+    pub field_overrides: BTreeMap<String, Tier>,
 }
 
 /// The `doc` block written into the artifact.
@@ -146,11 +175,25 @@ const DOC: &[&str] = &[
     "",
     "Field constants in `rshooks::sfield` follow their formats: a field takes",
     "the best tier among the formats referencing it, and a field no format",
-    "references stays active (those are structural/metadata fields, not",
-    "amendment-borne). The raw layers -- rshooks-core's sfcodes/tts/lets --",
-    "and the TxType/LedgerEntryType decoders stay complete regardless: they",
-    "mirror the wire protocol, and a decoder that cannot name a code it might",
-    "receive is worse than one that can.",
+    "references stays active (those are usually structural/metadata fields,",
+    "not amendment-borne). The raw layers -- rshooks-core's sfcodes/tts/lets",
+    "-- and the TxType/LedgerEntryType decoders stay complete regardless:",
+    "they mirror the wire protocol, and a decoder that cannot name a code it",
+    "might receive is worse than one that can.",
+    "",
+    "`field_overrides` corrects that derivation where it is wrong, and is",
+    "applied after it. An amendment can gate a FIELD rather than a format:",
+    "sfCredentialIDs is on Payment (active) but needs featureCredentials,",
+    "which is Supported::no, so no validated Xahau Payment can carry it --",
+    "derivation says active, the truth is dormant. The reverse also happens:",
+    "sfLockingChainIssue/sfIssuingChainIssue live inside the opaque",
+    "sfXChainBridge wire type, so no format lists them and the",
+    "structural-fallback keeps them active.",
+    "",
+    "Nothing derives field_overrides -- gen-core never adds, removes or",
+    "retiers an entry there. Seed it only with fields whose gating amendment",
+    "is Supported::no (objectively dead); leave judgment cases such as",
+    "sfHookName/NamedHooks to deliberate manual curation.",
     "",
     "=== HOW THE active/pending SPLIT WAS VERIFIED ===",
     "",
@@ -195,6 +238,7 @@ impl FormatAvailability {
             transactions: BTreeMap::new(),
             ledger_entries: BTreeMap::new(),
             inner_objects: BTreeMap::new(),
+            field_overrides: BTreeMap::new(),
         }
     }
 
@@ -230,13 +274,12 @@ impl FormatAvailability {
     /// Appends every format the artifact declares and this file does not, as
     /// [`Tier::Dormant`]. Returns the names added, for the `gen-core` log.
     ///
-    /// The only automatic mutation this file ever gets.
+    /// Appends and **nothing else**: no tier is changed, no entry removed,
+    /// and [`Self::field_overrides`] is not touched at all. A run that finds
+    /// no new format leaves the file byte-identical, which a test pins.
+    /// Normalizing the `doc`/`version` header is a separate, explicit step
+    /// ([`Self::refresh_doc`]) applied when the file is rendered.
     pub fn auto_add(&mut self, formats: &ProtocolFormats) -> Vec<String> {
-        // The doc block is owned by `DOC`, so a wording change lands on the
-        // next run rather than needing a hand edit.
-        self.doc = DOC.iter().map(|s| (*s).to_owned()).collect();
-        self.version = FORMAT_AVAILABILITY_VERSION;
-
         let mut added = Vec::new();
         for t in &formats.transactions {
             if !self.transactions.contains_key(&t.name) {
@@ -260,6 +303,21 @@ impl FormatAvailability {
         added
     }
 
+    /// Rewrites the `doc`/`version` header from this module's [`DOC`], so a
+    /// wording change here lands on the next `gen-core` run instead of
+    /// needing a hand edit.
+    ///
+    /// Separate from [`Self::auto_add`] on purpose: that function's contract
+    /// is "appends dormant entries and nothing else", and quietly
+    /// normalizing a header alongside it would make the contract false. This
+    /// is a rendering concern, applied where the file is serialized — so a
+    /// stale header shows up as an ordinary `gen-core --check` staleness
+    /// mismatch rather than being silently preserved.
+    pub fn refresh_doc(&mut self) {
+        self.doc = DOC.iter().map(|s| (*s).to_owned()).collect();
+        self.version = FORMAT_AVAILABILITY_VERSION;
+    }
+
     /// Fails when the two files have drifted apart in either direction.
     ///
     /// An **unclassified** format would silently render as dormant — a view
@@ -270,6 +328,15 @@ impl FormatAvailability {
     /// it is dead policy that will outlive anyone's memory of why it is
     /// there.
     pub fn validate(&self, formats: &ProtocolFormats) -> Result<()> {
+        if self.version != FORMAT_AVAILABILITY_VERSION {
+            bail!(
+                "crates/rshooks-core/format_availability.json is schema version {} but this \
+                 xtask understands {FORMAT_AVAILABILITY_VERSION}; run `cargo xtask gen-core` if \
+                 the file is merely stale, or reconcile the shapes if it is not",
+                self.version
+            );
+        }
+
         let declared_tx: BTreeSet<&str> = formats
             .transactions
             .iter()
@@ -337,6 +404,27 @@ impl FormatAvailability {
                 stale.join(", ")
             );
         }
+
+        // An override naming a field upstream no longer declares is dead
+        // policy, the same way a stale format classification is — and more
+        // easily missed, since these are hand-written one at a time.
+        let declared_fields: BTreeSet<&str> =
+            formats.sfields.iter().map(|s| s.name.as_str()).collect();
+        let unknown: Vec<&str> = self
+            .field_overrides
+            .keys()
+            .map(String::as_str)
+            .filter(|n| !declared_fields.contains(n))
+            .collect();
+        if !unknown.is_empty() {
+            bail!(
+                "crates/rshooks-core/format_availability.json overrides {} field(s) \
+                 sfields.macro does not declare: {}\nremove them, or re-vendor if upstream \
+                 should still have them",
+                unknown.len(),
+                unknown.join(", ")
+            );
+        }
         Ok(())
     }
 
@@ -345,15 +433,36 @@ impl FormatAvailability {
     ///
     /// Fields no format references are **not** in the map, and callers treat
     /// them as [`Tier::Active`]. That is deliberate: an unreferenced field is
-    /// structural rather than amendment-borne — metadata fields
+    /// usually structural rather than amendment-borne — metadata fields
     /// (`sfAffectedNodes` and friends), hash and index plumbing, the four
     /// container-typed pseudo-fields — and none of those arrive with an
-    /// amendment. See this module's docs; the imprecision it accepts is that
-    /// a handful of genuinely amendment-borne fields are reachable only from
-    /// inside an opaque wire type (`sfLockingChainIssue` inside
-    /// `sfXChainBridge`) and so look structural here. They stay available as
-    /// typed constants that no Xahau object will ever contain, which costs
-    /// nothing but tidiness.
+    /// amendment.
+    ///
+    /// # Where format-derivation is wrong, and what fixes it
+    ///
+    /// Deriving a field's tier from its formats has one blind spot, in both
+    /// directions, because **an amendment can gate a field rather than a
+    /// format**:
+    ///
+    /// - A field of an *available* format can still be unreachable.
+    ///   `sfCredentialIDs` is on `Payment`, `EscrowFinish`,
+    ///   `PaymentChannelClaim` and `AccountDelete` — all active — but is
+    ///   gated by `featureCredentials`, which xahaud marks `Supported::no`.
+    ///   A validated Xahau `Payment` can never carry it; its transactor
+    ///   returns `temDISABLED` when it is present. Derivation says active.
+    /// - A genuinely amendment-borne field can look *structural* because it
+    ///   is reachable only from inside an opaque wire type, so no format's
+    ///   field list names it: `sfLockingChainIssue` and
+    ///   `sfIssuingChainIssue` live inside `sfXChainBridge` (serialized type
+    ///   25, not an object), and the fallback above keeps them active.
+    ///
+    /// [`FormatAvailability::field_overrides`] is the remedy for both, and
+    /// is applied after derivation. It is curated rather than derived
+    /// because nothing in this repository knows what an amendment gates at
+    /// field level — so it is seeded only with cases whose amendment is
+    /// `Supported::no` (objectively dead), and judgment-tier cases
+    /// (`sfHookName` and `NamedHooks`, say) are left to manual curation
+    /// rather than guessed at.
     #[must_use]
     pub fn field_tiers(&self, formats: &ProtocolFormats) -> BTreeMap<String, Tier> {
         let mut out: BTreeMap<String, Tier> = BTreeMap::new();
@@ -391,6 +500,14 @@ impl FormatAvailability {
                 note(&f.sfield, tier);
             }
         }
+
+        // Overrides land last and win outright — including over the
+        // "unreferenced fields stay active" fallback, which is how
+        // `sfLockingChainIssue` (reachable only inside the opaque
+        // `sfXChainBridge` wire type) gets classified at all.
+        for (field, tier) in &self.field_overrides {
+            out.insert(field.clone(), *tier);
+        }
         out
     }
 }
@@ -409,7 +526,9 @@ mod tests {
     #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
     use super::*;
-    use crate::protocol_ir::{FieldSpec, InnerObjectFormat, LedgerEntryFormat, Presence, TxFormat};
+    use crate::protocol_ir::{
+        FieldSpec, InnerObjectFormat, LedgerEntryFormat, Presence, SFieldDef, TxFormat,
+    };
 
     fn field(name: &str) -> FieldSpec {
         FieldSpec {
@@ -422,7 +541,29 @@ mod tests {
     fn formats() -> ProtocolFormats {
         ProtocolFormats {
             version: 1,
-            sfields: Vec::new(),
+            sfields: [
+                "sfAccount",
+                "sfFlags",
+                "sfAmount",
+                "sfShared",
+                "sfBidMax",
+                "sfBaseAsset",
+                "sfPrice",
+                "sfAuctionSlot",
+                "sfLedgerIndex",
+                "sfCredentialIDs",
+            ]
+            .iter()
+            .map(|n| SFieldDef {
+                name: (*n).to_owned(),
+                sti: "UINT32".into(),
+                sti_code: 2,
+                field_code: 1,
+                code: (2 << 16) | 1,
+                typed: true,
+                extras: Vec::new(),
+            })
+            .collect(),
             tx_common: vec![field("sfAccount")],
             le_common: vec![field("sfFlags")],
             transactions: vec![
@@ -522,6 +663,88 @@ mod tests {
         );
         // Idempotent: a second run adds nothing.
         assert!(a.auto_add(&formats()).is_empty());
+    }
+
+    /// The invariant `auto_add`'s doc comment states: a run that finds no
+    /// new format must leave the file byte-identical. Serialized rather than
+    /// compared structurally, because byte-identity is the property that
+    /// actually matters to `gen-core --check`.
+    #[test]
+    fn auto_add_on_a_complete_file_is_byte_identical() {
+        let mut a = classified();
+        a.field_overrides
+            .insert("sfCredentialIDs".into(), Tier::Dormant);
+        a.refresh_doc();
+        let before = serde_json::to_string_pretty(&a).unwrap_or_default();
+
+        let added = a.auto_add(&formats());
+        let after = serde_json::to_string_pretty(&a).unwrap_or_default();
+
+        assert!(added.is_empty(), "nothing new to add: {added:?}");
+        assert_eq!(before, after, "auto_add mutated an already-complete file");
+    }
+
+    /// `auto_add` must not touch `field_overrides` even when it *is* adding
+    /// formats — that map is curated, and nothing derives it.
+    #[test]
+    fn auto_add_never_touches_field_overrides() {
+        let mut a = FormatAvailability::empty();
+        a.field_overrides
+            .insert("sfCredentialIDs".into(), Tier::Dormant);
+        let before = a.field_overrides.clone();
+        assert!(
+            !a.auto_add(&formats()).is_empty(),
+            "should have added formats"
+        );
+        assert_eq!(a.field_overrides, before);
+    }
+
+    #[test]
+    fn a_field_override_wins_over_the_derived_tier() {
+        let mut a = classified();
+        // Derivation says active (only `Payment`, an active format, uses it).
+        assert_eq!(
+            a.field_tiers(&formats()).get("sfAmount"),
+            Some(&Tier::Active)
+        );
+        a.field_overrides.insert("sfAmount".into(), Tier::Dormant);
+        assert_eq!(
+            a.field_tiers(&formats()).get("sfAmount"),
+            Some(&Tier::Dormant),
+            "an override must beat the derived tier"
+        );
+    }
+
+    /// The other direction the override exists for: a field no format
+    /// references at all, which the structural fallback would keep active.
+    #[test]
+    fn a_field_override_reaches_fields_no_format_references() {
+        let mut a = classified();
+        assert!(!a.field_tiers(&formats()).contains_key("sfLedgerIndex"));
+        a.field_overrides
+            .insert("sfLedgerIndex".into(), Tier::Dormant);
+        assert_eq!(
+            a.field_tiers(&formats()).get("sfLedgerIndex"),
+            Some(&Tier::Dormant)
+        );
+    }
+
+    #[test]
+    fn an_override_for_an_undeclared_field_fails_the_check() {
+        let mut a = classified();
+        a.field_overrides
+            .insert("sfNotAField".into(), Tier::Dormant);
+        let msg = format!("{:#}", a.validate(&formats()).unwrap_err());
+        assert!(msg.contains("sfNotAField"), "{msg}");
+        assert!(msg.contains("does not declare"), "{msg}");
+    }
+
+    #[test]
+    fn a_wrong_schema_version_fails_the_check() {
+        let mut a = classified();
+        a.version = FORMAT_AVAILABILITY_VERSION + 1;
+        let msg = format!("{:#}", a.validate(&formats()).unwrap_err());
+        assert!(msg.contains("schema version"), "{msg}");
     }
 
     #[test]

@@ -551,8 +551,6 @@ pub const sfAmendments: SField<crate::types::Opaque> = SField::new((19 << 16) + 
 pub const sfNFTokenOffers: SField<crate::types::Opaque> = SField::new((19 << 16) + 4);
 /// C: `sfHookNamespaces` (sfcodes.h) — Vector256, read as [`crate::types::Opaque`].
 pub const sfHookNamespaces: SField<crate::types::Opaque> = SField::new((19 << 16) + 5);
-/// C: `sfCredentialIDs` (sfcodes.h) — Vector256, read as [`crate::types::Opaque`].
-pub const sfCredentialIDs: SField<crate::types::Opaque> = SField::new((19 << 16) + 6);
 /// C: `sfURITokenIDs` (sfcodes.h) — Vector256, read as [`crate::types::Opaque`].
 pub const sfURITokenIDs: SField<crate::types::Opaque> = SField::new((19 << 16) + 99);
 /// C: `sfPaths` (sfcodes.h) — PathSet, read as [`crate::types::Opaque`].
@@ -561,10 +559,6 @@ pub const sfPaths: SField<crate::types::Opaque> = SField::new((18 << 16) + 1);
 pub const sfBaseAsset: SField<crate::types::CurrencyCode> = SField::new((26 << 16) + 1);
 /// C: `sfQuoteAsset` (sfcodes.h) — Currency, read as [`crate::types::CurrencyCode`].
 pub const sfQuoteAsset: SField<crate::types::CurrencyCode> = SField::new((26 << 16) + 2);
-/// C: `sfLockingChainIssue` (sfcodes.h) — Issue, read as [`crate::types::Issue`].
-pub const sfLockingChainIssue: SField<crate::types::Issue> = SField::new((24 << 16) + 1);
-/// C: `sfIssuingChainIssue` (sfcodes.h) — Issue, read as [`crate::types::Issue`].
-pub const sfIssuingChainIssue: SField<crate::types::Issue> = SField::new((24 << 16) + 2);
 /// C: `sfClaimCurrency` (sfcodes.h) — Issue, read as [`crate::types::Issue`].
 pub const sfClaimCurrency: SField<crate::types::Issue> = SField::new((24 << 16) + 5);
 /// C: `sfTransactionMetaData` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
@@ -1767,11 +1761,6 @@ mod parity {
             "sfHookNamespaces"
         );
         assert_eq!(
-            super::sfCredentialIDs.code(),
-            ::rshooks_core::sfcodes::sfCredentialIDs,
-            "sfCredentialIDs"
-        );
-        assert_eq!(
             super::sfURITokenIDs.code(),
             ::rshooks_core::sfcodes::sfURITokenIDs,
             "sfURITokenIDs"
@@ -1790,16 +1779,6 @@ mod parity {
             super::sfQuoteAsset.code(),
             ::rshooks_core::sfcodes::sfQuoteAsset,
             "sfQuoteAsset"
-        );
-        assert_eq!(
-            super::sfLockingChainIssue.code(),
-            ::rshooks_core::sfcodes::sfLockingChainIssue,
-            "sfLockingChainIssue"
-        );
-        assert_eq!(
-            super::sfIssuingChainIssue.code(),
-            ::rshooks_core::sfcodes::sfIssuingChainIssue,
-            "sfIssuingChainIssue"
         );
         assert_eq!(
             super::sfClaimCurrency.code(),
@@ -2073,6 +2052,6 @@ mod parity {
             ::rshooks_core::sfcodes::sfRemarks,
             "sfRemarks"
         );
-        assert_eq!(275, 275, "generated for 275 constants");
+        assert_eq!(272, 272, "generated for 272 constants");
     }
 }

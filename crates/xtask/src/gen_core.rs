@@ -398,6 +398,7 @@ pub fn run_update() -> Result<()> {
         .context("deserializing protocol_formats.json")?;
     let mut availability = read_format_availability()?;
     let added = availability.auto_add(&formats);
+    availability.refresh_doc();
     availability.validate(&formats)?;
     let availability_json = render_format_availability(&availability)?;
 
@@ -475,8 +476,9 @@ pub fn run_check() -> Result<()> {
     // `dormant`) instead of silently rendering as if they were.
     let formats: ProtocolFormats = serde_json::from_str(&protocol_formats_json)
         .context("deserializing protocol_formats.json")?;
-    let availability = read_format_availability()?;
+    let mut availability = read_format_availability()?;
     availability.validate(&formats)?;
+    availability.refresh_doc();
     let availability_json = render_format_availability(&availability)?;
 
     let generated = generate_rust_files(&hook_api_json, &protocol_formats_json)?;

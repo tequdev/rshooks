@@ -196,21 +196,6 @@ impl<S: crate::views::source::FieldSource> Payment<S> {
         self.src.read_opt(crate::sfield::sfDeliverMin)
     }
 
-    /// `sfCredentialIDs` — Vector256, `soeOPTIONAL`.
-    ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn credential_ids_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfCredentialIDs.code(), out)
-    }
-
     /// `sfTransactionType` — UInt16, `soeREQUIRED`.
     #[inline(always)]
     pub fn transaction_type(&self) -> crate::error::Result<u16> {
@@ -950,21 +935,6 @@ impl<S: crate::views::source::FieldSource> EscrowFinish<S> {
     ) -> crate::error::Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfCondition.code(), out)
-    }
-
-    /// `sfCredentialIDs` — Vector256, `soeOPTIONAL`.
-    ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn credential_ids_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfCredentialIDs.code(), out)
     }
 
     /// `sfTransactionType` — UInt16, `soeREQUIRED`.
@@ -4509,21 +4479,6 @@ impl<S: crate::views::source::FieldSource> PaymentChannelClaim<S> {
             .read_raw_opt(crate::sfield::sfPublicKey.code(), out)
     }
 
-    /// `sfCredentialIDs` — Vector256, `soeOPTIONAL`.
-    ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn credential_ids_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfCredentialIDs.code(), out)
-    }
-
     /// `sfTransactionType` — UInt16, `soeREQUIRED`.
     #[inline(always)]
     pub fn transaction_type(&self) -> crate::error::Result<u16> {
@@ -6620,21 +6575,6 @@ impl<S: crate::views::source::FieldSource> AccountDelete<S> {
     #[inline(always)]
     pub fn destination_tag(&self) -> crate::error::Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfDestinationTag)
-    }
-
-    /// `sfCredentialIDs` — Vector256, `soeOPTIONAL`.
-    ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn credential_ids_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfCredentialIDs.code(), out)
     }
 
     /// `sfTransactionType` — UInt16, `soeREQUIRED`.

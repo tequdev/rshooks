@@ -1308,12 +1308,25 @@ The decisions behind it:
   strictly worse than one that can. Nothing is unreachable either way —
   `rshooks::raw::sfcodes::sfXxx` is always there and every field-code
   parameter takes `impl Into<u32>`.
-- **A field no format references stays active.** Those are structural, not
-  amendment-borne: metadata fields, hash and index plumbing, the four
-  container-typed pseudo-fields. The imprecision this accepts is that a
-  field reachable only from inside an opaque wire type
-  (`sfLockingChainIssue` inside `sfXChainBridge`) looks structural and
-  survives as a typed constant no Xahau object will contain.
+- **A field no format references stays active.** Those are usually
+  structural, not amendment-borne: metadata fields, hash and index
+  plumbing, the four container-typed pseudo-fields.
+- **`field_overrides` corrects derivation where formats are the wrong
+  unit.** An amendment can gate a *field* rather than a format, and the
+  derivation is then wrong in both directions. `sfCredentialIDs` sits on
+  `Payment`, `EscrowFinish`, `PaymentChannelClaim` and `AccountDelete` —
+  all active — but needs `featureCredentials`, which xahaud marks
+  `Supported::no`; a validated Xahau `Payment` can never carry it, since
+  its transactor returns `temDISABLED` when it is present. Derivation says
+  active. Conversely `sfLockingChainIssue`/`sfIssuingChainIssue` live
+  inside the opaque `sfXChainBridge` wire type, so no format lists them and
+  the structural fallback keeps them. A curated `field_overrides` map,
+  applied after derivation, fixes both; `gen-core` never writes to it, and
+  it is seeded only with fields whose gating amendment is `Supported::no`.
+  Judgment cases (`sfHookName` and `NamedHooks`, say) are left to
+  deliberate manual curation rather than guessed at. An override that
+  makes a field scarcer than its view removes or `#[cfg]`s the *accessor*,
+  not the view.
 - **Pending views and their fields share one gate**, so a `pending` view
   compiles together with the `pending`-only constants it reads, or not at
   all. `mise run lint`/`test` each run one extra invocation with the

@@ -33,8 +33,8 @@ hand-edited.
 
 ## Rules
 
-- **Never hand-edit these six files.** Re-sync only with
-  `scripts/sync-vendor.sh` (run from the repo root), which downloads all six
+- **Never hand-edit these seven files.** Re-sync only with
+  `scripts/sync-vendor.sh` (run from the repo root), which downloads all seven
   from the `release` branch, overwrites the vendored copies, and regenerates
   `SHA256SUMS`. If the sync changed anything, regenerate the artifact below
   with `cargo xtask gen-core`, review the resulting `git diff`, and re-run
@@ -79,7 +79,7 @@ hand-edited.
   tests are: a bug in a shared parser would be invisible to the test meant
   to catch it — and cross-checks its counts and a sample of known formats
   against the generated artifact.
-- A drift-tripwire test (`../../tests/vendor_sha256.rs`) hashes these six
+- A drift-tripwire test (`../../tests/vendor_sha256.rs`) hashes these seven
   files at test time and asserts them against `SHA256SUMS`, so an accidental
   local edit (or a partial/corrupted re-download) fails CI loudly instead of
   silently drifting from what a real xahaud node runs.

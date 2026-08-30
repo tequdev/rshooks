@@ -278,12 +278,21 @@ struct Accessor<'a> {
     def: &'a SFieldDef,
     name: String,
     access: Access,
+    /// This *field's* tier, which is not always the view's.
+    ///
+    /// A derived field tier is the best among the formats using it, so it is
+    /// normally at least as available as any view carrying it — and then a
+    /// `field_overrides` entry can make it scarcer (`sfCredentialIDs` on an
+    /// active `Payment`). When that happens the accessor, not the view, is
+    /// what has to disappear or gain a `#[cfg]`.
+    tier: Tier,
 }
 
 fn resolve<'a>(
     fields: &[&'a FieldSpec],
     sfields: &BTreeMap<&str, &'a SFieldDef>,
     view: &str,
+    field_tiers: &BTreeMap<String, Tier>,
 ) -> Result<Vec<Accessor<'a>>> {
     let mut out = Vec::with_capacity(fields.len());
     let mut taken: BTreeSet<String> = BTreeSet::new();
@@ -295,6 +304,16 @@ fn resolve<'a>(
                 spec.sfield
             )
         })?;
+        // A field the classification calls dormant has no `sfield` constant
+        // to name, so its accessor cannot exist either — however available
+        // the enclosing view is.
+        let tier = field_tiers
+            .get(&spec.sfield)
+            .copied()
+            .unwrap_or(Tier::Active);
+        if !tier.is_rendered() {
+            continue;
+        }
         let name = method_name(&spec.sfield)
             .with_context(|| format!("naming `{}`'s accessor on view `{view}`", spec.sfield))?;
         let access = access(def.sti_code);
@@ -322,6 +341,7 @@ fn resolve<'a>(
             def,
             name,
             access,
+            tier,
         });
     }
     Ok(out)
@@ -333,13 +353,31 @@ fn resolve<'a>(
 
 /// The shared prefix of every accessor's doc comment: which upstream field
 /// it is, what its serialized type is, and how the format declares it.
-fn field_doc(a: &Accessor<'_>) -> String {
-    format!(
+///
+/// Includes the field's own `#[cfg]` when it is scarcer than the view
+/// carrying it — a `pending` field on an `active` view, which only a
+/// `field_overrides` entry can produce. When the view is already gated, its
+/// own attribute covers every accessor and repeating it would be noise.
+fn field_doc(a: &Accessor<'_>, view_tier: Tier) -> String {
+    let mut out = format!(
         "/// `{name}` — {ty}, `{presence}`.\n",
         name = a.def.name,
         ty = type_id_name(a.def.sti_code),
         presence = presence_token(a.spec.presence),
-    )
+    );
+    if a.tier == Tier::Pending && view_tier == Tier::Active {
+        out.push_str(
+            "///\n\
+             /// **Amendment not yet active** as of the vendored snapshot: this field is\n\
+             /// gated even though the enclosing format is available, so the accessor is\n\
+             /// behind the `pending-amendments` cargo feature.\n",
+        );
+        if let Some(attr) = a.tier.cfg_attr() {
+            out.push_str(&attr);
+            out.push('\n');
+        }
+    }
+    out
 }
 
 /// The sentence explaining an `Option` return, appended where the field is
@@ -357,11 +395,11 @@ fn optional_doc(p: Presence) -> &'static str {
 }
 
 /// Renders the value/raw accessors — the ones every source can serve.
-fn push_shared_accessor(buf: &mut String, a: &Accessor<'_>) -> Result<()> {
+fn push_shared_accessor(buf: &mut String, a: &Accessor<'_>, view_tier: Tier) -> Result<()> {
     let opt = is_optional(a.spec.presence);
     match a.access {
         Access::Value(ty) => {
-            buf.push_str(&field_doc(a));
+            buf.push_str(&field_doc(a, view_tier));
             if opt {
                 buf.push_str(optional_doc(a.spec.presence));
             }
@@ -384,7 +422,7 @@ fn push_shared_accessor(buf: &mut String, a: &Accessor<'_>) -> Result<()> {
         }
         Access::Raw | Access::Container(_) => {
             let container = matches!(a.access, Access::Container(_));
-            buf.push_str(&field_doc(a));
+            buf.push_str(&field_doc(a, view_tier));
             buf.push_str(
                 "///\n\
                  /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,\n\
@@ -430,12 +468,12 @@ fn push_shared_accessor(buf: &mut String, a: &Accessor<'_>) -> Result<()> {
 
 /// Renders the `*_slot` child-slot accessor a container field gets on a
 /// slot-backed view. Writes nothing for a non-container field.
-fn push_slot_accessor(buf: &mut String, a: &Accessor<'_>) -> Result<()> {
+fn push_slot_accessor(buf: &mut String, a: &Accessor<'_>, view_tier: Tier) -> Result<()> {
     let Access::Container(slot_ty) = a.access else {
         return Ok(());
     };
     let opt = is_optional(a.spec.presence);
-    buf.push_str(&field_doc(a));
+    buf.push_str(&field_doc(a, view_tier));
     buf.push_str(
         "///\n\
          /// Navigates to the field and hands its **child slot** to the caller, who\n\
@@ -544,6 +582,7 @@ const TX_MODULE_DOC: &str = "\
 /// Renders `crates/rshooks/src/views/tx.rs`.
 pub fn generate_tx(formats: &ProtocolFormats, availability: &FormatAvailability) -> Result<String> {
     let sfields = sfield_index(formats);
+    let field_tiers = availability.field_tiers(formats);
     check_unique(
         formats.transactions.iter().map(|t| t.name.clone()),
         "transaction",
@@ -555,7 +594,7 @@ pub fn generate_tx(formats: &ProtocolFormats, availability: &FormatAvailability)
         if !tier.is_rendered() {
             continue;
         }
-        push_tx_view(&mut body, tx, formats, &sfields, tier)
+        push_tx_view(&mut body, tx, formats, &sfields, tier, &field_tiers)
             .with_context(|| format!("rendering the `{}` transaction view", tx.name))?;
     }
     Ok(with_generated_marker_in("xahaud-protocol", "transactions.macro", TX_MODULE_DOC) + &body)
@@ -567,9 +606,10 @@ fn push_tx_view(
     formats: &ProtocolFormats,
     sfields: &BTreeMap<&str, &SFieldDef>,
     tier: Tier,
+    field_tiers: &BTreeMap<String, Tier>,
 ) -> Result<()> {
     let fields = merged_fields(&tx.fields, &formats.tx_common);
-    let accessors = resolve(&fields, sfields, &tx.name)?;
+    let accessors = resolve(&fields, sfields, &tx.name, field_tiers)?;
     let name = &tx.name;
     let (cfg, tier_doc) = tier_prelude(tier);
 
@@ -643,8 +683,8 @@ fn push_tx_view(
 
     let mut shared = String::new();
     for a in &accessors {
-        push_shared_accessor(&mut shared, a)?;
-        push_slot_accessor(&mut slot_only, a)?;
+        push_shared_accessor(&mut shared, a, tier)?;
+        push_slot_accessor(&mut slot_only, a, tier)?;
     }
 
     writeln!(
@@ -691,6 +731,7 @@ pub fn generate_ledger(
     availability: &FormatAvailability,
 ) -> Result<String> {
     let sfields = sfield_index(formats);
+    let field_tiers = availability.field_tiers(formats);
     check_unique(
         formats.ledger_entries.iter().map(|l| l.name.clone()),
         "ledger entry",
@@ -702,7 +743,7 @@ pub fn generate_ledger(
         if !tier.is_rendered() {
             continue;
         }
-        push_ledger_view(&mut body, le, formats, &sfields, tier)
+        push_ledger_view(&mut body, le, formats, &sfields, tier, &field_tiers)
             .with_context(|| format!("rendering the `{}` ledger entry view", le.name))?;
     }
     Ok(
@@ -717,9 +758,10 @@ fn push_ledger_view(
     formats: &ProtocolFormats,
     sfields: &BTreeMap<&str, &SFieldDef>,
     tier: Tier,
+    field_tiers: &BTreeMap<String, Tier>,
 ) -> Result<()> {
     let fields = merged_fields(&le.fields, &formats.le_common);
-    let accessors = resolve(&fields, sfields, &le.name)?;
+    let accessors = resolve(&fields, sfields, &le.name, field_tiers)?;
     let name = &le.name;
     let (cfg, tier_doc) = tier_prelude(tier);
 
@@ -773,8 +815,8 @@ fn push_ledger_view(
     .context("writing the view struct and constructors")?;
 
     for a in &accessors {
-        push_shared_accessor(buf, a)?;
-        push_slot_accessor(buf, a)?;
+        push_shared_accessor(buf, a, tier)?;
+        push_slot_accessor(buf, a, tier)?;
     }
     buf.push_str("}\n\n");
     Ok(())
@@ -805,6 +847,7 @@ pub fn generate_inner(
     availability: &FormatAvailability,
 ) -> Result<String> {
     let sfields = sfield_index(formats);
+    let field_tiers = availability.field_tiers(formats);
     let names = formats
         .inner_objects
         .iter()
@@ -818,7 +861,7 @@ pub fn generate_inner(
         if !tier.is_rendered() {
             continue;
         }
-        push_inner_view(&mut body, obj, &sfields, tier)
+        push_inner_view(&mut body, obj, &sfields, tier, &field_tiers)
             .with_context(|| format!("rendering the `{}` inner-object view", obj.sfield))?;
     }
     Ok(with_generated_marker_in(
@@ -842,11 +885,12 @@ fn push_inner_view(
     obj: &InnerObjectFormat,
     sfields: &BTreeMap<&str, &SFieldDef>,
     tier: Tier,
+    field_tiers: &BTreeMap<String, Tier>,
 ) -> Result<()> {
     let name = inner_name(&obj.sfield)?;
     let (cfg, tier_doc) = tier_prelude(tier);
     let fields: Vec<&FieldSpec> = obj.fields.iter().collect();
-    let accessors = resolve(&fields, sfields, &name)?;
+    let accessors = resolve(&fields, sfields, &name, field_tiers)?;
     let ty = type_id_name(
         sfields
             .get(obj.sfield.as_str())
@@ -889,8 +933,8 @@ fn push_inner_view(
     .context("writing the view struct and constructors")?;
 
     for a in &accessors {
-        push_shared_accessor(buf, a)?;
-        push_slot_accessor(buf, a)?;
+        push_shared_accessor(buf, a, tier)?;
+        push_slot_accessor(buf, a, tier)?;
     }
     buf.push_str("}\n\n");
     Ok(())
