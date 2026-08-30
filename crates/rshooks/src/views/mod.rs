@@ -31,6 +31,32 @@
 //! not — see `crate::txn`'s "Why there is no library-owned
 //! `PaymentTemplate` here", which this module amends rather than overturns.
 //!
+//! # Which views exist
+//!
+//! Upstream's format tables are inherited wholesale from rippled, so they
+//! declare a great deal Xahau cannot run. Generating all of it would offer
+//! you an `AMMBid` or an `XChainCommit` view that no real transaction can
+//! ever match, so `crates/rshooks-core/format_availability.json` classifies
+//! every format and the generator follows it:
+//!
+//! - **active** — activated on Xahau mainnet. Generated normally. This is
+//!   what you get by default.
+//! - **pending** — supported by xahaud but not yet activated as of the
+//!   vendored snapshot. Generated behind the `pending-amendments` cargo
+//!   feature, so you can write and test against the shape in advance
+//!   without it cluttering everyone else's autocomplete. Enable it with
+//!   `rshooks = { …, features = ["pending-amendments"] }`.
+//! - **dormant** — gated by an amendment xahaud marks `Supported::no`, so
+//!   it cannot activate on Xahau without a node upgrade. **Not generated at
+//!   all**, and no feature brings it back.
+//!
+//! The `sfield` constants a view reads follow the same tiers, so a pending
+//! view and its pending-only fields compile together or not at all. The raw
+//! layers are untouched: `rshooks::raw::sfcodes` stays a complete mirror,
+//! and [`crate::tx_type::TxType`]/[`crate::ledger_entry_type::LedgerEntryType`]
+//! stay exhaustive, because decoding a wire value is a different job from
+//! offering an API.
+//!
 //! [`source`] is hand-written: it holds the whole of the views' logic, so
 //! the generated files contain declarations and nothing else.
 //!

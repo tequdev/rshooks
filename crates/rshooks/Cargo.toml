@@ -32,6 +32,17 @@ panic-handler = []
 # from a `std` context — see the handler's doc comment in lib.rs.
 host-panic-handler = []
 trace = []
+# Generates the `rshooks::views` shapes for formats whose amendment is
+# supported by xahaud but not yet activated on Xahau mainnet, plus the
+# `rshooks::sfield` constants only those formats reference. Off by default:
+# nothing on-ledger matches these shapes yet, so a hook that reads one is
+# writing against a future ledger deliberately.
+#
+# The tier of every format lives in `crates/rshooks-core/format_availability.json`
+# and the feature name is `xtask`'s `availability::PENDING_FEATURE`; renaming
+# it means changing both. `dormant` formats are not generated at all and no
+# feature brings them back.
+pending-amendments = []
 # Enables the native mock-host bridge (`rshooks_core::backend`): wrapper
 # functions in `api/*` consult an installed `HostBackend` instead of the
 # host stubs, and `HookStatic::take` gains a per-invocation claim path.

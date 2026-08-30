@@ -739,10 +739,17 @@ impl HookParameter {
 ///
 /// Wrap a child slot with [`NFToken::from_slot`] — typically one an
 /// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
+///
+/// **Amendment not yet active** as of the vendored snapshot, so this
+/// shape is generated behind the `pending-amendments` cargo feature. Nothing on
+/// Xahau will match it until the amendment activates; it is here so a
+/// hook can be written and tested against the shape in advance.
+#[cfg(feature = "pending-amendments")]
 pub struct NFToken {
     src: crate::views::source::SlotSource,
 }
 
+#[cfg(feature = "pending-amendments")]
 impl NFToken {
     /// Views an already-navigated child slot as `NFToken`, taking ownership of
     /// the slot.
@@ -1040,10 +1047,17 @@ impl MintURIToken {
 ///
 /// Wrap a child slot with [`Remark::from_slot`] — typically one an
 /// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
+///
+/// **Amendment not yet active** as of the vendored snapshot, so this
+/// shape is generated behind the `pending-amendments` cargo feature. Nothing on
+/// Xahau will match it until the amendment activates; it is here so a
+/// hook can be written and tested against the shape in advance.
+#[cfg(feature = "pending-amendments")]
 pub struct Remark {
     src: crate::views::source::SlotSource,
 }
 
+#[cfg(feature = "pending-amendments")]
 impl Remark {
     /// Views an already-navigated child slot as `Remark`, taking ownership of
     /// the slot.
@@ -1101,544 +1115,21 @@ impl Remark {
     }
 }
 
-/// View of the `sfVoteEntry` inner object (STObject).
-///
-/// Wrap a child slot with [`VoteEntry::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
-pub struct VoteEntry {
-    src: crate::views::source::SlotSource,
-}
-
-impl VoteEntry {
-    /// Views an already-navigated child slot as `VoteEntry`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
-    #[inline(always)]
-    #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
-        Self {
-            src: crate::views::source::SlotSource::new(obj),
-        }
-    }
-
-    /// Hands the underlying slot back, consuming the view.
-    #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
-        self.src.into_slot()
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfTradingFee` — UInt16, `soeDEFAULT`.
-    ///
-    /// `Ok(None)` when the field is absent. `soeDEFAULT` means only that
-    /// upstream allows it to be left off the wire — there is no default
-    /// value to substitute, so absence is reported, not filled in.
-    #[inline(always)]
-    pub fn trading_fee(&self) -> crate::error::Result<Option<u16>> {
-        self.src.read_opt(crate::sfield::sfTradingFee)
-    }
-
-    /// `sfVoteWeight` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn vote_weight(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfVoteWeight)
-    }
-}
-
-/// View of the `sfAuctionSlot` inner object (STObject).
-///
-/// Wrap a child slot with [`AuctionSlot::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
-pub struct AuctionSlot {
-    src: crate::views::source::SlotSource,
-}
-
-impl AuctionSlot {
-    /// Views an already-navigated child slot as `AuctionSlot`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
-    #[inline(always)]
-    #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
-        Self {
-            src: crate::views::source::SlotSource::new(obj),
-        }
-    }
-
-    /// Hands the underlying slot back, consuming the view.
-    #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
-        self.src.into_slot()
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfExpiration` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn expiration(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfExpiration)
-    }
-
-    /// `sfDiscountedFee` — UInt16, `soeDEFAULT`.
-    ///
-    /// `Ok(None)` when the field is absent. `soeDEFAULT` means only that
-    /// upstream allows it to be left off the wire — there is no default
-    /// value to substitute, so absence is reported, not filled in.
-    #[inline(always)]
-    pub fn discounted_fee(&self) -> crate::error::Result<Option<u16>> {
-        self.src.read_opt(crate::sfield::sfDiscountedFee)
-    }
-
-    /// `sfPrice` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn price(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfPrice)
-    }
-
-    /// `sfAuthAccounts` — STArray, `soeOPTIONAL`.
-    ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `auth_accounts_slot`, which only a slot-backed view has.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn auth_accounts_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfAuthAccounts.code(), out)
-    }
-
-    /// `sfAuthAccounts` — STArray, `soeOPTIONAL`.
-    ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn auth_accounts_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfAuthAccounts)
-    }
-}
-
-/// View of the `sfXChainClaimAttestationCollectionElement` inner object (STObject).
-///
-/// Wrap a child slot with [`XChainClaimAttestationCollectionElement::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
-pub struct XChainClaimAttestationCollectionElement {
-    src: crate::views::source::SlotSource,
-}
-
-impl XChainClaimAttestationCollectionElement {
-    /// Views an already-navigated child slot as `XChainClaimAttestationCollectionElement`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
-    #[inline(always)]
-    #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
-        Self {
-            src: crate::views::source::SlotSource::new(obj),
-        }
-    }
-
-    /// Hands the underlying slot back, consuming the view.
-    #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
-        self.src.into_slot()
-    }
-
-    /// `sfAttestationSignerAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn attestation_signer_account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAttestationSignerAccount)
-    }
-
-    /// `sfPublicKey` — Blob, `soeREQUIRED`.
-    ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    #[inline(always)]
-    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src.read_raw(crate::sfield::sfPublicKey.code(), out)
-    }
-
-    /// `sfSignature` — Blob, `soeREQUIRED`.
-    ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    #[inline(always)]
-    pub fn signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src.read_raw(crate::sfield::sfSignature.code(), out)
-    }
-
-    /// `sfAmount` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfAmount)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfAttestationRewardAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn attestation_reward_account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAttestationRewardAccount)
-    }
-
-    /// `sfWasLockingChainSend` — UInt8, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn was_locking_chain_send(&self) -> crate::error::Result<u8> {
-        self.src.read(crate::sfield::sfWasLockingChainSend)
-    }
-
-    /// `sfXChainClaimID` — UInt64, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn xchain_claim_id(&self) -> crate::error::Result<u64> {
-        self.src.read(crate::sfield::sfXChainClaimID)
-    }
-
-    /// `sfDestination` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
-        self.src.read_opt(crate::sfield::sfDestination)
-    }
-}
-
-/// View of the `sfXChainCreateAccountAttestationCollectionElement` inner object (STObject).
-///
-/// Wrap a child slot with [`XChainCreateAccountAttestationCollectionElement::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
-pub struct XChainCreateAccountAttestationCollectionElement {
-    src: crate::views::source::SlotSource,
-}
-
-impl XChainCreateAccountAttestationCollectionElement {
-    /// Views an already-navigated child slot as `XChainCreateAccountAttestationCollectionElement`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
-    #[inline(always)]
-    #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
-        Self {
-            src: crate::views::source::SlotSource::new(obj),
-        }
-    }
-
-    /// Hands the underlying slot back, consuming the view.
-    #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
-        self.src.into_slot()
-    }
-
-    /// `sfAttestationSignerAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn attestation_signer_account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAttestationSignerAccount)
-    }
-
-    /// `sfPublicKey` — Blob, `soeREQUIRED`.
-    ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    #[inline(always)]
-    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src.read_raw(crate::sfield::sfPublicKey.code(), out)
-    }
-
-    /// `sfSignature` — Blob, `soeREQUIRED`.
-    ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    #[inline(always)]
-    pub fn signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src.read_raw(crate::sfield::sfSignature.code(), out)
-    }
-
-    /// `sfAmount` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfAmount)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfAttestationRewardAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn attestation_reward_account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAttestationRewardAccount)
-    }
-
-    /// `sfWasLockingChainSend` — UInt8, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn was_locking_chain_send(&self) -> crate::error::Result<u8> {
-        self.src.read(crate::sfield::sfWasLockingChainSend)
-    }
-
-    /// `sfXChainAccountCreateCount` — UInt64, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn xchain_account_create_count(&self) -> crate::error::Result<u64> {
-        self.src.read(crate::sfield::sfXChainAccountCreateCount)
-    }
-
-    /// `sfDestination` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfDestination)
-    }
-
-    /// `sfSignatureReward` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn signature_reward(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfSignatureReward)
-    }
-}
-
-/// View of the `sfXChainClaimProofSig` inner object (STObject).
-///
-/// Wrap a child slot with [`XChainClaimProofSig::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
-pub struct XChainClaimProofSig {
-    src: crate::views::source::SlotSource,
-}
-
-impl XChainClaimProofSig {
-    /// Views an already-navigated child slot as `XChainClaimProofSig`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
-    #[inline(always)]
-    #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
-        Self {
-            src: crate::views::source::SlotSource::new(obj),
-        }
-    }
-
-    /// Hands the underlying slot back, consuming the view.
-    #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
-        self.src.into_slot()
-    }
-
-    /// `sfAttestationSignerAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn attestation_signer_account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAttestationSignerAccount)
-    }
-
-    /// `sfPublicKey` — Blob, `soeREQUIRED`.
-    ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    #[inline(always)]
-    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src.read_raw(crate::sfield::sfPublicKey.code(), out)
-    }
-
-    /// `sfAmount` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfAmount)
-    }
-
-    /// `sfAttestationRewardAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn attestation_reward_account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAttestationRewardAccount)
-    }
-
-    /// `sfWasLockingChainSend` — UInt8, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn was_locking_chain_send(&self) -> crate::error::Result<u8> {
-        self.src.read(crate::sfield::sfWasLockingChainSend)
-    }
-
-    /// `sfDestination` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
-        self.src.read_opt(crate::sfield::sfDestination)
-    }
-}
-
-/// View of the `sfXChainCreateAccountProofSig` inner object (STObject).
-///
-/// Wrap a child slot with [`XChainCreateAccountProofSig::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
-pub struct XChainCreateAccountProofSig {
-    src: crate::views::source::SlotSource,
-}
-
-impl XChainCreateAccountProofSig {
-    /// Views an already-navigated child slot as `XChainCreateAccountProofSig`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
-    #[inline(always)]
-    #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
-        Self {
-            src: crate::views::source::SlotSource::new(obj),
-        }
-    }
-
-    /// Hands the underlying slot back, consuming the view.
-    #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
-        self.src.into_slot()
-    }
-
-    /// `sfAttestationSignerAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn attestation_signer_account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAttestationSignerAccount)
-    }
-
-    /// `sfPublicKey` — Blob, `soeREQUIRED`.
-    ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    #[inline(always)]
-    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src.read_raw(crate::sfield::sfPublicKey.code(), out)
-    }
-
-    /// `sfAmount` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfAmount)
-    }
-
-    /// `sfSignatureReward` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn signature_reward(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfSignatureReward)
-    }
-
-    /// `sfAttestationRewardAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn attestation_reward_account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAttestationRewardAccount)
-    }
-
-    /// `sfWasLockingChainSend` — UInt8, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn was_locking_chain_send(&self) -> crate::error::Result<u8> {
-        self.src.read(crate::sfield::sfWasLockingChainSend)
-    }
-
-    /// `sfDestination` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfDestination)
-    }
-}
-
-/// View of the `sfAuthAccount` inner object (STObject).
-///
-/// Wrap a child slot with [`AuthAccount::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
-pub struct AuthAccount {
-    src: crate::views::source::SlotSource,
-}
-
-impl AuthAccount {
-    /// Views an already-navigated child slot as `AuthAccount`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
-    #[inline(always)]
-    #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
-        Self {
-            src: crate::views::source::SlotSource::new(obj),
-        }
-    }
-
-    /// Hands the underlying slot back, consuming the view.
-    #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
-        self.src.into_slot()
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-}
-
 /// View of the `sfPriceData` inner object (STObject).
 ///
 /// Wrap a child slot with [`PriceData::from_slot`] — typically one an
 /// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
+///
+/// **Amendment not yet active** as of the vendored snapshot, so this
+/// shape is generated behind the `pending-amendments` cargo feature. Nothing on
+/// Xahau will match it until the amendment activates; it is here so a
+/// hook can be written and tested against the shape in advance.
+#[cfg(feature = "pending-amendments")]
 pub struct PriceData {
     src: crate::views::source::SlotSource,
 }
 
+#[cfg(feature = "pending-amendments")]
 impl PriceData {
     /// Views an already-navigated child slot as `PriceData`, taking ownership of
     /// the slot.
@@ -1691,63 +1182,21 @@ impl PriceData {
     }
 }
 
-/// View of the `sfCredential` inner object (STObject).
-///
-/// Wrap a child slot with [`Credential::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
-pub struct Credential {
-    src: crate::views::source::SlotSource,
-}
-
-impl Credential {
-    /// Views an already-navigated child slot as `Credential`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
-    #[inline(always)]
-    #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
-        Self {
-            src: crate::views::source::SlotSource::new(obj),
-        }
-    }
-
-    /// Hands the underlying slot back, consuming the view.
-    #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
-        self.src.into_slot()
-    }
-
-    /// `sfIssuer` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn issuer(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfIssuer)
-    }
-
-    /// `sfCredentialType` — Blob, `soeREQUIRED`.
-    ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    #[inline(always)]
-    pub fn credential_type_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfCredentialType.code(), out)
-    }
-}
-
 /// View of the `sfHighReward` inner object (STObject).
 ///
 /// Wrap a child slot with [`HighReward::from_slot`] — typically one an
 /// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
+///
+/// **Amendment not yet active** as of the vendored snapshot, so this
+/// shape is generated behind the `pending-amendments` cargo feature. Nothing on
+/// Xahau will match it until the amendment activates; it is here so a
+/// hook can be written and tested against the shape in advance.
+#[cfg(feature = "pending-amendments")]
 pub struct HighReward {
     src: crate::views::source::SlotSource,
 }
 
+#[cfg(feature = "pending-amendments")]
 impl HighReward {
     /// Views an already-navigated child slot as `HighReward`, taking ownership of
     /// the slot.
@@ -1800,10 +1249,17 @@ impl HighReward {
 ///
 /// Wrap a child slot with [`LowReward::from_slot`] — typically one an
 /// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
+///
+/// **Amendment not yet active** as of the vendored snapshot, so this
+/// shape is generated behind the `pending-amendments` cargo feature. Nothing on
+/// Xahau will match it until the amendment activates; it is here so a
+/// hook can be written and tested against the shape in advance.
+#[cfg(feature = "pending-amendments")]
 pub struct LowReward {
     src: crate::views::source::SlotSource,
 }
 
+#[cfg(feature = "pending-amendments")]
 impl LowReward {
     /// Views an already-navigated child slot as `LowReward`, taking ownership of
     /// the slot.

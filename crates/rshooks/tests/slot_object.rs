@@ -43,7 +43,12 @@ fn surface() {
     let _: SField<u8> = sfCloseResolution;
     let _: SField<u16> = sfTransactionType;
     let _: SField<STObject> = sfMemo;
-    let _: SField<Issue> = sfAsset;
+    // `sfClaimCurrency` rather than `sfAsset`: both are ISSUE-typed, but
+    // `sfAsset` belongs only to the AMM formats, which
+    // `format_availability.json` classifies `dormant` (featureAMM is
+    // Supported::no in xahaud), so the typed layer no longer carries it.
+    // `sfClaimCurrency` is on `ClaimReward`, which is active on Xahau.
+    let _: SField<Issue> = sfClaimCurrency;
     // Blob / Hash160 / PathSet -> Opaque
     let _: SField<Opaque> = sfSigningPubKey;
     let _: SField<Opaque> = sfTakerPaysCurrency;
@@ -98,7 +103,7 @@ fn navigation_types() {
             .assume_type::<CurrencyCode>()
             .value()?;
         let _: AmountBytes = root.get(sfBalance)?.value()?;
-        let _: IssueData = root.get(sfAsset)?.value()?;
+        let _: IssueData = root.get(sfClaimCurrency)?.value()?;
         // take_* recycling
         let _: u32 = root.get(sfSequence)?.take_value()?;
         let _: XFL = root.get(sfBalance)?.take_xfl()?;
@@ -134,18 +139,30 @@ fn slot_path_shapes() {
 // Field-table parity
 // ---------------------------------------------------------------------------
 //
-// The full 325-name `typed.code() == raw` comparison is *generated* into
-// `sfield.rs` alongside the table it checks (`cargo xtask gen-core`), so it
-// cannot drift when upstream adds a field — run it with
-// `cargo test -p rshooks --lib parity`. What is left here is the shape
-// check the generated test cannot make: that both files declare the same
-// set of names in the first place.
+// The `typed.code() == raw` comparison is *generated* into `sfield.rs`
+// alongside the table it checks (`cargo xtask gen-core`), so it cannot drift
+// when upstream adds a field — run it with
+// `cargo test -p rshooks --lib parity`. What is left here is the shape check
+// the generated test cannot make: how the two tables' name sets relate.
+//
+// They are deliberately **not** equal any more. `rshooks-core::sfcodes` is a
+// complete 1:1 mirror of the wire protocol; `rshooks::sfield` is the
+// ergonomic layer, and it carries only the fields some usable format
+// references (`crates/rshooks-core/format_availability.json`). A field whose
+// every format is `dormant` — gated by an amendment xahaud marks
+// `Supported::no`, so it can never activate on Xahau — has no typed
+// constant, because offering one would hand a hook author an API that
+// cannot match anything on-ledger. The raw constant stays, because a hook
+// that genuinely needs the code can still name it.
 
 #[test]
-fn both_tables_declare_the_same_names() {
+fn the_typed_table_is_the_usable_subset_of_the_raw_one() {
     let typed = include_str!("../src/sfield.rs");
     let raw = include_str!("../../rshooks-core/src/sfcodes.rs");
 
+    // Reads the *source text*, so the count is the same whether or not
+    // `pending-amendments` is enabled: cfg-gated constants are still
+    // declared here, just compiled out.
     let names = |src: &str| -> std::collections::BTreeSet<String> {
         src.lines()
             .filter_map(|l| l.trim().strip_prefix("pub const "))
@@ -156,11 +173,41 @@ fn both_tables_declare_the_same_names() {
     let typed_names = names(typed);
     let raw_names = names(raw);
 
-    assert_eq!(typed_names.len(), 325, "expected 325 typed constants");
-    assert_eq!(
-        typed_names, raw_names,
-        "the typed and raw field tables declare different names",
+    assert_eq!(raw_names.len(), 325, "the raw table must stay complete");
+    assert!(
+        typed_names.is_subset(&raw_names),
+        "the typed table names {:?} the raw table does not declare",
+        typed_names.difference(&raw_names).collect::<Vec<_>>(),
     );
+    assert!(
+        typed_names.len() < raw_names.len(),
+        "no field was filtered out — the availability classification is not \
+         reaching the sfield generator",
+    );
+
+    // Spot checks in both directions, so a mis-wiring that filtered
+    // everything (or nothing) fails loudly rather than silently passing the
+    // subset assertion above.
+    for present in [
+        "sfAccount",
+        "sfAmount",
+        "sfClaimCurrency",
+        "sfLedgerEntryType",
+    ] {
+        assert!(typed_names.contains(present), "{present} should be typed");
+    }
+    // `sfAsset`/`sfXChainBridge` are referenced only by AMM / XChainBridge
+    // formats, both dormant.
+    for absent in ["sfAsset", "sfAsset2", "sfXChainBridge", "sfLPTokenBalance"] {
+        assert!(
+            !typed_names.contains(absent),
+            "{absent} belongs only to dormant formats and should not be typed"
+        );
+        assert!(
+            raw_names.contains(absent),
+            "{absent} must stay in the raw table"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -16,15 +16,24 @@ cargo fmt --all --manifest-path examples/Cargo.toml
 """
 
 [tasks.lint]
-description = "Lint the root workspace (all targets) and the examples workspace (wasm32v1-none), denying warnings"
+description = "Lint the root workspace (all targets, and rshooks again with pending-amendments) and the examples workspace (wasm32v1-none), denying warnings"
 run = """
 cargo clippy --workspace --all-targets -- -D warnings
+# `pending-amendments` gates generated view structs and sfield constants, so
+# the feature-on build is a second, genuinely different tree of code that
+# nothing above compiles. One extra invocation covers it.
+cargo clippy -p rshooks --all-targets --features pending-amendments -- -D warnings
 cargo clippy --manifest-path examples/Cargo.toml --workspace --target wasm32v1-none -- -D warnings
 """
 
 [tasks.test]
-description = "Run all workspace tests"
-run = "cargo test --workspace"
+description = "Run all workspace tests, plus rshooks again with pending-amendments"
+run = """
+cargo test --workspace
+# Same reason as `lint`: the feature-on build has generated items the
+# default build does not, including its own generated parity assertions.
+cargo test -p rshooks --features pending-amendments
+"""
 
 [tasks.build-wasm]
 description = "Build the no_std crates for the wasm32v1-none Hook target"
