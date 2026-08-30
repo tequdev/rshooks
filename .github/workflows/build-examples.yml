@@ -150,7 +150,8 @@ jobs:
   # crate's own test suite. 16_typed-results follows the tests/ integration
   # layout too, and additionally covers the typed entry-return form's
   # rollback path (a `hook_errors!` msg-clause message surfacing in
-  # `HookExit.msg` through `?`).
+  # `HookExit.msg` through `?`). 18_typed-views covers the generated
+  # `rshooks::views` layer against seeded ledger objects.
   unit-tests-examples:
     name: Off-chain unit tests (rshooks-testenv)
     runs-on: ubuntu-latest
@@ -166,7 +167,7 @@ jobs:
         run: cargo test -p rshooks-testenv
 
       - name: cargo test (examples workspace, testenv-wired examples)
-        run: cargo test --manifest-path examples/Cargo.toml -p state-counter -p emit-txn -p typed-results -p sto-writer
+        run: cargo test --manifest-path examples/Cargo.toml -p state-counter -p emit-txn -p typed-results -p sto-writer -p typed-views
 
   build:
     name: ${{ matrix.name }}

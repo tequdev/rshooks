@@ -1,0 +1,29 @@
+[package]
+name = "typed-views"
+version = "0.1.1"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+# `rlib` lets the `tests/` integration tests link this crate as an ordinary
+# dependency. This crate is still no_std with no `test` crate available for
+# wasm32v1-none, so the lib target's own unit-test harness stays disabled
+# (`test = false`) — `tests/` integration tests are a separate target and
+# are unaffected by this setting.
+test = false
+
+[dependencies]
+rshooks = { path = "../../crates/rshooks", features = ["host-panic-handler"] }
+
+[dev-dependencies]
+rshooks = { path = "../../crates/rshooks", features = ["testenv"] }
+rshooks-testenv = { path = "../../crates/rshooks-testenv" }
+# Independent keylet recomputation in `tests/typed_views.rs` (the same
+# `sha512Half(ledgerSpace ++ args)` formula `examples/13_keylets` and
+# `examples/15_slot-objects` use).
+sha2 = "0.10"
+
+[lints]
+workspace = true
