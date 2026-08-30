@@ -32,17 +32,32 @@ panic-handler = []
 # from a `std` context — see the handler's doc comment in lib.rs.
 host-panic-handler = []
 trace = []
-# Generates the `rshooks::views` shapes for formats whose amendment is
-# supported by xahaud but not yet activated on Xahau mainnet, plus the
-# `rshooks::sfield` constants only those formats reference. Off by default:
-# nothing on-ledger matches these shapes yet, so a hook that reads one is
-# writing against a future ledger deliberately.
+# Amendment-availability of the generated `rshooks::views` shapes and the
+# `rshooks::sfield` constants they read. Tiers live in
+# `crates/rshooks-core/format_availability.json`; the two feature names are
+# `xtask`'s `availability::{ACTIVE_ONLY_FEATURE, ALL_FEATURE}`.
 #
-# The tier of every format lives in `crates/rshooks-core/format_availability.json`
-# and the feature name is `xtask`'s `availability::PENDING_FEATURE`; renaming
-# it means changing both. `dormant` formats are not generated at all and no
-# feature brings them back.
-pending-amendments = []
+#   (neither)           active + pending   <- the default
+#   active-amendments   active only
+#   all-amendments      active + pending + dormant
+#   both                same as all-amendments (widest wins)
+#
+# Widest-wins is deliberate. Cargo unifies features across the whole
+# dependency graph, so a crate enabling `all-amendments` turns it on for
+# every other user of rshooks in that build. Making the wider feature
+# dominate keeps enabling a feature additive in effect: a dependency can
+# give you more API than you asked for, never take API away.
+
+# Restrict to formats activated on Xahau mainnet. For a hook that wants its
+# surface to be exactly what is live today, so a shape that has not
+# activated yet cannot be reached by accident.
+active-amendments = []
+
+# Everything, including formats gated by an amendment xahaud marks
+# Supported::no — they cannot appear on Xahau mainnet, where activating one
+# would amendment-block the node. There for custom networks whose operator
+# knows otherwise; enable at your own judgment.
+all-amendments = []
 # Enables the native mock-host bridge (`rshooks_core::backend`): wrapper
 # functions in `api/*` consult an installed `HostBackend` instead of the
 # host stubs, and `HookStatic::take` gains a per-invocation claim path.

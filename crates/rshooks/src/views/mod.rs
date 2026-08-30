@@ -39,16 +39,28 @@
 //! ever match, so `crates/rshooks-core/format_availability.json` classifies
 //! every format and the generator follows it:
 //!
-//! - **active** — activated on Xahau mainnet. Generated normally. This is
-//!   what you get by default.
+//! - **active** — activated on Xahau mainnet.
 //! - **pending** — supported by xahaud but not yet activated as of the
-//!   vendored snapshot. Generated behind the `pending-amendments` cargo
-//!   feature, so you can write and test against the shape in advance
-//!   without it cluttering everyone else's autocomplete. Enable it with
-//!   `rshooks = { …, features = ["pending-amendments"] }`.
-//! - **dormant** — gated by an amendment xahaud marks `Supported::no`, so
-//!   it cannot activate on Xahau without a node upgrade. **Not generated at
-//!   all**, and no feature brings it back.
+//!   vendored snapshot.
+//! - **dormant** — gated by an amendment xahaud marks `Supported::no`, so it
+//!   cannot appear on Xahau at all (activating it would amendment-block the
+//!   node).
+//!
+//! Two cargo features decide which of those compile:
+//!
+//! | features on | active | pending | dormant |
+//! |---|---|---|---|
+//! | *(none)* — the default | yes | yes | no |
+//! | `active-amendments` | yes | no | no |
+//! | `all-amendments` | yes | yes | yes |
+//! | both | yes | yes | yes |
+//!
+//! So by default you get everything Xahau has or is expected to get. Add
+//! `active-amendments` to restrict the surface to what is live today; add
+//! `all-amendments` for a custom network where a `Supported::no` amendment
+//! is somehow in play. Both together behave as `all-amendments`: cargo
+//! unifies features across the dependency graph, so making the wider one
+//! win means a dependency can only ever *add* API, never remove it.
 //!
 //! The `sfield` constants a view reads follow the same tiers, so a pending
 //! view and its pending-only fields compile together or not at all. The raw

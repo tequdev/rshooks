@@ -81,12 +81,24 @@ pub const sfMethod: SField<u8> = SField::new((16 << 16) + 2);
 pub const sfTransactionResult: SField<u8> = SField::new((16 << 16) + 3);
 /// C: `sfScale` (sfcodes.h) — UInt8, read as [`u8`].
 pub const sfScale: SField<u8> = SField::new((16 << 16) + 4);
+/// C: `sfAssetScale` (sfcodes.h) — UInt8, read as [`u8`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfAssetScale: SField<u8> = SField::new((16 << 16) + 5);
 /// C: `sfTickSize` (sfcodes.h) — UInt8, read as [`u8`].
 pub const sfTickSize: SField<u8> = SField::new((16 << 16) + 16);
 /// C: `sfUNLModifyDisabling` (sfcodes.h) — UInt8, read as [`u8`].
 pub const sfUNLModifyDisabling: SField<u8> = SField::new((16 << 16) + 17);
 /// C: `sfHookResult` (sfcodes.h) — UInt8, read as [`u8`].
 pub const sfHookResult: SField<u8> = SField::new((16 << 16) + 18);
+/// C: `sfWasLockingChainSend` (sfcodes.h) — UInt8, read as [`u8`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfWasLockingChainSend: SField<u8> = SField::new((16 << 16) + 19);
 /// C: `sfLedgerEntryType` (sfcodes.h) — UInt16, read as [`u16`].
 pub const sfLedgerEntryType: SField<u16> = SField::new((1 << 16) + 1);
 /// C: `sfTransactionType` (sfcodes.h) — UInt16, read as [`u16`].
@@ -95,11 +107,23 @@ pub const sfTransactionType: SField<u16> = SField::new((1 << 16) + 2);
 pub const sfSignerWeight: SField<u16> = SField::new((1 << 16) + 3);
 /// C: `sfTransferFee` (sfcodes.h) — UInt16, read as [`u16`].
 ///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
+/// **Amendment not yet active** as of the vendored snapshot. Available by
+/// default alongside the views declaring it; excluded under the `active-amendments`
+/// cargo feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 pub const sfTransferFee: SField<u16> = SField::new((1 << 16) + 4);
+/// C: `sfTradingFee` (sfcodes.h) — UInt16, read as [`u16`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfTradingFee: SField<u16> = SField::new((1 << 16) + 5);
+/// C: `sfDiscountedFee` (sfcodes.h) — UInt16, read as [`u16`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfDiscountedFee: SField<u16> = SField::new((1 << 16) + 6);
 /// C: `sfVersion` (sfcodes.h) — UInt16, read as [`u16`].
 pub const sfVersion: SField<u16> = SField::new((1 << 16) + 16);
 /// C: `sfHookStateChangeCount` (sfcodes.h) — UInt16, read as [`u16`].
@@ -114,10 +138,10 @@ pub const sfHookApiVersion: SField<u16> = SField::new((1 << 16) + 20);
 pub const sfHookStateScale: SField<u16> = SField::new((1 << 16) + 21);
 /// C: `sfLedgerFixType` (sfcodes.h) — UInt16, read as [`u16`].
 ///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
+/// **Amendment not yet active** as of the vendored snapshot. Available by
+/// default alongside the views declaring it; excluded under the `active-amendments`
+/// cargo feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 pub const sfLedgerFixType: SField<u16> = SField::new((1 << 16) + 22);
 /// C: `sfNetworkID` (sfcodes.h) — UInt32, read as [`u32`].
 pub const sfNetworkID: SField<u32> = SField::new((2 << 16) + 1);
@@ -203,10 +227,10 @@ pub const sfTicketCount: SField<u32> = SField::new((2 << 16) + 40);
 pub const sfTicketSequence: SField<u32> = SField::new((2 << 16) + 41);
 /// C: `sfNFTokenTaxon` (sfcodes.h) — UInt32, read as [`u32`].
 ///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
+/// **Amendment not yet active** as of the vendored snapshot. Available by
+/// default alongside the views declaring it; excluded under the `active-amendments`
+/// cargo feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 pub const sfNFTokenTaxon: SField<u32> = SField::new((2 << 16) + 42);
 /// C: `sfMintedNFTokens` (sfcodes.h) — UInt32, read as [`u32`].
 pub const sfMintedNFTokens: SField<u32> = SField::new((2 << 16) + 43);
@@ -216,6 +240,12 @@ pub const sfBurnedNFTokens: SField<u32> = SField::new((2 << 16) + 44);
 pub const sfHookStateCount: SField<u32> = SField::new((2 << 16) + 45);
 /// C: `sfEmitGeneration` (sfcodes.h) — UInt32, read as [`u32`].
 pub const sfEmitGeneration: SField<u32> = SField::new((2 << 16) + 46);
+/// C: `sfVoteWeight` (sfcodes.h) — UInt32, read as [`u32`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfVoteWeight: SField<u32> = SField::new((2 << 16) + 48);
 /// C: `sfLockCount` (sfcodes.h) — UInt32, read as [`u32`].
 pub const sfLockCount: SField<u32> = SField::new((2 << 16) + 49);
 /// C: `sfFirstNFTokenSequence` (sfcodes.h) — UInt32, read as [`u32`].
@@ -262,10 +292,10 @@ pub const sfCookie: SField<u64> = SField::new((3 << 16) + 10);
 pub const sfServerVersion: SField<u64> = SField::new((3 << 16) + 11);
 /// C: `sfNFTokenOfferNode` (sfcodes.h) — UInt64, read as [`u64`].
 ///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
+/// **Amendment not yet active** as of the vendored snapshot. Available by
+/// default alongside the views declaring it; excluded under the `active-amendments`
+/// cargo feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 pub const sfNFTokenOfferNode: SField<u64> = SField::new((3 << 16) + 12);
 /// C: `sfEmitBurden` (sfcodes.h) — UInt64, read as [`u64`].
 pub const sfEmitBurden: SField<u64> = SField::new((3 << 16) + 13);
@@ -275,8 +305,56 @@ pub const sfHookInstructionCount: SField<u64> = SField::new((3 << 16) + 17);
 pub const sfHookReturnCode: SField<u64> = SField::new((3 << 16) + 18);
 /// C: `sfReferenceCount` (sfcodes.h) — UInt64, read as [`u64`].
 pub const sfReferenceCount: SField<u64> = SField::new((3 << 16) + 19);
+/// C: `sfXChainClaimID` (sfcodes.h) — UInt64, read as [`u64`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfXChainClaimID: SField<u64> = SField::new((3 << 16) + 20);
+/// C: `sfXChainAccountCreateCount` (sfcodes.h) — UInt64, read as [`u64`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfXChainAccountCreateCount: SField<u64> = SField::new((3 << 16) + 21);
+/// C: `sfXChainAccountClaimCount` (sfcodes.h) — UInt64, read as [`u64`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfXChainAccountClaimCount: SField<u64> = SField::new((3 << 16) + 22);
 /// C: `sfAssetPrice` (sfcodes.h) — UInt64, read as [`u64`].
 pub const sfAssetPrice: SField<u64> = SField::new((3 << 16) + 23);
+/// C: `sfMaximumAmount` (sfcodes.h) — UInt64, read as [`u64`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfMaximumAmount: SField<u64> = SField::new((3 << 16) + 24);
+/// C: `sfOutstandingAmount` (sfcodes.h) — UInt64, read as [`u64`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfOutstandingAmount: SField<u64> = SField::new((3 << 16) + 25);
+/// C: `sfMPTAmount` (sfcodes.h) — UInt64, read as [`u64`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfMPTAmount: SField<u64> = SField::new((3 << 16) + 26);
+/// C: `sfIssuerNode` (sfcodes.h) — UInt64, read as [`u64`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfIssuerNode: SField<u64> = SField::new((3 << 16) + 27);
+/// C: `sfSubjectNode` (sfcodes.h) — UInt64, read as [`u64`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfSubjectNode: SField<u64> = SField::new((3 << 16) + 28);
 /// C: `sfTouchCount` (sfcodes.h) — UInt64, read as [`u64`].
 pub const sfTouchCount: SField<u64> = SField::new((3 << 16) + 97);
 /// C: `sfAccountIndex` (sfcodes.h) — UInt64, read as [`u64`].
@@ -295,6 +373,12 @@ pub const sfTakerPaysIssuer: SField<crate::types::Opaque> = SField::new((17 << 1
 pub const sfTakerGetsCurrency: SField<crate::types::Opaque> = SField::new((17 << 16) + 3);
 /// C: `sfTakerGetsIssuer` (sfcodes.h) — Hash160, read as [`crate::types::Opaque`].
 pub const sfTakerGetsIssuer: SField<crate::types::Opaque> = SField::new((17 << 16) + 4);
+/// C: `sfMPTokenIssuanceID` (sfcodes.h) — UInt192, read as [`crate::types::Opaque`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfMPTokenIssuanceID: SField<crate::types::Opaque> = SField::new((21 << 16) + 1);
 /// C: `sfLedgerHash` (sfcodes.h) — Hash256, read as [`crate::types::Hash`].
 pub const sfLedgerHash: SField<crate::types::Hash> = SField::new((5 << 16) + 1);
 /// C: `sfParentHash` (sfcodes.h) — Hash256, read as [`crate::types::Hash`].
@@ -347,31 +431,31 @@ pub const sfCheckID: SField<crate::types::Hash> = SField::new((5 << 16) + 24);
 pub const sfValidatedHash: SField<crate::types::Hash> = SField::new((5 << 16) + 25);
 /// C: `sfPreviousPageMin` (sfcodes.h) — Hash256, read as [`crate::types::Hash`].
 ///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
+/// **Amendment not yet active** as of the vendored snapshot. Available by
+/// default alongside the views declaring it; excluded under the `active-amendments`
+/// cargo feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 pub const sfPreviousPageMin: SField<crate::types::Hash> = SField::new((5 << 16) + 26);
 /// C: `sfNextPageMin` (sfcodes.h) — Hash256, read as [`crate::types::Hash`].
 ///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
+/// **Amendment not yet active** as of the vendored snapshot. Available by
+/// default alongside the views declaring it; excluded under the `active-amendments`
+/// cargo feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 pub const sfNextPageMin: SField<crate::types::Hash> = SField::new((5 << 16) + 27);
 /// C: `sfNFTokenBuyOffer` (sfcodes.h) — Hash256, read as [`crate::types::Hash`].
 ///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
+/// **Amendment not yet active** as of the vendored snapshot. Available by
+/// default alongside the views declaring it; excluded under the `active-amendments`
+/// cargo feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 pub const sfNFTokenBuyOffer: SField<crate::types::Hash> = SField::new((5 << 16) + 28);
 /// C: `sfNFTokenSellOffer` (sfcodes.h) — Hash256, read as [`crate::types::Hash`].
 ///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
+/// **Amendment not yet active** as of the vendored snapshot. Available by
+/// default alongside the views declaring it; excluded under the `active-amendments`
+/// cargo feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 pub const sfNFTokenSellOffer: SField<crate::types::Hash> = SField::new((5 << 16) + 29);
 /// C: `sfHookStateKey` (sfcodes.h) — Hash256, read as [`crate::types::Hash`].
 pub const sfHookStateKey: SField<crate::types::Hash> = SField::new((5 << 16) + 30);
@@ -387,6 +471,12 @@ pub const sfOfferID: SField<crate::types::Hash> = SField::new((5 << 16) + 34);
 pub const sfEscrowID: SField<crate::types::Hash> = SField::new((5 << 16) + 35);
 /// C: `sfURITokenID` (sfcodes.h) — Hash256, read as [`crate::types::Hash`].
 pub const sfURITokenID: SField<crate::types::Hash> = SField::new((5 << 16) + 36);
+/// C: `sfDomainID` (sfcodes.h) — Hash256, read as [`crate::types::Hash`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfDomainID: SField<crate::types::Hash> = SField::new((5 << 16) + 37);
 /// C: `sfHookOnOutgoing` (sfcodes.h) — Hash256, read as [`crate::types::Hash`].
 pub const sfHookOnOutgoing: SField<crate::types::Hash> = SField::new((5 << 16) + 93);
 /// C: `sfHookOnIncoming` (sfcodes.h) — Hash256, read as [`crate::types::Hash`].
@@ -423,6 +513,24 @@ pub const sfFee: SField<crate::types::Amount> = SField::new((6 << 16) + 8);
 pub const sfSendMax: SField<crate::types::Amount> = SField::new((6 << 16) + 9);
 /// C: `sfDeliverMin` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
 pub const sfDeliverMin: SField<crate::types::Amount> = SField::new((6 << 16) + 10);
+/// C: `sfAmount2` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfAmount2: SField<crate::types::Amount> = SField::new((6 << 16) + 11);
+/// C: `sfBidMin` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfBidMin: SField<crate::types::Amount> = SField::new((6 << 16) + 12);
+/// C: `sfBidMax` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfBidMax: SField<crate::types::Amount> = SField::new((6 << 16) + 13);
 /// C: `sfMinimumOffer` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
 pub const sfMinimumOffer: SField<crate::types::Amount> = SField::new((6 << 16) + 16);
 /// C: `sfRippleEscrow` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
@@ -431,10 +539,10 @@ pub const sfRippleEscrow: SField<crate::types::Amount> = SField::new((6 << 16) +
 pub const sfDeliveredAmount: SField<crate::types::Amount> = SField::new((6 << 16) + 18);
 /// C: `sfNFTokenBrokerFee` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
 ///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
+/// **Amendment not yet active** as of the vendored snapshot. Available by
+/// default alongside the views declaring it; excluded under the `active-amendments`
+/// cargo feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 pub const sfNFTokenBrokerFee: SField<crate::types::Amount> = SField::new((6 << 16) + 19);
 /// C: `sfHookCallbackFee` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
 pub const sfHookCallbackFee: SField<crate::types::Amount> = SField::new((6 << 16) + 20);
@@ -446,6 +554,48 @@ pub const sfBaseFeeDrops: SField<crate::types::Amount> = SField::new((6 << 16) +
 pub const sfReserveBaseDrops: SField<crate::types::Amount> = SField::new((6 << 16) + 23);
 /// C: `sfReserveIncrementDrops` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
 pub const sfReserveIncrementDrops: SField<crate::types::Amount> = SField::new((6 << 16) + 24);
+/// C: `sfLPTokenOut` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfLPTokenOut: SField<crate::types::Amount> = SField::new((6 << 16) + 25);
+/// C: `sfLPTokenIn` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfLPTokenIn: SField<crate::types::Amount> = SField::new((6 << 16) + 26);
+/// C: `sfEPrice` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfEPrice: SField<crate::types::Amount> = SField::new((6 << 16) + 27);
+/// C: `sfPrice` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfPrice: SField<crate::types::Amount> = SField::new((6 << 16) + 28);
+/// C: `sfSignatureReward` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfSignatureReward: SField<crate::types::Amount> = SField::new((6 << 16) + 29);
+/// C: `sfMinAccountCreateAmount` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfMinAccountCreateAmount: SField<crate::types::Amount> = SField::new((6 << 16) + 30);
+/// C: `sfLPTokenBalance` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfLPTokenBalance: SField<crate::types::Amount> = SField::new((6 << 16) + 31);
 /// C: `sfTrustLineRewardAccumulator` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
 pub const sfTrustLineRewardAccumulator: SField<crate::types::Amount> = SField::new((6 << 16) + 99);
 /// C: `sfPublicKey` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
@@ -498,10 +648,34 @@ pub const sfHookParameterName: SField<crate::types::Opaque> = SField::new((7 << 
 pub const sfHookParameterValue: SField<crate::types::Opaque> = SField::new((7 << 16) + 25);
 /// C: `sfBlob` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
 pub const sfBlob: SField<crate::types::Opaque> = SField::new((7 << 16) + 26);
+/// C: `sfDIDDocument` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfDIDDocument: SField<crate::types::Opaque> = SField::new((7 << 16) + 27);
+/// C: `sfData` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfData: SField<crate::types::Opaque> = SField::new((7 << 16) + 28);
 /// C: `sfAssetClass` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
 pub const sfAssetClass: SField<crate::types::Opaque> = SField::new((7 << 16) + 29);
 /// C: `sfProvider` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
 pub const sfProvider: SField<crate::types::Opaque> = SField::new((7 << 16) + 30);
+/// C: `sfMPTokenMetadata` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfMPTokenMetadata: SField<crate::types::Opaque> = SField::new((7 << 16) + 31);
+/// C: `sfCredentialType` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfCredentialType: SField<crate::types::Opaque> = SField::new((7 << 16) + 32);
 /// C: `sfHookName` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
 pub const sfHookName: SField<crate::types::Opaque> = SField::new((7 << 16) + 97);
 /// C: `sfRemarkValue` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
@@ -530,10 +704,40 @@ pub const sfEmitCallback: SField<crate::types::AccountId> = SField::new((8 << 16
 pub const sfHolder: SField<crate::types::AccountId> = SField::new((8 << 16) + 11);
 /// C: `sfHookAccount` (sfcodes.h) — AccountID, read as [`crate::types::AccountId`].
 pub const sfHookAccount: SField<crate::types::AccountId> = SField::new((8 << 16) + 16);
+/// C: `sfOtherChainSource` (sfcodes.h) — AccountID, read as [`crate::types::AccountId`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfOtherChainSource: SField<crate::types::AccountId> = SField::new((8 << 16) + 18);
+/// C: `sfOtherChainDestination` (sfcodes.h) — AccountID, read as [`crate::types::AccountId`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfOtherChainDestination: SField<crate::types::AccountId> = SField::new((8 << 16) + 19);
+/// C: `sfAttestationSignerAccount` (sfcodes.h) — AccountID, read as [`crate::types::AccountId`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfAttestationSignerAccount: SField<crate::types::AccountId> = SField::new((8 << 16) + 20);
+/// C: `sfAttestationRewardAccount` (sfcodes.h) — AccountID, read as [`crate::types::AccountId`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfAttestationRewardAccount: SField<crate::types::AccountId> = SField::new((8 << 16) + 21);
 /// C: `sfLockingChainDoor` (sfcodes.h) — AccountID, read as [`crate::types::AccountId`].
 pub const sfLockingChainDoor: SField<crate::types::AccountId> = SField::new((8 << 16) + 22);
 /// C: `sfIssuingChainDoor` (sfcodes.h) — AccountID, read as [`crate::types::AccountId`].
 pub const sfIssuingChainDoor: SField<crate::types::AccountId> = SField::new((8 << 16) + 23);
+/// C: `sfSubject` (sfcodes.h) — AccountID, read as [`crate::types::AccountId`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfSubject: SField<crate::types::AccountId> = SField::new((8 << 16) + 24);
 /// C: `sfInform` (sfcodes.h) — AccountID, read as [`crate::types::AccountId`].
 pub const sfInform: SField<crate::types::AccountId> = SField::new((8 << 16) + 99);
 /// C: `sfIndexes` (sfcodes.h) — Vector256, read as [`crate::types::Opaque`].
@@ -544,13 +748,19 @@ pub const sfHashes: SField<crate::types::Opaque> = SField::new((19 << 16) + 2);
 pub const sfAmendments: SField<crate::types::Opaque> = SField::new((19 << 16) + 3);
 /// C: `sfNFTokenOffers` (sfcodes.h) — Vector256, read as [`crate::types::Opaque`].
 ///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
+/// **Amendment not yet active** as of the vendored snapshot. Available by
+/// default alongside the views declaring it; excluded under the `active-amendments`
+/// cargo feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 pub const sfNFTokenOffers: SField<crate::types::Opaque> = SField::new((19 << 16) + 4);
 /// C: `sfHookNamespaces` (sfcodes.h) — Vector256, read as [`crate::types::Opaque`].
 pub const sfHookNamespaces: SField<crate::types::Opaque> = SField::new((19 << 16) + 5);
+/// C: `sfCredentialIDs` (sfcodes.h) — Vector256, read as [`crate::types::Opaque`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfCredentialIDs: SField<crate::types::Opaque> = SField::new((19 << 16) + 6);
 /// C: `sfURITokenIDs` (sfcodes.h) — Vector256, read as [`crate::types::Opaque`].
 pub const sfURITokenIDs: SField<crate::types::Opaque> = SField::new((19 << 16) + 99);
 /// C: `sfPaths` (sfcodes.h) — PathSet, read as [`crate::types::Opaque`].
@@ -559,8 +769,38 @@ pub const sfPaths: SField<crate::types::Opaque> = SField::new((18 << 16) + 1);
 pub const sfBaseAsset: SField<crate::types::CurrencyCode> = SField::new((26 << 16) + 1);
 /// C: `sfQuoteAsset` (sfcodes.h) — Currency, read as [`crate::types::CurrencyCode`].
 pub const sfQuoteAsset: SField<crate::types::CurrencyCode> = SField::new((26 << 16) + 2);
+/// C: `sfLockingChainIssue` (sfcodes.h) — Issue, read as [`crate::types::Issue`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfLockingChainIssue: SField<crate::types::Issue> = SField::new((24 << 16) + 1);
+/// C: `sfIssuingChainIssue` (sfcodes.h) — Issue, read as [`crate::types::Issue`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfIssuingChainIssue: SField<crate::types::Issue> = SField::new((24 << 16) + 2);
+/// C: `sfAsset` (sfcodes.h) — Issue, read as [`crate::types::Issue`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfAsset: SField<crate::types::Issue> = SField::new((24 << 16) + 3);
+/// C: `sfAsset2` (sfcodes.h) — Issue, read as [`crate::types::Issue`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfAsset2: SField<crate::types::Issue> = SField::new((24 << 16) + 4);
 /// C: `sfClaimCurrency` (sfcodes.h) — Issue, read as [`crate::types::Issue`].
 pub const sfClaimCurrency: SField<crate::types::Issue> = SField::new((24 << 16) + 5);
+/// C: `sfXChainBridge` (sfcodes.h) — XChainBridge, read as [`crate::types::Opaque`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfXChainBridge: SField<crate::types::Opaque> = SField::new((25 << 16) + 1);
 /// C: `sfTransactionMetaData` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
 pub const sfTransactionMetaData: SField<crate::types::STObject> = SField::new((14 << 16) + 2);
 /// C: `sfCreatedNode` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
@@ -583,10 +823,10 @@ pub const sfMemo: SField<crate::types::STObject> = SField::new((14 << 16) + 10);
 pub const sfSignerEntry: SField<crate::types::STObject> = SField::new((14 << 16) + 11);
 /// C: `sfNFToken` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
 ///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
+/// **Amendment not yet active** as of the vendored snapshot. Available by
+/// default alongside the views declaring it; excluded under the `active-amendments`
+/// cargo feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 pub const sfNFToken: SField<crate::types::STObject> = SField::new((14 << 16) + 12);
 /// C: `sfEmitDetails` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
 pub const sfEmitDetails: SField<crate::types::STObject> = SField::new((14 << 16) + 13);
@@ -606,8 +846,59 @@ pub const sfHookExecution: SField<crate::types::STObject> = SField::new((14 << 1
 pub const sfHookParameter: SField<crate::types::STObject> = SField::new((14 << 16) + 23);
 /// C: `sfHookGrant` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
 pub const sfHookGrant: SField<crate::types::STObject> = SField::new((14 << 16) + 24);
+/// C: `sfVoteEntry` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfVoteEntry: SField<crate::types::STObject> = SField::new((14 << 16) + 25);
+/// C: `sfAuctionSlot` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfAuctionSlot: SField<crate::types::STObject> = SField::new((14 << 16) + 26);
+/// C: `sfAuthAccount` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfAuthAccount: SField<crate::types::STObject> = SField::new((14 << 16) + 27);
+/// C: `sfXChainClaimProofSig` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfXChainClaimProofSig: SField<crate::types::STObject> = SField::new((14 << 16) + 28);
+/// C: `sfXChainCreateAccountProofSig` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfXChainCreateAccountProofSig: SField<crate::types::STObject> =
+    SField::new((14 << 16) + 29);
+/// C: `sfXChainClaimAttestationCollectionElement` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfXChainClaimAttestationCollectionElement: SField<crate::types::STObject> =
+    SField::new((14 << 16) + 30);
+/// C: `sfXChainCreateAccountAttestationCollectionElement` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfXChainCreateAccountAttestationCollectionElement: SField<crate::types::STObject> =
+    SField::new((14 << 16) + 31);
 /// C: `sfPriceData` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
 pub const sfPriceData: SField<crate::types::STObject> = SField::new((14 << 16) + 32);
+/// C: `sfCredential` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfCredential: SField<crate::types::STObject> = SField::new((14 << 16) + 33);
 /// C: `sfAmountEntry` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
 pub const sfAmountEntry: SField<crate::types::STObject> = SField::new((14 << 16) + 91);
 /// C: `sfMintURIToken` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
@@ -642,13 +933,19 @@ pub const sfAffectedNodes: SField<crate::types::STArray> = SField::new((15 << 16
 pub const sfMemos: SField<crate::types::STArray> = SField::new((15 << 16) + 9);
 /// C: `sfNFTokens` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
 ///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
+/// **Amendment not yet active** as of the vendored snapshot. Available by
+/// default alongside the views declaring it; excluded under the `active-amendments`
+/// cargo feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 pub const sfNFTokens: SField<crate::types::STArray> = SField::new((15 << 16) + 10);
 /// C: `sfHooks` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
 pub const sfHooks: SField<crate::types::STArray> = SField::new((15 << 16) + 11);
+/// C: `sfVoteSlots` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfVoteSlots: SField<crate::types::STArray> = SField::new((15 << 16) + 12);
 /// C: `sfMajorities` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
 pub const sfMajorities: SField<crate::types::STArray> = SField::new((15 << 16) + 16);
 /// C: `sfDisabledValidators` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
@@ -659,12 +956,37 @@ pub const sfHookExecutions: SField<crate::types::STArray> = SField::new((15 << 1
 pub const sfHookParameters: SField<crate::types::STArray> = SField::new((15 << 16) + 19);
 /// C: `sfHookGrants` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
 pub const sfHookGrants: SField<crate::types::STArray> = SField::new((15 << 16) + 20);
+/// C: `sfXChainClaimAttestations` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfXChainClaimAttestations: SField<crate::types::STArray> = SField::new((15 << 16) + 21);
+/// C: `sfXChainCreateAccountAttestations` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfXChainCreateAccountAttestations: SField<crate::types::STArray> =
+    SField::new((15 << 16) + 22);
 /// C: `sfPriceDataSeries` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
 pub const sfPriceDataSeries: SField<crate::types::STArray> = SField::new((15 << 16) + 24);
+/// C: `sfAuthAccounts` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfAuthAccounts: SField<crate::types::STArray> = SField::new((15 << 16) + 25);
 /// C: `sfAuthorizeCredentials` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
 pub const sfAuthorizeCredentials: SField<crate::types::STArray> = SField::new((15 << 16) + 26);
 /// C: `sfUnauthorizeCredentials` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
 pub const sfUnauthorizeCredentials: SField<crate::types::STArray> = SField::new((15 << 16) + 27);
+/// C: `sfAcceptedCredentials` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
+/// object can carry this field. Needs the `all-amendments` cargo feature.
+#[cfg(feature = "all-amendments")]
+pub const sfAcceptedCredentials: SField<crate::types::STArray> = SField::new((15 << 16) + 28);
 /// C: `sfAmounts` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
 pub const sfAmounts: SField<crate::types::STArray> = SField::new((15 << 16) + 92);
 /// C: `sfHookEmissions` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
@@ -708,6 +1030,12 @@ mod parity {
             ::rshooks_core::sfcodes::sfScale,
             "sfScale"
         );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfAssetScale.code(),
+            ::rshooks_core::sfcodes::sfAssetScale,
+            "sfAssetScale"
+        );
         assert_eq!(
             super::sfTickSize.code(),
             ::rshooks_core::sfcodes::sfTickSize,
@@ -722,6 +1050,12 @@ mod parity {
             super::sfHookResult.code(),
             ::rshooks_core::sfcodes::sfHookResult,
             "sfHookResult"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfWasLockingChainSend.code(),
+            ::rshooks_core::sfcodes::sfWasLockingChainSend,
+            "sfWasLockingChainSend"
         );
         assert_eq!(
             super::sfLedgerEntryType.code(),
@@ -738,11 +1072,23 @@ mod parity {
             ::rshooks_core::sfcodes::sfSignerWeight,
             "sfSignerWeight"
         );
-        #[cfg(feature = "pending-amendments")]
+        #[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
         assert_eq!(
             super::sfTransferFee.code(),
             ::rshooks_core::sfcodes::sfTransferFee,
             "sfTransferFee"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfTradingFee.code(),
+            ::rshooks_core::sfcodes::sfTradingFee,
+            "sfTradingFee"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfDiscountedFee.code(),
+            ::rshooks_core::sfcodes::sfDiscountedFee,
+            "sfDiscountedFee"
         );
         assert_eq!(
             super::sfVersion.code(),
@@ -774,7 +1120,7 @@ mod parity {
             ::rshooks_core::sfcodes::sfHookStateScale,
             "sfHookStateScale"
         );
-        #[cfg(feature = "pending-amendments")]
+        #[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
         assert_eq!(
             super::sfLedgerFixType.code(),
             ::rshooks_core::sfcodes::sfLedgerFixType,
@@ -985,7 +1331,7 @@ mod parity {
             ::rshooks_core::sfcodes::sfTicketSequence,
             "sfTicketSequence"
         );
-        #[cfg(feature = "pending-amendments")]
+        #[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
         assert_eq!(
             super::sfNFTokenTaxon.code(),
             ::rshooks_core::sfcodes::sfNFTokenTaxon,
@@ -1010,6 +1356,12 @@ mod parity {
             super::sfEmitGeneration.code(),
             ::rshooks_core::sfcodes::sfEmitGeneration,
             "sfEmitGeneration"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfVoteWeight.code(),
+            ::rshooks_core::sfcodes::sfVoteWeight,
+            "sfVoteWeight"
         );
         assert_eq!(
             super::sfLockCount.code(),
@@ -1121,7 +1473,7 @@ mod parity {
             ::rshooks_core::sfcodes::sfServerVersion,
             "sfServerVersion"
         );
-        #[cfg(feature = "pending-amendments")]
+        #[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
         assert_eq!(
             super::sfNFTokenOfferNode.code(),
             ::rshooks_core::sfcodes::sfNFTokenOfferNode,
@@ -1147,10 +1499,58 @@ mod parity {
             ::rshooks_core::sfcodes::sfReferenceCount,
             "sfReferenceCount"
         );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfXChainClaimID.code(),
+            ::rshooks_core::sfcodes::sfXChainClaimID,
+            "sfXChainClaimID"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfXChainAccountCreateCount.code(),
+            ::rshooks_core::sfcodes::sfXChainAccountCreateCount,
+            "sfXChainAccountCreateCount"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfXChainAccountClaimCount.code(),
+            ::rshooks_core::sfcodes::sfXChainAccountClaimCount,
+            "sfXChainAccountClaimCount"
+        );
         assert_eq!(
             super::sfAssetPrice.code(),
             ::rshooks_core::sfcodes::sfAssetPrice,
             "sfAssetPrice"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfMaximumAmount.code(),
+            ::rshooks_core::sfcodes::sfMaximumAmount,
+            "sfMaximumAmount"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfOutstandingAmount.code(),
+            ::rshooks_core::sfcodes::sfOutstandingAmount,
+            "sfOutstandingAmount"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfMPTAmount.code(),
+            ::rshooks_core::sfcodes::sfMPTAmount,
+            "sfMPTAmount"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfIssuerNode.code(),
+            ::rshooks_core::sfcodes::sfIssuerNode,
+            "sfIssuerNode"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfSubjectNode.code(),
+            ::rshooks_core::sfcodes::sfSubjectNode,
+            "sfSubjectNode"
         );
         assert_eq!(
             super::sfTouchCount.code(),
@@ -1196,6 +1596,12 @@ mod parity {
             super::sfTakerGetsIssuer.code(),
             ::rshooks_core::sfcodes::sfTakerGetsIssuer,
             "sfTakerGetsIssuer"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfMPTokenIssuanceID.code(),
+            ::rshooks_core::sfcodes::sfMPTokenIssuanceID,
+            "sfMPTokenIssuanceID"
         );
         assert_eq!(
             super::sfLedgerHash.code(),
@@ -1322,25 +1728,25 @@ mod parity {
             ::rshooks_core::sfcodes::sfValidatedHash,
             "sfValidatedHash"
         );
-        #[cfg(feature = "pending-amendments")]
+        #[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
         assert_eq!(
             super::sfPreviousPageMin.code(),
             ::rshooks_core::sfcodes::sfPreviousPageMin,
             "sfPreviousPageMin"
         );
-        #[cfg(feature = "pending-amendments")]
+        #[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
         assert_eq!(
             super::sfNextPageMin.code(),
             ::rshooks_core::sfcodes::sfNextPageMin,
             "sfNextPageMin"
         );
-        #[cfg(feature = "pending-amendments")]
+        #[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
         assert_eq!(
             super::sfNFTokenBuyOffer.code(),
             ::rshooks_core::sfcodes::sfNFTokenBuyOffer,
             "sfNFTokenBuyOffer"
         );
-        #[cfg(feature = "pending-amendments")]
+        #[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
         assert_eq!(
             super::sfNFTokenSellOffer.code(),
             ::rshooks_core::sfcodes::sfNFTokenSellOffer,
@@ -1380,6 +1786,12 @@ mod parity {
             super::sfURITokenID.code(),
             ::rshooks_core::sfcodes::sfURITokenID,
             "sfURITokenID"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfDomainID.code(),
+            ::rshooks_core::sfcodes::sfDomainID,
+            "sfDomainID"
         );
         assert_eq!(
             super::sfHookOnOutgoing.code(),
@@ -1467,6 +1879,24 @@ mod parity {
             ::rshooks_core::sfcodes::sfDeliverMin,
             "sfDeliverMin"
         );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfAmount2.code(),
+            ::rshooks_core::sfcodes::sfAmount2,
+            "sfAmount2"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfBidMin.code(),
+            ::rshooks_core::sfcodes::sfBidMin,
+            "sfBidMin"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfBidMax.code(),
+            ::rshooks_core::sfcodes::sfBidMax,
+            "sfBidMax"
+        );
         assert_eq!(
             super::sfMinimumOffer.code(),
             ::rshooks_core::sfcodes::sfMinimumOffer,
@@ -1482,7 +1912,7 @@ mod parity {
             ::rshooks_core::sfcodes::sfDeliveredAmount,
             "sfDeliveredAmount"
         );
-        #[cfg(feature = "pending-amendments")]
+        #[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
         assert_eq!(
             super::sfNFTokenBrokerFee.code(),
             ::rshooks_core::sfcodes::sfNFTokenBrokerFee,
@@ -1512,6 +1942,48 @@ mod parity {
             super::sfReserveIncrementDrops.code(),
             ::rshooks_core::sfcodes::sfReserveIncrementDrops,
             "sfReserveIncrementDrops"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfLPTokenOut.code(),
+            ::rshooks_core::sfcodes::sfLPTokenOut,
+            "sfLPTokenOut"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfLPTokenIn.code(),
+            ::rshooks_core::sfcodes::sfLPTokenIn,
+            "sfLPTokenIn"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfEPrice.code(),
+            ::rshooks_core::sfcodes::sfEPrice,
+            "sfEPrice"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfPrice.code(),
+            ::rshooks_core::sfcodes::sfPrice,
+            "sfPrice"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfSignatureReward.code(),
+            ::rshooks_core::sfcodes::sfSignatureReward,
+            "sfSignatureReward"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfMinAccountCreateAmount.code(),
+            ::rshooks_core::sfcodes::sfMinAccountCreateAmount,
+            "sfMinAccountCreateAmount"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfLPTokenBalance.code(),
+            ::rshooks_core::sfcodes::sfLPTokenBalance,
+            "sfLPTokenBalance"
         );
         assert_eq!(
             super::sfTrustLineRewardAccumulator.code(),
@@ -1639,6 +2111,18 @@ mod parity {
             ::rshooks_core::sfcodes::sfBlob,
             "sfBlob"
         );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfDIDDocument.code(),
+            ::rshooks_core::sfcodes::sfDIDDocument,
+            "sfDIDDocument"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfData.code(),
+            ::rshooks_core::sfcodes::sfData,
+            "sfData"
+        );
         assert_eq!(
             super::sfAssetClass.code(),
             ::rshooks_core::sfcodes::sfAssetClass,
@@ -1648,6 +2132,18 @@ mod parity {
             super::sfProvider.code(),
             ::rshooks_core::sfcodes::sfProvider,
             "sfProvider"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfMPTokenMetadata.code(),
+            ::rshooks_core::sfcodes::sfMPTokenMetadata,
+            "sfMPTokenMetadata"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfCredentialType.code(),
+            ::rshooks_core::sfcodes::sfCredentialType,
+            "sfCredentialType"
         );
         assert_eq!(
             super::sfHookName.code(),
@@ -1719,6 +2215,30 @@ mod parity {
             ::rshooks_core::sfcodes::sfHookAccount,
             "sfHookAccount"
         );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfOtherChainSource.code(),
+            ::rshooks_core::sfcodes::sfOtherChainSource,
+            "sfOtherChainSource"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfOtherChainDestination.code(),
+            ::rshooks_core::sfcodes::sfOtherChainDestination,
+            "sfOtherChainDestination"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfAttestationSignerAccount.code(),
+            ::rshooks_core::sfcodes::sfAttestationSignerAccount,
+            "sfAttestationSignerAccount"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfAttestationRewardAccount.code(),
+            ::rshooks_core::sfcodes::sfAttestationRewardAccount,
+            "sfAttestationRewardAccount"
+        );
         assert_eq!(
             super::sfLockingChainDoor.code(),
             ::rshooks_core::sfcodes::sfLockingChainDoor,
@@ -1728,6 +2248,12 @@ mod parity {
             super::sfIssuingChainDoor.code(),
             ::rshooks_core::sfcodes::sfIssuingChainDoor,
             "sfIssuingChainDoor"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfSubject.code(),
+            ::rshooks_core::sfcodes::sfSubject,
+            "sfSubject"
         );
         assert_eq!(
             super::sfInform.code(),
@@ -1749,7 +2275,7 @@ mod parity {
             ::rshooks_core::sfcodes::sfAmendments,
             "sfAmendments"
         );
-        #[cfg(feature = "pending-amendments")]
+        #[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
         assert_eq!(
             super::sfNFTokenOffers.code(),
             ::rshooks_core::sfcodes::sfNFTokenOffers,
@@ -1759,6 +2285,12 @@ mod parity {
             super::sfHookNamespaces.code(),
             ::rshooks_core::sfcodes::sfHookNamespaces,
             "sfHookNamespaces"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfCredentialIDs.code(),
+            ::rshooks_core::sfcodes::sfCredentialIDs,
+            "sfCredentialIDs"
         );
         assert_eq!(
             super::sfURITokenIDs.code(),
@@ -1780,10 +2312,40 @@ mod parity {
             ::rshooks_core::sfcodes::sfQuoteAsset,
             "sfQuoteAsset"
         );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfLockingChainIssue.code(),
+            ::rshooks_core::sfcodes::sfLockingChainIssue,
+            "sfLockingChainIssue"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfIssuingChainIssue.code(),
+            ::rshooks_core::sfcodes::sfIssuingChainIssue,
+            "sfIssuingChainIssue"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfAsset.code(),
+            ::rshooks_core::sfcodes::sfAsset,
+            "sfAsset"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfAsset2.code(),
+            ::rshooks_core::sfcodes::sfAsset2,
+            "sfAsset2"
+        );
         assert_eq!(
             super::sfClaimCurrency.code(),
             ::rshooks_core::sfcodes::sfClaimCurrency,
             "sfClaimCurrency"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfXChainBridge.code(),
+            ::rshooks_core::sfcodes::sfXChainBridge,
+            "sfXChainBridge"
         );
         assert_eq!(
             super::sfTransactionMetaData.code(),
@@ -1835,7 +2397,7 @@ mod parity {
             ::rshooks_core::sfcodes::sfSignerEntry,
             "sfSignerEntry"
         );
-        #[cfg(feature = "pending-amendments")]
+        #[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
         assert_eq!(
             super::sfNFToken.code(),
             ::rshooks_core::sfcodes::sfNFToken,
@@ -1886,10 +2448,58 @@ mod parity {
             ::rshooks_core::sfcodes::sfHookGrant,
             "sfHookGrant"
         );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfVoteEntry.code(),
+            ::rshooks_core::sfcodes::sfVoteEntry,
+            "sfVoteEntry"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfAuctionSlot.code(),
+            ::rshooks_core::sfcodes::sfAuctionSlot,
+            "sfAuctionSlot"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfAuthAccount.code(),
+            ::rshooks_core::sfcodes::sfAuthAccount,
+            "sfAuthAccount"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfXChainClaimProofSig.code(),
+            ::rshooks_core::sfcodes::sfXChainClaimProofSig,
+            "sfXChainClaimProofSig"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfXChainCreateAccountProofSig.code(),
+            ::rshooks_core::sfcodes::sfXChainCreateAccountProofSig,
+            "sfXChainCreateAccountProofSig"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfXChainClaimAttestationCollectionElement.code(),
+            ::rshooks_core::sfcodes::sfXChainClaimAttestationCollectionElement,
+            "sfXChainClaimAttestationCollectionElement"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfXChainCreateAccountAttestationCollectionElement.code(),
+            ::rshooks_core::sfcodes::sfXChainCreateAccountAttestationCollectionElement,
+            "sfXChainCreateAccountAttestationCollectionElement"
+        );
         assert_eq!(
             super::sfPriceData.code(),
             ::rshooks_core::sfcodes::sfPriceData,
             "sfPriceData"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfCredential.code(),
+            ::rshooks_core::sfcodes::sfCredential,
+            "sfCredential"
         );
         assert_eq!(
             super::sfAmountEntry.code(),
@@ -1971,7 +2581,7 @@ mod parity {
             ::rshooks_core::sfcodes::sfMemos,
             "sfMemos"
         );
-        #[cfg(feature = "pending-amendments")]
+        #[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
         assert_eq!(
             super::sfNFTokens.code(),
             ::rshooks_core::sfcodes::sfNFTokens,
@@ -1981,6 +2591,12 @@ mod parity {
             super::sfHooks.code(),
             ::rshooks_core::sfcodes::sfHooks,
             "sfHooks"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfVoteSlots.code(),
+            ::rshooks_core::sfcodes::sfVoteSlots,
+            "sfVoteSlots"
         );
         assert_eq!(
             super::sfMajorities.code(),
@@ -2007,10 +2623,28 @@ mod parity {
             ::rshooks_core::sfcodes::sfHookGrants,
             "sfHookGrants"
         );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfXChainClaimAttestations.code(),
+            ::rshooks_core::sfcodes::sfXChainClaimAttestations,
+            "sfXChainClaimAttestations"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfXChainCreateAccountAttestations.code(),
+            ::rshooks_core::sfcodes::sfXChainCreateAccountAttestations,
+            "sfXChainCreateAccountAttestations"
+        );
         assert_eq!(
             super::sfPriceDataSeries.code(),
             ::rshooks_core::sfcodes::sfPriceDataSeries,
             "sfPriceDataSeries"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfAuthAccounts.code(),
+            ::rshooks_core::sfcodes::sfAuthAccounts,
+            "sfAuthAccounts"
         );
         assert_eq!(
             super::sfAuthorizeCredentials.code(),
@@ -2021,6 +2655,12 @@ mod parity {
             super::sfUnauthorizeCredentials.code(),
             ::rshooks_core::sfcodes::sfUnauthorizeCredentials,
             "sfUnauthorizeCredentials"
+        );
+        #[cfg(feature = "all-amendments")]
+        assert_eq!(
+            super::sfAcceptedCredentials.code(),
+            ::rshooks_core::sfcodes::sfAcceptedCredentials,
+            "sfAcceptedCredentials"
         );
         assert_eq!(
             super::sfAmounts.code(),
@@ -2052,6 +2692,6 @@ mod parity {
             ::rshooks_core::sfcodes::sfRemarks,
             "sfRemarks"
         );
-        assert_eq!(272, 272, "generated for 272 constants");
+        assert_eq!(325, 325, "generated for 325 constants");
     }
 }

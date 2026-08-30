@@ -196,6 +196,27 @@ impl<S: crate::views::source::FieldSource> Payment<S> {
         self.src.read_opt(crate::sfield::sfDeliverMin)
     }
 
+    /// `sfCredentialIDs` — Vector256, `soeOPTIONAL`.
+    ///
+    /// **Gated by an amendment xahaud marks `Supported::no`.** The enclosing
+    /// format is available, but this field is not: a validated Xahau
+    /// transaction can never carry it, so the accessor needs the `all-amendments` cargo
+    /// feature.
+    #[cfg(feature = "all-amendments")]
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn credential_ids_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfCredentialIDs.code(), out)
+    }
+
     /// `sfTransactionType` — UInt16, `soeREQUIRED`.
     #[inline(always)]
     pub fn transaction_type(&self) -> crate::error::Result<u16> {
@@ -935,6 +956,27 @@ impl<S: crate::views::source::FieldSource> EscrowFinish<S> {
     ) -> crate::error::Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfCondition.code(), out)
+    }
+
+    /// `sfCredentialIDs` — Vector256, `soeOPTIONAL`.
+    ///
+    /// **Gated by an amendment xahaud marks `Supported::no`.** The enclosing
+    /// format is available, but this field is not: a validated Xahau
+    /// transaction can never carry it, so the accessor needs the `all-amendments` cargo
+    /// feature.
+    #[cfg(feature = "all-amendments")]
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn credential_ids_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfCredentialIDs.code(), out)
     }
 
     /// `sfTransactionType` — UInt16, `soeREQUIRED`.
@@ -4479,6 +4521,27 @@ impl<S: crate::views::source::FieldSource> PaymentChannelClaim<S> {
             .read_raw_opt(crate::sfield::sfPublicKey.code(), out)
     }
 
+    /// `sfCredentialIDs` — Vector256, `soeOPTIONAL`.
+    ///
+    /// **Gated by an amendment xahaud marks `Supported::no`.** The enclosing
+    /// format is available, but this field is not: a validated Xahau
+    /// transaction can never carry it, so the accessor needs the `all-amendments` cargo
+    /// feature.
+    #[cfg(feature = "all-amendments")]
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn credential_ids_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfCredentialIDs.code(), out)
+    }
+
     /// `sfTransactionType` — UInt16, `soeREQUIRED`.
     #[inline(always)]
     pub fn transaction_type(&self) -> crate::error::Result<u16> {
@@ -6577,6 +6640,27 @@ impl<S: crate::views::source::FieldSource> AccountDelete<S> {
         self.src.read_opt(crate::sfield::sfDestinationTag)
     }
 
+    /// `sfCredentialIDs` — Vector256, `soeOPTIONAL`.
+    ///
+    /// **Gated by an amendment xahaud marks `Supported::no`.** The enclosing
+    /// format is available, but this field is not: a validated Xahau
+    /// transaction can never carry it, so the accessor needs the `all-amendments` cargo
+    /// feature.
+    #[cfg(feature = "all-amendments")]
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn credential_ids_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfCredentialIDs.code(), out)
+    }
+
     /// `sfTransactionType` — UInt16, `soeREQUIRED`.
     #[inline(always)]
     pub fn transaction_type(&self) -> crate::error::Result<u16> {
@@ -7131,16 +7215,17 @@ impl<S: crate::views::source::FieldSource> SetHook<S> {
 /// [`NFTokenMint::from_slot`] (an already-loaded transaction slot); both check the
 /// transaction type before handing the view back.
 ///
-/// **Amendment not yet active** as of the vendored snapshot, so this
-/// shape is generated behind the `pending-amendments` cargo feature. Nothing on
-/// Xahau will match it until the amendment activates; it is here so a
-/// hook can be written and tested against the shape in advance.
-#[cfg(feature = "pending-amendments")]
+/// **Amendment not yet active** as of the vendored snapshot. Available
+/// by default so a hook can be written and tested against the shape in
+/// advance; excluded under the `active-amendments` cargo feature, which restricts
+/// this crate to what is live on Xahau today. Nothing on-ledger will match
+/// it until the amendment activates.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 pub struct NFTokenMint<S: crate::views::source::FieldSource> {
     src: S,
 }
 
-#[cfg(feature = "pending-amendments")]
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 impl NFTokenMint<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `NFTokenMint`.
     ///
@@ -7154,7 +7239,7 @@ impl NFTokenMint<crate::views::source::OtxnSource> {
     }
 }
 
-#[cfg(feature = "pending-amendments")]
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 impl NFTokenMint<crate::views::source::SlotSource> {
     /// Views an already-loaded transaction slot as `NFTokenMint`, taking ownership
     /// of the slot.
@@ -7246,7 +7331,7 @@ impl NFTokenMint<crate::views::source::SlotSource> {
     }
 }
 
-#[cfg(feature = "pending-amendments")]
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 impl<S: crate::views::source::FieldSource> NFTokenMint<S> {
     /// `sfNFTokenTaxon` — UInt32, `soeREQUIRED`.
     #[inline(always)]
@@ -7519,16 +7604,17 @@ impl<S: crate::views::source::FieldSource> NFTokenMint<S> {
 /// [`NFTokenBurn::from_slot`] (an already-loaded transaction slot); both check the
 /// transaction type before handing the view back.
 ///
-/// **Amendment not yet active** as of the vendored snapshot, so this
-/// shape is generated behind the `pending-amendments` cargo feature. Nothing on
-/// Xahau will match it until the amendment activates; it is here so a
-/// hook can be written and tested against the shape in advance.
-#[cfg(feature = "pending-amendments")]
+/// **Amendment not yet active** as of the vendored snapshot. Available
+/// by default so a hook can be written and tested against the shape in
+/// advance; excluded under the `active-amendments` cargo feature, which restricts
+/// this crate to what is live on Xahau today. Nothing on-ledger will match
+/// it until the amendment activates.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 pub struct NFTokenBurn<S: crate::views::source::FieldSource> {
     src: S,
 }
 
-#[cfg(feature = "pending-amendments")]
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 impl NFTokenBurn<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `NFTokenBurn`.
     ///
@@ -7542,7 +7628,7 @@ impl NFTokenBurn<crate::views::source::OtxnSource> {
     }
 }
 
-#[cfg(feature = "pending-amendments")]
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 impl NFTokenBurn<crate::views::source::SlotSource> {
     /// Views an already-loaded transaction slot as `NFTokenBurn`, taking ownership
     /// of the slot.
@@ -7634,7 +7720,7 @@ impl NFTokenBurn<crate::views::source::SlotSource> {
     }
 }
 
-#[cfg(feature = "pending-amendments")]
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 impl<S: crate::views::source::FieldSource> NFTokenBurn<S> {
     /// `sfNFTokenID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
@@ -7861,16 +7947,17 @@ impl<S: crate::views::source::FieldSource> NFTokenBurn<S> {
 /// [`NFTokenCreateOffer::from_slot`] (an already-loaded transaction slot); both check the
 /// transaction type before handing the view back.
 ///
-/// **Amendment not yet active** as of the vendored snapshot, so this
-/// shape is generated behind the `pending-amendments` cargo feature. Nothing on
-/// Xahau will match it until the amendment activates; it is here so a
-/// hook can be written and tested against the shape in advance.
-#[cfg(feature = "pending-amendments")]
+/// **Amendment not yet active** as of the vendored snapshot. Available
+/// by default so a hook can be written and tested against the shape in
+/// advance; excluded under the `active-amendments` cargo feature, which restricts
+/// this crate to what is live on Xahau today. Nothing on-ledger will match
+/// it until the amendment activates.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 pub struct NFTokenCreateOffer<S: crate::views::source::FieldSource> {
     src: S,
 }
 
-#[cfg(feature = "pending-amendments")]
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 impl NFTokenCreateOffer<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `NFTokenCreateOffer`.
     ///
@@ -7885,7 +7972,7 @@ impl NFTokenCreateOffer<crate::views::source::OtxnSource> {
     }
 }
 
-#[cfg(feature = "pending-amendments")]
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 impl NFTokenCreateOffer<crate::views::source::SlotSource> {
     /// Views an already-loaded transaction slot as `NFTokenCreateOffer`, taking ownership
     /// of the slot.
@@ -7977,7 +8064,7 @@ impl NFTokenCreateOffer<crate::views::source::SlotSource> {
     }
 }
 
-#[cfg(feature = "pending-amendments")]
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 impl<S: crate::views::source::FieldSource> NFTokenCreateOffer<S> {
     /// `sfNFTokenID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
@@ -8226,16 +8313,17 @@ impl<S: crate::views::source::FieldSource> NFTokenCreateOffer<S> {
 /// [`NFTokenCancelOffer::from_slot`] (an already-loaded transaction slot); both check the
 /// transaction type before handing the view back.
 ///
-/// **Amendment not yet active** as of the vendored snapshot, so this
-/// shape is generated behind the `pending-amendments` cargo feature. Nothing on
-/// Xahau will match it until the amendment activates; it is here so a
-/// hook can be written and tested against the shape in advance.
-#[cfg(feature = "pending-amendments")]
+/// **Amendment not yet active** as of the vendored snapshot. Available
+/// by default so a hook can be written and tested against the shape in
+/// advance; excluded under the `active-amendments` cargo feature, which restricts
+/// this crate to what is live on Xahau today. Nothing on-ledger will match
+/// it until the amendment activates.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 pub struct NFTokenCancelOffer<S: crate::views::source::FieldSource> {
     src: S,
 }
 
-#[cfg(feature = "pending-amendments")]
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 impl NFTokenCancelOffer<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `NFTokenCancelOffer`.
     ///
@@ -8250,7 +8338,7 @@ impl NFTokenCancelOffer<crate::views::source::OtxnSource> {
     }
 }
 
-#[cfg(feature = "pending-amendments")]
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 impl NFTokenCancelOffer<crate::views::source::SlotSource> {
     /// Views an already-loaded transaction slot as `NFTokenCancelOffer`, taking ownership
     /// of the slot.
@@ -8342,7 +8430,7 @@ impl NFTokenCancelOffer<crate::views::source::SlotSource> {
     }
 }
 
-#[cfg(feature = "pending-amendments")]
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 impl<S: crate::views::source::FieldSource> NFTokenCancelOffer<S> {
     /// `sfNFTokenOffers` — Vector256, `soeREQUIRED`.
     ///
@@ -8568,16 +8656,17 @@ impl<S: crate::views::source::FieldSource> NFTokenCancelOffer<S> {
 /// [`NFTokenAcceptOffer::from_slot`] (an already-loaded transaction slot); both check the
 /// transaction type before handing the view back.
 ///
-/// **Amendment not yet active** as of the vendored snapshot, so this
-/// shape is generated behind the `pending-amendments` cargo feature. Nothing on
-/// Xahau will match it until the amendment activates; it is here so a
-/// hook can be written and tested against the shape in advance.
-#[cfg(feature = "pending-amendments")]
+/// **Amendment not yet active** as of the vendored snapshot. Available
+/// by default so a hook can be written and tested against the shape in
+/// advance; excluded under the `active-amendments` cargo feature, which restricts
+/// this crate to what is live on Xahau today. Nothing on-ledger will match
+/// it until the amendment activates.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 pub struct NFTokenAcceptOffer<S: crate::views::source::FieldSource> {
     src: S,
 }
 
-#[cfg(feature = "pending-amendments")]
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 impl NFTokenAcceptOffer<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `NFTokenAcceptOffer`.
     ///
@@ -8592,7 +8681,7 @@ impl NFTokenAcceptOffer<crate::views::source::OtxnSource> {
     }
 }
 
-#[cfg(feature = "pending-amendments")]
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 impl NFTokenAcceptOffer<crate::views::source::SlotSource> {
     /// Views an already-loaded transaction slot as `NFTokenAcceptOffer`, taking ownership
     /// of the slot.
@@ -8684,7 +8773,7 @@ impl NFTokenAcceptOffer<crate::views::source::SlotSource> {
     }
 }
 
-#[cfg(feature = "pending-amendments")]
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 impl<S: crate::views::source::FieldSource> NFTokenAcceptOffer<S> {
     /// `sfNFTokenBuyOffer` — Hash256, `soeOPTIONAL`.
     ///
@@ -9041,6 +9130,2532 @@ impl<S: crate::views::source::FieldSource> Clawback<S> {
     #[inline(always)]
     pub fn holder(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfHolder)
+    }
+
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> crate::error::Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `memos_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `signers_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `emit_details_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `hook_parameters_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
+/// View of the `AMMClawback` transaction (`ttAMM_CLAWBACK`, type code 31).
+///
+/// Build one with [`AMMClawback::otxn`] (the originating transaction) or
+/// [`AMMClawback::from_slot`] (an already-loaded transaction slot); both check the
+/// transaction type before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
+pub struct AMMClawback<S: crate::views::source::FieldSource> {
+    src: S,
+}
+
+#[cfg(feature = "all-amendments")]
+impl AMMClawback<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `AMMClawback`.
+    ///
+    /// One `otxn_type` host call and one integer compare against `ttAMM_CLAWBACK`;
+    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
+    /// originating transaction is something else. The view itself is zero-sized,
+    /// and each accessor below is a single `otxn_field` call.
+    #[inline(always)]
+    pub fn otxn() -> crate::error::Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttAMM_CLAWBACK).map(|src| Self { src })
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl AMMClawback<crate::views::source::SlotSource> {
+    /// Views an already-loaded transaction slot as `AMMClawback`, taking ownership
+    /// of the slot.
+    ///
+    /// Verifies the slot's `sfTransactionType` is `ttAMM_CLAWBACK`. On any failure the
+    /// slot is consumed and best-effort cleared, so a rejected view costs no
+    /// slot — see
+    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
+    /// behaves the same way for the same reason.
+    #[inline(always)]
+    pub fn from_slot(
+        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
+    ) -> crate::error::Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttAMM_CLAWBACK,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Hands the underlying slot back, consuming the view.
+    ///
+    /// The escape hatch for anything not generated here: everything
+    /// [`crate::slot_obj`] offers is available on the returned handle.
+    #[inline(always)]
+    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.src.subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> AMMClawback<S> {
+    /// `sfHolder` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn holder(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfHolder)
+    }
+
+    /// `sfAsset` — Issue, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn asset(&self) -> crate::error::Result<crate::slot_obj::IssueData> {
+        self.src.read(crate::sfield::sfAsset)
+    }
+
+    /// `sfAsset2` — Issue, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn asset2(&self) -> crate::error::Result<crate::slot_obj::IssueData> {
+        self.src.read(crate::sfield::sfAsset2)
+    }
+
+    /// `sfAmount` — Amount, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn amount(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+        self.src.read_opt(crate::sfield::sfAmount)
+    }
+
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> crate::error::Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `memos_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `signers_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `emit_details_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `hook_parameters_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
+/// View of the `AMMCreate` transaction (`ttAMM_CREATE`, type code 35).
+///
+/// Build one with [`AMMCreate::otxn`] (the originating transaction) or
+/// [`AMMCreate::from_slot`] (an already-loaded transaction slot); both check the
+/// transaction type before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
+pub struct AMMCreate<S: crate::views::source::FieldSource> {
+    src: S,
+}
+
+#[cfg(feature = "all-amendments")]
+impl AMMCreate<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `AMMCreate`.
+    ///
+    /// One `otxn_type` host call and one integer compare against `ttAMM_CREATE`;
+    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
+    /// originating transaction is something else. The view itself is zero-sized,
+    /// and each accessor below is a single `otxn_field` call.
+    #[inline(always)]
+    pub fn otxn() -> crate::error::Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttAMM_CREATE).map(|src| Self { src })
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl AMMCreate<crate::views::source::SlotSource> {
+    /// Views an already-loaded transaction slot as `AMMCreate`, taking ownership
+    /// of the slot.
+    ///
+    /// Verifies the slot's `sfTransactionType` is `ttAMM_CREATE`. On any failure the
+    /// slot is consumed and best-effort cleared, so a rejected view costs no
+    /// slot — see
+    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
+    /// behaves the same way for the same reason.
+    #[inline(always)]
+    pub fn from_slot(
+        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
+    ) -> crate::error::Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttAMM_CREATE,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Hands the underlying slot back, consuming the view.
+    ///
+    /// The escape hatch for anything not generated here: everything
+    /// [`crate::slot_obj`] offers is available on the returned handle.
+    #[inline(always)]
+    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.src.subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> AMMCreate<S> {
+    /// `sfAmount` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfAmount)
+    }
+
+    /// `sfAmount2` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn amount2(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfAmount2)
+    }
+
+    /// `sfTradingFee` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn trading_fee(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTradingFee)
+    }
+
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> crate::error::Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `memos_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `signers_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `emit_details_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `hook_parameters_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
+/// View of the `AMMDeposit` transaction (`ttAMM_DEPOSIT`, type code 36).
+///
+/// Build one with [`AMMDeposit::otxn`] (the originating transaction) or
+/// [`AMMDeposit::from_slot`] (an already-loaded transaction slot); both check the
+/// transaction type before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
+pub struct AMMDeposit<S: crate::views::source::FieldSource> {
+    src: S,
+}
+
+#[cfg(feature = "all-amendments")]
+impl AMMDeposit<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `AMMDeposit`.
+    ///
+    /// One `otxn_type` host call and one integer compare against `ttAMM_DEPOSIT`;
+    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
+    /// originating transaction is something else. The view itself is zero-sized,
+    /// and each accessor below is a single `otxn_field` call.
+    #[inline(always)]
+    pub fn otxn() -> crate::error::Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttAMM_DEPOSIT).map(|src| Self { src })
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl AMMDeposit<crate::views::source::SlotSource> {
+    /// Views an already-loaded transaction slot as `AMMDeposit`, taking ownership
+    /// of the slot.
+    ///
+    /// Verifies the slot's `sfTransactionType` is `ttAMM_DEPOSIT`. On any failure the
+    /// slot is consumed and best-effort cleared, so a rejected view costs no
+    /// slot — see
+    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
+    /// behaves the same way for the same reason.
+    #[inline(always)]
+    pub fn from_slot(
+        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
+    ) -> crate::error::Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttAMM_DEPOSIT,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Hands the underlying slot back, consuming the view.
+    ///
+    /// The escape hatch for anything not generated here: everything
+    /// [`crate::slot_obj`] offers is available on the returned handle.
+    #[inline(always)]
+    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.src.subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> AMMDeposit<S> {
+    /// `sfAsset` — Issue, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn asset(&self) -> crate::error::Result<crate::slot_obj::IssueData> {
+        self.src.read(crate::sfield::sfAsset)
+    }
+
+    /// `sfAsset2` — Issue, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn asset2(&self) -> crate::error::Result<crate::slot_obj::IssueData> {
+        self.src.read(crate::sfield::sfAsset2)
+    }
+
+    /// `sfAmount` — Amount, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn amount(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+        self.src.read_opt(crate::sfield::sfAmount)
+    }
+
+    /// `sfAmount2` — Amount, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn amount2(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+        self.src.read_opt(crate::sfield::sfAmount2)
+    }
+
+    /// `sfEPrice` — Amount, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn e_price(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+        self.src.read_opt(crate::sfield::sfEPrice)
+    }
+
+    /// `sfLPTokenOut` — Amount, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn lp_token_out(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+        self.src.read_opt(crate::sfield::sfLPTokenOut)
+    }
+
+    /// `sfTradingFee` — UInt16, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn trading_fee(&self) -> crate::error::Result<Option<u16>> {
+        self.src.read_opt(crate::sfield::sfTradingFee)
+    }
+
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> crate::error::Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `memos_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `signers_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `emit_details_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `hook_parameters_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
+/// View of the `AMMWithdraw` transaction (`ttAMM_WITHDRAW`, type code 37).
+///
+/// Build one with [`AMMWithdraw::otxn`] (the originating transaction) or
+/// [`AMMWithdraw::from_slot`] (an already-loaded transaction slot); both check the
+/// transaction type before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
+pub struct AMMWithdraw<S: crate::views::source::FieldSource> {
+    src: S,
+}
+
+#[cfg(feature = "all-amendments")]
+impl AMMWithdraw<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `AMMWithdraw`.
+    ///
+    /// One `otxn_type` host call and one integer compare against `ttAMM_WITHDRAW`;
+    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
+    /// originating transaction is something else. The view itself is zero-sized,
+    /// and each accessor below is a single `otxn_field` call.
+    #[inline(always)]
+    pub fn otxn() -> crate::error::Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttAMM_WITHDRAW).map(|src| Self { src })
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl AMMWithdraw<crate::views::source::SlotSource> {
+    /// Views an already-loaded transaction slot as `AMMWithdraw`, taking ownership
+    /// of the slot.
+    ///
+    /// Verifies the slot's `sfTransactionType` is `ttAMM_WITHDRAW`. On any failure the
+    /// slot is consumed and best-effort cleared, so a rejected view costs no
+    /// slot — see
+    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
+    /// behaves the same way for the same reason.
+    #[inline(always)]
+    pub fn from_slot(
+        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
+    ) -> crate::error::Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttAMM_WITHDRAW,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Hands the underlying slot back, consuming the view.
+    ///
+    /// The escape hatch for anything not generated here: everything
+    /// [`crate::slot_obj`] offers is available on the returned handle.
+    #[inline(always)]
+    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.src.subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> AMMWithdraw<S> {
+    /// `sfAsset` — Issue, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn asset(&self) -> crate::error::Result<crate::slot_obj::IssueData> {
+        self.src.read(crate::sfield::sfAsset)
+    }
+
+    /// `sfAsset2` — Issue, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn asset2(&self) -> crate::error::Result<crate::slot_obj::IssueData> {
+        self.src.read(crate::sfield::sfAsset2)
+    }
+
+    /// `sfAmount` — Amount, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn amount(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+        self.src.read_opt(crate::sfield::sfAmount)
+    }
+
+    /// `sfAmount2` — Amount, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn amount2(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+        self.src.read_opt(crate::sfield::sfAmount2)
+    }
+
+    /// `sfEPrice` — Amount, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn e_price(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+        self.src.read_opt(crate::sfield::sfEPrice)
+    }
+
+    /// `sfLPTokenIn` — Amount, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn lp_token_in(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+        self.src.read_opt(crate::sfield::sfLPTokenIn)
+    }
+
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> crate::error::Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `memos_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `signers_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `emit_details_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `hook_parameters_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
+/// View of the `AMMVote` transaction (`ttAMM_VOTE`, type code 38).
+///
+/// Build one with [`AMMVote::otxn`] (the originating transaction) or
+/// [`AMMVote::from_slot`] (an already-loaded transaction slot); both check the
+/// transaction type before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
+pub struct AMMVote<S: crate::views::source::FieldSource> {
+    src: S,
+}
+
+#[cfg(feature = "all-amendments")]
+impl AMMVote<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `AMMVote`.
+    ///
+    /// One `otxn_type` host call and one integer compare against `ttAMM_VOTE`;
+    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
+    /// originating transaction is something else. The view itself is zero-sized,
+    /// and each accessor below is a single `otxn_field` call.
+    #[inline(always)]
+    pub fn otxn() -> crate::error::Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttAMM_VOTE).map(|src| Self { src })
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl AMMVote<crate::views::source::SlotSource> {
+    /// Views an already-loaded transaction slot as `AMMVote`, taking ownership
+    /// of the slot.
+    ///
+    /// Verifies the slot's `sfTransactionType` is `ttAMM_VOTE`. On any failure the
+    /// slot is consumed and best-effort cleared, so a rejected view costs no
+    /// slot — see
+    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
+    /// behaves the same way for the same reason.
+    #[inline(always)]
+    pub fn from_slot(
+        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
+    ) -> crate::error::Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttAMM_VOTE,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Hands the underlying slot back, consuming the view.
+    ///
+    /// The escape hatch for anything not generated here: everything
+    /// [`crate::slot_obj`] offers is available on the returned handle.
+    #[inline(always)]
+    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.src.subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> AMMVote<S> {
+    /// `sfAsset` — Issue, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn asset(&self) -> crate::error::Result<crate::slot_obj::IssueData> {
+        self.src.read(crate::sfield::sfAsset)
+    }
+
+    /// `sfAsset2` — Issue, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn asset2(&self) -> crate::error::Result<crate::slot_obj::IssueData> {
+        self.src.read(crate::sfield::sfAsset2)
+    }
+
+    /// `sfTradingFee` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn trading_fee(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTradingFee)
+    }
+
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> crate::error::Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `memos_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `signers_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `emit_details_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `hook_parameters_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
+/// View of the `AMMBid` transaction (`ttAMM_BID`, type code 39).
+///
+/// Build one with [`AMMBid::otxn`] (the originating transaction) or
+/// [`AMMBid::from_slot`] (an already-loaded transaction slot); both check the
+/// transaction type before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
+pub struct AMMBid<S: crate::views::source::FieldSource> {
+    src: S,
+}
+
+#[cfg(feature = "all-amendments")]
+impl AMMBid<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `AMMBid`.
+    ///
+    /// One `otxn_type` host call and one integer compare against `ttAMM_BID`;
+    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
+    /// originating transaction is something else. The view itself is zero-sized,
+    /// and each accessor below is a single `otxn_field` call.
+    #[inline(always)]
+    pub fn otxn() -> crate::error::Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttAMM_BID).map(|src| Self { src })
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl AMMBid<crate::views::source::SlotSource> {
+    /// Views an already-loaded transaction slot as `AMMBid`, taking ownership
+    /// of the slot.
+    ///
+    /// Verifies the slot's `sfTransactionType` is `ttAMM_BID`. On any failure the
+    /// slot is consumed and best-effort cleared, so a rejected view costs no
+    /// slot — see
+    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
+    /// behaves the same way for the same reason.
+    #[inline(always)]
+    pub fn from_slot(
+        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
+    ) -> crate::error::Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttAMM_BID,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Hands the underlying slot back, consuming the view.
+    ///
+    /// The escape hatch for anything not generated here: everything
+    /// [`crate::slot_obj`] offers is available on the returned handle.
+    #[inline(always)]
+    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfAuthAccounts` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn auth_accounts_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfAuthAccounts)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.src.subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> AMMBid<S> {
+    /// `sfAsset` — Issue, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn asset(&self) -> crate::error::Result<crate::slot_obj::IssueData> {
+        self.src.read(crate::sfield::sfAsset)
+    }
+
+    /// `sfAsset2` — Issue, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn asset2(&self) -> crate::error::Result<crate::slot_obj::IssueData> {
+        self.src.read(crate::sfield::sfAsset2)
+    }
+
+    /// `sfBidMin` — Amount, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn bid_min(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+        self.src.read_opt(crate::sfield::sfBidMin)
+    }
+
+    /// `sfBidMax` — Amount, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn bid_max(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+        self.src.read_opt(crate::sfield::sfBidMax)
+    }
+
+    /// `sfAuthAccounts` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `auth_accounts_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn auth_accounts_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfAuthAccounts.code(), out)
+    }
+
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> crate::error::Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `memos_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `signers_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `emit_details_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `hook_parameters_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
+/// View of the `AMMDelete` transaction (`ttAMM_DELETE`, type code 40).
+///
+/// Build one with [`AMMDelete::otxn`] (the originating transaction) or
+/// [`AMMDelete::from_slot`] (an already-loaded transaction slot); both check the
+/// transaction type before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
+pub struct AMMDelete<S: crate::views::source::FieldSource> {
+    src: S,
+}
+
+#[cfg(feature = "all-amendments")]
+impl AMMDelete<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `AMMDelete`.
+    ///
+    /// One `otxn_type` host call and one integer compare against `ttAMM_DELETE`;
+    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
+    /// originating transaction is something else. The view itself is zero-sized,
+    /// and each accessor below is a single `otxn_field` call.
+    #[inline(always)]
+    pub fn otxn() -> crate::error::Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttAMM_DELETE).map(|src| Self { src })
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl AMMDelete<crate::views::source::SlotSource> {
+    /// Views an already-loaded transaction slot as `AMMDelete`, taking ownership
+    /// of the slot.
+    ///
+    /// Verifies the slot's `sfTransactionType` is `ttAMM_DELETE`. On any failure the
+    /// slot is consumed and best-effort cleared, so a rejected view costs no
+    /// slot — see
+    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
+    /// behaves the same way for the same reason.
+    #[inline(always)]
+    pub fn from_slot(
+        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
+    ) -> crate::error::Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttAMM_DELETE,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Hands the underlying slot back, consuming the view.
+    ///
+    /// The escape hatch for anything not generated here: everything
+    /// [`crate::slot_obj`] offers is available on the returned handle.
+    #[inline(always)]
+    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.src.subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> AMMDelete<S> {
+    /// `sfAsset` — Issue, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn asset(&self) -> crate::error::Result<crate::slot_obj::IssueData> {
+        self.src.read(crate::sfield::sfAsset)
+    }
+
+    /// `sfAsset2` — Issue, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn asset2(&self) -> crate::error::Result<crate::slot_obj::IssueData> {
+        self.src.read(crate::sfield::sfAsset2)
     }
 
     /// `sfTransactionType` — UInt16, `soeREQUIRED`.
@@ -10922,6 +13537,3681 @@ impl<S: crate::views::source::FieldSource> URITokenCancelSellOffer<S> {
     }
 }
 
+/// View of the `XChainCreateClaimID` transaction (`ttXCHAIN_CREATE_CLAIM_ID`, type code 50).
+///
+/// Build one with [`XChainCreateClaimID::otxn`] (the originating transaction) or
+/// [`XChainCreateClaimID::from_slot`] (an already-loaded transaction slot); both check the
+/// transaction type before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
+pub struct XChainCreateClaimID<S: crate::views::source::FieldSource> {
+    src: S,
+}
+
+#[cfg(feature = "all-amendments")]
+impl XChainCreateClaimID<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `XChainCreateClaimID`.
+    ///
+    /// One `otxn_type` host call and one integer compare against `ttXCHAIN_CREATE_CLAIM_ID`;
+    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
+    /// originating transaction is something else. The view itself is zero-sized,
+    /// and each accessor below is a single `otxn_field` call.
+    #[inline(always)]
+    pub fn otxn() -> crate::error::Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttXCHAIN_CREATE_CLAIM_ID)
+            .map(|src| Self { src })
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl XChainCreateClaimID<crate::views::source::SlotSource> {
+    /// Views an already-loaded transaction slot as `XChainCreateClaimID`, taking ownership
+    /// of the slot.
+    ///
+    /// Verifies the slot's `sfTransactionType` is `ttXCHAIN_CREATE_CLAIM_ID`. On any failure the
+    /// slot is consumed and best-effort cleared, so a rejected view costs no
+    /// slot — see
+    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
+    /// behaves the same way for the same reason.
+    #[inline(always)]
+    pub fn from_slot(
+        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
+    ) -> crate::error::Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttXCHAIN_CREATE_CLAIM_ID,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Hands the underlying slot back, consuming the view.
+    ///
+    /// The escape hatch for anything not generated here: everything
+    /// [`crate::slot_obj`] offers is available on the returned handle.
+    #[inline(always)]
+    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.src.subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> XChainCreateClaimID<S> {
+    /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src.read_raw(crate::sfield::sfXChainBridge.code(), out)
+    }
+
+    /// `sfSignatureReward` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn signature_reward(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfSignatureReward)
+    }
+
+    /// `sfOtherChainSource` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn other_chain_source(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfOtherChainSource)
+    }
+
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> crate::error::Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `memos_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `signers_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `emit_details_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `hook_parameters_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
+/// View of the `XChainCommit` transaction (`ttXCHAIN_COMMIT`, type code 51).
+///
+/// Build one with [`XChainCommit::otxn`] (the originating transaction) or
+/// [`XChainCommit::from_slot`] (an already-loaded transaction slot); both check the
+/// transaction type before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
+pub struct XChainCommit<S: crate::views::source::FieldSource> {
+    src: S,
+}
+
+#[cfg(feature = "all-amendments")]
+impl XChainCommit<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `XChainCommit`.
+    ///
+    /// One `otxn_type` host call and one integer compare against `ttXCHAIN_COMMIT`;
+    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
+    /// originating transaction is something else. The view itself is zero-sized,
+    /// and each accessor below is a single `otxn_field` call.
+    #[inline(always)]
+    pub fn otxn() -> crate::error::Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttXCHAIN_COMMIT).map(|src| Self { src })
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl XChainCommit<crate::views::source::SlotSource> {
+    /// Views an already-loaded transaction slot as `XChainCommit`, taking ownership
+    /// of the slot.
+    ///
+    /// Verifies the slot's `sfTransactionType` is `ttXCHAIN_COMMIT`. On any failure the
+    /// slot is consumed and best-effort cleared, so a rejected view costs no
+    /// slot — see
+    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
+    /// behaves the same way for the same reason.
+    #[inline(always)]
+    pub fn from_slot(
+        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
+    ) -> crate::error::Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttXCHAIN_COMMIT,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Hands the underlying slot back, consuming the view.
+    ///
+    /// The escape hatch for anything not generated here: everything
+    /// [`crate::slot_obj`] offers is available on the returned handle.
+    #[inline(always)]
+    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.src.subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> XChainCommit<S> {
+    /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src.read_raw(crate::sfield::sfXChainBridge.code(), out)
+    }
+
+    /// `sfXChainClaimID` — UInt64, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn xchain_claim_id(&self) -> crate::error::Result<u64> {
+        self.src.read(crate::sfield::sfXChainClaimID)
+    }
+
+    /// `sfAmount` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfAmount)
+    }
+
+    /// `sfOtherChainDestination` — AccountID, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn other_chain_destination(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+        self.src.read_opt(crate::sfield::sfOtherChainDestination)
+    }
+
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> crate::error::Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `memos_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `signers_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `emit_details_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `hook_parameters_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
+/// View of the `XChainClaim` transaction (`ttXCHAIN_CLAIM`, type code 52).
+///
+/// Build one with [`XChainClaim::otxn`] (the originating transaction) or
+/// [`XChainClaim::from_slot`] (an already-loaded transaction slot); both check the
+/// transaction type before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
+pub struct XChainClaim<S: crate::views::source::FieldSource> {
+    src: S,
+}
+
+#[cfg(feature = "all-amendments")]
+impl XChainClaim<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `XChainClaim`.
+    ///
+    /// One `otxn_type` host call and one integer compare against `ttXCHAIN_CLAIM`;
+    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
+    /// originating transaction is something else. The view itself is zero-sized,
+    /// and each accessor below is a single `otxn_field` call.
+    #[inline(always)]
+    pub fn otxn() -> crate::error::Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttXCHAIN_CLAIM).map(|src| Self { src })
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl XChainClaim<crate::views::source::SlotSource> {
+    /// Views an already-loaded transaction slot as `XChainClaim`, taking ownership
+    /// of the slot.
+    ///
+    /// Verifies the slot's `sfTransactionType` is `ttXCHAIN_CLAIM`. On any failure the
+    /// slot is consumed and best-effort cleared, so a rejected view costs no
+    /// slot — see
+    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
+    /// behaves the same way for the same reason.
+    #[inline(always)]
+    pub fn from_slot(
+        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
+    ) -> crate::error::Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttXCHAIN_CLAIM,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Hands the underlying slot back, consuming the view.
+    ///
+    /// The escape hatch for anything not generated here: everything
+    /// [`crate::slot_obj`] offers is available on the returned handle.
+    #[inline(always)]
+    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.src.subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> XChainClaim<S> {
+    /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src.read_raw(crate::sfield::sfXChainBridge.code(), out)
+    }
+
+    /// `sfXChainClaimID` — UInt64, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn xchain_claim_id(&self) -> crate::error::Result<u64> {
+        self.src.read(crate::sfield::sfXChainClaimID)
+    }
+
+    /// `sfDestination` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn destination(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfDestination)
+    }
+
+    /// `sfDestinationTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn destination_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfDestinationTag)
+    }
+
+    /// `sfAmount` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfAmount)
+    }
+
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> crate::error::Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `memos_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `signers_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `emit_details_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `hook_parameters_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
+/// View of the `XChainAccountCreateCommit` transaction (`ttXCHAIN_ACCOUNT_CREATE_COMMIT`, type code 53).
+///
+/// Build one with [`XChainAccountCreateCommit::otxn`] (the originating transaction) or
+/// [`XChainAccountCreateCommit::from_slot`] (an already-loaded transaction slot); both check the
+/// transaction type before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
+pub struct XChainAccountCreateCommit<S: crate::views::source::FieldSource> {
+    src: S,
+}
+
+#[cfg(feature = "all-amendments")]
+impl XChainAccountCreateCommit<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `XChainAccountCreateCommit`.
+    ///
+    /// One `otxn_type` host call and one integer compare against `ttXCHAIN_ACCOUNT_CREATE_COMMIT`;
+    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
+    /// originating transaction is something else. The view itself is zero-sized,
+    /// and each accessor below is a single `otxn_field` call.
+    #[inline(always)]
+    pub fn otxn() -> crate::error::Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttXCHAIN_ACCOUNT_CREATE_COMMIT)
+            .map(|src| Self { src })
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl XChainAccountCreateCommit<crate::views::source::SlotSource> {
+    /// Views an already-loaded transaction slot as `XChainAccountCreateCommit`, taking ownership
+    /// of the slot.
+    ///
+    /// Verifies the slot's `sfTransactionType` is `ttXCHAIN_ACCOUNT_CREATE_COMMIT`. On any failure the
+    /// slot is consumed and best-effort cleared, so a rejected view costs no
+    /// slot — see
+    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
+    /// behaves the same way for the same reason.
+    #[inline(always)]
+    pub fn from_slot(
+        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
+    ) -> crate::error::Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttXCHAIN_ACCOUNT_CREATE_COMMIT,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Hands the underlying slot back, consuming the view.
+    ///
+    /// The escape hatch for anything not generated here: everything
+    /// [`crate::slot_obj`] offers is available on the returned handle.
+    #[inline(always)]
+    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.src.subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> XChainAccountCreateCommit<S> {
+    /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src.read_raw(crate::sfield::sfXChainBridge.code(), out)
+    }
+
+    /// `sfDestination` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn destination(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfDestination)
+    }
+
+    /// `sfAmount` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfAmount)
+    }
+
+    /// `sfSignatureReward` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn signature_reward(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfSignatureReward)
+    }
+
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> crate::error::Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `memos_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `signers_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `emit_details_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `hook_parameters_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
+/// View of the `XChainAddClaimAttestation` transaction (`ttXCHAIN_ADD_CLAIM_ATTESTATION`, type code 54).
+///
+/// Build one with [`XChainAddClaimAttestation::otxn`] (the originating transaction) or
+/// [`XChainAddClaimAttestation::from_slot`] (an already-loaded transaction slot); both check the
+/// transaction type before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
+pub struct XChainAddClaimAttestation<S: crate::views::source::FieldSource> {
+    src: S,
+}
+
+#[cfg(feature = "all-amendments")]
+impl XChainAddClaimAttestation<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `XChainAddClaimAttestation`.
+    ///
+    /// One `otxn_type` host call and one integer compare against `ttXCHAIN_ADD_CLAIM_ATTESTATION`;
+    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
+    /// originating transaction is something else. The view itself is zero-sized,
+    /// and each accessor below is a single `otxn_field` call.
+    #[inline(always)]
+    pub fn otxn() -> crate::error::Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttXCHAIN_ADD_CLAIM_ATTESTATION)
+            .map(|src| Self { src })
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl XChainAddClaimAttestation<crate::views::source::SlotSource> {
+    /// Views an already-loaded transaction slot as `XChainAddClaimAttestation`, taking ownership
+    /// of the slot.
+    ///
+    /// Verifies the slot's `sfTransactionType` is `ttXCHAIN_ADD_CLAIM_ATTESTATION`. On any failure the
+    /// slot is consumed and best-effort cleared, so a rejected view costs no
+    /// slot — see
+    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
+    /// behaves the same way for the same reason.
+    #[inline(always)]
+    pub fn from_slot(
+        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
+    ) -> crate::error::Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttXCHAIN_ADD_CLAIM_ATTESTATION,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Hands the underlying slot back, consuming the view.
+    ///
+    /// The escape hatch for anything not generated here: everything
+    /// [`crate::slot_obj`] offers is available on the returned handle.
+    #[inline(always)]
+    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.src.subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> XChainAddClaimAttestation<S> {
+    /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src.read_raw(crate::sfield::sfXChainBridge.code(), out)
+    }
+
+    /// `sfAttestationSignerAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn attestation_signer_account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAttestationSignerAccount)
+    }
+
+    /// `sfPublicKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src.read_raw(crate::sfield::sfPublicKey.code(), out)
+    }
+
+    /// `sfSignature` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src.read_raw(crate::sfield::sfSignature.code(), out)
+    }
+
+    /// `sfOtherChainSource` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn other_chain_source(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfOtherChainSource)
+    }
+
+    /// `sfAmount` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfAmount)
+    }
+
+    /// `sfAttestationRewardAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn attestation_reward_account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAttestationRewardAccount)
+    }
+
+    /// `sfWasLockingChainSend` — UInt8, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn was_locking_chain_send(&self) -> crate::error::Result<u8> {
+        self.src.read(crate::sfield::sfWasLockingChainSend)
+    }
+
+    /// `sfXChainClaimID` — UInt64, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn xchain_claim_id(&self) -> crate::error::Result<u64> {
+        self.src.read(crate::sfield::sfXChainClaimID)
+    }
+
+    /// `sfDestination` — AccountID, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn destination(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+        self.src.read_opt(crate::sfield::sfDestination)
+    }
+
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> crate::error::Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `memos_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `signers_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `emit_details_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `hook_parameters_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
+/// View of the `XChainAddAccountCreateAttestation` transaction (`ttXCHAIN_ADD_ACCOUNT_CREATE_ATTESTATION`, type code 55).
+///
+/// Build one with [`XChainAddAccountCreateAttestation::otxn`] (the originating transaction) or
+/// [`XChainAddAccountCreateAttestation::from_slot`] (an already-loaded transaction slot); both check the
+/// transaction type before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
+pub struct XChainAddAccountCreateAttestation<S: crate::views::source::FieldSource> {
+    src: S,
+}
+
+#[cfg(feature = "all-amendments")]
+impl XChainAddAccountCreateAttestation<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `XChainAddAccountCreateAttestation`.
+    ///
+    /// One `otxn_type` host call and one integer compare against `ttXCHAIN_ADD_ACCOUNT_CREATE_ATTESTATION`;
+    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
+    /// originating transaction is something else. The view itself is zero-sized,
+    /// and each accessor below is a single `otxn_field` call.
+    #[inline(always)]
+    pub fn otxn() -> crate::error::Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttXCHAIN_ADD_ACCOUNT_CREATE_ATTESTATION)
+            .map(|src| Self { src })
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl XChainAddAccountCreateAttestation<crate::views::source::SlotSource> {
+    /// Views an already-loaded transaction slot as `XChainAddAccountCreateAttestation`, taking ownership
+    /// of the slot.
+    ///
+    /// Verifies the slot's `sfTransactionType` is `ttXCHAIN_ADD_ACCOUNT_CREATE_ATTESTATION`. On any failure the
+    /// slot is consumed and best-effort cleared, so a rejected view costs no
+    /// slot — see
+    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
+    /// behaves the same way for the same reason.
+    #[inline(always)]
+    pub fn from_slot(
+        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
+    ) -> crate::error::Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttXCHAIN_ADD_ACCOUNT_CREATE_ATTESTATION,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Hands the underlying slot back, consuming the view.
+    ///
+    /// The escape hatch for anything not generated here: everything
+    /// [`crate::slot_obj`] offers is available on the returned handle.
+    #[inline(always)]
+    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.src.subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> XChainAddAccountCreateAttestation<S> {
+    /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src.read_raw(crate::sfield::sfXChainBridge.code(), out)
+    }
+
+    /// `sfAttestationSignerAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn attestation_signer_account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAttestationSignerAccount)
+    }
+
+    /// `sfPublicKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src.read_raw(crate::sfield::sfPublicKey.code(), out)
+    }
+
+    /// `sfSignature` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src.read_raw(crate::sfield::sfSignature.code(), out)
+    }
+
+    /// `sfOtherChainSource` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn other_chain_source(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfOtherChainSource)
+    }
+
+    /// `sfAmount` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfAmount)
+    }
+
+    /// `sfAttestationRewardAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn attestation_reward_account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAttestationRewardAccount)
+    }
+
+    /// `sfWasLockingChainSend` — UInt8, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn was_locking_chain_send(&self) -> crate::error::Result<u8> {
+        self.src.read(crate::sfield::sfWasLockingChainSend)
+    }
+
+    /// `sfXChainAccountCreateCount` — UInt64, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn xchain_account_create_count(&self) -> crate::error::Result<u64> {
+        self.src.read(crate::sfield::sfXChainAccountCreateCount)
+    }
+
+    /// `sfDestination` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn destination(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfDestination)
+    }
+
+    /// `sfSignatureReward` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn signature_reward(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfSignatureReward)
+    }
+
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> crate::error::Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `memos_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `signers_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `emit_details_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `hook_parameters_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
+/// View of the `XChainModifyBridge` transaction (`ttXCHAIN_MODIFY_BRIDGE`, type code 56).
+///
+/// Build one with [`XChainModifyBridge::otxn`] (the originating transaction) or
+/// [`XChainModifyBridge::from_slot`] (an already-loaded transaction slot); both check the
+/// transaction type before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
+pub struct XChainModifyBridge<S: crate::views::source::FieldSource> {
+    src: S,
+}
+
+#[cfg(feature = "all-amendments")]
+impl XChainModifyBridge<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `XChainModifyBridge`.
+    ///
+    /// One `otxn_type` host call and one integer compare against `ttXCHAIN_MODIFY_BRIDGE`;
+    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
+    /// originating transaction is something else. The view itself is zero-sized,
+    /// and each accessor below is a single `otxn_field` call.
+    #[inline(always)]
+    pub fn otxn() -> crate::error::Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttXCHAIN_MODIFY_BRIDGE)
+            .map(|src| Self { src })
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl XChainModifyBridge<crate::views::source::SlotSource> {
+    /// Views an already-loaded transaction slot as `XChainModifyBridge`, taking ownership
+    /// of the slot.
+    ///
+    /// Verifies the slot's `sfTransactionType` is `ttXCHAIN_MODIFY_BRIDGE`. On any failure the
+    /// slot is consumed and best-effort cleared, so a rejected view costs no
+    /// slot — see
+    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
+    /// behaves the same way for the same reason.
+    #[inline(always)]
+    pub fn from_slot(
+        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
+    ) -> crate::error::Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttXCHAIN_MODIFY_BRIDGE,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Hands the underlying slot back, consuming the view.
+    ///
+    /// The escape hatch for anything not generated here: everything
+    /// [`crate::slot_obj`] offers is available on the returned handle.
+    #[inline(always)]
+    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.src.subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> XChainModifyBridge<S> {
+    /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src.read_raw(crate::sfield::sfXChainBridge.code(), out)
+    }
+
+    /// `sfSignatureReward` — Amount, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signature_reward(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+        self.src.read_opt(crate::sfield::sfSignatureReward)
+    }
+
+    /// `sfMinAccountCreateAmount` — Amount, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn min_account_create_amount(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+        self.src.read_opt(crate::sfield::sfMinAccountCreateAmount)
+    }
+
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> crate::error::Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `memos_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `signers_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `emit_details_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `hook_parameters_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
+/// View of the `XChainCreateBridge` transaction (`ttXCHAIN_CREATE_BRIDGE`, type code 57).
+///
+/// Build one with [`XChainCreateBridge::otxn`] (the originating transaction) or
+/// [`XChainCreateBridge::from_slot`] (an already-loaded transaction slot); both check the
+/// transaction type before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
+pub struct XChainCreateBridge<S: crate::views::source::FieldSource> {
+    src: S,
+}
+
+#[cfg(feature = "all-amendments")]
+impl XChainCreateBridge<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `XChainCreateBridge`.
+    ///
+    /// One `otxn_type` host call and one integer compare against `ttXCHAIN_CREATE_BRIDGE`;
+    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
+    /// originating transaction is something else. The view itself is zero-sized,
+    /// and each accessor below is a single `otxn_field` call.
+    #[inline(always)]
+    pub fn otxn() -> crate::error::Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttXCHAIN_CREATE_BRIDGE)
+            .map(|src| Self { src })
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl XChainCreateBridge<crate::views::source::SlotSource> {
+    /// Views an already-loaded transaction slot as `XChainCreateBridge`, taking ownership
+    /// of the slot.
+    ///
+    /// Verifies the slot's `sfTransactionType` is `ttXCHAIN_CREATE_BRIDGE`. On any failure the
+    /// slot is consumed and best-effort cleared, so a rejected view costs no
+    /// slot — see
+    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
+    /// behaves the same way for the same reason.
+    #[inline(always)]
+    pub fn from_slot(
+        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
+    ) -> crate::error::Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttXCHAIN_CREATE_BRIDGE,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Hands the underlying slot back, consuming the view.
+    ///
+    /// The escape hatch for anything not generated here: everything
+    /// [`crate::slot_obj`] offers is available on the returned handle.
+    #[inline(always)]
+    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.src.subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> XChainCreateBridge<S> {
+    /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src.read_raw(crate::sfield::sfXChainBridge.code(), out)
+    }
+
+    /// `sfSignatureReward` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn signature_reward(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfSignatureReward)
+    }
+
+    /// `sfMinAccountCreateAmount` — Amount, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn min_account_create_amount(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+        self.src.read_opt(crate::sfield::sfMinAccountCreateAmount)
+    }
+
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> crate::error::Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `memos_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `signers_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `emit_details_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `hook_parameters_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
+/// View of the `DIDSet` transaction (`ttDID_SET`, type code 58).
+///
+/// Build one with [`DIDSet::otxn`] (the originating transaction) or
+/// [`DIDSet::from_slot`] (an already-loaded transaction slot); both check the
+/// transaction type before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
+pub struct DIDSet<S: crate::views::source::FieldSource> {
+    src: S,
+}
+
+#[cfg(feature = "all-amendments")]
+impl DIDSet<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `DIDSet`.
+    ///
+    /// One `otxn_type` host call and one integer compare against `ttDID_SET`;
+    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
+    /// originating transaction is something else. The view itself is zero-sized,
+    /// and each accessor below is a single `otxn_field` call.
+    #[inline(always)]
+    pub fn otxn() -> crate::error::Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttDID_SET).map(|src| Self { src })
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl DIDSet<crate::views::source::SlotSource> {
+    /// Views an already-loaded transaction slot as `DIDSet`, taking ownership
+    /// of the slot.
+    ///
+    /// Verifies the slot's `sfTransactionType` is `ttDID_SET`. On any failure the
+    /// slot is consumed and best-effort cleared, so a rejected view costs no
+    /// slot — see
+    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
+    /// behaves the same way for the same reason.
+    #[inline(always)]
+    pub fn from_slot(
+        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
+    ) -> crate::error::Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttDID_SET,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Hands the underlying slot back, consuming the view.
+    ///
+    /// The escape hatch for anything not generated here: everything
+    /// [`crate::slot_obj`] offers is available on the returned handle.
+    #[inline(always)]
+    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.src.subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> DIDSet<S> {
+    /// `sfDIDDocument` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn did_document_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfDIDDocument.code(), out)
+    }
+
+    /// `sfURI` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn uri_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfURI.code(), out)
+    }
+
+    /// `sfData` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn data_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfData.code(), out)
+    }
+
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> crate::error::Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `memos_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `signers_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `emit_details_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `hook_parameters_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
+/// View of the `DIDDelete` transaction (`ttDID_DELETE`, type code 59).
+///
+/// Build one with [`DIDDelete::otxn`] (the originating transaction) or
+/// [`DIDDelete::from_slot`] (an already-loaded transaction slot); both check the
+/// transaction type before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
+pub struct DIDDelete<S: crate::views::source::FieldSource> {
+    src: S,
+}
+
+#[cfg(feature = "all-amendments")]
+impl DIDDelete<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `DIDDelete`.
+    ///
+    /// One `otxn_type` host call and one integer compare against `ttDID_DELETE`;
+    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
+    /// originating transaction is something else. The view itself is zero-sized,
+    /// and each accessor below is a single `otxn_field` call.
+    #[inline(always)]
+    pub fn otxn() -> crate::error::Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttDID_DELETE).map(|src| Self { src })
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl DIDDelete<crate::views::source::SlotSource> {
+    /// Views an already-loaded transaction slot as `DIDDelete`, taking ownership
+    /// of the slot.
+    ///
+    /// Verifies the slot's `sfTransactionType` is `ttDID_DELETE`. On any failure the
+    /// slot is consumed and best-effort cleared, so a rejected view costs no
+    /// slot — see
+    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
+    /// behaves the same way for the same reason.
+    #[inline(always)]
+    pub fn from_slot(
+        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
+    ) -> crate::error::Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttDID_DELETE,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Hands the underlying slot back, consuming the view.
+    ///
+    /// The escape hatch for anything not generated here: everything
+    /// [`crate::slot_obj`] offers is available on the returned handle.
+    #[inline(always)]
+    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.src.subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> DIDDelete<S> {
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> crate::error::Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `memos_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `signers_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `emit_details_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `hook_parameters_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
 /// View of the `OracleSet` transaction (`ttORACLE_SET`, type code 60).
 ///
 /// Build one with [`OracleSet::otxn`] (the originating transaction) or
@@ -11655,16 +17945,17 @@ impl<S: crate::views::source::FieldSource> OracleDelete<S> {
 /// [`LedgerStateFix::from_slot`] (an already-loaded transaction slot); both check the
 /// transaction type before handing the view back.
 ///
-/// **Amendment not yet active** as of the vendored snapshot, so this
-/// shape is generated behind the `pending-amendments` cargo feature. Nothing on
-/// Xahau will match it until the amendment activates; it is here so a
-/// hook can be written and tested against the shape in advance.
-#[cfg(feature = "pending-amendments")]
+/// **Amendment not yet active** as of the vendored snapshot. Available
+/// by default so a hook can be written and tested against the shape in
+/// advance; excluded under the `active-amendments` cargo feature, which restricts
+/// this crate to what is live on Xahau today. Nothing on-ledger will match
+/// it until the amendment activates.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 pub struct LedgerStateFix<S: crate::views::source::FieldSource> {
     src: S,
 }
 
-#[cfg(feature = "pending-amendments")]
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 impl LedgerStateFix<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `LedgerStateFix`.
     ///
@@ -11678,7 +17969,7 @@ impl LedgerStateFix<crate::views::source::OtxnSource> {
     }
 }
 
-#[cfg(feature = "pending-amendments")]
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 impl LedgerStateFix<crate::views::source::SlotSource> {
     /// Views an already-loaded transaction slot as `LedgerStateFix`, taking ownership
     /// of the slot.
@@ -11770,7 +18061,7 @@ impl LedgerStateFix<crate::views::source::SlotSource> {
     }
 }
 
-#[cfg(feature = "pending-amendments")]
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 impl<S: crate::views::source::FieldSource> LedgerStateFix<S> {
     /// `sfLedgerFixType` — UInt16, `soeREQUIRED`.
     #[inline(always)]
@@ -11784,6 +18075,3548 @@ impl<S: crate::views::source::FieldSource> LedgerStateFix<S> {
     #[inline(always)]
     pub fn owner(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfOwner)
+    }
+
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> crate::error::Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `memos_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `signers_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `emit_details_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `hook_parameters_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
+/// View of the `MPTokenIssuanceCreate` transaction (`ttMPTOKEN_ISSUANCE_CREATE`, type code 63).
+///
+/// Build one with [`MPTokenIssuanceCreate::otxn`] (the originating transaction) or
+/// [`MPTokenIssuanceCreate::from_slot`] (an already-loaded transaction slot); both check the
+/// transaction type before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
+pub struct MPTokenIssuanceCreate<S: crate::views::source::FieldSource> {
+    src: S,
+}
+
+#[cfg(feature = "all-amendments")]
+impl MPTokenIssuanceCreate<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `MPTokenIssuanceCreate`.
+    ///
+    /// One `otxn_type` host call and one integer compare against `ttMPTOKEN_ISSUANCE_CREATE`;
+    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
+    /// originating transaction is something else. The view itself is zero-sized,
+    /// and each accessor below is a single `otxn_field` call.
+    #[inline(always)]
+    pub fn otxn() -> crate::error::Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttMPTOKEN_ISSUANCE_CREATE)
+            .map(|src| Self { src })
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl MPTokenIssuanceCreate<crate::views::source::SlotSource> {
+    /// Views an already-loaded transaction slot as `MPTokenIssuanceCreate`, taking ownership
+    /// of the slot.
+    ///
+    /// Verifies the slot's `sfTransactionType` is `ttMPTOKEN_ISSUANCE_CREATE`. On any failure the
+    /// slot is consumed and best-effort cleared, so a rejected view costs no
+    /// slot — see
+    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
+    /// behaves the same way for the same reason.
+    #[inline(always)]
+    pub fn from_slot(
+        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
+    ) -> crate::error::Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttMPTOKEN_ISSUANCE_CREATE,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Hands the underlying slot back, consuming the view.
+    ///
+    /// The escape hatch for anything not generated here: everything
+    /// [`crate::slot_obj`] offers is available on the returned handle.
+    #[inline(always)]
+    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.src.subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> MPTokenIssuanceCreate<S> {
+    /// `sfAssetScale` — UInt8, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn asset_scale(&self) -> crate::error::Result<Option<u8>> {
+        self.src.read_opt(crate::sfield::sfAssetScale)
+    }
+
+    /// `sfTransferFee` — UInt16, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn transfer_fee(&self) -> crate::error::Result<Option<u16>> {
+        self.src.read_opt(crate::sfield::sfTransferFee)
+    }
+
+    /// `sfMaximumAmount` — UInt64, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn maximum_amount(&self) -> crate::error::Result<Option<u64>> {
+        self.src.read_opt(crate::sfield::sfMaximumAmount)
+    }
+
+    /// `sfMPTokenMetadata` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn mptoken_metadata_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfMPTokenMetadata.code(), out)
+    }
+
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> crate::error::Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `memos_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `signers_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `emit_details_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `hook_parameters_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
+/// View of the `MPTokenIssuanceDestroy` transaction (`ttMPTOKEN_ISSUANCE_DESTROY`, type code 64).
+///
+/// Build one with [`MPTokenIssuanceDestroy::otxn`] (the originating transaction) or
+/// [`MPTokenIssuanceDestroy::from_slot`] (an already-loaded transaction slot); both check the
+/// transaction type before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
+pub struct MPTokenIssuanceDestroy<S: crate::views::source::FieldSource> {
+    src: S,
+}
+
+#[cfg(feature = "all-amendments")]
+impl MPTokenIssuanceDestroy<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `MPTokenIssuanceDestroy`.
+    ///
+    /// One `otxn_type` host call and one integer compare against `ttMPTOKEN_ISSUANCE_DESTROY`;
+    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
+    /// originating transaction is something else. The view itself is zero-sized,
+    /// and each accessor below is a single `otxn_field` call.
+    #[inline(always)]
+    pub fn otxn() -> crate::error::Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttMPTOKEN_ISSUANCE_DESTROY)
+            .map(|src| Self { src })
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl MPTokenIssuanceDestroy<crate::views::source::SlotSource> {
+    /// Views an already-loaded transaction slot as `MPTokenIssuanceDestroy`, taking ownership
+    /// of the slot.
+    ///
+    /// Verifies the slot's `sfTransactionType` is `ttMPTOKEN_ISSUANCE_DESTROY`. On any failure the
+    /// slot is consumed and best-effort cleared, so a rejected view costs no
+    /// slot — see
+    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
+    /// behaves the same way for the same reason.
+    #[inline(always)]
+    pub fn from_slot(
+        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
+    ) -> crate::error::Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttMPTOKEN_ISSUANCE_DESTROY,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Hands the underlying slot back, consuming the view.
+    ///
+    /// The escape hatch for anything not generated here: everything
+    /// [`crate::slot_obj`] offers is available on the returned handle.
+    #[inline(always)]
+    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.src.subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> MPTokenIssuanceDestroy<S> {
+    /// `sfMPTokenIssuanceID` — UInt192, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn mptoken_issuance_id_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfMPTokenIssuanceID.code(), out)
+    }
+
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> crate::error::Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `memos_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `signers_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `emit_details_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `hook_parameters_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
+/// View of the `MPTokenIssuanceSet` transaction (`ttMPTOKEN_ISSUANCE_SET`, type code 65).
+///
+/// Build one with [`MPTokenIssuanceSet::otxn`] (the originating transaction) or
+/// [`MPTokenIssuanceSet::from_slot`] (an already-loaded transaction slot); both check the
+/// transaction type before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
+pub struct MPTokenIssuanceSet<S: crate::views::source::FieldSource> {
+    src: S,
+}
+
+#[cfg(feature = "all-amendments")]
+impl MPTokenIssuanceSet<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `MPTokenIssuanceSet`.
+    ///
+    /// One `otxn_type` host call and one integer compare against `ttMPTOKEN_ISSUANCE_SET`;
+    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
+    /// originating transaction is something else. The view itself is zero-sized,
+    /// and each accessor below is a single `otxn_field` call.
+    #[inline(always)]
+    pub fn otxn() -> crate::error::Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttMPTOKEN_ISSUANCE_SET)
+            .map(|src| Self { src })
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl MPTokenIssuanceSet<crate::views::source::SlotSource> {
+    /// Views an already-loaded transaction slot as `MPTokenIssuanceSet`, taking ownership
+    /// of the slot.
+    ///
+    /// Verifies the slot's `sfTransactionType` is `ttMPTOKEN_ISSUANCE_SET`. On any failure the
+    /// slot is consumed and best-effort cleared, so a rejected view costs no
+    /// slot — see
+    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
+    /// behaves the same way for the same reason.
+    #[inline(always)]
+    pub fn from_slot(
+        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
+    ) -> crate::error::Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttMPTOKEN_ISSUANCE_SET,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Hands the underlying slot back, consuming the view.
+    ///
+    /// The escape hatch for anything not generated here: everything
+    /// [`crate::slot_obj`] offers is available on the returned handle.
+    #[inline(always)]
+    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.src.subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> MPTokenIssuanceSet<S> {
+    /// `sfMPTokenIssuanceID` — UInt192, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn mptoken_issuance_id_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfMPTokenIssuanceID.code(), out)
+    }
+
+    /// `sfHolder` — AccountID, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn holder(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+        self.src.read_opt(crate::sfield::sfHolder)
+    }
+
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> crate::error::Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `memos_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `signers_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `emit_details_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `hook_parameters_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
+/// View of the `MPTokenAuthorize` transaction (`ttMPTOKEN_AUTHORIZE`, type code 66).
+///
+/// Build one with [`MPTokenAuthorize::otxn`] (the originating transaction) or
+/// [`MPTokenAuthorize::from_slot`] (an already-loaded transaction slot); both check the
+/// transaction type before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
+pub struct MPTokenAuthorize<S: crate::views::source::FieldSource> {
+    src: S,
+}
+
+#[cfg(feature = "all-amendments")]
+impl MPTokenAuthorize<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `MPTokenAuthorize`.
+    ///
+    /// One `otxn_type` host call and one integer compare against `ttMPTOKEN_AUTHORIZE`;
+    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
+    /// originating transaction is something else. The view itself is zero-sized,
+    /// and each accessor below is a single `otxn_field` call.
+    #[inline(always)]
+    pub fn otxn() -> crate::error::Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttMPTOKEN_AUTHORIZE)
+            .map(|src| Self { src })
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl MPTokenAuthorize<crate::views::source::SlotSource> {
+    /// Views an already-loaded transaction slot as `MPTokenAuthorize`, taking ownership
+    /// of the slot.
+    ///
+    /// Verifies the slot's `sfTransactionType` is `ttMPTOKEN_AUTHORIZE`. On any failure the
+    /// slot is consumed and best-effort cleared, so a rejected view costs no
+    /// slot — see
+    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
+    /// behaves the same way for the same reason.
+    #[inline(always)]
+    pub fn from_slot(
+        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
+    ) -> crate::error::Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttMPTOKEN_AUTHORIZE,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Hands the underlying slot back, consuming the view.
+    ///
+    /// The escape hatch for anything not generated here: everything
+    /// [`crate::slot_obj`] offers is available on the returned handle.
+    #[inline(always)]
+    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.src.subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> MPTokenAuthorize<S> {
+    /// `sfMPTokenIssuanceID` — UInt192, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn mptoken_issuance_id_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfMPTokenIssuanceID.code(), out)
+    }
+
+    /// `sfHolder` — AccountID, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn holder(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+        self.src.read_opt(crate::sfield::sfHolder)
+    }
+
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> crate::error::Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `memos_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `signers_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `emit_details_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `hook_parameters_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
+/// View of the `CredentialCreate` transaction (`ttCREDENTIAL_CREATE`, type code 67).
+///
+/// Build one with [`CredentialCreate::otxn`] (the originating transaction) or
+/// [`CredentialCreate::from_slot`] (an already-loaded transaction slot); both check the
+/// transaction type before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
+pub struct CredentialCreate<S: crate::views::source::FieldSource> {
+    src: S,
+}
+
+#[cfg(feature = "all-amendments")]
+impl CredentialCreate<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `CredentialCreate`.
+    ///
+    /// One `otxn_type` host call and one integer compare against `ttCREDENTIAL_CREATE`;
+    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
+    /// originating transaction is something else. The view itself is zero-sized,
+    /// and each accessor below is a single `otxn_field` call.
+    #[inline(always)]
+    pub fn otxn() -> crate::error::Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttCREDENTIAL_CREATE)
+            .map(|src| Self { src })
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl CredentialCreate<crate::views::source::SlotSource> {
+    /// Views an already-loaded transaction slot as `CredentialCreate`, taking ownership
+    /// of the slot.
+    ///
+    /// Verifies the slot's `sfTransactionType` is `ttCREDENTIAL_CREATE`. On any failure the
+    /// slot is consumed and best-effort cleared, so a rejected view costs no
+    /// slot — see
+    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
+    /// behaves the same way for the same reason.
+    #[inline(always)]
+    pub fn from_slot(
+        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
+    ) -> crate::error::Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttCREDENTIAL_CREATE,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Hands the underlying slot back, consuming the view.
+    ///
+    /// The escape hatch for anything not generated here: everything
+    /// [`crate::slot_obj`] offers is available on the returned handle.
+    #[inline(always)]
+    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.src.subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> CredentialCreate<S> {
+    /// `sfSubject` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn subject(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfSubject)
+    }
+
+    /// `sfCredentialType` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn credential_type_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfCredentialType.code(), out)
+    }
+
+    /// `sfExpiration` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn expiration(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfExpiration)
+    }
+
+    /// `sfURI` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn uri_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfURI.code(), out)
+    }
+
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> crate::error::Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `memos_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `signers_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `emit_details_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `hook_parameters_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
+/// View of the `CredentialAccept` transaction (`ttCREDENTIAL_ACCEPT`, type code 68).
+///
+/// Build one with [`CredentialAccept::otxn`] (the originating transaction) or
+/// [`CredentialAccept::from_slot`] (an already-loaded transaction slot); both check the
+/// transaction type before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
+pub struct CredentialAccept<S: crate::views::source::FieldSource> {
+    src: S,
+}
+
+#[cfg(feature = "all-amendments")]
+impl CredentialAccept<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `CredentialAccept`.
+    ///
+    /// One `otxn_type` host call and one integer compare against `ttCREDENTIAL_ACCEPT`;
+    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
+    /// originating transaction is something else. The view itself is zero-sized,
+    /// and each accessor below is a single `otxn_field` call.
+    #[inline(always)]
+    pub fn otxn() -> crate::error::Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttCREDENTIAL_ACCEPT)
+            .map(|src| Self { src })
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl CredentialAccept<crate::views::source::SlotSource> {
+    /// Views an already-loaded transaction slot as `CredentialAccept`, taking ownership
+    /// of the slot.
+    ///
+    /// Verifies the slot's `sfTransactionType` is `ttCREDENTIAL_ACCEPT`. On any failure the
+    /// slot is consumed and best-effort cleared, so a rejected view costs no
+    /// slot — see
+    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
+    /// behaves the same way for the same reason.
+    #[inline(always)]
+    pub fn from_slot(
+        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
+    ) -> crate::error::Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttCREDENTIAL_ACCEPT,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Hands the underlying slot back, consuming the view.
+    ///
+    /// The escape hatch for anything not generated here: everything
+    /// [`crate::slot_obj`] offers is available on the returned handle.
+    #[inline(always)]
+    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.src.subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> CredentialAccept<S> {
+    /// `sfIssuer` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn issuer(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfIssuer)
+    }
+
+    /// `sfCredentialType` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn credential_type_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfCredentialType.code(), out)
+    }
+
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> crate::error::Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `memos_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `signers_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `emit_details_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `hook_parameters_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
+/// View of the `CredentialDelete` transaction (`ttCREDENTIAL_DELETE`, type code 69).
+///
+/// Build one with [`CredentialDelete::otxn`] (the originating transaction) or
+/// [`CredentialDelete::from_slot`] (an already-loaded transaction slot); both check the
+/// transaction type before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
+pub struct CredentialDelete<S: crate::views::source::FieldSource> {
+    src: S,
+}
+
+#[cfg(feature = "all-amendments")]
+impl CredentialDelete<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `CredentialDelete`.
+    ///
+    /// One `otxn_type` host call and one integer compare against `ttCREDENTIAL_DELETE`;
+    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
+    /// originating transaction is something else. The view itself is zero-sized,
+    /// and each accessor below is a single `otxn_field` call.
+    #[inline(always)]
+    pub fn otxn() -> crate::error::Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttCREDENTIAL_DELETE)
+            .map(|src| Self { src })
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl CredentialDelete<crate::views::source::SlotSource> {
+    /// Views an already-loaded transaction slot as `CredentialDelete`, taking ownership
+    /// of the slot.
+    ///
+    /// Verifies the slot's `sfTransactionType` is `ttCREDENTIAL_DELETE`. On any failure the
+    /// slot is consumed and best-effort cleared, so a rejected view costs no
+    /// slot — see
+    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
+    /// behaves the same way for the same reason.
+    #[inline(always)]
+    pub fn from_slot(
+        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
+    ) -> crate::error::Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttCREDENTIAL_DELETE,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Hands the underlying slot back, consuming the view.
+    ///
+    /// The escape hatch for anything not generated here: everything
+    /// [`crate::slot_obj`] offers is available on the returned handle.
+    #[inline(always)]
+    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.src.subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> CredentialDelete<S> {
+    /// `sfSubject` — AccountID, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn subject(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+        self.src.read_opt(crate::sfield::sfSubject)
+    }
+
+    /// `sfIssuer` — AccountID, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn issuer(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+        self.src.read_opt(crate::sfield::sfIssuer)
+    }
+
+    /// `sfCredentialType` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn credential_type_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfCredentialType.code(), out)
+    }
+
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> crate::error::Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `memos_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `signers_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `emit_details_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `hook_parameters_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
+/// View of the `NFTokenModify` transaction (`ttNFTOKEN_MODIFY`, type code 70).
+///
+/// Build one with [`NFTokenModify::otxn`] (the originating transaction) or
+/// [`NFTokenModify::from_slot`] (an already-loaded transaction slot); both check the
+/// transaction type before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
+pub struct NFTokenModify<S: crate::views::source::FieldSource> {
+    src: S,
+}
+
+#[cfg(feature = "all-amendments")]
+impl NFTokenModify<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `NFTokenModify`.
+    ///
+    /// One `otxn_type` host call and one integer compare against `ttNFTOKEN_MODIFY`;
+    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
+    /// originating transaction is something else. The view itself is zero-sized,
+    /// and each accessor below is a single `otxn_field` call.
+    #[inline(always)]
+    pub fn otxn() -> crate::error::Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttNFTOKEN_MODIFY).map(|src| Self { src })
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl NFTokenModify<crate::views::source::SlotSource> {
+    /// Views an already-loaded transaction slot as `NFTokenModify`, taking ownership
+    /// of the slot.
+    ///
+    /// Verifies the slot's `sfTransactionType` is `ttNFTOKEN_MODIFY`. On any failure the
+    /// slot is consumed and best-effort cleared, so a rejected view costs no
+    /// slot — see
+    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
+    /// behaves the same way for the same reason.
+    #[inline(always)]
+    pub fn from_slot(
+        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
+    ) -> crate::error::Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttNFTOKEN_MODIFY,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Hands the underlying slot back, consuming the view.
+    ///
+    /// The escape hatch for anything not generated here: everything
+    /// [`crate::slot_obj`] offers is available on the returned handle.
+    #[inline(always)]
+    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.src.subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> NFTokenModify<S> {
+    /// `sfNFTokenID` — Hash256, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn nftoken_id(&self) -> crate::error::Result<crate::types::Hash> {
+        self.src.read(crate::sfield::sfNFTokenID)
+    }
+
+    /// `sfOwner` — AccountID, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn owner(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+        self.src.read_opt(crate::sfield::sfOwner)
+    }
+
+    /// `sfURI` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn uri_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfURI.code(), out)
+    }
+
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> crate::error::Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `memos_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `signers_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `emit_details_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `hook_parameters_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
+/// View of the `PermissionedDomainSet` transaction (`ttPERMISSIONED_DOMAIN_SET`, type code 71).
+///
+/// Build one with [`PermissionedDomainSet::otxn`] (the originating transaction) or
+/// [`PermissionedDomainSet::from_slot`] (an already-loaded transaction slot); both check the
+/// transaction type before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
+pub struct PermissionedDomainSet<S: crate::views::source::FieldSource> {
+    src: S,
+}
+
+#[cfg(feature = "all-amendments")]
+impl PermissionedDomainSet<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `PermissionedDomainSet`.
+    ///
+    /// One `otxn_type` host call and one integer compare against `ttPERMISSIONED_DOMAIN_SET`;
+    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
+    /// originating transaction is something else. The view itself is zero-sized,
+    /// and each accessor below is a single `otxn_field` call.
+    #[inline(always)]
+    pub fn otxn() -> crate::error::Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttPERMISSIONED_DOMAIN_SET)
+            .map(|src| Self { src })
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl PermissionedDomainSet<crate::views::source::SlotSource> {
+    /// Views an already-loaded transaction slot as `PermissionedDomainSet`, taking ownership
+    /// of the slot.
+    ///
+    /// Verifies the slot's `sfTransactionType` is `ttPERMISSIONED_DOMAIN_SET`. On any failure the
+    /// slot is consumed and best-effort cleared, so a rejected view costs no
+    /// slot — see
+    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
+    /// behaves the same way for the same reason.
+    #[inline(always)]
+    pub fn from_slot(
+        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
+    ) -> crate::error::Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttPERMISSIONED_DOMAIN_SET,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Hands the underlying slot back, consuming the view.
+    ///
+    /// The escape hatch for anything not generated here: everything
+    /// [`crate::slot_obj`] offers is available on the returned handle.
+    #[inline(always)]
+    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfAcceptedCredentials` — STArray, `soeREQUIRED`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    #[inline(always)]
+    pub fn accepted_credentials_slot(
+        &self,
+    ) -> crate::error::Result<crate::slot_obj::SlotObject<crate::types::STArray>> {
+        self.src.subobject(crate::sfield::sfAcceptedCredentials)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.src.subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> PermissionedDomainSet<S> {
+    /// `sfDomainID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn domain_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfDomainID)
+    }
+
+    /// `sfAcceptedCredentials` — STArray, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `accepted_credentials_slot`, which only a slot-backed view has.
+    #[inline(always)]
+    pub fn accepted_credentials_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfAcceptedCredentials.code(), out)
+    }
+
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.src.read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> crate::error::Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.src.read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `memos_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `signers_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `emit_details_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    /// This is the whole container serialized; navigating *into* it needs
+    /// `hook_parameters_slot`, which only a slot-backed view has.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
+    /// exactly as the host holds them. Returns the number of bytes written.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
+/// View of the `PermissionedDomainDelete` transaction (`ttPERMISSIONED_DOMAIN_DELETE`, type code 72).
+///
+/// Build one with [`PermissionedDomainDelete::otxn`] (the originating transaction) or
+/// [`PermissionedDomainDelete::from_slot`] (an already-loaded transaction slot); both check the
+/// transaction type before handing the view back.
+///
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
+pub struct PermissionedDomainDelete<S: crate::views::source::FieldSource> {
+    src: S,
+}
+
+#[cfg(feature = "all-amendments")]
+impl PermissionedDomainDelete<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `PermissionedDomainDelete`.
+    ///
+    /// One `otxn_type` host call and one integer compare against `ttPERMISSIONED_DOMAIN_DELETE`;
+    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
+    /// originating transaction is something else. The view itself is zero-sized,
+    /// and each accessor below is a single `otxn_field` call.
+    #[inline(always)]
+    pub fn otxn() -> crate::error::Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttPERMISSIONED_DOMAIN_DELETE)
+            .map(|src| Self { src })
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl PermissionedDomainDelete<crate::views::source::SlotSource> {
+    /// Views an already-loaded transaction slot as `PermissionedDomainDelete`, taking ownership
+    /// of the slot.
+    ///
+    /// Verifies the slot's `sfTransactionType` is `ttPERMISSIONED_DOMAIN_DELETE`. On any failure the
+    /// slot is consumed and best-effort cleared, so a rejected view costs no
+    /// slot — see
+    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
+    /// behaves the same way for the same reason.
+    #[inline(always)]
+    pub fn from_slot(
+        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
+    ) -> crate::error::Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttPERMISSIONED_DOMAIN_DELETE,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Hands the underlying slot back, consuming the view.
+    ///
+    /// The escape hatch for anything not generated here: everything
+    /// [`crate::slot_obj`] offers is available on the returned handle.
+    #[inline(always)]
+    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.src.subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Navigates to the field and hands its **child slot** to the caller, who
+    /// owns it from here (the one place a view does not clear what it opens —
+    /// a container has no terminal read to clear after). Clear it, or read a
+    /// value out of it with the `take_*` family, before deriving many more.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    pub fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.src.subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> PermissionedDomainDelete<S> {
+    /// `sfDomainID` — Hash256, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn domain_id(&self) -> crate::error::Result<crate::types::Hash> {
+        self.src.read(crate::sfield::sfDomainID)
     }
 
     /// `sfTransactionType` — UInt16, `soeREQUIRED`.

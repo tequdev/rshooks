@@ -175,9 +175,6 @@ pub fn generate(sfcodes: &[ConstSpec], field_tiers: &BTreeMap<String, Tier>) -> 
         // `crate::availability::FormatAvailability::field_tiers` documents
         // that rule and the imprecision it accepts.
         let tier = field_tiers.get(&d.name).copied().unwrap_or(Tier::Active);
-        if !tier.is_rendered() {
-            continue;
-        }
         rendered.push(d);
 
         let value = render_shift_add(&d.c_expr)?;
@@ -192,16 +189,25 @@ pub fn generate(sfcodes: &[ConstSpec], field_tiers: &BTreeMap<String, Tier>) -> 
             id_name = type_id_name(type_id),
         )
         .context("writing constant doc")?;
-        if tier == Tier::Pending {
-            writeln!(
+        match tier {
+            Tier::Active => {}
+            Tier::Pending => writeln!(
                 body,
                 "///\n\
-                 /// **Amendment not yet active** as of the vendored snapshot: every format\n\
-                 /// declaring this field is `pending`, so the constant is generated behind\n\
-                 /// the `{feature}` cargo feature alongside those views.",
-                feature = crate::availability::PENDING_FEATURE,
+                 /// **Amendment not yet active** as of the vendored snapshot. Available by\n\
+                 /// default alongside the views declaring it; excluded under the `{narrow}`\n\
+                 /// cargo feature.",
+                narrow = crate::availability::ACTIVE_ONLY_FEATURE,
             )
-            .context("writing a pending-tier doc note")?;
+            .context("writing a pending-tier doc note")?,
+            Tier::Dormant => writeln!(
+                body,
+                "///\n\
+                 /// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau\n\
+                 /// object can carry this field. Needs the `{all}` cargo feature.",
+                all = crate::availability::ALL_FEATURE,
+            )
+            .context("writing a dormant-tier doc note")?,
         }
         if let Some(attr) = tier.cfg_attr() {
             writeln!(body, "{attr}").context("writing a tier cfg")?;

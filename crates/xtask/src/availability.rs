@@ -16,14 +16,20 @@
 //!
 //! # The three tiers
 //!
-//! - [`Tier::Active`] — activated on Xahau mainnet. Generated normally.
+//! - [`Tier::Active`] — activated on Xahau mainnet. Always available.
 //! - [`Tier::Pending`] — Xahau-bound and supported by the node, but not
-//!   activated as of the vendored snapshot. Generated behind the
-//!   [`PENDING_FEATURE`] cargo feature, so a hook opting in gets the shape
-//!   and everyone else does not.
+//!   activated as of the vendored snapshot. **Available by default**;
+//!   excluded by the [`ACTIVE_ONLY_FEATURE`] cargo feature for a hook that
+//!   wants its surface restricted to what is live today.
 //! - [`Tier::Dormant`] — inherited from rippled with no activation prospect
-//!   (in practice: gated by an amendment `features.macro` marks
-//!   `Supported::no`, or depending on one). Not generated at all.
+//!   on Xahau (in practice: gated by an amendment `features.macro` marks
+//!   `Supported::no`, or depending on one). Available only under
+//!   [`ALL_FEATURE`], for a custom network where the operator knows
+//!   otherwise.
+//!
+//! Nothing is *omitted* any more: every tier is rendered, and the `#[cfg]`
+//! it carries decides whether it compiles. [`Tier::cfg_attr`] has the
+//! truth table and the widest-wins precedence rule for both features on.
 //!
 //! The `Supported::no` half is objective and checkable against the vendored
 //! `features.macro`. The active/pending split is a fact about ledger state,
@@ -62,19 +68,27 @@ use serde::{Deserialize, Serialize};
 
 use crate::protocol_ir::ProtocolFormats;
 
-/// The cargo feature [`Tier::Pending`] items are generated behind.
+/// The cargo feature that *narrows* the surface to [`Tier::Active`] only.
 ///
-/// Named in exactly one place so renaming it is a one-line change here plus
-/// the matching rename in `crates/rshooks/Cargo.toml` — the renderer, the
-/// generated `#[cfg]` attributes and the generated rustdoc all read it from
-/// this constant.
-pub const PENDING_FEATURE: &str = "pending-amendments";
+/// Opt-in: without it, `pending` shapes are available too.
+pub const ACTIVE_ONLY_FEATURE: &str = "active-amendments";
+
+/// The cargo feature that *widens* the surface to everything, [`Tier::Dormant`]
+/// included.
+///
+/// Dominates [`ACTIVE_ONLY_FEATURE`] when both are on — see [`Tier::cfg_attr`]
+/// for why that direction is the safe one.
+pub const ALL_FEATURE: &str = "all-amendments";
 
 /// This artifact's schema version. Same additive-extension contract as
 /// [`crate::protocol_ir::PROTOCOL_FORMATS_VERSION`].
 pub const FORMAT_AVAILABILITY_VERSION: u32 = 1;
 
 /// How available a format is to a hook author on Xahau.
+///
+/// Every tier is *rendered*; what differs is the `#[cfg]` it carries, and so
+/// which cargo features have to be on for it to compile. See
+/// [`Tier::cfg_attr`] for the three states and the precedence rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Tier {
@@ -84,9 +98,10 @@ pub enum Tier {
     /// and "most available" is what a field's tier resolves to.
     Active,
     /// Supported by the node but not activated as of the vendored snapshot.
-    /// Generated behind [`PENDING_FEATURE`].
+    /// Available by default; excluded under [`ACTIVE_ONLY_FEATURE`].
     Pending,
-    /// No activation prospect. Not generated.
+    /// No activation prospect on Xahau. Available only under
+    /// [`ALL_FEATURE`].
     Dormant,
 }
 
@@ -102,21 +117,40 @@ impl Tier {
     }
 
     /// The `#[cfg(...)]` line a generated item at this tier needs, if any.
+    ///
+    /// Three states, from two features:
+    ///
+    /// | features on | active | pending | dormant |
+    /// |---|---|---|---|
+    /// | *(none)* | yes | yes | no |
+    /// | `active-amendments` | yes | no | no |
+    /// | `all-amendments` | yes | yes | yes |
+    /// | both | yes | yes | yes |
+    ///
+    /// The default is deliberately the middle one: a `pending` shape is
+    /// something Xahau is expected to get, so writing against it early is a
+    /// reasonable thing to do without ceremony, while `dormant` shapes
+    /// cannot appear on Xahau at all and stay out of the way.
+    ///
+    /// **Both features on is widest-wins**, which is not a detail — cargo
+    /// unifies features across the whole dependency graph, so a crate that
+    /// enables `all-amendments` turns it on for every other user of
+    /// `rshooks` in that build. Making the wider feature dominate keeps
+    /// enabling a feature *additive in effect*: pulling in a dependency can
+    /// give you more API than you asked for, but it can never take API away
+    /// from you, which would be a build break you did not cause and cannot
+    /// see. That is why `pending` reads
+    /// `any(not(active-amendments), all-amendments)` rather than the more
+    /// obvious `not(active-amendments)`.
     #[must_use]
     pub fn cfg_attr(self) -> Option<String> {
         match self {
             Self::Active => None,
-            Self::Pending => Some(format!("#[cfg(feature = \"{PENDING_FEATURE}\")]")),
-            // A dormant item is never rendered at all, so it never reaches
-            // an attribute.
-            Self::Dormant => None,
+            Self::Pending => Some(format!(
+                "#[cfg(any(not(feature = \"{ACTIVE_ONLY_FEATURE}\"), feature = \"{ALL_FEATURE}\"))]"
+            )),
+            Self::Dormant => Some(format!("#[cfg(feature = \"{ALL_FEATURE}\")]")),
         }
-    }
-
-    /// Whether an item at this tier is rendered.
-    #[must_use]
-    pub fn is_rendered(self) -> bool {
-        !matches!(self, Self::Dormant)
     }
 }
 
@@ -161,12 +195,24 @@ const DOC: &[&str] = &[
     "Curated: which declared protocol formats a hook can actually use on Xahau.",
     "NOT vendor data and NOT derived — a human maintains the tiers.",
     "",
-    "  active   activated on Xahau mainnet; generated normally.",
-    "  pending  supported by the node, not yet activated; generated behind",
-    "           the `pending-amendments` cargo feature on the rshooks crate.",
-    "  dormant  no activation prospect (in practice: gated by an amendment",
-    "           features.macro marks Supported::no, or depending on one);",
-    "           no code generated at all.",
+    "  active   activated on Xahau mainnet.",
+    "  pending  supported by the node, not yet activated.",
+    "  dormant  gated by an amendment features.macro marks Supported::no",
+    "           (or depending on one), so it cannot activate on Xahau at all.",
+    "",
+    "Every tier is generated. Two cargo features on the rshooks crate decide",
+    "which ones compile:",
+    "",
+    "  (neither)           active + pending   <- the default",
+    "  active-amendments   active only",
+    "  all-amendments      active + pending + dormant",
+    "  both                same as all-amendments (widest wins)",
+    "",
+    "Widest-wins matters because cargo unifies features across the whole",
+    "dependency graph: a crate enabling all-amendments turns it on for every",
+    "other user of rshooks in that build. Making the wider feature dominate",
+    "keeps enabling a feature additive in effect -- a dependency can give you",
+    "more API than you asked for, never take API away.",
     "",
     "`cargo xtask gen-core` appends unknown formats as `dormant` and does",
     "nothing else to this file; moving an entry between tiers is a human",
@@ -776,16 +822,15 @@ mod tests {
     fn tiers_serialize_as_the_snake_case_names_the_file_uses() {
         let json = serde_json::to_string(&Tier::Pending).unwrap_or_default();
         assert_eq!(json, "\"pending\"");
-        assert_eq!(
-            Tier::Dormant.cfg_attr(),
-            None,
-            "a dormant item is never rendered, so it never carries a cfg"
+        // Every tier renders now; the cfg is what differs.
+        assert_eq!(Tier::Active.cfg_attr(), None);
+        let pending = Tier::Pending.cfg_attr().unwrap_or_default();
+        let dormant = Tier::Dormant.cfg_attr().unwrap_or_default();
+        assert!(
+            pending.contains(&format!("not(feature = \"{ACTIVE_ONLY_FEATURE}\")"))
+                && pending.contains(&format!("feature = \"{ALL_FEATURE}\"")),
+            "pending must be widest-wins, not a bare `not(active-amendments)`: {pending}"
         );
-        assert_eq!(
-            Tier::Pending.cfg_attr().unwrap_or_default(),
-            format!("#[cfg(feature = \"{PENDING_FEATURE}\")]")
-        );
-        assert!(Tier::Active.is_rendered() && Tier::Pending.is_rendered());
-        assert!(!Tier::Dormant.is_rendered());
+        assert_eq!(dormant, format!("#[cfg(feature = \"{ALL_FEATURE}\")]"));
     }
 }

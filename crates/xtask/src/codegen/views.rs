@@ -304,16 +304,10 @@ fn resolve<'a>(
                 spec.sfield
             )
         })?;
-        // A field the classification calls dormant has no `sfield` constant
-        // to name, so its accessor cannot exist either — however available
-        // the enclosing view is.
         let tier = field_tiers
             .get(&spec.sfield)
             .copied()
             .unwrap_or(Tier::Active);
-        if !tier.is_rendered() {
-            continue;
-        }
         let name = method_name(&spec.sfield)
             .with_context(|| format!("naming `{}`'s accessor on view `{view}`", spec.sfield))?;
         let access = access(def.sti_code);
@@ -354,10 +348,12 @@ fn resolve<'a>(
 /// The shared prefix of every accessor's doc comment: which upstream field
 /// it is, what its serialized type is, and how the format declares it.
 ///
-/// Includes the field's own `#[cfg]` when it is scarcer than the view
-/// carrying it — a `pending` field on an `active` view, which only a
-/// `field_overrides` entry can produce. When the view is already gated, its
-/// own attribute covers every accessor and repeating it would be noise.
+/// Includes the field's own `#[cfg]` when the field is *strictly scarcer*
+/// than the view carrying it — which only a `field_overrides` entry can
+/// produce, since a derived field tier is the best over its formats and so
+/// never worse than any view listing it. When the field is as available as
+/// the view (or more), the view's own attribute already covers the accessor
+/// and repeating it would be noise.
 fn field_doc(a: &Accessor<'_>, view_tier: Tier) -> String {
     let mut out = format!(
         "/// `{name}` — {ty}, `{presence}`.\n",
@@ -365,19 +361,37 @@ fn field_doc(a: &Accessor<'_>, view_tier: Tier) -> String {
         ty = type_id_name(a.def.sti_code),
         presence = presence_token(a.spec.presence),
     );
-    if a.tier == Tier::Pending && view_tier == Tier::Active {
-        out.push_str(
-            "///\n\
-             /// **Amendment not yet active** as of the vendored snapshot: this field is\n\
-             /// gated even though the enclosing format is available, so the accessor is\n\
-             /// behind the `pending-amendments` cargo feature.\n",
-        );
+    if a.tier > view_tier {
+        out.push_str(&tier_field_doc(a.tier));
         if let Some(attr) = a.tier.cfg_attr() {
             out.push_str(&attr);
             out.push('\n');
         }
     }
     out
+}
+
+/// The rustdoc note explaining why one accessor is gated more tightly than
+/// the view around it.
+fn tier_field_doc(tier: Tier) -> String {
+    match tier {
+        Tier::Active => String::new(),
+        Tier::Pending => format!(
+            "///\n\
+             /// **Amendment not yet active** as of the vendored snapshot. The enclosing\n\
+             /// format is available but this field is not, so the accessor is excluded\n\
+             /// under the `{narrow}` cargo feature.\n",
+            narrow = crate::availability::ACTIVE_ONLY_FEATURE,
+        ),
+        Tier::Dormant => format!(
+            "///\n\
+             /// **Gated by an amendment xahaud marks `Supported::no`.** The enclosing\n\
+             /// format is available, but this field is not: a validated Xahau\n\
+             /// transaction can never carry it, so the accessor needs the `{all}` cargo\n\
+             /// feature.\n",
+            all = crate::availability::ALL_FEATURE,
+        ),
+    }
 }
 
 /// The sentence explaining an `Option` return, appended where the field is
@@ -513,19 +527,28 @@ fn push_slot_accessor(buf: &mut String, a: &Accessor<'_>, view_tier: Tier) -> Re
 /// an `impl` block for a struct that does not exist is a compile error, so
 /// the gate has to be uniform across the whole view.
 fn tier_prelude(tier: Tier) -> (String, String) {
-    match tier.cfg_attr() {
-        None => (String::new(), String::new()),
-        Some(attr) => (
-            format!("{attr}\n"),
-            format!(
-                "///\n/// **Amendment not yet active** as of the vendored snapshot, so this\n\
-                 /// shape is generated behind the `{feature}` cargo feature. Nothing on\n\
-                 /// Xahau will match it until the amendment activates; it is here so a\n\
-                 /// hook can be written and tested against the shape in advance.\n",
-                feature = crate::availability::PENDING_FEATURE,
-            ),
+    let Some(attr) = tier.cfg_attr() else {
+        return (String::new(), String::new());
+    };
+    let doc = match tier {
+        Tier::Active => String::new(),
+        Tier::Pending => format!(
+            "///\n/// **Amendment not yet active** as of the vendored snapshot. Available\n\
+             /// by default so a hook can be written and tested against the shape in\n\
+             /// advance; excluded under the `{narrow}` cargo feature, which restricts\n\
+             /// this crate to what is live on Xahau today. Nothing on-ledger will match\n\
+             /// it until the amendment activates.\n",
+            narrow = crate::availability::ACTIVE_ONLY_FEATURE,
         ),
-    }
+        Tier::Dormant => format!(
+            "///\n/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot\n\
+             /// appear on Xahau mainnet — activating it would amendment-block the node.\n\
+             /// Needs the `{all}` cargo feature, which is there for a custom network\n\
+             /// whose operator knows otherwise. Enable it at your own judgment.\n",
+            all = crate::availability::ALL_FEATURE,
+        ),
+    };
+    (format!("{attr}\n"), doc)
 }
 
 /// The one `use` any generated view file needs.
@@ -591,9 +614,6 @@ pub fn generate_tx(formats: &ProtocolFormats, availability: &FormatAvailability)
     let mut body = String::from("\n");
     for tx in &formats.transactions {
         let tier = availability.tx(&tx.name);
-        if !tier.is_rendered() {
-            continue;
-        }
         push_tx_view(&mut body, tx, formats, &sfields, tier, &field_tiers)
             .with_context(|| format!("rendering the `{}` transaction view", tx.name))?;
     }
@@ -740,9 +760,6 @@ pub fn generate_ledger(
     let mut body = String::from(SOURCE_TRAIT_IMPORT);
     for le in &formats.ledger_entries {
         let tier = availability.ledger_entry(&le.name);
-        if !tier.is_rendered() {
-            continue;
-        }
         push_ledger_view(&mut body, le, formats, &sfields, tier, &field_tiers)
             .with_context(|| format!("rendering the `{}` ledger entry view", le.name))?;
     }
@@ -858,9 +875,6 @@ pub fn generate_inner(
     let mut body = String::from(SOURCE_TRAIT_IMPORT);
     for obj in &formats.inner_objects {
         let tier = availability.inner_object(&inner_name(&obj.sfield)?);
-        if !tier.is_rendered() {
-            continue;
-        }
         push_inner_view(&mut body, obj, &sfields, tier, &field_tiers)
             .with_context(|| format!("rendering the `{}` inner-object view", obj.sfield))?;
     }
