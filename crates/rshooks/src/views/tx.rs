@@ -7215,17 +7215,16 @@ impl<S: crate::views::source::FieldSource> SetHook<S> {
 /// [`NFTokenMint::from_slot`] (an already-loaded transaction slot); both check the
 /// transaction type before handing the view back.
 ///
-/// **Amendment not yet active** as of the vendored snapshot. Available
-/// by default so a hook can be written and tested against the shape in
-/// advance; excluded under the `active-amendments` cargo feature, which restricts
-/// this crate to what is live on Xahau today. Nothing on-ledger will match
-/// it until the amendment activates.
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct NFTokenMint<S: crate::views::source::FieldSource> {
     src: S,
 }
 
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+#[cfg(feature = "all-amendments")]
 impl NFTokenMint<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `NFTokenMint`.
     ///
@@ -7239,7 +7238,7 @@ impl NFTokenMint<crate::views::source::OtxnSource> {
     }
 }
 
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+#[cfg(feature = "all-amendments")]
 impl NFTokenMint<crate::views::source::SlotSource> {
     /// Views an already-loaded transaction slot as `NFTokenMint`, taking ownership
     /// of the slot.
@@ -7331,7 +7330,7 @@ impl NFTokenMint<crate::views::source::SlotSource> {
     }
 }
 
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+#[cfg(feature = "all-amendments")]
 impl<S: crate::views::source::FieldSource> NFTokenMint<S> {
     /// `sfNFTokenTaxon` — UInt32, `soeREQUIRED`.
     #[inline(always)]
@@ -7604,17 +7603,16 @@ impl<S: crate::views::source::FieldSource> NFTokenMint<S> {
 /// [`NFTokenBurn::from_slot`] (an already-loaded transaction slot); both check the
 /// transaction type before handing the view back.
 ///
-/// **Amendment not yet active** as of the vendored snapshot. Available
-/// by default so a hook can be written and tested against the shape in
-/// advance; excluded under the `active-amendments` cargo feature, which restricts
-/// this crate to what is live on Xahau today. Nothing on-ledger will match
-/// it until the amendment activates.
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct NFTokenBurn<S: crate::views::source::FieldSource> {
     src: S,
 }
 
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+#[cfg(feature = "all-amendments")]
 impl NFTokenBurn<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `NFTokenBurn`.
     ///
@@ -7628,7 +7626,7 @@ impl NFTokenBurn<crate::views::source::OtxnSource> {
     }
 }
 
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+#[cfg(feature = "all-amendments")]
 impl NFTokenBurn<crate::views::source::SlotSource> {
     /// Views an already-loaded transaction slot as `NFTokenBurn`, taking ownership
     /// of the slot.
@@ -7720,7 +7718,7 @@ impl NFTokenBurn<crate::views::source::SlotSource> {
     }
 }
 
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+#[cfg(feature = "all-amendments")]
 impl<S: crate::views::source::FieldSource> NFTokenBurn<S> {
     /// `sfNFTokenID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
@@ -7947,17 +7945,16 @@ impl<S: crate::views::source::FieldSource> NFTokenBurn<S> {
 /// [`NFTokenCreateOffer::from_slot`] (an already-loaded transaction slot); both check the
 /// transaction type before handing the view back.
 ///
-/// **Amendment not yet active** as of the vendored snapshot. Available
-/// by default so a hook can be written and tested against the shape in
-/// advance; excluded under the `active-amendments` cargo feature, which restricts
-/// this crate to what is live on Xahau today. Nothing on-ledger will match
-/// it until the amendment activates.
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct NFTokenCreateOffer<S: crate::views::source::FieldSource> {
     src: S,
 }
 
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+#[cfg(feature = "all-amendments")]
 impl NFTokenCreateOffer<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `NFTokenCreateOffer`.
     ///
@@ -7972,7 +7969,7 @@ impl NFTokenCreateOffer<crate::views::source::OtxnSource> {
     }
 }
 
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+#[cfg(feature = "all-amendments")]
 impl NFTokenCreateOffer<crate::views::source::SlotSource> {
     /// Views an already-loaded transaction slot as `NFTokenCreateOffer`, taking ownership
     /// of the slot.
@@ -8064,7 +8061,7 @@ impl NFTokenCreateOffer<crate::views::source::SlotSource> {
     }
 }
 
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+#[cfg(feature = "all-amendments")]
 impl<S: crate::views::source::FieldSource> NFTokenCreateOffer<S> {
     /// `sfNFTokenID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
@@ -8313,17 +8310,16 @@ impl<S: crate::views::source::FieldSource> NFTokenCreateOffer<S> {
 /// [`NFTokenCancelOffer::from_slot`] (an already-loaded transaction slot); both check the
 /// transaction type before handing the view back.
 ///
-/// **Amendment not yet active** as of the vendored snapshot. Available
-/// by default so a hook can be written and tested against the shape in
-/// advance; excluded under the `active-amendments` cargo feature, which restricts
-/// this crate to what is live on Xahau today. Nothing on-ledger will match
-/// it until the amendment activates.
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct NFTokenCancelOffer<S: crate::views::source::FieldSource> {
     src: S,
 }
 
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+#[cfg(feature = "all-amendments")]
 impl NFTokenCancelOffer<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `NFTokenCancelOffer`.
     ///
@@ -8338,7 +8334,7 @@ impl NFTokenCancelOffer<crate::views::source::OtxnSource> {
     }
 }
 
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+#[cfg(feature = "all-amendments")]
 impl NFTokenCancelOffer<crate::views::source::SlotSource> {
     /// Views an already-loaded transaction slot as `NFTokenCancelOffer`, taking ownership
     /// of the slot.
@@ -8430,7 +8426,7 @@ impl NFTokenCancelOffer<crate::views::source::SlotSource> {
     }
 }
 
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+#[cfg(feature = "all-amendments")]
 impl<S: crate::views::source::FieldSource> NFTokenCancelOffer<S> {
     /// `sfNFTokenOffers` — Vector256, `soeREQUIRED`.
     ///
@@ -8656,17 +8652,16 @@ impl<S: crate::views::source::FieldSource> NFTokenCancelOffer<S> {
 /// [`NFTokenAcceptOffer::from_slot`] (an already-loaded transaction slot); both check the
 /// transaction type before handing the view back.
 ///
-/// **Amendment not yet active** as of the vendored snapshot. Available
-/// by default so a hook can be written and tested against the shape in
-/// advance; excluded under the `active-amendments` cargo feature, which restricts
-/// this crate to what is live on Xahau today. Nothing on-ledger will match
-/// it until the amendment activates.
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct NFTokenAcceptOffer<S: crate::views::source::FieldSource> {
     src: S,
 }
 
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+#[cfg(feature = "all-amendments")]
 impl NFTokenAcceptOffer<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `NFTokenAcceptOffer`.
     ///
@@ -8681,7 +8676,7 @@ impl NFTokenAcceptOffer<crate::views::source::OtxnSource> {
     }
 }
 
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+#[cfg(feature = "all-amendments")]
 impl NFTokenAcceptOffer<crate::views::source::SlotSource> {
     /// Views an already-loaded transaction slot as `NFTokenAcceptOffer`, taking ownership
     /// of the slot.
@@ -8773,7 +8768,7 @@ impl NFTokenAcceptOffer<crate::views::source::SlotSource> {
     }
 }
 
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+#[cfg(feature = "all-amendments")]
 impl<S: crate::views::source::FieldSource> NFTokenAcceptOffer<S> {
     /// `sfNFTokenBuyOffer` — Hash256, `soeOPTIONAL`.
     ///
@@ -17945,17 +17940,16 @@ impl<S: crate::views::source::FieldSource> OracleDelete<S> {
 /// [`LedgerStateFix::from_slot`] (an already-loaded transaction slot); both check the
 /// transaction type before handing the view back.
 ///
-/// **Amendment not yet active** as of the vendored snapshot. Available
-/// by default so a hook can be written and tested against the shape in
-/// advance; excluded under the `active-amendments` cargo feature, which restricts
-/// this crate to what is live on Xahau today. Nothing on-ledger will match
-/// it until the amendment activates.
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct LedgerStateFix<S: crate::views::source::FieldSource> {
     src: S,
 }
 
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+#[cfg(feature = "all-amendments")]
 impl LedgerStateFix<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `LedgerStateFix`.
     ///
@@ -17969,7 +17963,7 @@ impl LedgerStateFix<crate::views::source::OtxnSource> {
     }
 }
 
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+#[cfg(feature = "all-amendments")]
 impl LedgerStateFix<crate::views::source::SlotSource> {
     /// Views an already-loaded transaction slot as `LedgerStateFix`, taking ownership
     /// of the slot.
@@ -18061,7 +18055,7 @@ impl LedgerStateFix<crate::views::source::SlotSource> {
     }
 }
 
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+#[cfg(feature = "all-amendments")]
 impl<S: crate::views::source::FieldSource> LedgerStateFix<S> {
     /// `sfLedgerFixType` — UInt16, `soeREQUIRED`.
     #[inline(always)]

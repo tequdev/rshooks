@@ -26,17 +26,16 @@ use crate::views::source::FieldSource as _;
 /// Build one with [`NFTokenOffer::from_keylet`] or [`NFTokenOffer::from_slot`]; both
 /// check `sfLedgerEntryType` before handing the view back.
 ///
-/// **Amendment not yet active** as of the vendored snapshot. Available
-/// by default so a hook can be written and tested against the shape in
-/// advance; excluded under the `active-amendments` cargo feature, which restricts
-/// this crate to what is live on Xahau today. Nothing on-ledger will match
-/// it until the amendment activates.
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct NFTokenOffer {
     src: crate::views::source::SlotSource,
 }
 
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+#[cfg(feature = "all-amendments")]
 impl NFTokenOffer {
     /// Loads the ledger object a keylet points at and views it as `NFTokenOffer`.
     ///
@@ -1298,17 +1297,16 @@ impl NegativeUNL {
 /// Build one with [`NFTokenPage::from_keylet`] or [`NFTokenPage::from_slot`]; both
 /// check `sfLedgerEntryType` before handing the view back.
 ///
-/// **Amendment not yet active** as of the vendored snapshot. Available
-/// by default so a hook can be written and tested against the shape in
-/// advance; excluded under the `active-amendments` cargo feature, which restricts
-/// this crate to what is live on Xahau today. Nothing on-ledger will match
-/// it until the amendment activates.
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct NFTokenPage {
     src: crate::views::source::SlotSource,
 }
 
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+#[cfg(feature = "all-amendments")]
 impl NFTokenPage {
     /// Loads the ledger object a keylet points at and views it as `NFTokenPage`.
     ///

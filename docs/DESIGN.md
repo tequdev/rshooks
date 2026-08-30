@@ -1272,7 +1272,7 @@ classifies every declared format, and the generator follows it.
 |---|---|
 | `active` | activated on Xahau mainnet |
 | `pending` | supported by xahaud, not yet activated |
-| `dormant` | gated by an amendment xahaud marks `Supported::no` (or depending on one), so it cannot activate on Xahau mainnet without a node upgrade — a custom network may still run it |
+| `dormant` | not expected to activate on Xahau mainnet — gated by an amendment xahaud marks `Supported::no` (or depending on one), or a curator judgment that Xahau will not adopt it (the NFToken family; Xahau ships URIToken instead) — a custom network may still run it |
 
 Every tier is *generated*; two cargo features on `rshooks` decide which ones
 compile:

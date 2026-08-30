@@ -740,17 +740,16 @@ impl HookParameter {
 /// Wrap a child slot with [`NFToken::from_slot`] — typically one an
 /// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
 ///
-/// **Amendment not yet active** as of the vendored snapshot. Available
-/// by default so a hook can be written and tested against the shape in
-/// advance; excluded under the `active-amendments` cargo feature, which restricts
-/// this crate to what is live on Xahau today. Nothing on-ledger will match
-/// it until the amendment activates.
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
+/// appear on Xahau mainnet — activating it would amendment-block the node.
+/// Needs the `all-amendments` cargo feature, which is there for a custom network
+/// whose operator knows otherwise. Enable it at your own judgment.
+#[cfg(feature = "all-amendments")]
 pub struct NFToken {
     src: crate::views::source::SlotSource,
 }
 
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+#[cfg(feature = "all-amendments")]
 impl NFToken {
     /// Views an already-navigated child slot as `NFToken`, taking ownership of
     /// the slot.

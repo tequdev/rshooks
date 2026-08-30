@@ -202,34 +202,39 @@ fn both_tables_name_the_same_fields_and_the_typed_one_gates_by_availability() {
         assert_eq!(cfg_of(n), None, "{n} is active and must not be gated");
     }
     // Pending: in by default, out under `active-amendments`. The `any(...)`
-    // form is what makes both-features-on resolve to "in" (widest wins).
-    for n in ["sfNFTokenTaxon", "sfNFTokenOffers"] {
-        assert_eq!(cfg_of(n).as_deref(), Some(PENDING), "{n} should be pending");
+    // form is what makes both-features-on resolve to "in" (widest wins). The
+    // tier is currently empty; every gated field below must carry one of the
+    // two known expressions, so a future pending field cannot invent a third.
+    for (n, cfg) in &typed {
+        if let Some(cfg) = cfg {
+            assert!(
+                cfg == PENDING || cfg == DORMANT,
+                "{n} carries an unknown gate: {cfg}",
+            );
+        }
     }
     // Dormant: only under `all-amendments`. `sfAsset`/`sfXChainBridge` get
-    // there by their formats; `sfCredentialIDs` by a `field_overrides` entry,
+    // there by their formats; `sfNFTokenTaxon` by the NFToken family's
+    // curator judgment; `sfCredentialIDs` by a `field_overrides` entry,
     // since `Payment` is active but `featureCredentials` is Supported::no.
-    for n in ["sfAsset", "sfAsset2", "sfXChainBridge", "sfCredentialIDs"] {
+    for n in [
+        "sfAsset",
+        "sfAsset2",
+        "sfXChainBridge",
+        "sfNFTokenTaxon",
+        "sfCredentialIDs",
+    ] {
         assert_eq!(cfg_of(n).as_deref(), Some(DORMANT), "{n} should be dormant");
     }
 }
 
-// The two checks above read source text. These two are the compile-time
-// half: they only exist in the feature state they describe, and `mise run
-// test` runs the suite in each state.
+// The checks above read source text. This one is the compile-time half: it
+// only exists in the feature state it describes, and `mise run test` runs
+// the suite in each state. (The pending tier is currently empty, so it has
+// no nameable-constant twin — restore one gated by the pending `any(...)`
+// expression if a field ever moves back to `pending`.)
 
-/// Pending shapes are part of the default surface — and stay part of it when
-/// both features are on, which is the widest-wins rule. This test carries the
-/// *same* cfg expression the pending constants do, so it exists in exactly
-/// the states where they do: it would fail to compile if the two ever
-/// disagreed.
-#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
-#[test]
-fn a_pending_constant_is_nameable_unless_narrowed() {
-    assert_eq!(sfNFTokenTaxon.code(), rshooks::raw::sfcodes::sfNFTokenTaxon);
-}
-
-/// ...and dormant ones are not, until asked for.
+/// A dormant constant is not nameable until asked for.
 #[cfg(feature = "all-amendments")]
 #[test]
 fn a_dormant_constant_is_nameable_under_all_amendments() {

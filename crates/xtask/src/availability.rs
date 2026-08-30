@@ -197,9 +197,11 @@ const DOC: &[&str] = &[
     "",
     "  active   activated on Xahau mainnet.",
     "  pending  supported by the node, not yet activated.",
-    "  dormant  gated by an amendment features.macro marks Supported::no",
-    "           (or depending on one), so it cannot activate on Xahau mainnet",
-    "           -- though a custom network may still run it.",
+    "  dormant  not expected to activate on Xahau mainnet -- either gated by",
+    "           an amendment features.macro marks Supported::no (or depending",
+    "           on one), or a curator judgment that Xahau will not adopt it",
+    "           (the NFToken family: Xahau ships URIToken instead). A custom",
+    "           network may still run it.",
     "",
     "Every tier is generated. Two cargo features on the rshooks crate decide",
     "which ones compile:",
@@ -270,9 +272,10 @@ const DOC: &[&str] = &[
     "unconditionally on and is absent from the Amendments object (Escrow,",
     "PaymentChannels, MultiSign and friends are retired in features.macro).",
     "Never demote a format to `dormant` because its amendment is missing",
-    "from that list. The dormant criterion is and stays `Supported::no` in",
-    "the vendored features.macro; the ledger check only distinguishes",
-    "`active` from `pending` among amendments features.macro still tracks.",
+    "from that list. Demotion needs either `Supported::no` in the vendored",
+    "features.macro or an explicit curator judgment; the ledger check only",
+    "distinguishes `active` from `pending` among amendments features.macro",
+    "still tracks.",
 ];
 
 impl FormatAvailability {
