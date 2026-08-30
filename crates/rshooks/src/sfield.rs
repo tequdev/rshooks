@@ -27,21 +27,26 @@
 //! it carries a constant only for a field some usable format references.
 //! `crates/rshooks-core/format_availability.json` classifies every format:
 //!
-//! - a field referenced by at least one **active** format is here normally;
+//! - a field referenced by at least one **active** format is always here;
 //! - a field whose best format is **pending** (supported by xahaud, not yet
-//!   activated on Xahau) is here behind the `pending-amendments` cargo
-//!   feature, alongside the views that read it;
+//!   activated on Xahau) is here by default, alongside the views that read
+//!   it, and excluded under the `active-amendments` cargo feature;
 //! - a field referenced only by **dormant** formats — gated by an amendment
-//!   xahaud marks `Supported::no`, so it cannot activate on Xahau without a
-//!   node upgrade — has **no typed constant**. `sfAsset` (AMM) and
-//!   `sfXChainBridge` (XChainBridge) are the shape of that group.
-//! - a field **no** format references is structural rather than
-//!   amendment-borne — metadata, hash and index plumbing — and stays.
+//!   xahaud marks `Supported::no`, so no Xahau object can carry it — needs
+//!   the `all-amendments` feature. `sfAsset` (AMM) and `sfXChainBridge`
+//!   (XChainBridge) are the shape of that group;
+//! - a field **no** format references is usually structural rather than
+//!   amendment-borne — metadata, hash and index plumbing — and stays. Where
+//!   that inference is wrong in either direction,
+//!   `format_availability.json`'s `field_overrides` corrects it:
+//!   `sfCredentialIDs` sits on an active `Payment` but needs a
+//!   `Supported::no` amendment, so it is overridden to dormant.
 //!
-//! Nothing is lost: the raw `u32` is always available as
+//! Nothing is lost in any state: the raw `u32` is always available as
 //! `rshooks::raw::sfcodes::sfXxx`, and every API that takes a field code
-//! takes `impl Into<u32>`. What the omission buys is that this table cannot
-//! offer an autocomplete entry for a field no Xahau object can contain.
+//! takes `impl Into<u32>`. What the gating buys is that the default table
+//! cannot offer an autocomplete entry for a field no Xahau object can
+//! contain.
 //!
 //! [`crate::tx_type::TxType`] and [`crate::ledger_entry_type::LedgerEntryType`]
 //! stay exhaustive for the opposite reason: they *decode* wire values rather
