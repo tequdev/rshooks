@@ -614,10 +614,6 @@ mod tests {
             otxn_field_typed(crate::sfield::sfExchangeRate),
             Err(HookError::NotImplemented)
         );
-        // `sfClaimCurrency` rather than `sfLockingChainIssue`: both are
-        // ISSUE-typed, but the latter is reachable only inside the opaque
-        // `sfXChainBridge` wire type of a dormant format, so
-        // `format_availability.json` overrides it out of the typed table.
         assert_eq!(
             otxn_field_typed(crate::sfield::sfClaimCurrency),
             Err(HookError::NotImplemented)

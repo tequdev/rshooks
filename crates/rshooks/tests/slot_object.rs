@@ -43,11 +43,6 @@ fn surface() {
     let _: SField<u8> = sfCloseResolution;
     let _: SField<u16> = sfTransactionType;
     let _: SField<STObject> = sfMemo;
-    // `sfClaimCurrency` rather than `sfAsset`: both are ISSUE-typed, but
-    // `sfAsset` belongs only to the AMM formats, which
-    // `format_availability.json` classifies `dormant` (featureAMM is
-    // Supported::no in xahaud), so the typed layer no longer carries it.
-    // `sfClaimCurrency` is on `ClaimReward`, which is active on Xahau.
     let _: SField<Issue> = sfClaimCurrency;
     // Blob / Hash160 / PathSet -> Opaque
     let _: SField<Opaque> = sfSigningPubKey;
