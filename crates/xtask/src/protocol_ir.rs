@@ -763,6 +763,11 @@ mod tests {
         let text = serde_json::to_string(&f).unwrap_or_else(|e| panic!("{e}"));
         let round_tripped: ProtocolFormats =
             serde_json::from_str(&text).unwrap_or_else(|e| panic!("{e}"));
+        // The view renderers also read the curated availability
+        // classification; the JSON hop must not perturb them either.
+        let av: crate::availability::FormatAvailability =
+            serde_json::from_str(include_str!("../../rshooks-core/format_availability.json"))
+                .unwrap_or_else(|e| panic!("{e}"));
 
         for (label, direct, hopped) in [
             (
@@ -777,18 +782,18 @@ mod tests {
             ),
             (
                 "views/tx.rs",
-                crate::codegen::views::generate_tx(&f),
-                crate::codegen::views::generate_tx(&round_tripped),
+                crate::codegen::views::generate_tx(&f, &av),
+                crate::codegen::views::generate_tx(&round_tripped, &av),
             ),
             (
                 "views/ledger.rs",
-                crate::codegen::views::generate_ledger(&f),
-                crate::codegen::views::generate_ledger(&round_tripped),
+                crate::codegen::views::generate_ledger(&f, &av),
+                crate::codegen::views::generate_ledger(&round_tripped, &av),
             ),
             (
                 "views/inner.rs",
-                crate::codegen::views::generate_inner(&f),
-                crate::codegen::views::generate_inner(&round_tripped),
+                crate::codegen::views::generate_inner(&f, &av),
+                crate::codegen::views::generate_inner(&round_tripped, &av),
             ),
         ] {
             let direct = direct.unwrap_or_else(|e| panic!("{label}: {e:#}"));

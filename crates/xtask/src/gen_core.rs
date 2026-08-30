@@ -22,6 +22,7 @@ use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 
+use crate::availability::FormatAvailability;
 use crate::codegen;
 use crate::ir::{self, HookApiSpec};
 use crate::protocol_ir::{self, ProtocolFormats};
@@ -72,6 +73,13 @@ const HOOK_API_JSON: &str = "hook_api.json";
 /// [`HOOK_API_JSON`]: the protocol format artifact (module docs on
 /// [`crate::protocol_ir`]).
 const PROTOCOL_FORMATS_JSON: &str = "protocol_formats.json";
+
+/// The curated availability classification checked in beside
+/// [`PROTOCOL_FORMATS_JSON`]: which formats a hook may actually use on
+/// Xahau (module docs on [`crate::availability`]). Unlike every other file
+/// this module writes, it is **not** derived — `gen-core` only ever appends
+/// newly declared formats to it as `dormant`, and a human curates the rest.
+const FORMAT_AVAILABILITY_JSON: &str = "format_availability.json";
 
 /// Repo root, resolved from this crate's own manifest directory
 /// (`crates/xtask`, two levels below the workspace root) at compile time —
@@ -192,6 +200,25 @@ fn build_protocol_formats_json(hook_api_json: &str) -> Result<String> {
     Ok(again)
 }
 
+/// Reads the curated availability classification, or an empty one if the
+/// file does not exist yet (the first `gen-core` run creates it).
+fn read_format_availability() -> Result<FormatAvailability> {
+    let path = crate_dir().join(FORMAT_AVAILABILITY_JSON);
+    if !path.exists() {
+        return Ok(FormatAvailability::empty());
+    }
+    let text = read(&path)?;
+    serde_json::from_str(&text).with_context(|| format!("deserializing {}", path.display()))
+}
+
+/// Renders the classification back to canonical JSON (trailing newline,
+/// key-sorted maps, so a re-tiering is a one-line diff).
+fn render_format_availability(a: &FormatAvailability) -> Result<String> {
+    let mut json = serde_json::to_string_pretty(a).context("serializing FormatAvailability")?;
+    json.push('\n');
+    Ok(json)
+}
+
 /// Generates every target `.rs` file's *unformatted* content, keyed by its
 /// `src/`-relative filename, from the two artifact texts that get written to
 /// (or checked against) `crates/rshooks-core/hook_api.json` and
@@ -245,6 +272,7 @@ fn generate_rust_files(
 fn generate_rshooks_files(
     hook_api_json: &str,
     protocol_formats_json: &str,
+    availability: &FormatAvailability,
 ) -> Result<BTreeMap<&'static str, String>> {
     let spec: HookApiSpec =
         serde_json::from_str(hook_api_json).context("deserializing hook_api.json")?;
@@ -252,18 +280,32 @@ fn generate_rshooks_files(
         .context("deserializing protocol_formats.json")?;
 
     let mut out = BTreeMap::new();
-    out.insert("sfield.rs", codegen::sfield::generate(&spec.sfcodes)?);
+    // `sfield.rs` is the ergonomic typed layer, so it follows availability:
+    // a constant whose every format is dormant is not rendered, and one whose
+    // best format is pending is rendered behind the feature. The raw
+    // `sfcodes.rs` table above stays a complete 1:1 mirror — see
+    // `codegen::sfield`'s module docs for where that line is drawn and why.
+    out.insert(
+        "sfield.rs",
+        codegen::sfield::generate(&spec.sfcodes, &availability.field_tiers(&formats))?,
+    );
     out.insert("tx_type.rs", codegen::tx_type::generate(&spec.tts)?);
     out.insert(
         "ledger_entry_type.rs",
         codegen::ledger_entry_type::generate(&formats.ledger_entries)?,
     );
-    out.insert("views/tx.rs", codegen::views::generate_tx(&formats)?);
+    out.insert(
+        "views/tx.rs",
+        codegen::views::generate_tx(&formats, availability)?,
+    );
     out.insert(
         "views/ledger.rs",
-        codegen::views::generate_ledger(&formats)?,
+        codegen::views::generate_ledger(&formats, availability)?,
     );
-    out.insert("views/inner.rs", codegen::views::generate_inner(&formats)?);
+    out.insert(
+        "views/inner.rs",
+        codegen::views::generate_inner(&formats, availability)?,
+    );
 
     for name in GENERATED_FILES_HOOKS_LIB {
         if !out.contains_key(name) {
@@ -348,9 +390,21 @@ fn format_all(
 pub fn run_update() -> Result<()> {
     let hook_api_json = build_hook_api_json()?;
     let protocol_formats_json = build_protocol_formats_json(&hook_api_json)?;
+
+    // The one automatic edit this file ever gets: a format the artifact
+    // declares and nobody has classified is appended as `dormant`, so a
+    // newly vendored format is unusable until a human says otherwise.
+    let formats: ProtocolFormats = serde_json::from_str(&protocol_formats_json)
+        .context("deserializing protocol_formats.json")?;
+    let mut availability = read_format_availability()?;
+    let added = availability.auto_add(&formats);
+    availability.validate(&formats)?;
+    let availability_json = render_format_availability(&availability)?;
+
     let generated = generate_rust_files(&hook_api_json, &protocol_formats_json)?;
     let formatted = format_all(&generated)?;
-    let generated_rshooks = generate_rshooks_files(&hook_api_json, &protocol_formats_json)?;
+    let generated_rshooks =
+        generate_rshooks_files(&hook_api_json, &protocol_formats_json, &availability)?;
     let formatted_rshooks = format_all(&generated_rshooks)?;
 
     let json_path = crate_dir().join(HOOK_API_JSON);
@@ -362,6 +416,21 @@ pub fn run_update() -> Result<()> {
     fs::write(&protocol_json_path, &protocol_formats_json)
         .with_context(|| format!("writing {}", protocol_json_path.display()))?;
     println!("wrote {}", protocol_json_path.display());
+
+    let availability_path = crate_dir().join(FORMAT_AVAILABILITY_JSON);
+    fs::write(&availability_path, &availability_json)
+        .with_context(|| format!("writing {}", availability_path.display()))?;
+    println!("wrote {}", availability_path.display());
+    for name in &added {
+        println!("  classified {name} as `dormant` (newly declared upstream)");
+    }
+    if !added.is_empty() {
+        println!(
+            "  {} format(s) added as `dormant`; move any that should be usable to \
+             `pending` or `active` in {FORMAT_AVAILABILITY_JSON}",
+            added.len()
+        );
+    }
 
     let dir = src_dir();
     for (name, content) in &formatted {
@@ -399,9 +468,21 @@ pub fn run_update() -> Result<()> {
 pub fn run_check() -> Result<()> {
     let hook_api_json = build_hook_api_json()?;
     let protocol_formats_json = build_protocol_formats_json(&hook_api_json)?;
+
+    // Unlike the derived artifacts, a stale classification is an *error*
+    // rather than a diff to regenerate: only a human can decide a tier, so
+    // the message points at `gen-core` (which appends the missing ones as
+    // `dormant`) instead of silently rendering as if they were.
+    let formats: ProtocolFormats = serde_json::from_str(&protocol_formats_json)
+        .context("deserializing protocol_formats.json")?;
+    let availability = read_format_availability()?;
+    availability.validate(&formats)?;
+    let availability_json = render_format_availability(&availability)?;
+
     let generated = generate_rust_files(&hook_api_json, &protocol_formats_json)?;
     let formatted = format_all(&generated)?;
-    let generated_rshooks = generate_rshooks_files(&hook_api_json, &protocol_formats_json)?;
+    let generated_rshooks =
+        generate_rshooks_files(&hook_api_json, &protocol_formats_json, &availability)?;
     let formatted_rshooks = format_all(&generated_rshooks)?;
 
     let mut mismatched = Vec::new();
@@ -414,6 +495,15 @@ pub fn run_check() -> Result<()> {
     // `unwrap_or_default` makes a missing artifact a mismatch, not an I/O
     // error: "not generated yet" and "generated but stale" are the same
     // failure to a CI job.
+    // Formatting drift in the curated file (someone hand-edited it into a
+    // different shape) is a plain staleness mismatch, since `gen-core`
+    // rewrites it canonically.
+    let availability_on_disk =
+        read(&crate_dir().join(FORMAT_AVAILABILITY_JSON)).unwrap_or_default();
+    if availability_json != availability_on_disk {
+        mismatched.push(FORMAT_AVAILABILITY_JSON);
+    }
+
     let protocol_json_on_disk = read(&crate_dir().join(PROTOCOL_FORMATS_JSON)).unwrap_or_default();
     if protocol_formats_json != protocol_json_on_disk {
         mismatched.push(PROTOCOL_FORMATS_JSON);
