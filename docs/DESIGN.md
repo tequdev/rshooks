@@ -1282,6 +1282,15 @@ The decisions behind it:
   is a fact about ledger state that no file in this repository can answer.
   So it is a hand-maintained list, checked in beside `protocol_formats.json`
   and outside `vendor/`.
+- **Verified against the ledger, not guessed.** The current tiers were
+  checked against Xahau mainnet's `Amendments` object (validated ledger
+  25441901, 2026-08-30). The artifact's own `doc` block carries the
+  snapshot, the `sha512half(feature_name) ∈ Amendments` membership recipe
+  as a runnable one-liner, and the caveat that makes it safe: a **retired**
+  amendment is unconditionally on and absent from that object, so absence
+  is never grounds to demote a format to `dormant`. The ledger check only
+  separates `active` from `pending`; `Supported::no` remains the sole
+  `dormant` criterion.
 - **One automatic mutation, in the safe direction.** `gen-core` appends any
   newly declared format as `dormant` and does nothing else; moving an entry
   between tiers is a human decision. A newly vendored format is therefore

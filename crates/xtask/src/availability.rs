@@ -26,9 +26,13 @@
 //!   `Supported::no`, or depending on one). Not generated at all.
 //!
 //! The `Supported::no` half is objective and checkable against the vendored
-//! `features.macro`. The active/pending split is a judgment about ledger
-//! state, which no file in this repository can answer — hence a curated,
-//! hand-reviewed list rather than a derivation.
+//! `features.macro`. The active/pending split is a fact about ledger state,
+//! which no file in this repository can answer — hence a curated list rather
+//! than a derivation. It is not guesswork either: [`DOC`] (reproduced into
+//! the artifact itself) records the mainnet snapshot the current tiers were
+//! verified against and the `sha512half(feature_name) ∈ Amendments`
+//! membership recipe to re-verify them, along with the retired-amendment
+//! caveat that makes absence from that list *not* evidence of dormancy.
 //!
 //! # The one automatic mutation
 //!
@@ -147,6 +151,38 @@ const DOC: &[&str] = &[
     "and the TxType/LedgerEntryType decoders stay complete regardless: they",
     "mirror the wire protocol, and a decoder that cannot name a code it might",
     "receive is worse than one that can.",
+    "",
+    "=== HOW THE active/pending SPLIT WAS VERIFIED ===",
+    "",
+    "Snapshot: Xahau mainnet, validated ledger 25441901, 2026-08-30,",
+    "via https://xahau.network. The Amendments ledger object at index",
+    "7DB0788C020F02780A673DC74757F23823FA3014C1866E72CC4CD8B226CD6EF4",
+    "listed 74 activated amendment hashes.",
+    "",
+    "An amendment is identified on-ledger by its hash, not its name:",
+    "",
+    "  amendment_id = sha512half(feature_name)   # first 32 bytes of SHA-512",
+    "                                            # of the ASCII name, e.g. \"Cron\"",
+    "",
+    "So the membership test for one amendment is:",
+    "",
+    "  curl -s https://xahau.network -H 'Content-Type: application/json' -d '{",
+    "    \"method\":\"ledger_entry\",",
+    "    \"params\":[{\"index\":\"7DB0788C020F02780A673DC74757F23823FA3014C1866E72CC4CD8B226CD6EF4\",",
+    "                \"ledger_index\":\"validated\"}]}' \\",
+    "  | python3 -c 'import sys,json,hashlib;",
+    "      n=sys.argv[1].encode();",
+    "      h=hashlib.sha512(n).hexdigest()[:64].upper();",
+    "      a=json.load(sys.stdin)[\"result\"][\"node\"][\"Amendments\"];",
+    "      print(sys.argv[1], h in a)' Cron",
+    "",
+    "CAVEAT — absence proves nothing on its own. A RETIRED amendment is",
+    "unconditionally on and is absent from the Amendments object (Escrow,",
+    "PaymentChannels, MultiSign and friends are retired in features.macro).",
+    "Never demote a format to `dormant` because its amendment is missing",
+    "from that list. The dormant criterion is and stays `Supported::no` in",
+    "the vendored features.macro; the ledger check only distinguishes",
+    "`active` from `pending` among amendments features.macro still tracks.",
 ];
 
 impl FormatAvailability {

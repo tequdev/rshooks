@@ -1047,17 +1047,10 @@ impl MintURIToken {
 ///
 /// Wrap a child slot with [`Remark::from_slot`] — typically one an
 /// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
-///
-/// **Amendment not yet active** as of the vendored snapshot, so this
-/// shape is generated behind the `pending-amendments` cargo feature. Nothing on
-/// Xahau will match it until the amendment activates; it is here so a
-/// hook can be written and tested against the shape in advance.
-#[cfg(feature = "pending-amendments")]
 pub struct Remark {
     src: crate::views::source::SlotSource,
 }
 
-#[cfg(feature = "pending-amendments")]
 impl Remark {
     /// Views an already-navigated child slot as `Remark`, taking ownership of
     /// the slot.
@@ -1119,17 +1112,10 @@ impl Remark {
 ///
 /// Wrap a child slot with [`PriceData::from_slot`] — typically one an
 /// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
-///
-/// **Amendment not yet active** as of the vendored snapshot, so this
-/// shape is generated behind the `pending-amendments` cargo feature. Nothing on
-/// Xahau will match it until the amendment activates; it is here so a
-/// hook can be written and tested against the shape in advance.
-#[cfg(feature = "pending-amendments")]
 pub struct PriceData {
     src: crate::views::source::SlotSource,
 }
 
-#[cfg(feature = "pending-amendments")]
 impl PriceData {
     /// Views an already-navigated child slot as `PriceData`, taking ownership of
     /// the slot.
@@ -1186,17 +1172,10 @@ impl PriceData {
 ///
 /// Wrap a child slot with [`HighReward::from_slot`] — typically one an
 /// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
-///
-/// **Amendment not yet active** as of the vendored snapshot, so this
-/// shape is generated behind the `pending-amendments` cargo feature. Nothing on
-/// Xahau will match it until the amendment activates; it is here so a
-/// hook can be written and tested against the shape in advance.
-#[cfg(feature = "pending-amendments")]
 pub struct HighReward {
     src: crate::views::source::SlotSource,
 }
 
-#[cfg(feature = "pending-amendments")]
 impl HighReward {
     /// Views an already-navigated child slot as `HighReward`, taking ownership of
     /// the slot.
@@ -1249,17 +1228,10 @@ impl HighReward {
 ///
 /// Wrap a child slot with [`LowReward::from_slot`] — typically one an
 /// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
-///
-/// **Amendment not yet active** as of the vendored snapshot, so this
-/// shape is generated behind the `pending-amendments` cargo feature. Nothing on
-/// Xahau will match it until the amendment activates; it is here so a
-/// hook can be written and tested against the shape in advance.
-#[cfg(feature = "pending-amendments")]
 pub struct LowReward {
     src: crate::views::source::SlotSource,
 }
 
-#[cfg(feature = "pending-amendments")]
 impl LowReward {
     /// Views an already-navigated child slot as `LowReward`, taking ownership of
     /// the slot.

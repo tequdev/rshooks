@@ -184,17 +184,10 @@ impl NFTokenOffer {
 ///
 /// Build one with [`Cron::from_keylet`] or [`Cron::from_slot`]; both
 /// check `sfLedgerEntryType` before handing the view back.
-///
-/// **Amendment not yet active** as of the vendored snapshot, so this
-/// shape is generated behind the `pending-amendments` cargo feature. Nothing on
-/// Xahau will match it until the amendment activates; it is here so a
-/// hook can be written and tested against the shape in advance.
-#[cfg(feature = "pending-amendments")]
 pub struct Cron {
     src: crate::views::source::SlotSource,
 }
 
-#[cfg(feature = "pending-amendments")]
 impl Cron {
     /// Loads the ledger object a keylet points at and views it as `Cron`.
     ///
@@ -4248,17 +4241,10 @@ impl PayChannel {
 ///
 /// Build one with [`Oracle::from_keylet`] or [`Oracle::from_slot`]; both
 /// check `sfLedgerEntryType` before handing the view back.
-///
-/// **Amendment not yet active** as of the vendored snapshot, so this
-/// shape is generated behind the `pending-amendments` cargo feature. Nothing on
-/// Xahau will match it until the amendment activates; it is here so a
-/// hook can be written and tested against the shape in advance.
-#[cfg(feature = "pending-amendments")]
 pub struct Oracle {
     src: crate::views::source::SlotSource,
 }
 
-#[cfg(feature = "pending-amendments")]
 impl Oracle {
     /// Loads the ledger object a keylet points at and views it as `Oracle`.
     ///

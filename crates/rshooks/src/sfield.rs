@@ -80,11 +80,6 @@ pub const sfMethod: SField<u8> = SField::new((16 << 16) + 2);
 /// C: `sfTransactionResult` (sfcodes.h) — UInt8, read as [`u8`].
 pub const sfTransactionResult: SField<u8> = SField::new((16 << 16) + 3);
 /// C: `sfScale` (sfcodes.h) — UInt8, read as [`u8`].
-///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
 pub const sfScale: SField<u8> = SField::new((16 << 16) + 4);
 /// C: `sfTickSize` (sfcodes.h) — UInt8, read as [`u8`].
 pub const sfTickSize: SField<u8> = SField::new((16 << 16) + 16);
@@ -153,11 +148,6 @@ pub const sfOwnerCount: SField<u32> = SField::new((2 << 16) + 13);
 /// C: `sfDestinationTag` (sfcodes.h) — UInt32, read as [`u32`].
 pub const sfDestinationTag: SField<u32> = SField::new((2 << 16) + 14);
 /// C: `sfLastUpdateTime` (sfcodes.h) — UInt32, read as [`u32`].
-///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
 pub const sfLastUpdateTime: SField<u32> = SField::new((2 << 16) + 15);
 /// C: `sfHighQualityIn` (sfcodes.h) — UInt32, read as [`u32`].
 pub const sfHighQualityIn: SField<u32> = SField::new((2 << 16) + 16);
@@ -231,32 +221,12 @@ pub const sfLockCount: SField<u32> = SField::new((2 << 16) + 49);
 /// C: `sfFirstNFTokenSequence` (sfcodes.h) — UInt32, read as [`u32`].
 pub const sfFirstNFTokenSequence: SField<u32> = SField::new((2 << 16) + 50);
 /// C: `sfOracleDocumentID` (sfcodes.h) — UInt32, read as [`u32`].
-///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
 pub const sfOracleDocumentID: SField<u32> = SField::new((2 << 16) + 51);
 /// C: `sfStartTime` (sfcodes.h) — UInt32, read as [`u32`].
-///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
 pub const sfStartTime: SField<u32> = SField::new((2 << 16) + 93);
 /// C: `sfRepeatCount` (sfcodes.h) — UInt32, read as [`u32`].
-///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
 pub const sfRepeatCount: SField<u32> = SField::new((2 << 16) + 94);
 /// C: `sfDelaySeconds` (sfcodes.h) — UInt32, read as [`u32`].
-///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
 pub const sfDelaySeconds: SField<u32> = SField::new((2 << 16) + 95);
 /// C: `sfXahauActivationLgrSeq` (sfcodes.h) — UInt32, read as [`u32`].
 pub const sfXahauActivationLgrSeq: SField<u32> = SField::new((2 << 16) + 96);
@@ -306,11 +276,6 @@ pub const sfHookReturnCode: SField<u64> = SField::new((3 << 16) + 18);
 /// C: `sfReferenceCount` (sfcodes.h) — UInt64, read as [`u64`].
 pub const sfReferenceCount: SField<u64> = SField::new((3 << 16) + 19);
 /// C: `sfAssetPrice` (sfcodes.h) — UInt64, read as [`u64`].
-///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
 pub const sfAssetPrice: SField<u64> = SField::new((3 << 16) + 23);
 /// C: `sfTouchCount` (sfcodes.h) — UInt64, read as [`u64`].
 pub const sfTouchCount: SField<u64> = SField::new((3 << 16) + 97);
@@ -357,11 +322,6 @@ pub const sfEmitNonce: SField<crate::types::Hash> = SField::new((5 << 16) + 12);
 /// C: `sfEmitHookHash` (sfcodes.h) — Hash256, read as [`crate::types::Hash`].
 pub const sfEmitHookHash: SField<crate::types::Hash> = SField::new((5 << 16) + 13);
 /// C: `sfObjectID` (sfcodes.h) — Hash256, read as [`crate::types::Hash`].
-///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
 pub const sfObjectID: SField<crate::types::Hash> = SField::new((5 << 16) + 14);
 /// C: `sfAMMID` (sfcodes.h) — Hash256, read as [`crate::types::Hash`].
 pub const sfAMMID: SField<crate::types::Hash> = SField::new((5 << 16) + 15);
@@ -487,11 +447,6 @@ pub const sfReserveBaseDrops: SField<crate::types::Amount> = SField::new((6 << 1
 /// C: `sfReserveIncrementDrops` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
 pub const sfReserveIncrementDrops: SField<crate::types::Amount> = SField::new((6 << 16) + 24);
 /// C: `sfTrustLineRewardAccumulator` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
-///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
 pub const sfTrustLineRewardAccumulator: SField<crate::types::Amount> = SField::new((6 << 16) + 99);
 /// C: `sfPublicKey` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
 pub const sfPublicKey: SField<crate::types::Opaque> = SField::new((7 << 16) + 1);
@@ -544,34 +499,14 @@ pub const sfHookParameterValue: SField<crate::types::Opaque> = SField::new((7 <<
 /// C: `sfBlob` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
 pub const sfBlob: SField<crate::types::Opaque> = SField::new((7 << 16) + 26);
 /// C: `sfAssetClass` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
-///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
 pub const sfAssetClass: SField<crate::types::Opaque> = SField::new((7 << 16) + 29);
 /// C: `sfProvider` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
-///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
 pub const sfProvider: SField<crate::types::Opaque> = SField::new((7 << 16) + 30);
 /// C: `sfHookName` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
 pub const sfHookName: SField<crate::types::Opaque> = SField::new((7 << 16) + 97);
 /// C: `sfRemarkValue` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
-///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
 pub const sfRemarkValue: SField<crate::types::Opaque> = SField::new((7 << 16) + 98);
 /// C: `sfRemarkName` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
-///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
 pub const sfRemarkName: SField<crate::types::Opaque> = SField::new((7 << 16) + 99);
 /// C: `sfAccount` (sfcodes.h) — AccountID, read as [`crate::types::AccountId`].
 pub const sfAccount: SField<crate::types::AccountId> = SField::new((8 << 16) + 1);
@@ -592,11 +527,6 @@ pub const sfNFTokenMinter: SField<crate::types::AccountId> = SField::new((8 << 1
 /// C: `sfEmitCallback` (sfcodes.h) — AccountID, read as [`crate::types::AccountId`].
 pub const sfEmitCallback: SField<crate::types::AccountId> = SField::new((8 << 16) + 10);
 /// C: `sfHolder` (sfcodes.h) — AccountID, read as [`crate::types::AccountId`].
-///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
 pub const sfHolder: SField<crate::types::AccountId> = SField::new((8 << 16) + 11);
 /// C: `sfHookAccount` (sfcodes.h) — AccountID, read as [`crate::types::AccountId`].
 pub const sfHookAccount: SField<crate::types::AccountId> = SField::new((8 << 16) + 16);
@@ -628,18 +558,8 @@ pub const sfURITokenIDs: SField<crate::types::Opaque> = SField::new((19 << 16) +
 /// C: `sfPaths` (sfcodes.h) — PathSet, read as [`crate::types::Opaque`].
 pub const sfPaths: SField<crate::types::Opaque> = SField::new((18 << 16) + 1);
 /// C: `sfBaseAsset` (sfcodes.h) — Currency, read as [`crate::types::CurrencyCode`].
-///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
 pub const sfBaseAsset: SField<crate::types::CurrencyCode> = SField::new((26 << 16) + 1);
 /// C: `sfQuoteAsset` (sfcodes.h) — Currency, read as [`crate::types::CurrencyCode`].
-///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
 pub const sfQuoteAsset: SField<crate::types::CurrencyCode> = SField::new((26 << 16) + 2);
 /// C: `sfLockingChainIssue` (sfcodes.h) — Issue, read as [`crate::types::Issue`].
 pub const sfLockingChainIssue: SField<crate::types::Issue> = SField::new((24 << 16) + 1);
@@ -693,11 +613,6 @@ pub const sfHookParameter: SField<crate::types::STObject> = SField::new((14 << 1
 /// C: `sfHookGrant` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
 pub const sfHookGrant: SField<crate::types::STObject> = SField::new((14 << 16) + 24);
 /// C: `sfPriceData` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
-///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
 pub const sfPriceData: SField<crate::types::STObject> = SField::new((14 << 16) + 32);
 /// C: `sfAmountEntry` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
 pub const sfAmountEntry: SField<crate::types::STObject> = SField::new((14 << 16) + 91);
@@ -712,11 +627,6 @@ pub const sfActiveValidator: SField<crate::types::STObject> = SField::new((14 <<
 /// C: `sfGenesisMint` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
 pub const sfGenesisMint: SField<crate::types::STObject> = SField::new((14 << 16) + 96);
 /// C: `sfRemark` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
-///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
 pub const sfRemark: SField<crate::types::STObject> = SField::new((14 << 16) + 97);
 /// C: `sfHighReward` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
 pub const sfHighReward: SField<crate::types::STObject> = SField::new((14 << 16) + 98);
@@ -756,11 +666,6 @@ pub const sfHookParameters: SField<crate::types::STArray> = SField::new((15 << 1
 /// C: `sfHookGrants` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
 pub const sfHookGrants: SField<crate::types::STArray> = SField::new((15 << 16) + 20);
 /// C: `sfPriceDataSeries` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
-///
-/// **Amendment not yet active** as of the vendored snapshot: every format
-/// declaring this field is `pending`, so the constant is generated behind
-/// the `pending-amendments` cargo feature alongside those views.
-#[cfg(feature = "pending-amendments")]
 pub const sfPriceDataSeries: SField<crate::types::STArray> = SField::new((15 << 16) + 24);
 /// C: `sfAuthorizeCredentials` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
 pub const sfAuthorizeCredentials: SField<crate::types::STArray> = SField::new((15 << 16) + 26);
@@ -804,7 +709,6 @@ mod parity {
             ::rshooks_core::sfcodes::sfTransactionResult,
             "sfTransactionResult"
         );
-        #[cfg(feature = "pending-amendments")]
         assert_eq!(
             super::sfScale.code(),
             ::rshooks_core::sfcodes::sfScale,
@@ -952,7 +856,6 @@ mod parity {
             ::rshooks_core::sfcodes::sfDestinationTag,
             "sfDestinationTag"
         );
-        #[cfg(feature = "pending-amendments")]
         assert_eq!(
             super::sfLastUpdateTime.code(),
             ::rshooks_core::sfcodes::sfLastUpdateTime,
@@ -1124,25 +1027,21 @@ mod parity {
             ::rshooks_core::sfcodes::sfFirstNFTokenSequence,
             "sfFirstNFTokenSequence"
         );
-        #[cfg(feature = "pending-amendments")]
         assert_eq!(
             super::sfOracleDocumentID.code(),
             ::rshooks_core::sfcodes::sfOracleDocumentID,
             "sfOracleDocumentID"
         );
-        #[cfg(feature = "pending-amendments")]
         assert_eq!(
             super::sfStartTime.code(),
             ::rshooks_core::sfcodes::sfStartTime,
             "sfStartTime"
         );
-        #[cfg(feature = "pending-amendments")]
         assert_eq!(
             super::sfRepeatCount.code(),
             ::rshooks_core::sfcodes::sfRepeatCount,
             "sfRepeatCount"
         );
-        #[cfg(feature = "pending-amendments")]
         assert_eq!(
             super::sfDelaySeconds.code(),
             ::rshooks_core::sfcodes::sfDelaySeconds,
@@ -1254,7 +1153,6 @@ mod parity {
             ::rshooks_core::sfcodes::sfReferenceCount,
             "sfReferenceCount"
         );
-        #[cfg(feature = "pending-amendments")]
         assert_eq!(
             super::sfAssetPrice.code(),
             ::rshooks_core::sfcodes::sfAssetPrice,
@@ -1370,7 +1268,6 @@ mod parity {
             ::rshooks_core::sfcodes::sfEmitHookHash,
             "sfEmitHookHash"
         );
-        #[cfg(feature = "pending-amendments")]
         assert_eq!(
             super::sfObjectID.code(),
             ::rshooks_core::sfcodes::sfObjectID,
@@ -1622,7 +1519,6 @@ mod parity {
             ::rshooks_core::sfcodes::sfReserveIncrementDrops,
             "sfReserveIncrementDrops"
         );
-        #[cfg(feature = "pending-amendments")]
         assert_eq!(
             super::sfTrustLineRewardAccumulator.code(),
             ::rshooks_core::sfcodes::sfTrustLineRewardAccumulator,
@@ -1749,13 +1645,11 @@ mod parity {
             ::rshooks_core::sfcodes::sfBlob,
             "sfBlob"
         );
-        #[cfg(feature = "pending-amendments")]
         assert_eq!(
             super::sfAssetClass.code(),
             ::rshooks_core::sfcodes::sfAssetClass,
             "sfAssetClass"
         );
-        #[cfg(feature = "pending-amendments")]
         assert_eq!(
             super::sfProvider.code(),
             ::rshooks_core::sfcodes::sfProvider,
@@ -1766,13 +1660,11 @@ mod parity {
             ::rshooks_core::sfcodes::sfHookName,
             "sfHookName"
         );
-        #[cfg(feature = "pending-amendments")]
         assert_eq!(
             super::sfRemarkValue.code(),
             ::rshooks_core::sfcodes::sfRemarkValue,
             "sfRemarkValue"
         );
-        #[cfg(feature = "pending-amendments")]
         assert_eq!(
             super::sfRemarkName.code(),
             ::rshooks_core::sfcodes::sfRemarkName,
@@ -1823,7 +1715,6 @@ mod parity {
             ::rshooks_core::sfcodes::sfEmitCallback,
             "sfEmitCallback"
         );
-        #[cfg(feature = "pending-amendments")]
         assert_eq!(
             super::sfHolder.code(),
             ::rshooks_core::sfcodes::sfHolder,
@@ -1890,13 +1781,11 @@ mod parity {
             ::rshooks_core::sfcodes::sfPaths,
             "sfPaths"
         );
-        #[cfg(feature = "pending-amendments")]
         assert_eq!(
             super::sfBaseAsset.code(),
             ::rshooks_core::sfcodes::sfBaseAsset,
             "sfBaseAsset"
         );
-        #[cfg(feature = "pending-amendments")]
         assert_eq!(
             super::sfQuoteAsset.code(),
             ::rshooks_core::sfcodes::sfQuoteAsset,
@@ -2018,7 +1907,6 @@ mod parity {
             ::rshooks_core::sfcodes::sfHookGrant,
             "sfHookGrant"
         );
-        #[cfg(feature = "pending-amendments")]
         assert_eq!(
             super::sfPriceData.code(),
             ::rshooks_core::sfcodes::sfPriceData,
@@ -2054,7 +1942,6 @@ mod parity {
             ::rshooks_core::sfcodes::sfGenesisMint,
             "sfGenesisMint"
         );
-        #[cfg(feature = "pending-amendments")]
         assert_eq!(
             super::sfRemark.code(),
             ::rshooks_core::sfcodes::sfRemark,
@@ -2141,7 +2028,6 @@ mod parity {
             ::rshooks_core::sfcodes::sfHookGrants,
             "sfHookGrants"
         );
-        #[cfg(feature = "pending-amendments")]
         assert_eq!(
             super::sfPriceDataSeries.code(),
             ::rshooks_core::sfcodes::sfPriceDataSeries,

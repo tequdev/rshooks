@@ -8980,17 +8980,10 @@ impl<S: crate::views::source::FieldSource> NFTokenAcceptOffer<S> {
 /// Build one with [`Clawback::otxn`] (the originating transaction) or
 /// [`Clawback::from_slot`] (an already-loaded transaction slot); both check the
 /// transaction type before handing the view back.
-///
-/// **Amendment not yet active** as of the vendored snapshot, so this
-/// shape is generated behind the `pending-amendments` cargo feature. Nothing on
-/// Xahau will match it until the amendment activates; it is here so a
-/// hook can be written and tested against the shape in advance.
-#[cfg(feature = "pending-amendments")]
 pub struct Clawback<S: crate::views::source::FieldSource> {
     src: S,
 }
 
-#[cfg(feature = "pending-amendments")]
 impl Clawback<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `Clawback`.
     ///
@@ -9004,7 +8997,6 @@ impl Clawback<crate::views::source::OtxnSource> {
     }
 }
 
-#[cfg(feature = "pending-amendments")]
 impl Clawback<crate::views::source::SlotSource> {
     /// Views an already-loaded transaction slot as `Clawback`, taking ownership
     /// of the slot.
@@ -9096,7 +9088,6 @@ impl Clawback<crate::views::source::SlotSource> {
     }
 }
 
-#[cfg(feature = "pending-amendments")]
 impl<S: crate::views::source::FieldSource> Clawback<S> {
     /// `sfAmount` — Amount, `soeREQUIRED`.
     #[inline(always)]
@@ -10996,17 +10987,10 @@ impl<S: crate::views::source::FieldSource> URITokenCancelSellOffer<S> {
 /// Build one with [`OracleSet::otxn`] (the originating transaction) or
 /// [`OracleSet::from_slot`] (an already-loaded transaction slot); both check the
 /// transaction type before handing the view back.
-///
-/// **Amendment not yet active** as of the vendored snapshot, so this
-/// shape is generated behind the `pending-amendments` cargo feature. Nothing on
-/// Xahau will match it until the amendment activates; it is here so a
-/// hook can be written and tested against the shape in advance.
-#[cfg(feature = "pending-amendments")]
 pub struct OracleSet<S: crate::views::source::FieldSource> {
     src: S,
 }
 
-#[cfg(feature = "pending-amendments")]
 impl OracleSet<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `OracleSet`.
     ///
@@ -11020,7 +11004,6 @@ impl OracleSet<crate::views::source::OtxnSource> {
     }
 }
 
-#[cfg(feature = "pending-amendments")]
 impl OracleSet<crate::views::source::SlotSource> {
     /// Views an already-loaded transaction slot as `OracleSet`, taking ownership
     /// of the slot.
@@ -11125,7 +11108,6 @@ impl OracleSet<crate::views::source::SlotSource> {
     }
 }
 
-#[cfg(feature = "pending-amendments")]
 impl<S: crate::views::source::FieldSource> OracleSet<S> {
     /// `sfOracleDocumentID` — UInt32, `soeREQUIRED`.
     #[inline(always)]
@@ -11407,17 +11389,10 @@ impl<S: crate::views::source::FieldSource> OracleSet<S> {
 /// Build one with [`OracleDelete::otxn`] (the originating transaction) or
 /// [`OracleDelete::from_slot`] (an already-loaded transaction slot); both check the
 /// transaction type before handing the view back.
-///
-/// **Amendment not yet active** as of the vendored snapshot, so this
-/// shape is generated behind the `pending-amendments` cargo feature. Nothing on
-/// Xahau will match it until the amendment activates; it is here so a
-/// hook can be written and tested against the shape in advance.
-#[cfg(feature = "pending-amendments")]
 pub struct OracleDelete<S: crate::views::source::FieldSource> {
     src: S,
 }
 
-#[cfg(feature = "pending-amendments")]
 impl OracleDelete<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `OracleDelete`.
     ///
@@ -11431,7 +11406,6 @@ impl OracleDelete<crate::views::source::OtxnSource> {
     }
 }
 
-#[cfg(feature = "pending-amendments")]
 impl OracleDelete<crate::views::source::SlotSource> {
     /// Views an already-loaded transaction slot as `OracleDelete`, taking ownership
     /// of the slot.
@@ -11523,7 +11497,6 @@ impl OracleDelete<crate::views::source::SlotSource> {
     }
 }
 
-#[cfg(feature = "pending-amendments")]
 impl<S: crate::views::source::FieldSource> OracleDelete<S> {
     /// `sfOracleDocumentID` — UInt32, `soeREQUIRED`.
     #[inline(always)]
@@ -12083,17 +12056,10 @@ impl<S: crate::views::source::FieldSource> LedgerStateFix<S> {
 /// Build one with [`Cron::otxn`] (the originating transaction) or
 /// [`Cron::from_slot`] (an already-loaded transaction slot); both check the
 /// transaction type before handing the view back.
-///
-/// **Amendment not yet active** as of the vendored snapshot, so this
-/// shape is generated behind the `pending-amendments` cargo feature. Nothing on
-/// Xahau will match it until the amendment activates; it is here so a
-/// hook can be written and tested against the shape in advance.
-#[cfg(feature = "pending-amendments")]
 pub struct Cron<S: crate::views::source::FieldSource> {
     src: S,
 }
 
-#[cfg(feature = "pending-amendments")]
 impl Cron<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `Cron`.
     ///
@@ -12107,7 +12073,6 @@ impl Cron<crate::views::source::OtxnSource> {
     }
 }
 
-#[cfg(feature = "pending-amendments")]
 impl Cron<crate::views::source::SlotSource> {
     /// Views an already-loaded transaction slot as `Cron`, taking ownership
     /// of the slot.
@@ -12199,7 +12164,6 @@ impl Cron<crate::views::source::SlotSource> {
     }
 }
 
-#[cfg(feature = "pending-amendments")]
 impl<S: crate::views::source::FieldSource> Cron<S> {
     /// `sfOwner` — AccountID, `soeREQUIRED`.
     #[inline(always)]
@@ -12423,17 +12387,10 @@ impl<S: crate::views::source::FieldSource> Cron<S> {
 /// Build one with [`CronSet::otxn`] (the originating transaction) or
 /// [`CronSet::from_slot`] (an already-loaded transaction slot); both check the
 /// transaction type before handing the view back.
-///
-/// **Amendment not yet active** as of the vendored snapshot, so this
-/// shape is generated behind the `pending-amendments` cargo feature. Nothing on
-/// Xahau will match it until the amendment activates; it is here so a
-/// hook can be written and tested against the shape in advance.
-#[cfg(feature = "pending-amendments")]
 pub struct CronSet<S: crate::views::source::FieldSource> {
     src: S,
 }
 
-#[cfg(feature = "pending-amendments")]
 impl CronSet<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `CronSet`.
     ///
@@ -12447,7 +12404,6 @@ impl CronSet<crate::views::source::OtxnSource> {
     }
 }
 
-#[cfg(feature = "pending-amendments")]
 impl CronSet<crate::views::source::SlotSource> {
     /// Views an already-loaded transaction slot as `CronSet`, taking ownership
     /// of the slot.
@@ -12539,7 +12495,6 @@ impl CronSet<crate::views::source::SlotSource> {
     }
 }
 
-#[cfg(feature = "pending-amendments")]
 impl<S: crate::views::source::FieldSource> CronSet<S> {
     /// `sfDelaySeconds` — UInt32, `soeOPTIONAL`.
     ///
@@ -12775,17 +12730,10 @@ impl<S: crate::views::source::FieldSource> CronSet<S> {
 /// Build one with [`SetRemarks::otxn`] (the originating transaction) or
 /// [`SetRemarks::from_slot`] (an already-loaded transaction slot); both check the
 /// transaction type before handing the view back.
-///
-/// **Amendment not yet active** as of the vendored snapshot, so this
-/// shape is generated behind the `pending-amendments` cargo feature. Nothing on
-/// Xahau will match it until the amendment activates; it is here so a
-/// hook can be written and tested against the shape in advance.
-#[cfg(feature = "pending-amendments")]
 pub struct SetRemarks<S: crate::views::source::FieldSource> {
     src: S,
 }
 
-#[cfg(feature = "pending-amendments")]
 impl SetRemarks<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `SetRemarks`.
     ///
@@ -12799,7 +12747,6 @@ impl SetRemarks<crate::views::source::OtxnSource> {
     }
 }
 
-#[cfg(feature = "pending-amendments")]
 impl SetRemarks<crate::views::source::SlotSource> {
     /// Views an already-loaded transaction slot as `SetRemarks`, taking ownership
     /// of the slot.
@@ -12904,7 +12851,6 @@ impl SetRemarks<crate::views::source::SlotSource> {
     }
 }
 
-#[cfg(feature = "pending-amendments")]
 impl<S: crate::views::source::FieldSource> SetRemarks<S> {
     /// `sfObjectID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
