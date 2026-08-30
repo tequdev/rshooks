@@ -99,6 +99,42 @@ pub(crate) fn otxn_field_raw_code<B: AsMut<[u8]> + ?Sized>(out: &mut B, field_id
     unsafe { rshooks_core::otxn_field(out.as_mut_ptr() as u32, out.len() as u32, field_id) }
 }
 
+/// [`otxn_field_raw_code`], reading into **uninitialized** storage.
+///
+/// The fixed-size counterpart: a caller that knows the field's exact width
+/// hands over scratch it has not zeroed, and only treats it as initialized
+/// once the returned code says the host wrote the whole thing. The generated
+/// views' typed accessors ([`crate::views`]) are that caller — every
+/// `Hash`/`AccountId`/`CurrencyCode`/`u64` field read goes through here.
+///
+/// Zeroing that scratch first would be dead work the Hook API's guard
+/// checker still charges for, since a zeroed buffer whose address escapes
+/// into an `extern` call is a store LLVM cannot prove dead across the FFI
+/// boundary. The destination therefore stays `&mut [MaybeUninit<u8>]` all
+/// the way down and is never turned into a `&mut [u8]`: a reference must
+/// point to a valid value of its type, and uninitialized bytes are not valid
+/// `u8`s. Only the address and the length cross the boundary.
+///
+/// Body duplicated rather than shared with [`otxn_field_raw_code`], for the
+/// reason that function's own doc comment records.
+#[inline(always)]
+pub(crate) fn otxn_field_raw_code_uninit(
+    out: &mut [core::mem::MaybeUninit<u8>],
+    field_id: u32,
+) -> i64 {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.otxn_field(field_id)) {
+        return crate::testenv_bridge::write_bytes_uninit_code(out, r);
+    }
+    unsafe {
+        rshooks_core::otxn_field(
+            out.as_mut_ptr().cast::<u8>() as u32,
+            out.len() as u32,
+            field_id,
+        )
+    }
+}
+
 /// [`otxn_field_u64`]'s raw-code counterpart (as-int64 mode). See
 /// [`otxn_field_raw_code`] for why this exists and why its body is
 /// duplicated rather than shared.

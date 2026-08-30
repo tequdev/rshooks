@@ -36,6 +36,7 @@ api/ledger.rs::ledger_seq -> ledger_seq
 api/otxn.rs::otxn_burden -> otxn_burden
 api/otxn.rs::otxn_field -> otxn_field
 api/otxn.rs::otxn_field_raw_code -> otxn_field
+api/otxn.rs::otxn_field_raw_code_uninit -> otxn_field
 api/otxn.rs::otxn_field_u64 -> otxn_field
 api/otxn.rs::otxn_field_u64_raw_code -> otxn_field
 api/otxn.rs::otxn_generation -> otxn_generation
@@ -99,6 +100,7 @@ api/ledger.rs::ledger_keylet -> ledger_keylet
 api/otxn.rs::otxn_slot -> otxn_slot
 api/slot.rs::meta_slot -> meta_slot
 api/slot.rs::slot -> slot
+api/slot.rs::slot_uninit -> slot
 api/slot.rs::slot_clear -> slot_clear
 api/slot.rs::slot_count -> slot_count
 api/slot.rs::slot_set -> slot_set

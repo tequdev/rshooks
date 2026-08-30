@@ -526,62 +526,35 @@ impl<T> SlotObject<T> {
     }
 }
 
-/// Forms a `&mut [u8]` view over `buf`'s storage without requiring it to be
-/// initialized first.
-///
-/// [`read_exact_bytes`] hands a scratch buffer straight to
-/// [`api::slot::slot`], which always *completely overwrites* it on the only
-/// path its contents are read afterward (the exact-length check below).
-/// Zero-initializing that buffer first is dead work the Hook API's guard
-/// checker still charges for, because a zeroed buffer whose address escapes
-/// into an `extern` call is a store LLVM cannot prove dead across the FFI
-/// boundary.
-///
-/// # Safety
-///
-/// The caller must read the returned slice only over the range a prior write
-/// into it actually covered — never past what [`api::slot::slot`] itself
-/// reported writing. No bit pattern is invalid for `u8`, so forming the
-/// `&mut [u8]` here is the standard pre-`BorrowedBuf` I/O shape over
-/// `MaybeUninit` storage — relied on throughout this crate rather than
-/// unconditionally guaranteed by the language; the requirement is entirely
-/// about what the caller does with it afterward. [`api::slot::slot`] is
-/// itself an `unsafe` `extern` host call already fully trusted by every
-/// other line of this crate, so trusting its reported byte count is the
-/// same FFI trust boundary, not a new one.
-///
-/// `pub(crate)` rather than private: [`crate::views::source`]'s fixed-size
-/// otxn reads have the identical shape (read into scratch, accept only on a
-/// reported full-length write) and share this helper rather than repeating
-/// the `unsafe` block.
-#[inline(always)]
-pub(crate) unsafe fn uninit_slice_mut<const N: usize>(buf: &mut MaybeUninit<[u8; N]>) -> &mut [u8] {
-    // SAFETY: `buf` is `N` bytes of live, properly aligned storage (a
-    // `MaybeUninit<[u8; N]>` has the same size and alignment as `[u8; N]`).
-    // `u8` has no invalid bit patterns and no padding, so a `&mut [u8]` over
-    // that storage is well-formed the instant it is created, whether or not
-    // the storage has been written to yet — only reading through it before
-    // it is written would be unsound, and that burden is on the caller.
-    unsafe { core::slice::from_raw_parts_mut(buf.as_mut_ptr().cast::<u8>(), N) }
-}
-
 /// Reads exactly `N` bytes out of `no`, erroring when the slot's size is not
 /// exactly `N`.
 ///
 /// Factored out of [`SlotObject::raw_exact`]/[`SlotObject::take_raw_exact`]
 /// so the two share one definition of "exact".
+///
+/// The scratch buffer is deliberately **not** zero-initialized: the host
+/// call overwrites what it is handed, and those zeroing stores are not free
+/// — a zeroed buffer whose address escapes into an `extern` call is a store
+/// LLVM cannot prove dead across the FFI boundary, so the guard checker
+/// charges for every one of them.
+///
+/// The storage stays a `MaybeUninit` the whole way down
+/// ([`api::slot::slot_uninit`] takes `&mut [MaybeUninit<u8>]`) and is never
+/// borrowed as a `&mut [u8]` while uninitialized. That is not pedantry: a
+/// reference must point to a valid value of its type, uninitialized bytes
+/// are not valid `u8`s, and `slice::from_raw_parts_mut` explicitly requires
+/// "`len` consecutive properly initialized values". Only the address and the
+/// length cross the boundary, which is all the host reads.
 #[inline(always)]
 fn read_exact_bytes<const N: usize>(no: u32) -> Result<[u8; N]> {
-    let mut buf = MaybeUninit::<[u8; N]>::uninit();
-    // SAFETY: the returned slice is read only via `assume_init` below, and
-    // only once `written == N` confirms the host call just wrote every byte
-    // of it — honoring `uninit_slice_mut`'s contract.
-    let written = api::slot::slot(unsafe { uninit_slice_mut(&mut buf) }, no)?;
+    let mut buf = [const { MaybeUninit::<u8>::uninit() }; N];
+    let written = api::slot::slot_uninit(&mut buf, no)?;
     if written == N {
-        // SAFETY: `written == N` means `api::slot::slot` reported writing
-        // all `N` bytes of `buf`'s storage, so `buf` is now fully
-        // initialized.
-        Ok(unsafe { buf.assume_init() })
+        // SAFETY: `written == N` means the host reported writing all `N`
+        // bytes of `buf`'s storage, so every element is now initialized.
+        // `MaybeUninit<u8>` has the same layout as `u8`, so the transmute of
+        // the array is the standard `array_assume_init` shape.
+        Ok(unsafe { core::mem::transmute_copy::<[MaybeUninit<u8>; N], [u8; N]>(&buf) })
     } else {
         Err(HookError::TooSmall)
     }

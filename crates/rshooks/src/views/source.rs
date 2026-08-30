@@ -188,16 +188,24 @@ int_view_value!(u32);
 /// `SlotObject::<u64>::value` and `OtxnFieldValue for u64` both record.
 ///
 /// The read goes into **uninitialized** scratch, the same way
-/// [`crate::slot_obj`]'s fixed-size reads do and for the same reason: the
-/// host call overwrites whatever it is handed, and the result is only
+/// [`crate::slot_obj`]'s `read_exact_bytes` does and for the same reason:
+/// the host call overwrites whatever it is handed, and the result is only
 /// accepted when it reports writing the buffer's entire length, so nothing
 /// is ever read uninitialized. Zero-initializing first would be dead work
 /// the guard checker still charges for — a zeroed buffer whose address
 /// escapes into an `extern` call is a store LLVM cannot prove dead across
-/// the FFI boundary. [`Amount`] and [`Issue`] below deliberately keep their
-/// zero-init: those reads are variable-length and inspect `buf[..written]`,
-/// so the full-length proof this relies on is not available to them —
-/// exactly the split `slot_obj`'s `decode_amount`/`decode_issue` make.
+/// the FFI boundary.
+///
+/// The storage stays `MaybeUninit` all the way down to the host call
+/// (`otxn_field_raw_code_uninit` takes `&mut [MaybeUninit<u8>]`) and is
+/// never borrowed as a `&mut [u8]` while uninitialized: a reference must
+/// point to a valid value of its type, and uninitialized bytes are not valid
+/// `u8`s.
+///
+/// [`Amount`] and [`Issue`] below deliberately keep their zero-init: those
+/// reads are variable-length and inspect `buf[..written]`, so the
+/// full-length proof this relies on is not available to them — exactly the
+/// split `slot_obj`'s `decode_amount`/`decode_issue` make.
 macro_rules! bytes_view_value {
     ($ty:ty, $len:expr, $decode:expr) => {
         impl private::SealedValue for $ty {}
@@ -206,23 +214,23 @@ macro_rules! bytes_view_value {
 
             #[inline(always)]
             fn read_otxn_opt(field: SField<Self>) -> Result<Option<$ty>> {
-                let mut buf = core::mem::MaybeUninit::<[u8; $len]>::uninit();
-                // SAFETY: the slice is handed straight to the host call and
-                // never read here; `buf` itself is only read through
-                // `assume_init` below, and only once `written == $len`
-                // confirms the host wrote every byte of it — honoring
-                // `uninit_slice_mut`'s contract.
-                let out = unsafe { crate::slot_obj::uninit_slice_mut(&mut buf) };
-                let code = otxn::otxn_field_raw_code(out, field.code());
+                let mut buf = [const { core::mem::MaybeUninit::<u8>::uninit() }; $len];
+                let code = otxn::otxn_field_raw_code_uninit(&mut buf, field.code());
                 if code == rshooks_core::DOESNT_EXIST {
                     return Ok(None);
                 }
                 let written = res(code)? as usize;
                 if written == $len {
                     // SAFETY: `written == $len` means the host reported
-                    // writing all `$len` bytes of `buf`'s storage, so it is
-                    // now fully initialized.
-                    let bytes = unsafe { buf.assume_init() };
+                    // writing all `$len` bytes of `buf`'s storage, so every
+                    // element is now initialized. `MaybeUninit<u8>` has the
+                    // same layout as `u8`, so this is the standard
+                    // `array_assume_init` shape.
+                    let bytes = unsafe {
+                        core::mem::transmute_copy::<[core::mem::MaybeUninit<u8>; $len], [u8; $len]>(
+                            &buf,
+                        )
+                    };
                     #[allow(clippy::redundant_closure_call)]
                     Ok(Some($decode(bytes)))
                 } else {

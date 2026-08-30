@@ -128,6 +128,60 @@ pub(crate) fn write_bytes_code(out: &mut [u8], r: BackendResult<Vec<u8>>) -> i64
     }
 }
 
+/// Copies `r`'s success value into **uninitialized** `out`, honoring the
+/// same buffer contract as [`write_bytes`]: `out` shorter than the value is
+/// [`HookError::TooSmall`], never a truncated copy. Success returns the
+/// number of bytes copied.
+///
+/// Backs `api::slot`'s `slot_uninit`. The copy is written through
+/// [`core::mem::MaybeUninit::write`] one byte at a time rather than
+/// `copy_from_slice`, because the destination is not a `&mut [u8]` and must
+/// not be turned into one — that is the entire point of the uninit path
+/// (see `slot_uninit`'s doc comment). The per-byte loop costs nothing that
+/// matters: this module is `cfg(not(target_arch = "wasm32"))` and never
+/// reaches a shipped hook.
+#[inline(always)]
+pub(crate) fn write_bytes_uninit(
+    out: &mut [core::mem::MaybeUninit<u8>],
+    r: BackendResult<Vec<u8>>,
+) -> HookResult<usize> {
+    match r {
+        Ok(value) => match out.get_mut(..value.len()) {
+            Some(dst) => {
+                for (slot, byte) in dst.iter_mut().zip(value.iter()) {
+                    slot.write(*byte);
+                }
+                Ok(value.len())
+            }
+            None => Err(HookError::TooSmall),
+        },
+        Err(code) => res(code).map(|v| v as usize),
+    }
+}
+
+/// Raw-code counterpart to [`write_bytes_uninit`]: same buffer contract and
+/// same uninitialized destination, but returns the **undecoded** `i64` a raw
+/// host call would have returned. Backs `api::otxn`'s
+/// `otxn_field_raw_code_uninit`.
+#[inline(always)]
+pub(crate) fn write_bytes_uninit_code(
+    out: &mut [core::mem::MaybeUninit<u8>],
+    r: BackendResult<Vec<u8>>,
+) -> i64 {
+    match r {
+        Ok(value) => match out.get_mut(..value.len()) {
+            Some(dst) => {
+                for (slot, byte) in dst.iter_mut().zip(value.iter()) {
+                    slot.write(*byte);
+                }
+                value.len() as i64
+            }
+            None => rshooks_core::TOO_SMALL,
+        },
+        Err(code) => code,
+    }
+}
+
 /// A `state_foreign(_set)` target narrowed to the host's fixed widths:
 /// `(namespace, account)`, each `None` meaning "this hook's own".
 pub(crate) type ForeignTarget<'a> = (Option<&'a [u8; 32]>, Option<&'a [u8; 20]>);
