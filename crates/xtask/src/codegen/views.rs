@@ -57,27 +57,13 @@ use crate::protocol_ir::{
 // Method naming
 // ---------------------------------------------------------------------
 
-/// Field-name fragments that are one word even though their capitalization
-/// says otherwise, longest first (the matcher takes the first entry that
-/// matches at the current position, so order is significance, not style).
-///
-/// The generic splitter below handles every ordinary acronym on its own —
-/// `sfImportVLKeys` → `import_vl_keys`, `sfMPTAmount` → `mpt_amount`,
-/// `sfEPrice` → `e_price` — so this table exists only for the fragments it
-/// would get *wrong* (`sfAMMID` → `ammid`, `sfCredentialIDs` →
-/// `credential_i_ds`) and for the three spellings `super::tx_type` already
-/// fixes on the transaction-type side, so that `NFTokenMint`'s fields read
-/// `nftoken_*` the way its type name reads `NFToken`.
+/// Capitalized fragments that the generic word splitter cannot infer.
+/// Keep longer prefixes before shorter ones because the first match wins.
 const ACRONYMS: &[&str] = &[
     "NFToken", "MPToken", "XChain", "AMM", "DID", "UNL", "URI", "ID",
 ];
 
-/// Splits a `PascalCase` field name into its words.
-///
-/// The generic rule is the usual one: a capital starts a word, and a run of
-/// capitals is one word except that its last capital starts the next word
-/// when a lowercase letter follows (`VLKey` → `VL`, `Key`). [`ACRONYMS`]
-/// short-circuits it where that rule misreads upstream's intent.
+/// Splits a `PascalCase` field name into words, honoring [`ACRONYMS`].
 fn split_words(name: &str) -> Result<Vec<String>> {
     let mut out: Vec<String> = Vec::new();
     let mut i = 0usize;
@@ -125,13 +111,10 @@ fn split_words(name: &str) -> Result<Vec<String>> {
     Ok(out)
 }
 
-/// The byte at `at`, as a `char` (field names are ASCII).
 fn char_at(s: &str, at: usize) -> Option<char> {
     s.as_bytes().get(at).map(|b| *b as char)
 }
 
-/// Advances past a run of lowercase letters and digits — the tail of a word
-/// whose head has already been consumed.
 fn consume_tail(s: &str, mut at: usize) -> usize {
     while char_at(s, at).is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit()) {
         at = at.saturating_add(1);
@@ -145,9 +128,7 @@ fn word(name: &str, start: usize, end: usize) -> Result<String> {
         .ok_or_else(|| anyhow!("failed to slice `{name}` at {start}..{end}"))
 }
 
-/// Turns an `sfXxx` field name into the accessor name a view exposes it
-/// under: `sfDestinationTag` → `destination_tag`, `sfNFTokenID` →
-/// `nftoken_id`.
+/// Turns an `sfXxx` field name into its snake-case accessor name.
 ///
 /// A name that collides with a Rust keyword becomes a raw identifier. The
 /// four keywords that have no raw form (`self`, `Self`, `super`, `crate`)
@@ -190,9 +171,7 @@ const RUST_KEYWORDS: &[&str] = &[
 /// How a view reads a field, decided by its serialized type ID.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Access {
-    /// A modeled value type: `read`/`read_opt` hand back this Rust type.
     Value(&'static str),
-    /// No modeled value type: raw wire bytes through a `*_into` accessor.
     Raw,
     /// A container: raw bytes on every source, plus a `*_slot` child-slot
     /// accessor on the slot-backed ones (only the slot API can navigate
@@ -228,7 +207,6 @@ fn access(sti_code: u32) -> Access {
     }
 }
 
-/// The `soe*` token a presence came from, for the generated doc comments.
 fn presence_token(p: Presence) -> &'static str {
     match p {
         Presence::Required => "soeREQUIRED",
@@ -263,7 +241,6 @@ fn merged_fields<'a>(specific: &'a [FieldSpec], common: &'a [FieldSpec]) -> Vec<
     out
 }
 
-/// Indexes the artifact's serialized-field table by name.
 fn sfield_index(formats: &ProtocolFormats) -> BTreeMap<&str, &SFieldDef> {
     formats
         .sfields
@@ -272,7 +249,6 @@ fn sfield_index(formats: &ProtocolFormats) -> BTreeMap<&str, &SFieldDef> {
         .collect()
 }
 
-/// Everything one accessor needs, resolved once.
 struct Accessor<'a> {
     spec: &'a FieldSpec,
     def: &'a SFieldDef,
@@ -345,15 +321,7 @@ fn resolve<'a>(
 // Accessor rendering
 // ---------------------------------------------------------------------
 
-/// The shared prefix of every accessor's doc comment: which upstream field
-/// it is, what its serialized type is, and how the format declares it.
-///
-/// Includes the note explaining a field gated more tightly than the view
-/// around it, but **not** the `#[cfg]` itself — that is [`field_cfg`], and
-/// it has to come after the whole doc block. Splicing an attribute into the
-/// middle of a doc comment compiles, but reads as a stray line in the
-/// generated source and puts everything after it outside the attribute's
-/// apparent scope to a human skimming the file.
+/// Describes a field and any availability gate stricter than its view's.
 fn field_doc(a: &Accessor<'_>, view_tier: Tier) -> String {
     let mut out = format!(
         "/// `{name}` — {ty}, `{presence}`.\n",
@@ -367,15 +335,7 @@ fn field_doc(a: &Accessor<'_>, view_tier: Tier) -> String {
     out
 }
 
-/// The field's own `#[cfg]` line, emitted after the accessor's complete doc
-/// block and immediately before `#[inline(always)]`.
-///
-/// Present only when the field is *strictly scarcer* than the view carrying
-/// it — which only a `field_overrides` entry can produce, since a derived
-/// field tier is the best over its formats and so never worse than any view
-/// listing it. When the field is as available as the view (or more), the
-/// view's own attribute already covers the accessor and repeating it would
-/// be noise.
+/// Gates a field only when it is less available than its enclosing view.
 fn field_cfg(a: &Accessor<'_>, view_tier: Tier) -> String {
     if a.tier > view_tier {
         a.tier
@@ -387,38 +347,25 @@ fn field_cfg(a: &Accessor<'_>, view_tier: Tier) -> String {
     }
 }
 
-/// The rustdoc note explaining why one accessor is gated more tightly than
-/// the view around it.
 fn tier_field_doc(tier: Tier) -> String {
     match tier {
         Tier::Active => String::new(),
         Tier::Pending => format!(
-            "///\n\
-             /// **Amendment not yet active** as of the vendored snapshot. The enclosing\n\
-             /// format is available but this field is not, so the accessor is excluded\n\
-             /// under the `{narrow}` cargo feature.\n",
+            "///\n/// Pending field; excluded by the `{narrow}` feature.\n",
             narrow = crate::availability::ACTIVE_ONLY_FEATURE,
         ),
         Tier::Dormant => format!(
-            "///\n\
-             /// **Gated by an amendment xahaud marks `Supported::no`.** The enclosing\n\
-             /// format is available, but this field is not: a validated Xahau\n\
-             /// transaction can never carry it, so the accessor needs the `{all}` cargo\n\
-             /// feature.\n",
+            "///\n/// Dormant field; requires the `{all}` feature.\n",
             all = crate::availability::ALL_FEATURE,
         ),
     }
 }
 
-/// The sentence explaining an `Option` return, appended where the field is
-/// not `soeREQUIRED`.
 fn optional_doc(p: Presence) -> &'static str {
     match p {
         Presence::Default => {
             "///\n\
-             /// `Ok(None)` when the field is absent. `soeDEFAULT` means only that\n\
-             /// upstream allows it to be left off the wire — there is no default\n\
-             /// value to substitute, so absence is reported, not filled in.\n"
+             /// `Ok(None)` when omitted; `soeDEFAULT` defines no value to substitute.\n"
         }
         _ => "///\n/// `Ok(None)` when the field is absent.\n",
     }
@@ -454,21 +401,16 @@ fn push_shared_accessor(buf: &mut String, a: &Accessor<'_>, view_tier: Tier) -> 
         Access::Raw | Access::Container(_) => {
             let container = matches!(a.access, Access::Container(_));
             buf.push_str(&field_doc(a, view_tier));
-            buf.push_str(
-                "///\n\
-                 /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,\n\
-                 /// exactly as the host holds them. Returns the number of bytes written.\n",
-            );
+            buf.push_str("///\n/// Writes the raw wire bytes to `out`.\n");
             if container {
                 // A plain code span, not an intra-doc link: on a
                 // transaction view this doc sits in the `impl<S:
                 // FieldSource>` block, where `Self::{name}_slot` does not
                 // resolve — that method exists only on the `SlotSource`
                 // instantiation.
-                write!(
+                writeln!(
                     buf,
-                    "/// This is the whole container serialized; navigating *into* it needs\n\
-                     /// `{name}_slot`, which only a slot-backed view has.\n",
+                    "/// Use `{name}_slot` on a slot-backed view to navigate the container.",
                     name = a.name,
                 )
                 .context("writing a container accessor doc")?;
@@ -508,10 +450,7 @@ fn push_slot_accessor(buf: &mut String, a: &Accessor<'_>, view_tier: Tier) -> Re
     buf.push_str(&field_doc(a, view_tier));
     buf.push_str(
         "///\n\
-         /// Navigates to the field and hands its **child slot** to the caller, who\n\
-         /// owns it from here (the one place a view does not clear what it opens —\n\
-         /// a container has no terminal read to clear after). Clear it, or read a\n\
-         /// value out of it with the `take_*` family, before deriving many more.\n",
+         /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.\n",
     );
     if opt {
         buf.push_str(optional_doc(a.spec.presence));
@@ -539,12 +478,8 @@ fn push_slot_accessor(buf: &mut String, a: &Accessor<'_>, view_tier: Tier) -> Re
     Ok(())
 }
 
-/// The `#[cfg]` line (if any) plus the rustdoc note a tier adds to a
-/// generated view, as `(attr, doc_lines)`.
-///
-/// Every item of a pending view carries the attribute, not just the struct:
-/// an `impl` block for a struct that does not exist is a compile error, so
-/// the gate has to be uniform across the whole view.
+/// Returns the gate and documentation for a view. The gate is repeated on
+/// its impl blocks because a gated-out struct cannot have an ungated impl.
 fn tier_prelude(tier: Tier) -> (String, String) {
     let Some(attr) = tier.cfg_attr() else {
         return (String::new(), String::new());
@@ -552,32 +487,18 @@ fn tier_prelude(tier: Tier) -> (String, String) {
     let doc = match tier {
         Tier::Active => String::new(),
         Tier::Pending => format!(
-            "///\n/// **Amendment not yet active** as of the vendored snapshot. Available\n\
-             /// by default so a hook can be written and tested against the shape in\n\
-             /// advance; excluded under the `{narrow}` cargo feature, which restricts\n\
-             /// this crate to what is live on Xahau today. Nothing on-ledger will match\n\
-             /// it until the amendment activates.\n",
+            "///\n/// Pending on Xahau mainnet; excluded by the `{narrow}` feature.\n",
             narrow = crate::availability::ACTIVE_ONLY_FEATURE,
         ),
         Tier::Dormant => format!(
-            "///\n/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot\n\
-             /// appear on Xahau mainnet — activating it would amendment-block the node.\n\
-             /// Needs the `{all}` cargo feature, which is there for a custom network\n\
-             /// whose operator knows otherwise. Enable it at your own judgment.\n",
+            "///\n/// Dormant on Xahau mainnet; requires the `{all}` feature.\n",
             all = crate::availability::ALL_FEATURE,
         ),
     };
     (format!("{attr}\n"), doc)
 }
 
-/// The one `use` any generated view file needs.
-///
-/// `tx.rs` does not: its views are generic over `S: FieldSource`, and that
-/// bound puts the trait's methods in scope. The ledger and inner views are
-/// concrete `SlotSource` wrappers, so the trait has to be imported for
-/// `self.src.read(..)` to resolve — anonymously (`as _`), since nothing in
-/// the file names it. Everything else is spelled with a full path, so a
-/// format named `Result` or `Hash` could never shadow anything.
+/// Brings `FieldSource` methods into scope for concrete `SlotSource` views.
 const SOURCE_TRAIT_IMPORT: &str = "\nuse crate::views::source::FieldSource as _;\n\n";
 
 /// Guards against two formats claiming the same Rust type name in one
@@ -655,10 +576,6 @@ fn push_tx_view(
     writeln!(
         buf,
         "/// View of the `{name}` transaction (`{tag}`, type code {value}).\n\
-         ///\n\
-         /// Build one with [`{name}::otxn`] (the originating transaction) or\n\
-         /// [`{name}::from_slot`] (an already-loaded transaction slot); both check the\n\
-         /// transaction type before handing the view back.\n\
          {tier_doc}{cfg}pub struct {name}<S: crate::views::source::FieldSource> {{\n\
          src: S,\n\
          }}\n",
@@ -670,12 +587,7 @@ fn push_tx_view(
     writeln!(
         buf,
         "{cfg}impl {name}<crate::views::source::OtxnSource> {{\n\
-         /// Views the originating transaction as `{name}`.\n\
-         ///\n\
-         /// One `otxn_type` host call and one integer compare against `{tag}`;\n\
-         /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the\n\
-         /// originating transaction is something else. The view itself is zero-sized,\n\
-         /// and each accessor below is a single `otxn_field` call.\n\
+         /// Views the originating transaction as `{name}`, checking its type.\n\
          #[inline(always)]\n\
          pub fn otxn() -> crate::error::Result<Self> {{\n\
          crate::views::source::otxn_of_type(rshooks_core::{tag}).map(|src| Self {{ src }})\n\
@@ -688,14 +600,8 @@ fn push_tx_view(
     let mut slot_only = String::new();
     writeln!(
         slot_only,
-        "/// Views an already-loaded transaction slot as `{name}`, taking ownership\n\
-         /// of the slot.\n\
-         ///\n\
-         /// Verifies the slot's `sfTransactionType` is `{tag}`. On any failure the\n\
-         /// slot is consumed and best-effort cleared, so a rejected view costs no\n\
-         /// slot — see\n\
-         /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which\n\
-         /// behaves the same way for the same reason.\n\
+        "/// Takes a transaction slot after verifying `sfTransactionType` is `{tag}`.\n\
+         /// A failed check best-effort clears the consumed slot.\n\
          #[inline(always)]\n\
          pub fn from_slot(\n\
          obj: crate::slot_obj::SlotObject<crate::types::STObject>,\n\
@@ -708,10 +614,7 @@ fn push_tx_view(
          .map(|src| Self {{ src }})\n\
          }}\n\
          \n\
-         /// Hands the underlying slot back, consuming the view.\n\
-         ///\n\
-         /// The escape hatch for anything not generated here: everything\n\
-         /// [`crate::slot_obj`] offers is available on the returned handle.\n\
+         /// Consumes the view and returns its slot.\n\
          #[inline(always)]\n\
          pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {{\n\
          self.src.into_slot()\n\
@@ -805,28 +708,19 @@ fn push_ledger_view(
         buf,
         "/// View of the `{name}` ledger object (`{tag}`, type code 0x{value:04x}, RPC\n\
          /// name `{rpc}`).\n\
-         ///\n\
-         /// Build one with [`{name}::from_keylet`] or [`{name}::from_slot`]; both\n\
-         /// check `sfLedgerEntryType` before handing the view back.\n\
          {tier_doc}{cfg}pub struct {name} {{\n\
          src: crate::views::source::SlotSource,\n\
          }}\n\
          \n\
          {cfg}impl {name} {{\n\
-         /// Loads the ledger object a keylet points at and views it as `{name}`.\n\
-         ///\n\
-         /// `slot_set` followed by the same check [`{name}::from_slot`] makes.\n\
+         /// Loads and type-checks the ledger object identified by `keylet`.\n\
          #[inline(always)]\n\
          pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {{\n\
          Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)\n\
          }}\n\
          \n\
-         /// Views an already-loaded ledger-entry slot as `{name}`, taking ownership\n\
-         /// of the slot.\n\
-         ///\n\
-         /// Verifies the slot's `sfLedgerEntryType` is `{tag}`. On any failure the\n\
-         /// slot is consumed and best-effort cleared, so a rejected view costs no\n\
-         /// slot.\n\
+         /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `{tag}`.\n\
+         /// A failed check best-effort clears the consumed slot.\n\
          #[inline(always)]\n\
          pub fn from_slot(\n\
          obj: crate::slot_obj::SlotObject<crate::types::STObject>,\n\
@@ -839,7 +733,7 @@ fn push_ledger_view(
          .map(|src| Self {{ src }})\n\
          }}\n\
          \n\
-         /// Hands the underlying slot back, consuming the view.\n\
+         /// Consumes the view and returns its slot.\n\
          #[inline(always)]\n\
          pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {{\n\
          self.src.into_slot()\n\
@@ -934,20 +828,12 @@ fn push_inner_view(
     writeln!(
         buf,
         "/// View of the `{sf}` inner object ({ty}).\n\
-         ///\n\
-         /// Wrap a child slot with [`{name}::from_slot`] — typically one an\n\
-         /// enclosing view's `…_slot` accessor handed back, or an `STArray` element.\n\
          {tier_doc}{cfg}pub struct {name} {{\n\
          src: crate::views::source::SlotSource,\n\
          }}\n\
          \n\
          {cfg}impl {name} {{\n\
-         /// Views an already-navigated child slot as `{name}`, taking ownership of\n\
-         /// the slot.\n\
-         ///\n\
-         /// Infallible: an inner object carries no type field, so there is nothing\n\
-         /// to verify. Wrapping the wrong slot produces read errors, not a wrong\n\
-         /// answer.\n\
+         /// Takes a child slot without type-checking it; inner objects have no type field.\n\
          #[inline(always)]\n\
          #[must_use]\n\
          pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {{\n\
@@ -956,7 +842,7 @@ fn push_inner_view(
          }}\n\
          }}\n\
          \n\
-         /// Hands the underlying slot back, consuming the view.\n\
+         /// Consumes the view and returns its slot.\n\
          #[inline(always)]\n\
          pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {{\n\
          self.src.into_slot()\n\

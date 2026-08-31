@@ -73,22 +73,11 @@ pub fn otxn_field_u64(field_id: impl Into<u32>) -> Result<u64> {
     res(unsafe { rshooks_core::otxn_field(0, 0, field_id) }).map(|v| v as u64)
 }
 
-/// [`otxn_field`], returning the **undecoded** `i64` the host call
-/// produced instead of a decoded [`Result`].
+/// Raw-code counterpart to [`otxn_field`], used to detect absence before
+/// decoding [`HookError`] (see `docs/DESIGN.md` §5.6).
 ///
-/// Exists for the same reason `api::state`'s `state_raw_code` does
-/// (`docs/DESIGN.md` §5.6, the nesting-depth rule): a caller that needs to
-/// tell "this field is absent" from "this read failed" must compare the raw
-/// code against `rshooks_core::DOESNT_EXIST` *before* any [`HookError`] is
-/// constructed, or it pays that enum's ~40-block decode. The generated
-/// views' optional-field accessors ([`crate::views`]) are that caller.
-///
-/// Deliberately **not** implemented by having [`otxn_field`] call this (or
-/// vice versa): `state_raw_code`'s doc comment records why routing an
-/// existing wrapper through a second function perturbs `rshooks-build`'s
-/// unnest pass even when both are `#[inline(always)]`. The body is
-/// duplicated instead, so [`otxn_field`]'s compiled output is provably
-/// unaffected.
+/// Kept as a separate host-call wrapper because sharing the body changes
+/// `rshooks-build`'s nesting output even with `#[inline(always)]`.
 #[inline(always)]
 pub(crate) fn otxn_field_raw_code<B: AsMut<[u8]> + ?Sized>(out: &mut B, field_id: u32) -> i64 {
     let out = out.as_mut();
@@ -99,24 +88,10 @@ pub(crate) fn otxn_field_raw_code<B: AsMut<[u8]> + ?Sized>(out: &mut B, field_id
     unsafe { rshooks_core::otxn_field(out.as_mut_ptr() as u32, out.len() as u32, field_id) }
 }
 
-/// [`otxn_field_raw_code`], reading into **uninitialized** storage.
-///
-/// The fixed-size counterpart: a caller that knows the field's exact width
-/// hands over scratch it has not zeroed, and only treats it as initialized
-/// once the returned code says the host wrote the whole thing. The generated
-/// views' typed accessors ([`crate::views`]) are that caller — every
-/// `Hash`/`AccountId`/`CurrencyCode`/`u64` field read goes through here.
-///
-/// Zeroing that scratch first would be dead work the Hook API's guard
-/// checker still charges for, since a zeroed buffer whose address escapes
-/// into an `extern` call is a store LLVM cannot prove dead across the FFI
-/// boundary. The destination therefore stays `&mut [MaybeUninit<u8>]` all
-/// the way down and is never turned into a `&mut [u8]`: a reference must
-/// point to a valid value of its type, and uninitialized bytes are not valid
-/// `u8`s. Only the address and the length cross the boundary.
-///
-/// Body duplicated rather than shared with [`otxn_field_raw_code`], for the
-/// reason that function's own doc comment records.
+/// [`otxn_field_raw_code`] for fixed-size reads into uninitialized scratch.
+/// Callers may treat only the prefix reported as written as initialized. Keeping the
+/// destination as `MaybeUninit` avoids both invalid `&mut [u8]` construction
+/// and guard-charged zeroing stores.
 #[inline(always)]
 pub(crate) fn otxn_field_raw_code_uninit(
     out: &mut [core::mem::MaybeUninit<u8>],
@@ -135,9 +110,7 @@ pub(crate) fn otxn_field_raw_code_uninit(
     }
 }
 
-/// [`otxn_field_u64`]'s raw-code counterpart (as-int64 mode). See
-/// [`otxn_field_raw_code`] for why this exists and why its body is
-/// duplicated rather than shared.
+/// Raw-code counterpart to [`otxn_field_u64`] (as-int64 mode).
 #[inline(always)]
 pub(crate) fn otxn_field_u64_raw_code(field_id: u32) -> i64 {
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
@@ -147,15 +120,8 @@ pub(crate) fn otxn_field_u64_raw_code(field_id: u32) -> i64 {
     unsafe { rshooks_core::otxn_field(0, 0, field_id) }
 }
 
-/// The originating transaction's type as the raw `u16` `tt*` code, without
-/// decoding it into a [`TxType`].
-///
-/// [`otxn_type`] is the one to reach for in hook code. This exists because
-/// `TxType::from` is a ~74-arm match with the same nesting cost as
-/// `HookError::from` (`docs/DESIGN.md` §5.6 spells out the analogy), and
-/// the generated views' constructors check the type on *every* view they
-/// build — comparing against a raw `rshooks_core::tt*` constant costs one
-/// integer compare instead.
+/// The originating transaction's raw `tt*` code, avoiding the large
+/// [`TxType`] decode in generated view type checks.
 #[inline(always)]
 pub(crate) fn otxn_type_code() -> u16 {
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]

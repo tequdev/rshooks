@@ -95,19 +95,10 @@ use crate::types::{
     Issue, SField, STObject,
 };
 
-/// Sealing module: [`FieldSource`] and [`ViewValue`] are closed sets.
-///
-/// [`FieldSource`] is sealed because a downstream implementation would
-/// decide what a *generated* accessor does — including whether it clears the
-/// slots it opens — which is this module's invariant to keep, not a
-/// caller's. [`ViewValue`] is sealed for the reason
-/// [`crate::api::otxn::OtxnFieldValue`] is: it pairs a wire type with a Rust
-/// type, and only the generated [`crate::sfield`] table is supposed to make
-/// that pairing.
+/// Seals the source policy and wire-type/Rust-type pairings used by generated
+/// accessors.
 mod private {
-    /// Supertrait of [`super::FieldSource`].
     pub trait SealedSource {}
-    /// Supertrait of [`super::ViewValue`].
     pub trait SealedValue {}
 }
 
@@ -142,8 +133,6 @@ pub trait ViewValue: private::SealedValue + Sized {
     ) -> Result<Option<Self::Out>>;
 }
 
-/// Implements [`ViewValue`] for a type read through the host's as-int64
-/// mode on the otxn side and `take_value` on the slot side.
 macro_rules! int_view_value {
     ($ty:ty) => {
         impl private::SealedValue for $ty {}
@@ -180,32 +169,8 @@ int_view_value!(u8);
 int_view_value!(u16);
 int_view_value!(u32);
 
-/// Implements [`ViewValue`] for a fixed-size wire type read verbatim.
-///
-/// `u64` uses this too rather than the as-int64 path: the host rejects a
-/// value with bit 63 set as `TOO_BIG`, and legitimate 64-bit fields set it
-/// (`sfExchangeRate` among them) — the identical rationale
-/// `SlotObject::<u64>::value` and `OtxnFieldValue for u64` both record.
-///
-/// The read goes into **uninitialized** scratch, the same way
-/// [`crate::slot_obj`]'s `read_exact_bytes` does and for the same reason:
-/// the host call overwrites whatever it is handed, and the result is only
-/// accepted when it reports writing the buffer's entire length, so nothing
-/// is ever read uninitialized. Zero-initializing first would be dead work
-/// the guard checker still charges for — a zeroed buffer whose address
-/// escapes into an `extern` call is a store LLVM cannot prove dead across
-/// the FFI boundary.
-///
-/// The storage stays `MaybeUninit` all the way down to the host call
-/// (`otxn_field_raw_code_uninit` takes `&mut [MaybeUninit<u8>]`) and is
-/// never borrowed as a `&mut [u8]` while uninitialized: a reference must
-/// point to a valid value of its type, and uninitialized bytes are not valid
-/// `u8`s.
-///
-/// [`Amount`] and [`Issue`] below deliberately keep their zero-init: those
-/// reads are variable-length and inspect `buf[..written]`, so the
-/// full-length proof this relies on is not available to them — exactly the
-/// split `slot_obj`'s `decode_amount`/`decode_issue` make.
+/// Implements a fixed-width wire read using uninitialized scratch. `u64`
+/// uses this path because as-int64 mode rejects values with bit 63 set.
 macro_rules! bytes_view_value {
     ($ty:ty, $len:expr, $decode:expr) => {
         impl private::SealedValue for $ty {}
@@ -221,11 +186,8 @@ macro_rules! bytes_view_value {
                 }
                 let written = res(code)? as usize;
                 if written == $len {
-                    // SAFETY: `written == $len` means the host reported
-                    // writing all `$len` bytes of `buf`'s storage, so every
-                    // element is now initialized. `MaybeUninit<u8>` has the
-                    // same layout as `u8`, so this is the standard
-                    // `array_assume_init` shape.
+                    // SAFETY: `written == $len` proves every byte is initialized;
+                    // `MaybeUninit<u8>` has the same layout as `u8`.
                     let bytes = unsafe {
                         core::mem::transmute_copy::<[core::mem::MaybeUninit<u8>; $len], [u8; $len]>(
                             &buf,
@@ -261,9 +223,6 @@ impl private::SealedValue for Amount {}
 impl ViewValue for Amount {
     type Out = AmountBytes;
 
-    /// Reads into a 48-byte buffer (the widest form, an IOU amount) and
-    /// classifies by written length, the same way
-    /// `OtxnFieldValue for Amount` does.
     #[inline(always)]
     fn read_otxn_opt(field: SField<Self>) -> Result<Option<AmountBytes>> {
         let mut buf = [0u8; IOU_AMOUNT_LEN];
@@ -292,10 +251,8 @@ impl private::SealedValue for Issue {}
 impl ViewValue for Issue {
     type Out = IssueData;
 
-    /// 44 bytes, not the 40 an IOU issue needs — `slot_obj::decode_issue`'s
-    /// doc comment records why the wider buffer is what makes a 44-byte MPT
-    /// issue surface as a `ParseError` instead of failing the host call as
-    /// `TooSmall` first.
+    /// The 44-byte buffer lets unsupported MPT issues reach classification
+    /// and report `ParseError` instead of failing early as `TooSmall`.
     #[inline(always)]
     fn read_otxn_opt(field: SField<Self>) -> Result<Option<IssueData>> {
         let mut buf = [0u8; crate::slot_obj::ISSUE_MAX_READ_LEN];

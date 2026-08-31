@@ -1,22 +1,8 @@
-//! Parity test: `vendor/xahaud-protocol/*.macro` vs the generated
-//! `protocol_formats.json` artifact (`crates/xtask/src/protocol_ir.rs`).
+//! Parity tests for the vendored protocol definitions and generated artifacts.
 //!
-//! The parser below is deliberately independent of `xtask`'s, for the same
-//! reason every other parity test in this directory keeps its own: `xtask`'s
-//! parser is the thing under test, and a bug in a parser shared with it would
-//! be invisible here. It is also independent *in technique* — a line-oriented
-//! state machine rather than a comment-stripped token stream with
-//! balanced-delimiter scanning — so the two are unlikely to be wrong the same
-//! way. It is strict: anything it does not recognize panics rather than being
-//! skipped, so a shape change upstream fails this test instead of quietly
-//! shrinking its coverage.
-//!
-//! `serde_json` reads the artifact. That is not a second parse of the
-//! upstream sources — it is reading the generator's output in its own
-//! declared format — so it does not compromise the independence above.
-//!
-//! Test code is exempt from the workspace's panic-freedom lints (per
-//! `docs/DESIGN.md` §8).
+//! The line-oriented parser is intentionally independent of `xtask`'s parser
+//! and rejects unknown input, so parser bugs or upstream syntax changes cannot
+//! silently reduce test coverage.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -35,18 +21,12 @@ const SFIELDS: &str = include_str!("../vendor/xahaud-protocol/sfields.macro");
 const ARTIFACT: &str = include_str!("../protocol_formats.json");
 const LETS_RS: &str = include_str!("../src/lets.rs");
 
-/// One format as this file's own parser sees it: the header arguments before
-/// the field list, then `{sfX, soeY, ...}` entries flattened to
-/// `["sfX", "soeY", ...]`.
 #[derive(Debug, PartialEq, Eq)]
 struct Format {
     head: Vec<String>,
     fields: Vec<Vec<String>>,
 }
 
-/// Returns each source line with `//` and `/* */` comments removed. Block
-/// comments are the doc comments above every format; line comments annotate
-/// individual field entries.
 fn uncommented(src: &str) -> Vec<String> {
     let mut in_block = false;
     let mut lines = Vec::new();
@@ -91,7 +71,6 @@ fn uncommented(src: &str) -> Vec<String> {
     lines
 }
 
-/// Splits a comma-separated argument list, trimming each part.
 fn split_args(s: &str) -> Vec<String> {
     s.split(',')
         .map(|p| p.trim().to_string())
@@ -99,8 +78,6 @@ fn split_args(s: &str) -> Vec<String> {
         .collect()
 }
 
-/// Parses one `{sfX, soeY[, soeZ]}` field line, with or without a trailing
-/// comma.
 fn parse_field_line(line: &str) -> Vec<String> {
     let body = line
         .trim_end_matches(',')
@@ -119,9 +96,6 @@ fn parse_field_line(line: &str) -> Vec<String> {
     parts
 }
 
-/// Line-oriented scan for `head_count`-argument invocations of any macro in
-/// `names`, each followed by a `({` … `}))` field list (or the single-line
-/// `({})` empty form).
 fn scan_formats(src: &str, names: &[&str], head_count: usize) -> Vec<Format> {
     let mut out: Vec<Format> = Vec::new();
     let mut open: Option<Format> = None;
@@ -138,7 +112,6 @@ fn scan_formats(src: &str, names: &[&str], head_count: usize) -> Vec<Format> {
             }
             continue;
         }
-        // Directives and the `#ifndef` block's macro definitions.
         if line.starts_with('#') {
             continue;
         }
@@ -183,7 +156,6 @@ fn scan_formats(src: &str, names: &[&str], head_count: usize) -> Vec<Format> {
     out
 }
 
-/// Normalizes a type value written as decimal, hex, or a character literal.
 fn value_of(text: &str) -> u64 {
     if let Some(body) = text.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')) {
         let mut chars = body.chars();
@@ -207,8 +179,6 @@ fn array<'a>(v: &'a Value, key: &str) -> &'a Vec<Value> {
         .unwrap_or_else(|| panic!("protocol_formats.json has no array `{key}`"))
 }
 
-/// The artifact's field list, flattened to the same
-/// `["sfX", "soeY", ...]` shape [`parse_field_line`] produces.
 fn artifact_fields(format: &Value) -> Vec<Vec<String>> {
     array(format, "fields")
         .iter()
@@ -329,7 +299,6 @@ fn sfields_macro_matches_the_artifact() {
         assert_eq!(name, theirs["name"].as_str().expect("name"));
         assert_eq!(sti, theirs["sti"].as_str().expect("sti"));
         assert_eq!(*code, theirs["field_code"].as_u64().expect("field_code"));
-        // The packed code the artifact promises is derivable by sorting.
         assert_eq!(
             theirs["code"].as_u64().expect("code"),
             (theirs["sti_code"].as_u64().expect("sti_code") << 16) | code
@@ -351,7 +320,6 @@ fn known_formats_read_the_way_the_upstream_sources_do() {
 
     assert_eq!(artifact["version"].as_u64(), Some(1));
 
-    // A transaction with a `soeMPTSupported` extra and a `soeDEFAULT` field.
     let payment = find("transactions", "tag", "ttPAYMENT");
     assert_eq!(payment["value"].as_u64(), Some(0));
     assert_eq!(
@@ -364,13 +332,11 @@ fn known_formats_read_the_way_the_upstream_sources_do() {
             .any(|f| f[0] == "sfPaths" && f[1] == "soeDEFAULT")
     );
 
-    // The empty field list.
     assert!(
         artifact_fields(&find("transactions", "tag", "ttDID_DELETE")).is_empty(),
         "DIDDelete declares ({{}})"
     );
 
-    // A character-literal ledger entry value, and a hex one.
     assert_eq!(
         find("ledger_entries", "tag", "ltHOOK")["value"].as_u64(),
         Some(0x48)
@@ -380,8 +346,7 @@ fn known_formats_read_the_way_the_upstream_sources_do() {
         Some(0x0072)
     );
 
-    // The common-field lists, which live in the two .cpp files rather than
-    // in the .macro files this file's parser reads.
+    // Common fields come from the vendored .cpp files, outside scan_formats.
     let tx_common: Vec<String> = array(&artifact, "tx_common")
         .iter()
         .map(|f| f["sfield"].as_str().expect("sfield").to_string())
@@ -400,7 +365,6 @@ fn known_formats_read_the_way_the_upstream_sources_do() {
         vec!["sfLedgerIndex", "sfLedgerEntryType", "sfFlags", "sfRemarks"]
     );
 
-    // An inner object whose `add(...)` call uses the compact `{{...}}` form.
     let emit = array(&artifact, "inner_objects")
         .iter()
         .find(|i| i["sfield"].as_str() == Some("sfEmitDetails"))
@@ -411,12 +375,6 @@ fn known_formats_read_the_way_the_upstream_sources_do() {
     );
 }
 
-/// The other parity tests in this directory close the loop from a vendored
-/// upstream file to the generated Rust it produces; this does the same for
-/// `src/lets.rs`, whose "header" side is the `LEDGER_ENTRY` invocations
-/// rather than a list of `#define`s. The Rust side is read with the same
-/// `common` helpers `tts_parity.rs` uses, so only the upstream-side parser
-/// is this file's own.
 #[test]
 fn lets_rs_matches_ledger_entries_macro() {
     let parsed = scan_formats(

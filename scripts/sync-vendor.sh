@@ -39,16 +39,10 @@ trap 'rm -rf "${TMP_DIR}"' EXIT INT TERM
 
 overall_status=0
 
-# Sync one vendor directory from one upstream tree.
-#
 #   sync_group <label> <vendor-dir> <upstream-dir> <file>...
 #
-# Each <file> is resolved against <upstream-dir> upstream but vendored (and
-# recorded in SHA256SUMS) under its basename, so a group whose files live in
-# more than one upstream directory passes an empty <upstream-dir> and
-# repo-root-relative paths instead. For a group whose files all share one
-# directory — the two header groups below — basename is the identity and
-# this behaves exactly as before.
+# Pass an empty <upstream-dir> and repo-relative file paths when a group spans
+# multiple upstream directories. Files are always vendored by basename.
 sync_group() {
     name="$1"
     vendor_rel="$2"
@@ -139,17 +133,9 @@ sync_group "hook-headers" \
     "hook" \
     error.h extern.h hookapi.h ls_flags.h macro.h sfcodes.h tts.h tx_flags.h
 
-# Protocol format definitions. These span two upstream directories, so the
-# group passes an empty upstream dir and full repo-relative paths; they land
-# flat in the vendor directory under their basenames.
-#
-# features.macro is not a format definition; it is the amendment table, and
-# it is vendored as supporting evidence for the curated
-# crates/rshooks-core/format_availability.json (which classifies every
-# format as active/pending/dormant). Nothing generates code from it — its
-# `Supported::no` rows are the objective half of that file's dormant tier,
-# and having it in-tree means a reviewer can check a classification without
-# a xahaud checkout.
+# These files span two upstream directories, hence the empty upstream path.
+# features.macro is evidence for the curated format_availability.json; the
+# generator does not parse it.
 sync_group "protocol-formats" \
     "crates/rshooks-core/vendor/xahaud-protocol" \
     "" \
@@ -172,11 +158,8 @@ fi
 
 echo ""
 echo "Done. Review any changes with:  git diff crates/rshooks-build/vendor/ crates/rshooks-core/vendor/"
-echo "If the hook-headers or protocol-formats group changed, regenerate"
-echo "rshooks-core's translated sources and format artifacts:"
+echo "If the hook headers or protocol definitions changed, regenerate:"
 echo "  cargo xtask gen-core"
-echo "That rewrites protocol_formats.json plus every generated source it"
-echo "feeds, including rshooks' typed views (src/views/{tx,ledger,inner}.rs),"
-echo "so a protocol-formats change shows up there as a reviewable diff."
+echo "If features.macro changed, review format_availability.json."
 echo "Then run the test suite (vendored behavior/translations may have changed):"
 echo "  cargo test --workspace"

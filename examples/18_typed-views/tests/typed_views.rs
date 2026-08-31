@@ -1,23 +1,7 @@
-//! Off-chain unit tests for the `typed-views` example, driven through
-//! `TestEnv::invoke` against the real `TypedViews` chain — no wasm build, no
-//! node. Every policy branch the hook can take is exercised against a
-//! seeded trust line and issuer account.
+//! Off-chain policy tests against seeded trust-line and issuer objects.
 //!
-//! Keylets are computed independently here (not by calling into
-//! `rshooks-testenv`'s crate-private `host::keylet`, and not through
-//! `rshooks::api::keylet` either — those need a live backend installed,
-//! which isn't the case while building the seed data *before*
-//! `TestEnv::invoke` runs) — the same two-tier verification pattern
-//! `examples/13_keylets/tests/keylets.rs` and
-//! `examples/15_slot-objects/tests/slot_objects.rs` use:
-//! `sha512Half(ledgerSpace ++ args)`, cross-checked against
-//! `crates/rshooks-testenv/src/host/keylet.rs`'s own vectors.
-//!
-//! Serialized objects, by contrast, are built from the generated
-//! `rshooks::sfield` codes rather than hand-transcribed field headers:
-//! those codes are already cross-validated against the vendored
-//! `sfcodes.h`, so re-typing them here would add a transcription risk
-//! without adding an independent oracle.
+//! Keylets are computed independently with `sha512Half(ledgerSpace ++ args)`;
+//! the seed objects use generated SField codes to avoid duplicating wire IDs.
 
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, missing_docs)]
 
@@ -25,8 +9,6 @@ use rshooks::prelude::*;
 use rshooks_testenv::prelude::*;
 use sha2::{Digest, Sha512};
 use typed_views::{TypedViews, ViewError};
-
-// -- Independent keylet computation (see module doc comment) --
 
 fn index_hash(space: u16, parts: &[&[u8]]) -> [u8; 32] {
     let mut buf = Vec::new();
@@ -58,9 +40,6 @@ fn keylet_account(account: [u8; 20]) -> [u8; 34] {
     keylet(LT_ACCOUNT_ROOT, index_hash(SPACE_ACCOUNT, &[&account]))
 }
 
-/// The protocol sorts the two accounts before hashing — the same
-/// canonical low/high ordering the hook's `hook_is_low_side` has to
-/// recover from the line's own `sfLowLimit`.
 fn keylet_line(a: [u8; 20], b: [u8; 20], currency: [u8; 20]) -> [u8; 34] {
     let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
     keylet(
@@ -69,9 +48,6 @@ fn keylet_line(a: [u8; 20], b: [u8; 20], currency: [u8; 20]) -> [u8; 34] {
     )
 }
 
-// -- Wire-format builders --
-
-/// The serialized type IDs whose wire form carries a VL length prefix.
 const STI_VL: u32 = 7;
 const STI_ACCOUNT: u32 = 8;
 
@@ -86,9 +62,6 @@ fn header(code: u32) -> Vec<u8> {
     }
 }
 
-/// A root object's canonical field sequence: sorted by field code,
-/// VL-prefixed where the type calls for it, no wrapping header or
-/// terminator — what `slot_set`/`World::ledger_objects` expects.
 fn sto(fields: &[(u32, Vec<u8>)]) -> Vec<u8> {
     let mut sorted = fields.to_vec();
     sorted.sort_by_key(|(code, _)| *code);
@@ -103,11 +76,7 @@ fn sto(fields: &[(u32, Vec<u8>)]) -> Vec<u8> {
     out
 }
 
-/// A 48-byte IOU `STAmount`: an 8-byte value with the not-native/positive
-/// flags and a normalized exponent, then the 20-byte currency, then the
-/// 20-byte issuer. The hook reads the currency/issuer halves of the
-/// payment's amount (to build the trust-line keylet) and the issuer half
-/// of `sfLowLimit` (to learn which side it is on), so both must be real.
+// A 48-byte IOU STAmount: value, currency, then issuer.
 fn iou_amount(mantissa: u64, exponent: i32, currency: [u8; 20], issuer: [u8; 20]) -> Vec<u8> {
     let mut out = vec![0u8; 48];
     let exp_biased = (exponent + 97) as u8;
@@ -127,16 +96,11 @@ fn iou_amount(mantissa: u64, exponent: i32, currency: [u8; 20], issuer: [u8; 20]
 const HOOK: [u8; 20] = [1u8; 20];
 const SENDER: [u8; 20] = [2u8; 20];
 const ISSUER: [u8; 20] = [6u8; 20];
-/// A hook account that sorts *above* the issuer, so the canonical low/high
-/// assignment flips — see `frozen_by_us_and_by_them_swap_with_the_side`.
+// Sorts above ISSUER to exercise the opposite trust-line side.
 const HIGH_HOOK: [u8; 20] = [9u8; 20];
 const USD: [u8; 20] = [0xAAu8; 20];
 const TAG: u32 = 42;
 
-/// A `RippleState` between `hook` and [`ISSUER`] in [`USD`]: the required
-/// fields, plus `sfLowLimit`/`sfHighLimit` whose issuer halves carry the
-/// canonically-ordered low and high accounts, exactly as rippled stores
-/// them.
 fn trust_line_bytes(hook: [u8; 20], flags: u32) -> Vec<u8> {
     let (low, high) = if hook <= ISSUER {
         (hook, ISSUER)
@@ -155,9 +119,6 @@ fn trust_line_bytes(hook: [u8; 20], flags: u32) -> Vec<u8> {
     ])
 }
 
-/// An `AccountRoot` for [`ISSUER`]. `transfer_rate` is `soeOPTIONAL`:
-/// `None` here leaves the field off the wire entirely, which is what a
-/// no-fee issuer's real ledger object looks like.
 fn issuer_account_bytes(transfer_rate: Option<u32>) -> Vec<u8> {
     let mut fields = vec![
         (
@@ -175,8 +136,6 @@ fn issuer_account_bytes(transfer_rate: Option<u32>) -> Vec<u8> {
     sto(&fields)
 }
 
-// -- Environments --
-
 fn iou_payment(tag: Option<u32>) -> Otxn {
     let mut otxn = Otxn::new(TxType::Payment)
         .account(SENDER)
@@ -188,8 +147,6 @@ fn iou_payment(tag: Option<u32>) -> Otxn {
     otxn
 }
 
-/// The happy path: an IOU payment with a tag, an unfrozen line, and a
-/// no-fee issuer.
 fn env_with(hook: [u8; 20], flags: u32, transfer_rate: Option<u32>) -> TestEnv {
     TestEnv::new()
         .hook_account(hook)
@@ -205,8 +162,6 @@ fn env() -> TestEnv {
     env_with(HOOK, 0, None)
 }
 
-// -- Tests --
-
 #[test]
 fn accepts_an_iou_payment_over_a_healthy_line() {
     let exit = env().invoke::<TypedViews>(0);
@@ -214,8 +169,6 @@ fn accepts_an_iou_payment_over_a_healthy_line() {
     assert_eq!(exit.msg, b"typed-views: incoming IOU accepted");
 }
 
-/// A native payment is out of scope and short-circuits before any ledger
-/// object is touched — the `AmountBytes::Native` arm.
 #[test]
 fn accepts_a_native_payment_without_reading_the_ledger() {
     let env = TestEnv::new().hook_account(HOOK).otxn(
@@ -229,8 +182,6 @@ fn accepts_a_native_payment_without_reading_the_ledger() {
     assert_eq!(exit.msg, b"typed-views: native payment, not gated");
 }
 
-/// The optional-field showcase: an absent `sfDestinationTag` reads as
-/// `Ok(None)`, which the hook can act on. It is not an error.
 #[test]
 fn rejects_an_iou_payment_with_no_destination_tag() {
     let env = TestEnv::new()
@@ -254,9 +205,6 @@ fn rejects_when_no_trust_line_exists() {
     assert_eq!(exit.code, i64::from(ViewError::NoTrustLine));
 }
 
-/// `RippleState::from_slot`/`from_keylet` verify `sfLedgerEntryType`, so an
-/// object of another type at the line's keylet is refused rather than
-/// misread.
 #[test]
 fn rejects_when_the_lines_keylet_holds_another_object_type() {
     let env = TestEnv::new()
@@ -269,10 +217,7 @@ fn rejects_when_the_lines_keylet_holds_another_object_type() {
     assert_eq!(exit.code, i64::from(ViewError::NoTrustLine));
 }
 
-/// The low/high determination, both ways round. `HOOK` sorts below
-/// `ISSUER`, so it is the *low* side and `lsfLowFreeze` is its own freeze;
-/// `HIGH_HOOK` sorts above, so the same bit becomes the counterparty's.
-/// Nothing but the account bytes changes between the two halves.
+// The same freeze bits change ownership when the hook account changes side.
 #[test]
 fn frozen_by_us_and_by_them_swap_with_the_side() {
     assert!(HOOK < ISSUER, "HOOK must sort as the low account");
@@ -298,9 +243,6 @@ fn frozen_by_us_and_by_them_swap_with_the_side() {
     }
 }
 
-/// `sfTransferRate` absent and an explicit 1.0 both mean "no fee" — the
-/// default is the hook's to supply, since upstream's format macro records
-/// only that the field may be omitted.
 #[test]
 fn an_absent_or_unit_transfer_rate_is_no_fee() {
     for rate in [None, Some(0), Some(1_000_000_000)] {
@@ -327,10 +269,7 @@ fn rejects_an_unfunded_issuer() {
     assert_eq!(exit.code, i64::from(ViewError::NoIssuerAccount));
 }
 
-/// `Payment::otxn()` verifies the transaction type before any field is
-/// read. `TestEnv::invoke` is a direct entry call with no `HookOn`
-/// filtering, so the wrong type reaches the entry here even though a live
-/// node's `on = [Payment]` would not have triggered it.
+// TestEnv bypasses HookOn filtering, allowing the constructor check to run.
 #[test]
 fn rejects_a_transaction_that_is_not_a_payment() {
     let env = TestEnv::new()

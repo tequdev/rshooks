@@ -23,13 +23,7 @@ use crate::views::source::FieldSource as _;
 /// View of the `NFTokenOffer` ledger object (`ltNFTOKEN_OFFER`, type code 0x0037, RPC
 /// name `nft_offer`).
 ///
-/// Build one with [`NFTokenOffer::from_keylet`] or [`NFTokenOffer::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct NFTokenOffer {
     src: crate::views::source::SlotSource,
@@ -37,20 +31,14 @@ pub struct NFTokenOffer {
 
 #[cfg(feature = "all-amendments")]
 impl NFTokenOffer {
-    /// Loads the ledger object a keylet points at and views it as `NFTokenOffer`.
-    ///
-    /// `slot_set` followed by the same check [`NFTokenOffer::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `NFTokenOffer`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltNFTOKEN_OFFER`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltNFTOKEN_OFFER`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -63,7 +51,7 @@ impl NFTokenOffer {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -149,10 +137,8 @@ impl NFTokenOffer {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -165,10 +151,7 @@ impl NFTokenOffer {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -181,28 +164,19 @@ impl NFTokenOffer {
 
 /// View of the `Cron` ledger object (`ltCRON`, type code 0x0041, RPC
 /// name `cron`).
-///
-/// Build one with [`Cron::from_keylet`] or [`Cron::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
 pub struct Cron {
     src: crate::views::source::SlotSource,
 }
 
 impl Cron {
-    /// Loads the ledger object a keylet points at and views it as `Cron`.
-    ///
-    /// `slot_set` followed by the same check [`Cron::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `Cron`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltCRON`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltCRON`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -215,7 +189,7 @@ impl Cron {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -285,10 +259,8 @@ impl Cron {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -301,10 +273,7 @@ impl Cron {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -317,28 +286,19 @@ impl Cron {
 
 /// View of the `Check` ledger object (`ltCHECK`, type code 0x0043, RPC
 /// name `check`).
-///
-/// Build one with [`Check::from_keylet`] or [`Check::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
 pub struct Check {
     src: crate::views::source::SlotSource,
 }
 
 impl Check {
-    /// Loads the ledger object a keylet points at and views it as `Check`.
-    ///
-    /// `slot_set` followed by the same check [`Check::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `Check`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltCHECK`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltCHECK`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -351,7 +311,7 @@ impl Check {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -459,10 +419,8 @@ impl Check {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -475,10 +433,7 @@ impl Check {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -491,28 +446,19 @@ impl Check {
 
 /// View of the `HookDefinition` ledger object (`ltHOOK_DEFINITION`, type code 0x0044, RPC
 /// name `hook_definition`).
-///
-/// Build one with [`HookDefinition::from_keylet`] or [`HookDefinition::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
 pub struct HookDefinition {
     src: crate::views::source::SlotSource,
 }
 
 impl HookDefinition {
-    /// Loads the ledger object a keylet points at and views it as `HookDefinition`.
-    ///
-    /// `slot_set` followed by the same check [`HookDefinition::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `HookDefinition`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltHOOK_DEFINITION`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltHOOK_DEFINITION`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -525,7 +471,7 @@ impl HookDefinition {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -577,10 +523,8 @@ impl HookDefinition {
 
     /// `sfHookParameters` — STArray, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     #[inline(always)]
     pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -592,10 +536,7 @@ impl HookDefinition {
 
     /// `sfHookParameters` — STArray, `soeREQUIRED`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     #[inline(always)]
     pub fn hook_parameters_slot(
         &self,
@@ -611,8 +552,7 @@ impl HookDefinition {
 
     /// `sfCreateCode` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn create_code_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -685,10 +625,8 @@ impl HookDefinition {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -701,10 +639,7 @@ impl HookDefinition {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -717,28 +652,19 @@ impl HookDefinition {
 
 /// View of the `EmittedTxn` ledger object (`ltEMITTED_TXN`, type code 0x0045, RPC
 /// name `emitted_txn`).
-///
-/// Build one with [`EmittedTxn::from_keylet`] or [`EmittedTxn::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
 pub struct EmittedTxn {
     src: crate::views::source::SlotSource,
 }
 
 impl EmittedTxn {
-    /// Loads the ledger object a keylet points at and views it as `EmittedTxn`.
-    ///
-    /// `slot_set` followed by the same check [`EmittedTxn::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `EmittedTxn`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltEMITTED_TXN`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltEMITTED_TXN`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -751,7 +677,7 @@ impl EmittedTxn {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -759,10 +685,8 @@ impl EmittedTxn {
 
     /// `sfEmittedTxn` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emitted_txn_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emitted_txn_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -776,10 +700,7 @@ impl EmittedTxn {
 
     /// `sfEmittedTxn` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -817,10 +738,8 @@ impl EmittedTxn {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -833,10 +752,7 @@ impl EmittedTxn {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -849,28 +765,19 @@ impl EmittedTxn {
 
 /// View of the `Hook` ledger object (`ltHOOK`, type code 0x0048, RPC
 /// name `hook`).
-///
-/// Build one with [`Hook::from_keylet`] or [`Hook::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
 pub struct Hook {
     src: crate::views::source::SlotSource,
 }
 
 impl Hook {
-    /// Loads the ledger object a keylet points at and views it as `Hook`.
-    ///
-    /// `slot_set` followed by the same check [`Hook::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `Hook`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltHOOK`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltHOOK`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -883,7 +790,7 @@ impl Hook {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -917,10 +824,8 @@ impl Hook {
 
     /// `sfHooks` — STArray, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hooks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hooks_slot` on a slot-backed view to navigate the container.
     #[inline(always)]
     pub fn hooks_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> crate::error::Result<usize> {
         self.src.read_raw(crate::sfield::sfHooks.code(), out)
@@ -928,10 +833,7 @@ impl Hook {
 
     /// `sfHooks` — STArray, `soeREQUIRED`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     #[inline(always)]
     pub fn hooks_slot(
         &self,
@@ -961,10 +863,8 @@ impl Hook {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -977,10 +877,7 @@ impl Hook {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -993,28 +890,19 @@ impl Hook {
 
 /// View of the `ImportVLSequence` ledger object (`ltIMPORT_VLSEQ`, type code 0x0049, RPC
 /// name `import_vlseq`).
-///
-/// Build one with [`ImportVLSequence::from_keylet`] or [`ImportVLSequence::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
 pub struct ImportVLSequence {
     src: crate::views::source::SlotSource,
 }
 
 impl ImportVLSequence {
-    /// Loads the ledger object a keylet points at and views it as `ImportVLSequence`.
-    ///
-    /// `slot_set` followed by the same check [`ImportVLSequence::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `ImportVLSequence`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltIMPORT_VLSEQ`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltIMPORT_VLSEQ`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -1027,7 +915,7 @@ impl ImportVLSequence {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -1035,8 +923,7 @@ impl ImportVLSequence {
 
     /// `sfPublicKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -1089,10 +976,8 @@ impl ImportVLSequence {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1105,10 +990,7 @@ impl ImportVLSequence {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1121,28 +1003,19 @@ impl ImportVLSequence {
 
 /// View of the `NegativeUNL` ledger object (`ltNEGATIVE_UNL`, type code 0x004e, RPC
 /// name `nunl`).
-///
-/// Build one with [`NegativeUNL::from_keylet`] or [`NegativeUNL::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
 pub struct NegativeUNL {
     src: crate::views::source::SlotSource,
 }
 
 impl NegativeUNL {
-    /// Loads the ledger object a keylet points at and views it as `NegativeUNL`.
-    ///
-    /// `slot_set` followed by the same check [`NegativeUNL::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `NegativeUNL`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltNEGATIVE_UNL`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltNEGATIVE_UNL`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -1155,7 +1028,7 @@ impl NegativeUNL {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -1163,10 +1036,8 @@ impl NegativeUNL {
 
     /// `sfDisabledValidators` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `disabled_validators_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `disabled_validators_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1180,10 +1051,7 @@ impl NegativeUNL {
 
     /// `sfDisabledValidators` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1195,8 +1063,7 @@ impl NegativeUNL {
 
     /// `sfValidatorToDisable` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1210,8 +1077,7 @@ impl NegativeUNL {
 
     /// `sfValidatorToReEnable` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1261,10 +1127,8 @@ impl NegativeUNL {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1277,10 +1141,7 @@ impl NegativeUNL {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1294,13 +1155,7 @@ impl NegativeUNL {
 /// View of the `NFTokenPage` ledger object (`ltNFTOKEN_PAGE`, type code 0x0050, RPC
 /// name `nft_page`).
 ///
-/// Build one with [`NFTokenPage::from_keylet`] or [`NFTokenPage::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct NFTokenPage {
     src: crate::views::source::SlotSource,
@@ -1308,20 +1163,14 @@ pub struct NFTokenPage {
 
 #[cfg(feature = "all-amendments")]
 impl NFTokenPage {
-    /// Loads the ledger object a keylet points at and views it as `NFTokenPage`.
-    ///
-    /// `slot_set` followed by the same check [`NFTokenPage::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `NFTokenPage`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltNFTOKEN_PAGE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltNFTOKEN_PAGE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -1334,7 +1183,7 @@ impl NFTokenPage {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -1358,10 +1207,8 @@ impl NFTokenPage {
 
     /// `sfNFTokens` — STArray, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `nftokens_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `nftokens_slot` on a slot-backed view to navigate the container.
     #[inline(always)]
     pub fn nftokens_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -1372,10 +1219,7 @@ impl NFTokenPage {
 
     /// `sfNFTokens` — STArray, `soeREQUIRED`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     #[inline(always)]
     pub fn nftokens_slot(
         &self,
@@ -1417,10 +1261,8 @@ impl NFTokenPage {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1433,10 +1275,7 @@ impl NFTokenPage {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1449,28 +1288,19 @@ impl NFTokenPage {
 
 /// View of the `UNLReport` ledger object (`ltUNL_REPORT`, type code 0x0052, RPC
 /// name `unl_report`).
-///
-/// Build one with [`UNLReport::from_keylet`] or [`UNLReport::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
 pub struct UNLReport {
     src: crate::views::source::SlotSource,
 }
 
 impl UNLReport {
-    /// Loads the ledger object a keylet points at and views it as `UNLReport`.
-    ///
-    /// `slot_set` followed by the same check [`UNLReport::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `UNLReport`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltUNL_REPORT`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltUNL_REPORT`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -1483,7 +1313,7 @@ impl UNLReport {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -1491,10 +1321,8 @@ impl UNLReport {
 
     /// `sfImportVLKeys` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `import_vl_keys_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `import_vl_keys_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1508,10 +1336,7 @@ impl UNLReport {
 
     /// `sfImportVLKeys` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1523,10 +1348,8 @@ impl UNLReport {
 
     /// `sfActiveValidators` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `active_validators_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `active_validators_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1540,10 +1363,7 @@ impl UNLReport {
 
     /// `sfActiveValidators` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1587,10 +1407,8 @@ impl UNLReport {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1603,10 +1421,7 @@ impl UNLReport {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1619,28 +1434,19 @@ impl UNLReport {
 
 /// View of the `SignerList` ledger object (`ltSIGNER_LIST`, type code 0x0053, RPC
 /// name `signer_list`).
-///
-/// Build one with [`SignerList::from_keylet`] or [`SignerList::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
 pub struct SignerList {
     src: crate::views::source::SlotSource,
 }
 
 impl SignerList {
-    /// Loads the ledger object a keylet points at and views it as `SignerList`.
-    ///
-    /// `slot_set` followed by the same check [`SignerList::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `SignerList`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltSIGNER_LIST`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltSIGNER_LIST`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -1653,7 +1459,7 @@ impl SignerList {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -1673,10 +1479,8 @@ impl SignerList {
 
     /// `sfSignerEntries` — STArray, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signer_entries_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signer_entries_slot` on a slot-backed view to navigate the container.
     #[inline(always)]
     pub fn signer_entries_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -1688,10 +1492,7 @@ impl SignerList {
 
     /// `sfSignerEntries` — STArray, `soeREQUIRED`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     #[inline(always)]
     pub fn signer_entries_slot(
         &self,
@@ -1739,10 +1540,8 @@ impl SignerList {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1755,10 +1554,7 @@ impl SignerList {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1771,28 +1567,19 @@ impl SignerList {
 
 /// View of the `Ticket` ledger object (`ltTICKET`, type code 0x0054, RPC
 /// name `ticket`).
-///
-/// Build one with [`Ticket::from_keylet`] or [`Ticket::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
 pub struct Ticket {
     src: crate::views::source::SlotSource,
 }
 
 impl Ticket {
-    /// Loads the ledger object a keylet points at and views it as `Ticket`.
-    ///
-    /// `slot_set` followed by the same check [`Ticket::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `Ticket`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltTICKET`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltTICKET`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -1805,7 +1592,7 @@ impl Ticket {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -1863,10 +1650,8 @@ impl Ticket {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1879,10 +1664,7 @@ impl Ticket {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1895,28 +1677,19 @@ impl Ticket {
 
 /// View of the `URIToken` ledger object (`ltURI_TOKEN`, type code 0x0055, RPC
 /// name `uri_token`).
-///
-/// Build one with [`URIToken::from_keylet`] or [`URIToken::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
 pub struct URIToken {
     src: crate::views::source::SlotSource,
 }
 
 impl URIToken {
-    /// Loads the ledger object a keylet points at and views it as `URIToken`.
-    ///
-    /// `slot_set` followed by the same check [`URIToken::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `URIToken`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltURI_TOKEN`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltURI_TOKEN`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -1929,7 +1702,7 @@ impl URIToken {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -1955,8 +1728,7 @@ impl URIToken {
 
     /// `sfURI` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn uri_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> crate::error::Result<usize> {
         self.src.read_raw(crate::sfield::sfURI.code(), out)
@@ -2020,10 +1792,8 @@ impl URIToken {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2036,10 +1806,7 @@ impl URIToken {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2052,28 +1819,19 @@ impl URIToken {
 
 /// View of the `AccountRoot` ledger object (`ltACCOUNT_ROOT`, type code 0x0061, RPC
 /// name `account`).
-///
-/// Build one with [`AccountRoot::from_keylet`] or [`AccountRoot::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
 pub struct AccountRoot {
     src: crate::views::source::SlotSource,
 }
 
 impl AccountRoot {
-    /// Loads the ledger object a keylet points at and views it as `AccountRoot`.
-    ///
-    /// `slot_set` followed by the same check [`AccountRoot::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `AccountRoot`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltACCOUNT_ROOT`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltACCOUNT_ROOT`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -2086,7 +1844,7 @@ impl AccountRoot {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -2146,8 +1904,7 @@ impl AccountRoot {
 
     /// `sfEmailHash` — Hash128, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2177,8 +1934,7 @@ impl AccountRoot {
 
     /// `sfMessageKey` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2200,8 +1956,7 @@ impl AccountRoot {
 
     /// `sfDomain` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2238,9 +1993,7 @@ impl AccountRoot {
 
     /// `sfMintedNFTokens` — UInt32, `soeDEFAULT`.
     ///
-    /// `Ok(None)` when the field is absent. `soeDEFAULT` means only that
-    /// upstream allows it to be left off the wire — there is no default
-    /// value to substitute, so absence is reported, not filled in.
+    /// `Ok(None)` when omitted; `soeDEFAULT` defines no value to substitute.
     #[inline(always)]
     pub fn minted_nftokens(&self) -> crate::error::Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfMintedNFTokens)
@@ -2248,9 +2001,7 @@ impl AccountRoot {
 
     /// `sfBurnedNFTokens` — UInt32, `soeDEFAULT`.
     ///
-    /// `Ok(None)` when the field is absent. `soeDEFAULT` means only that
-    /// upstream allows it to be left off the wire — there is no default
-    /// value to substitute, so absence is reported, not filled in.
+    /// `Ok(None)` when omitted; `soeDEFAULT` defines no value to substitute.
     #[inline(always)]
     pub fn burned_nftokens(&self) -> crate::error::Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfBurnedNFTokens)
@@ -2266,8 +2017,7 @@ impl AccountRoot {
 
     /// `sfHookNamespaces` — Vector256, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2405,10 +2155,8 @@ impl AccountRoot {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2421,10 +2169,7 @@ impl AccountRoot {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2437,28 +2182,19 @@ impl AccountRoot {
 
 /// View of the `DirectoryNode` ledger object (`ltDIR_NODE`, type code 0x0064, RPC
 /// name `directory`).
-///
-/// Build one with [`DirectoryNode::from_keylet`] or [`DirectoryNode::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
 pub struct DirectoryNode {
     src: crate::views::source::SlotSource,
 }
 
 impl DirectoryNode {
-    /// Loads the ledger object a keylet points at and views it as `DirectoryNode`.
-    ///
-    /// `slot_set` followed by the same check [`DirectoryNode::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `DirectoryNode`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltDIR_NODE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltDIR_NODE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -2471,7 +2207,7 @@ impl DirectoryNode {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -2487,8 +2223,7 @@ impl DirectoryNode {
 
     /// `sfTakerPaysCurrency` — Hash160, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2502,8 +2237,7 @@ impl DirectoryNode {
 
     /// `sfTakerPaysIssuer` — Hash160, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2517,8 +2251,7 @@ impl DirectoryNode {
 
     /// `sfTakerGetsCurrency` — Hash160, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2532,8 +2265,7 @@ impl DirectoryNode {
 
     /// `sfTakerGetsIssuer` — Hash160, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2563,8 +2295,7 @@ impl DirectoryNode {
 
     /// `sfIndexes` — Vector256, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn indexes_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -2641,10 +2372,8 @@ impl DirectoryNode {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2657,10 +2386,7 @@ impl DirectoryNode {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2673,28 +2399,19 @@ impl DirectoryNode {
 
 /// View of the `Amendments` ledger object (`ltAMENDMENTS`, type code 0x0066, RPC
 /// name `amendments`).
-///
-/// Build one with [`Amendments::from_keylet`] or [`Amendments::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
 pub struct Amendments {
     src: crate::views::source::SlotSource,
 }
 
 impl Amendments {
-    /// Loads the ledger object a keylet points at and views it as `Amendments`.
-    ///
-    /// `slot_set` followed by the same check [`Amendments::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `Amendments`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltAMENDMENTS`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltAMENDMENTS`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -2707,7 +2424,7 @@ impl Amendments {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -2715,8 +2432,7 @@ impl Amendments {
 
     /// `sfAmendments` — Vector256, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2730,10 +2446,8 @@ impl Amendments {
 
     /// `sfMajorities` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `majorities_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `majorities_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2747,10 +2461,7 @@ impl Amendments {
 
     /// `sfMajorities` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2798,10 +2509,8 @@ impl Amendments {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2814,10 +2523,7 @@ impl Amendments {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2830,28 +2536,19 @@ impl Amendments {
 
 /// View of the `LedgerHashes` ledger object (`ltLEDGER_HASHES`, type code 0x0068, RPC
 /// name `hashes`).
-///
-/// Build one with [`LedgerHashes::from_keylet`] or [`LedgerHashes::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
 pub struct LedgerHashes {
     src: crate::views::source::SlotSource,
 }
 
 impl LedgerHashes {
-    /// Loads the ledger object a keylet points at and views it as `LedgerHashes`.
-    ///
-    /// `slot_set` followed by the same check [`LedgerHashes::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `LedgerHashes`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltLEDGER_HASHES`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltLEDGER_HASHES`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -2864,7 +2561,7 @@ impl LedgerHashes {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -2888,8 +2585,7 @@ impl LedgerHashes {
 
     /// `sfHashes` — Vector256, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn hashes_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> crate::error::Result<usize> {
         self.src.read_raw(crate::sfield::sfHashes.code(), out)
@@ -2917,10 +2613,8 @@ impl LedgerHashes {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2933,10 +2627,7 @@ impl LedgerHashes {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2950,13 +2641,7 @@ impl LedgerHashes {
 /// View of the `Bridge` ledger object (`ltBRIDGE`, type code 0x0069, RPC
 /// name `bridge`).
 ///
-/// Build one with [`Bridge::from_keylet`] or [`Bridge::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct Bridge {
     src: crate::views::source::SlotSource,
@@ -2964,20 +2649,14 @@ pub struct Bridge {
 
 #[cfg(feature = "all-amendments")]
 impl Bridge {
-    /// Loads the ledger object a keylet points at and views it as `Bridge`.
-    ///
-    /// `slot_set` followed by the same check [`Bridge::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `Bridge`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltBRIDGE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltBRIDGE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -2990,7 +2669,7 @@ impl Bridge {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -3020,8 +2699,7 @@ impl Bridge {
 
     /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -3088,10 +2766,8 @@ impl Bridge {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3104,10 +2780,7 @@ impl Bridge {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3120,28 +2793,19 @@ impl Bridge {
 
 /// View of the `Offer` ledger object (`ltOFFER`, type code 0x006f, RPC
 /// name `offer`).
-///
-/// Build one with [`Offer::from_keylet`] or [`Offer::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
 pub struct Offer {
     src: crate::views::source::SlotSource,
 }
 
 impl Offer {
-    /// Loads the ledger object a keylet points at and views it as `Offer`.
-    ///
-    /// `slot_set` followed by the same check [`Offer::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `Offer`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltOFFER`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltOFFER`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -3154,7 +2818,7 @@ impl Offer {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -3244,10 +2908,8 @@ impl Offer {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3260,10 +2922,7 @@ impl Offer {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3276,28 +2935,19 @@ impl Offer {
 
 /// View of the `DepositPreauth` ledger object (`ltDEPOSIT_PREAUTH`, type code 0x0070, RPC
 /// name `deposit_preauth`).
-///
-/// Build one with [`DepositPreauth::from_keylet`] or [`DepositPreauth::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
 pub struct DepositPreauth {
     src: crate::views::source::SlotSource,
 }
 
 impl DepositPreauth {
-    /// Loads the ledger object a keylet points at and views it as `DepositPreauth`.
-    ///
-    /// `slot_set` followed by the same check [`DepositPreauth::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `DepositPreauth`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltDEPOSIT_PREAUTH`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltDEPOSIT_PREAUTH`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -3310,7 +2960,7 @@ impl DepositPreauth {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -3350,10 +3000,8 @@ impl DepositPreauth {
 
     /// `sfAuthorizeCredentials` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `authorize_credentials_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `authorize_credentials_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3367,10 +3015,7 @@ impl DepositPreauth {
 
     /// `sfAuthorizeCredentials` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3403,10 +3048,8 @@ impl DepositPreauth {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3419,10 +3062,7 @@ impl DepositPreauth {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3436,13 +3076,7 @@ impl DepositPreauth {
 /// View of the `XChainOwnedClaimID` ledger object (`ltXCHAIN_OWNED_CLAIM_ID`, type code 0x0071, RPC
 /// name `xchain_owned_claim_id`).
 ///
-/// Build one with [`XChainOwnedClaimID::from_keylet`] or [`XChainOwnedClaimID::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct XChainOwnedClaimID {
     src: crate::views::source::SlotSource,
@@ -3450,20 +3084,14 @@ pub struct XChainOwnedClaimID {
 
 #[cfg(feature = "all-amendments")]
 impl XChainOwnedClaimID {
-    /// Loads the ledger object a keylet points at and views it as `XChainOwnedClaimID`.
-    ///
-    /// `slot_set` followed by the same check [`XChainOwnedClaimID::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `XChainOwnedClaimID`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltXCHAIN_OWNED_CLAIM_ID`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltXCHAIN_OWNED_CLAIM_ID`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -3476,7 +3104,7 @@ impl XChainOwnedClaimID {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -3490,8 +3118,7 @@ impl XChainOwnedClaimID {
 
     /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -3514,10 +3141,8 @@ impl XChainOwnedClaimID {
 
     /// `sfXChainClaimAttestations` — STArray, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `xchain_claim_attestations_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `xchain_claim_attestations_slot` on a slot-backed view to navigate the container.
     #[inline(always)]
     pub fn xchain_claim_attestations_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -3529,10 +3154,7 @@ impl XChainOwnedClaimID {
 
     /// `sfXChainClaimAttestations` — STArray, `soeREQUIRED`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     #[inline(always)]
     pub fn xchain_claim_attestations_slot(
         &self,
@@ -3586,10 +3208,8 @@ impl XChainOwnedClaimID {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3602,10 +3222,7 @@ impl XChainOwnedClaimID {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3618,28 +3235,19 @@ impl XChainOwnedClaimID {
 
 /// View of the `RippleState` ledger object (`ltRIPPLE_STATE`, type code 0x0072, RPC
 /// name `state`).
-///
-/// Build one with [`RippleState::from_keylet`] or [`RippleState::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
 pub struct RippleState {
     src: crate::views::source::SlotSource,
 }
 
 impl RippleState {
-    /// Loads the ledger object a keylet points at and views it as `RippleState`.
-    ///
-    /// `slot_set` followed by the same check [`RippleState::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `RippleState`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltRIPPLE_STATE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltRIPPLE_STATE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -3652,7 +3260,7 @@ impl RippleState {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -3754,10 +3362,8 @@ impl RippleState {
 
     /// `sfHighReward` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `high_reward_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `high_reward_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3771,10 +3377,7 @@ impl RippleState {
 
     /// `sfHighReward` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3786,10 +3389,8 @@ impl RippleState {
 
     /// `sfLowReward` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `low_reward_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `low_reward_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3803,10 +3404,7 @@ impl RippleState {
 
     /// `sfLowReward` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3838,10 +3436,8 @@ impl RippleState {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3854,10 +3450,7 @@ impl RippleState {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3870,28 +3463,19 @@ impl RippleState {
 
 /// View of the `FeeSettings` ledger object (`ltFEE_SETTINGS`, type code 0x0073, RPC
 /// name `fee`).
-///
-/// Build one with [`FeeSettings::from_keylet`] or [`FeeSettings::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
 pub struct FeeSettings {
     src: crate::views::source::SlotSource,
 }
 
 impl FeeSettings {
-    /// Loads the ledger object a keylet points at and views it as `FeeSettings`.
-    ///
-    /// `slot_set` followed by the same check [`FeeSettings::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `FeeSettings`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltFEE_SETTINGS`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltFEE_SETTINGS`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -3904,7 +3488,7 @@ impl FeeSettings {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -4030,10 +3614,8 @@ impl FeeSettings {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4046,10 +3628,7 @@ impl FeeSettings {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4063,13 +3642,7 @@ impl FeeSettings {
 /// View of the `XChainOwnedCreateAccountClaimID` ledger object (`ltXCHAIN_OWNED_CREATE_ACCOUNT_CLAIM_ID`, type code 0x0074, RPC
 /// name `xchain_owned_create_account_claim_id`).
 ///
-/// Build one with [`XChainOwnedCreateAccountClaimID::from_keylet`] or [`XChainOwnedCreateAccountClaimID::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct XChainOwnedCreateAccountClaimID {
     src: crate::views::source::SlotSource,
@@ -4077,20 +3650,14 @@ pub struct XChainOwnedCreateAccountClaimID {
 
 #[cfg(feature = "all-amendments")]
 impl XChainOwnedCreateAccountClaimID {
-    /// Loads the ledger object a keylet points at and views it as `XChainOwnedCreateAccountClaimID`.
-    ///
-    /// `slot_set` followed by the same check [`XChainOwnedCreateAccountClaimID::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `XChainOwnedCreateAccountClaimID`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltXCHAIN_OWNED_CREATE_ACCOUNT_CLAIM_ID`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltXCHAIN_OWNED_CREATE_ACCOUNT_CLAIM_ID`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -4103,7 +3670,7 @@ impl XChainOwnedCreateAccountClaimID {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -4117,8 +3684,7 @@ impl XChainOwnedCreateAccountClaimID {
 
     /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -4135,10 +3701,8 @@ impl XChainOwnedCreateAccountClaimID {
 
     /// `sfXChainCreateAccountAttestations` — STArray, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `xchain_create_account_attestations_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `xchain_create_account_attestations_slot` on a slot-backed view to navigate the container.
     #[inline(always)]
     pub fn xchain_create_account_attestations_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -4150,10 +3714,7 @@ impl XChainOwnedCreateAccountClaimID {
 
     /// `sfXChainCreateAccountAttestations` — STArray, `soeREQUIRED`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     #[inline(always)]
     pub fn xchain_create_account_attestations_slot(
         &self,
@@ -4202,10 +3763,8 @@ impl XChainOwnedCreateAccountClaimID {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4218,10 +3777,7 @@ impl XChainOwnedCreateAccountClaimID {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4234,28 +3790,19 @@ impl XChainOwnedCreateAccountClaimID {
 
 /// View of the `Escrow` ledger object (`ltESCROW`, type code 0x0075, RPC
 /// name `escrow`).
-///
-/// Build one with [`Escrow::from_keylet`] or [`Escrow::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
 pub struct Escrow {
     src: crate::views::source::SlotSource,
 }
 
 impl Escrow {
-    /// Loads the ledger object a keylet points at and views it as `Escrow`.
-    ///
-    /// `slot_set` followed by the same check [`Escrow::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `Escrow`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltESCROW`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltESCROW`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -4268,7 +3815,7 @@ impl Escrow {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -4302,8 +3849,7 @@ impl Escrow {
 
     /// `sfCondition` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4395,10 +3941,8 @@ impl Escrow {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4411,10 +3955,7 @@ impl Escrow {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4427,28 +3968,19 @@ impl Escrow {
 
 /// View of the `HookState` ledger object (`ltHOOK_STATE`, type code 0x0076, RPC
 /// name `hook_state`).
-///
-/// Build one with [`HookState::from_keylet`] or [`HookState::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
 pub struct HookState {
     src: crate::views::source::SlotSource,
 }
 
 impl HookState {
-    /// Loads the ledger object a keylet points at and views it as `HookState`.
-    ///
-    /// `slot_set` followed by the same check [`HookState::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `HookState`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltHOOK_STATE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltHOOK_STATE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -4461,7 +3993,7 @@ impl HookState {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -4481,8 +4013,7 @@ impl HookState {
 
     /// `sfHookStateData` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn hook_state_data_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -4530,10 +4061,8 @@ impl HookState {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4546,10 +4075,7 @@ impl HookState {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4562,28 +4088,19 @@ impl HookState {
 
 /// View of the `PayChannel` ledger object (`ltPAYCHAN`, type code 0x0078, RPC
 /// name `payment_channel`).
-///
-/// Build one with [`PayChannel::from_keylet`] or [`PayChannel::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
 pub struct PayChannel {
     src: crate::views::source::SlotSource,
 }
 
 impl PayChannel {
-    /// Loads the ledger object a keylet points at and views it as `PayChannel`.
-    ///
-    /// `slot_set` followed by the same check [`PayChannel::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `PayChannel`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltPAYCHAN`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltPAYCHAN`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -4596,7 +4113,7 @@ impl PayChannel {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -4628,8 +4145,7 @@ impl PayChannel {
 
     /// `sfPublicKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -4732,10 +4248,8 @@ impl PayChannel {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4748,10 +4262,7 @@ impl PayChannel {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4765,13 +4276,7 @@ impl PayChannel {
 /// View of the `AMM` ledger object (`ltAMM`, type code 0x0079, RPC
 /// name `amm`).
 ///
-/// Build one with [`AMM::from_keylet`] or [`AMM::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct AMM {
     src: crate::views::source::SlotSource,
@@ -4779,20 +4284,14 @@ pub struct AMM {
 
 #[cfg(feature = "all-amendments")]
 impl AMM {
-    /// Loads the ledger object a keylet points at and views it as `AMM`.
-    ///
-    /// `slot_set` followed by the same check [`AMM::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `AMM`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltAMM`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltAMM`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -4805,7 +4304,7 @@ impl AMM {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -4819,9 +4318,7 @@ impl AMM {
 
     /// `sfTradingFee` — UInt16, `soeDEFAULT`.
     ///
-    /// `Ok(None)` when the field is absent. `soeDEFAULT` means only that
-    /// upstream allows it to be left off the wire — there is no default
-    /// value to substitute, so absence is reported, not filled in.
+    /// `Ok(None)` when omitted; `soeDEFAULT` defines no value to substitute.
     #[inline(always)]
     pub fn trading_fee(&self) -> crate::error::Result<Option<u16>> {
         self.src.read_opt(crate::sfield::sfTradingFee)
@@ -4829,10 +4326,8 @@ impl AMM {
 
     /// `sfVoteSlots` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `vote_slots_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `vote_slots_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4846,10 +4341,7 @@ impl AMM {
 
     /// `sfVoteSlots` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4861,10 +4353,8 @@ impl AMM {
 
     /// `sfAuctionSlot` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `auction_slot_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `auction_slot_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4878,10 +4368,7 @@ impl AMM {
 
     /// `sfAuctionSlot` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4949,10 +4436,8 @@ impl AMM {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4965,10 +4450,7 @@ impl AMM {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4981,28 +4463,19 @@ impl AMM {
 
 /// View of the `Oracle` ledger object (`ltORACLE`, type code 0x0080, RPC
 /// name `oracle`).
-///
-/// Build one with [`Oracle::from_keylet`] or [`Oracle::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
 pub struct Oracle {
     src: crate::views::source::SlotSource,
 }
 
 impl Oracle {
-    /// Loads the ledger object a keylet points at and views it as `Oracle`.
-    ///
-    /// `slot_set` followed by the same check [`Oracle::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `Oracle`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltORACLE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltORACLE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -5015,7 +4488,7 @@ impl Oracle {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -5029,8 +4502,7 @@ impl Oracle {
 
     /// `sfProvider` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn provider_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -5041,10 +4513,8 @@ impl Oracle {
 
     /// `sfPriceDataSeries` — STArray, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `price_data_series_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `price_data_series_slot` on a slot-backed view to navigate the container.
     #[inline(always)]
     pub fn price_data_series_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -5056,10 +4526,7 @@ impl Oracle {
 
     /// `sfPriceDataSeries` — STArray, `soeREQUIRED`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     #[inline(always)]
     pub fn price_data_series_slot(
         &self,
@@ -5069,8 +4536,7 @@ impl Oracle {
 
     /// `sfAssetClass` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn asset_class_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -5087,8 +4553,7 @@ impl Oracle {
 
     /// `sfURI` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5139,10 +4604,8 @@ impl Oracle {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5155,10 +4618,7 @@ impl Oracle {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5172,13 +4632,7 @@ impl Oracle {
 /// View of the `MPTokenIssuance` ledger object (`ltMPTOKEN_ISSUANCE`, type code 0x007e, RPC
 /// name `mpt_issuance`).
 ///
-/// Build one with [`MPTokenIssuance::from_keylet`] or [`MPTokenIssuance::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct MPTokenIssuance {
     src: crate::views::source::SlotSource,
@@ -5186,20 +4640,14 @@ pub struct MPTokenIssuance {
 
 #[cfg(feature = "all-amendments")]
 impl MPTokenIssuance {
-    /// Loads the ledger object a keylet points at and views it as `MPTokenIssuance`.
-    ///
-    /// `slot_set` followed by the same check [`MPTokenIssuance::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `MPTokenIssuance`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltMPTOKEN_ISSUANCE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltMPTOKEN_ISSUANCE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -5212,7 +4660,7 @@ impl MPTokenIssuance {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -5232,9 +4680,7 @@ impl MPTokenIssuance {
 
     /// `sfTransferFee` — UInt16, `soeDEFAULT`.
     ///
-    /// `Ok(None)` when the field is absent. `soeDEFAULT` means only that
-    /// upstream allows it to be left off the wire — there is no default
-    /// value to substitute, so absence is reported, not filled in.
+    /// `Ok(None)` when omitted; `soeDEFAULT` defines no value to substitute.
     #[inline(always)]
     pub fn transfer_fee(&self) -> crate::error::Result<Option<u16>> {
         self.src.read_opt(crate::sfield::sfTransferFee)
@@ -5248,9 +4694,7 @@ impl MPTokenIssuance {
 
     /// `sfAssetScale` — UInt8, `soeDEFAULT`.
     ///
-    /// `Ok(None)` when the field is absent. `soeDEFAULT` means only that
-    /// upstream allows it to be left off the wire — there is no default
-    /// value to substitute, so absence is reported, not filled in.
+    /// `Ok(None)` when omitted; `soeDEFAULT` defines no value to substitute.
     #[inline(always)]
     pub fn asset_scale(&self) -> crate::error::Result<Option<u8>> {
         self.src.read_opt(crate::sfield::sfAssetScale)
@@ -5272,8 +4716,7 @@ impl MPTokenIssuance {
 
     /// `sfMPTokenMetadata` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5319,10 +4762,8 @@ impl MPTokenIssuance {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5335,10 +4776,7 @@ impl MPTokenIssuance {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5352,13 +4790,7 @@ impl MPTokenIssuance {
 /// View of the `MPToken` ledger object (`ltMPTOKEN`, type code 0x007f, RPC
 /// name `mptoken`).
 ///
-/// Build one with [`MPToken::from_keylet`] or [`MPToken::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct MPToken {
     src: crate::views::source::SlotSource,
@@ -5366,20 +4798,14 @@ pub struct MPToken {
 
 #[cfg(feature = "all-amendments")]
 impl MPToken {
-    /// Loads the ledger object a keylet points at and views it as `MPToken`.
-    ///
-    /// `slot_set` followed by the same check [`MPToken::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `MPToken`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltMPTOKEN`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltMPTOKEN`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -5392,7 +4818,7 @@ impl MPToken {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -5406,8 +4832,7 @@ impl MPToken {
 
     /// `sfMPTokenIssuanceID` — UInt192, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn mptoken_issuance_id_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -5419,9 +4844,7 @@ impl MPToken {
 
     /// `sfMPTAmount` — UInt64, `soeDEFAULT`.
     ///
-    /// `Ok(None)` when the field is absent. `soeDEFAULT` means only that
-    /// upstream allows it to be left off the wire — there is no default
-    /// value to substitute, so absence is reported, not filled in.
+    /// `Ok(None)` when omitted; `soeDEFAULT` defines no value to substitute.
     #[inline(always)]
     pub fn mpt_amount(&self) -> crate::error::Result<Option<u64>> {
         self.src.read_opt(crate::sfield::sfMPTAmount)
@@ -5467,10 +4890,8 @@ impl MPToken {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5483,10 +4904,7 @@ impl MPToken {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5500,13 +4918,7 @@ impl MPToken {
 /// View of the `Credential` ledger object (`ltCREDENTIAL`, type code 0x0081, RPC
 /// name `credential`).
 ///
-/// Build one with [`Credential::from_keylet`] or [`Credential::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct Credential {
     src: crate::views::source::SlotSource,
@@ -5514,20 +4926,14 @@ pub struct Credential {
 
 #[cfg(feature = "all-amendments")]
 impl Credential {
-    /// Loads the ledger object a keylet points at and views it as `Credential`.
-    ///
-    /// `slot_set` followed by the same check [`Credential::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `Credential`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltCREDENTIAL`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltCREDENTIAL`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -5540,7 +4946,7 @@ impl Credential {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -5560,8 +4966,7 @@ impl Credential {
 
     /// `sfCredentialType` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn credential_type_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -5581,8 +4986,7 @@ impl Credential {
 
     /// `sfURI` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5639,10 +5043,8 @@ impl Credential {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5655,10 +5057,7 @@ impl Credential {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5672,13 +5071,7 @@ impl Credential {
 /// View of the `PermissionedDomain` ledger object (`ltPERMISSIONED_DOMAIN`, type code 0x0082, RPC
 /// name `permissioned_domain`).
 ///
-/// Build one with [`PermissionedDomain::from_keylet`] or [`PermissionedDomain::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct PermissionedDomain {
     src: crate::views::source::SlotSource,
@@ -5686,20 +5079,14 @@ pub struct PermissionedDomain {
 
 #[cfg(feature = "all-amendments")]
 impl PermissionedDomain {
-    /// Loads the ledger object a keylet points at and views it as `PermissionedDomain`.
-    ///
-    /// `slot_set` followed by the same check [`PermissionedDomain::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `PermissionedDomain`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltPERMISSIONED_DOMAIN`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltPERMISSIONED_DOMAIN`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -5712,7 +5099,7 @@ impl PermissionedDomain {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -5732,10 +5119,8 @@ impl PermissionedDomain {
 
     /// `sfAcceptedCredentials` — STArray, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `accepted_credentials_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `accepted_credentials_slot` on a slot-backed view to navigate the container.
     #[inline(always)]
     pub fn accepted_credentials_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -5747,10 +5132,7 @@ impl PermissionedDomain {
 
     /// `sfAcceptedCredentials` — STArray, `soeREQUIRED`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     #[inline(always)]
     pub fn accepted_credentials_slot(
         &self,
@@ -5798,10 +5180,8 @@ impl PermissionedDomain {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5814,10 +5194,7 @@ impl PermissionedDomain {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5831,13 +5208,7 @@ impl PermissionedDomain {
 /// View of the `DID` ledger object (`ltDID`, type code 0x008d, RPC
 /// name `did`).
 ///
-/// Build one with [`DID::from_keylet`] or [`DID::from_slot`]; both
-/// check `sfLedgerEntryType` before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct DID {
     src: crate::views::source::SlotSource,
@@ -5845,20 +5216,14 @@ pub struct DID {
 
 #[cfg(feature = "all-amendments")]
 impl DID {
-    /// Loads the ledger object a keylet points at and views it as `DID`.
-    ///
-    /// `slot_set` followed by the same check [`DID::from_slot`] makes.
+    /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
     pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
     }
 
-    /// Views an already-loaded ledger-entry slot as `DID`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfLedgerEntryType` is `ltDID`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot.
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltDID`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -5871,7 +5236,7 @@ impl DID {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -5885,8 +5250,7 @@ impl DID {
 
     /// `sfDIDDocument` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5900,8 +5264,7 @@ impl DID {
 
     /// `sfURI` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5914,8 +5277,7 @@ impl DID {
 
     /// `sfData` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5966,10 +5328,8 @@ impl DID {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5982,10 +5342,7 @@ impl DID {
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]

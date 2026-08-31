@@ -1,10 +1,4 @@
-//! Drift tripwire for the vendored Hook API headers (`docs/DESIGN.md` §4),
-//! identical in spirit to
-//! `crates/rshooks-build/tests/guard_native.rs::vendored_files_match_recorded_sha256`.
-//!
-//! Test code is exempt from the workspace's panic-freedom lints (per
-//! `docs/DESIGN.md` §8): `unwrap`/`expect` on a known-good fixture is the
-//! normal, idiomatic way to assert behavior in a test.
+//! Drift tripwire for vendored xahaud sources (`docs/DESIGN.md` §4).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -26,14 +20,6 @@ fn sha256_hex(path: &str) -> String {
         .collect()
 }
 
-/// Drift tripwire against one group's `SHA256SUMS` (the single source of
-/// truth for that group's vendored hashes, regenerated only by
-/// `scripts/sync-vendor.sh`): an accidental local edit to a vendored,
-/// supposedly byte-identical upstream file (or a corrupted re-download)
-/// fails a test loudly, instead of silently diverging from what a real
-/// xahaud node runs — and, transitively, from what the parity tests in this
-/// same directory assume they're checking. The recorded entry count is
-/// asserted too, so a *removed* file is caught alongside an edited one.
 fn assert_vendor_group(dir: &str, expected_entries: usize) {
     let sums_path = format!("{dir}/SHA256SUMS");
     let sums =
@@ -68,8 +54,6 @@ fn vendored_files_match_recorded_sha256() {
     assert_vendor_group("vendor/xahaud-hook", 8);
 }
 
-/// The same tripwire for the second vendor group, the protocol format
-/// definitions `protocol_formats.json` is generated from.
 #[test]
 fn vendored_protocol_files_match_recorded_sha256() {
     assert_vendor_group("vendor/xahaud-protocol", 7);

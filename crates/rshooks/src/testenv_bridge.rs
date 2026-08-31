@@ -128,18 +128,8 @@ pub(crate) fn write_bytes_code(out: &mut [u8], r: BackendResult<Vec<u8>>) -> i64
     }
 }
 
-/// Copies `r`'s success value into **uninitialized** `out`, honoring the
-/// same buffer contract as [`write_bytes`]: `out` shorter than the value is
-/// [`HookError::TooSmall`], never a truncated copy. Success returns the
-/// number of bytes copied.
-///
-/// Backs `api::slot`'s `slot_uninit`. The copy is written through
-/// [`core::mem::MaybeUninit::write`] one byte at a time rather than
-/// `copy_from_slice`, because the destination is not a `&mut [u8]` and must
-/// not be turned into one — that is the entire point of the uninit path
-/// (see `slot_uninit`'s doc comment). The per-byte loop costs nothing that
-/// matters: this module is `cfg(not(target_arch = "wasm32"))` and never
-/// reaches a shipped hook.
+/// [`write_bytes`] into uninitialized storage. Each byte is initialized
+/// explicitly because the destination must not be reborrowed as `&mut [u8]`.
 #[inline(always)]
 pub(crate) fn write_bytes_uninit(
     out: &mut [core::mem::MaybeUninit<u8>],
@@ -159,10 +149,7 @@ pub(crate) fn write_bytes_uninit(
     }
 }
 
-/// Raw-code counterpart to [`write_bytes_uninit`]: same buffer contract and
-/// same uninitialized destination, but returns the **undecoded** `i64` a raw
-/// host call would have returned. Backs `api::otxn`'s
-/// `otxn_field_raw_code_uninit`.
+/// Raw-code counterpart to [`write_bytes_uninit`].
 #[inline(always)]
 pub(crate) fn write_bytes_uninit_code(
     out: &mut [core::mem::MaybeUninit<u8>],

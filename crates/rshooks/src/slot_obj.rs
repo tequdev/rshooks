@@ -383,24 +383,13 @@ impl<T> SlotObject<T> {
         <K as private::Resolve>::resolve(key, self.no).map(SlotObject::wrap)
     }
 
-    /// [`get`](Self::get) for a field that may be absent: `Ok(None)` when
-    /// the object has no such field, `Err` for a real failure.
-    ///
-    /// The distinction is made on the **raw** host return code, before any
-    /// [`HookError`] exists — `docs/DESIGN.md` §5.6 requires that of
-    /// `rshooks`'s own internals, since matching `HookError::DoesntExist`
-    /// would drag that enum's ~40-block decode into every inlined call site.
-    /// Deliberately not public: a hook author reading one optional field
-    /// pays one specific-variant match and is within the documented budget,
-    /// whereas the generated views ([`crate::views`]) emit an optional read
-    /// per optional field of every type and would blow through it.
+    /// [`get`](Self::get) for an optional field. Absence is checked on the
+    /// raw host code to avoid the nesting cost of decoding [`HookError`].
     #[inline(always)]
     pub(crate) fn get_opt<U>(&self, field: SField<U>) -> Result<Option<SlotObject<U>>>
     where
         SField<U>: SlotKey<T>,
     {
-        // `0` asks the host to auto-assign the child slot, matching
-        // `Resolve for SField<T>`.
         let code = api::slot::slot_subfield_raw_code(self.no, field.code(), 0);
         if code == rshooks_core::DOESNT_EXIST {
             return Ok(None);
@@ -431,21 +420,8 @@ impl<T> SlotObject<T> {
         api::slot::slot(buf, self.no)
     }
 
-    /// [`raw`](Self::raw), then clears the slot — on the success path *and*
-    /// the failure path.
-    ///
-    /// The variable-length member of the read-and-clear family, alongside
-    /// [`take_value`](Self::value)/[`take_xfl`](SlotObject::<Amount>::take_xfl)/
-    /// [`take_raw_exact`](Self::take_raw_exact): [`raw`](Self::raw) consumes
-    /// the handle but leaves the slot allocated, which is the right cost
-    /// model for a one-shot read and the wrong one for anything that
-    /// navigates repeatedly. Generated views read every raw field through
-    /// this, so calling their accessors any number of times costs no slots
-    /// beyond the view's own root.
-    ///
-    /// The clear's own result is discarded: the read's result is what the
-    /// caller asked for, and a failed clear cannot be acted on usefully
-    /// here.
+    /// [`raw`](Self::raw), then best-effort clears the slot on every path.
+    /// The read result takes precedence over a clear failure.
     #[inline(always)]
     pub fn take_raw<B: AsMut<[u8]> + ?Sized>(self, buf: &mut B) -> Result<usize> {
         let no = self.no;
@@ -526,34 +502,16 @@ impl<T> SlotObject<T> {
     }
 }
 
-/// Reads exactly `N` bytes out of `no`, erroring when the slot's size is not
-/// exactly `N`.
-///
-/// Factored out of [`SlotObject::raw_exact`]/[`SlotObject::take_raw_exact`]
-/// so the two share one definition of "exact".
-///
-/// The scratch buffer is deliberately **not** zero-initialized: the host
-/// call overwrites what it is handed, and those zeroing stores are not free
-/// — a zeroed buffer whose address escapes into an `extern` call is a store
-/// LLVM cannot prove dead across the FFI boundary, so the guard checker
-/// charges for every one of them.
-///
-/// The storage stays a `MaybeUninit` the whole way down
-/// ([`api::slot::slot_uninit`] takes `&mut [MaybeUninit<u8>]`) and is never
-/// borrowed as a `&mut [u8]` while uninitialized. That is not pedantry: a
-/// reference must point to a valid value of its type, uninitialized bytes
-/// are not valid `u8`s, and `slice::from_raw_parts_mut` explicitly requires
-/// "`len` consecutive properly initialized values". Only the address and the
-/// length cross the boundary, which is all the host reads.
+/// Reads exactly `N` bytes without zero-initializing the host-owned output
+/// buffer. The result is exposed only after the host reports writing all
+/// `N` bytes.
 #[inline(always)]
 fn read_exact_bytes<const N: usize>(no: u32) -> Result<[u8; N]> {
     let mut buf = [const { MaybeUninit::<u8>::uninit() }; N];
     let written = api::slot::slot_uninit(&mut buf, no)?;
     if written == N {
-        // SAFETY: `written == N` means the host reported writing all `N`
-        // bytes of `buf`'s storage, so every element is now initialized.
-        // `MaybeUninit<u8>` has the same layout as `u8`, so the transmute of
-        // the array is the standard `array_assume_init` shape.
+        // SAFETY: `written == N` proves every byte is initialized;
+        // `MaybeUninit<u8>` has the same layout as `u8`.
         Ok(unsafe { core::mem::transmute_copy::<[MaybeUninit<u8>; N], [u8; N]>(&buf) })
     } else {
         Err(HookError::TooSmall)

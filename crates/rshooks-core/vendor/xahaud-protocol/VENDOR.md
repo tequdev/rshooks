@@ -1,13 +1,8 @@
 # Vendored upstream: xahaud protocol format definitions
 
-Where [`../xahaud-hook/`](../xahaud-hook/VENDOR.md) vendors the Hook API C
-headers a hook *calls*, this directory vendors the definitions of the data a
-hook *reads*: xahaud's own declarations of every serialized field, every
-transaction format and every ledger entry format. They are vendored
-**verbatim, byte-identical from upstream** for the same reason the headers
-are — so the Rust side can be generated from them and parity-tested against
-them, rather than trusted to stay in sync by hand. These files are never
-hand-edited.
+This directory contains the upstream definitions used to generate serialized
+fields, transaction formats, and ledger entry formats. The files are vendored
+verbatim so generated Rust can be parity-tested against xahaud.
 
 ## Provenance
 
@@ -25,64 +20,37 @@ hand-edited.
   | `InnerObjectFormats.cpp` | `src/libxrpl/protocol/` | the inner-object formats (`sfEmitDetails`, `sfSigner`, `sfHookExecution`, …) |
   | `features.macro` | `include/xrpl/protocol/detail/` | the amendment table, with each amendment's `Supported::yes\|no` — evidence only, see below |
 
-  They span two upstream directories but are vendored flat, under their
+  They span two upstream directories but are vendored flat under their
   basenames.
-- Last synced: 2026-08-30
 - Recorded hashes: [`SHA256SUMS`](SHA256SUMS) (single source of truth,
   regenerated only by the sync script)
 
 ## Rules
 
 - **Never hand-edit these seven files.** Re-sync only with
-  `scripts/sync-vendor.sh` (run from the repo root), which downloads all seven
-  from the `release` branch, overwrites the vendored copies, and regenerates
-  `SHA256SUMS`. If the sync changed anything, regenerate the artifact below
-  with `cargo xtask gen-core`, review the resulting `git diff`, and re-run
-  `cargo test --workspace` before committing.
-- `scripts/sync-vendor.sh --check` verifies (without writing) that the
-  vendored files are byte-identical to upstream `release` AND match
-  `SHA256SUMS`. CI runs this on every push/PR and weekly on a schedule
-  (`.github/workflows/vendor-sync.yml`), so upstream drift surfaces as a
-  failing workflow instead of a silent divergence.
+  `scripts/sync-vendor.sh` from the repository root. After a change, run
+  `cargo xtask gen-core`, review the diff, and run `cargo test --workspace`.
+- `scripts/sync-vendor.sh --check` verifies that the vendored files match both
+  upstream `release` and `SHA256SUMS` without writing.
 - **`features.macro` generates nothing.** It is vendored as *evidence* for
-  the curated `../../format_availability.json`, which classifies every
-  format as `active` / `pending` / `dormant`. An amendment marked
-  `Supported::no` there cannot activate on Xahau without a node upgrade, so
-  the formats it gates are objectively `dormant` — having the table in-tree
-  lets a reviewer check that half of the classification without a xahaud
-  checkout. The parser never reads it.
-- **`../../protocol_formats.json` is generated from the other six files**, not
-  hand-edited: `cargo xtask gen-core` (see `crates/xtask`) parses them into
-  a versioned intermediate representation and writes it there, exactly as it
-  writes `hook_api.json` from the Hook API headers. `cargo xtask gen-core
-  --check` (what CI runs) verifies the artifact is up to date without
-  writing anything, and fails naming it when it has drifted.
-- The parse is **cross-validated against `../xahaud-hook/sfcodes.h`**: every
-  field `sfields.macro` declares must exist there with the identical
-  `(type << 16) | field` code, or generation fails naming the field. The two
-  vendor groups therefore cannot drift out of sync with each other silently:
-  re-syncing one without the other is a build failure.
+  the curated `../../format_availability.json`. Formats gated by an amendment
+  marked `Supported::no` are `dormant` until node support changes. The
+  generator does not parse this file.
+- **`../../protocol_formats.json` is generated, not hand-edited.**
+  `cargo xtask gen-core --check` verifies that it is current without writing.
+- Generation cross-validates `sfields.macro` against
+  `../xahaud-hook/sfcodes.h`; each ordinary field must have the same
+  `(type << 16) | field` code in both vendor groups.
 
-  **One exemption, by upstream's design:** the four fields whose serialized
-  type names a whole container rather than a value — `sfTransaction`,
-  `sfLedgerEntry`, `sfValidation`, `sfMetadata`, serialized type IDs
-  10001–10004 — are declared in `sfields.macro` but deliberately absent
-  from `sfcodes.h`, which is written from the Hook API's point of view and
-  has no reason to name a field no hook can read. Those four skip the code
-  comparison (`protocol_ir::cross_validate`, gated on
-  `protocol_parse::PSEUDO_STI_MIN`); they are still carried in the artifact
-  with the code the macro implies. Every other field, without exception, is
-  checked.
+  The four container pseudo-fields (`sfTransaction`, `sfLedgerEntry`,
+  `sfValidation`, and `sfMetadata`, type IDs 10001–10004) are intentionally
+  absent from `sfcodes.h` and exempt from this comparison. They remain in the
+  generated artifact with the codes declared by `sfields.macro`.
 - **Parity test** (`../../tests/protocol_formats_parity.rs`) re-parses the
-  three `.macro` files at test time with a deliberately independent minimal
-  parser — independent of `xtask`'s for the same reason the header parity
-  tests are: a bug in a shared parser would be invisible to the test meant
-  to catch it — and cross-checks its counts and a sample of known formats
-  against the generated artifact.
+  three `.macro` files with an independent parser and compares every parsed
+  format with the generated artifact.
 - A drift-tripwire test (`../../tests/vendor_sha256.rs`) hashes these seven
-  files at test time and asserts them against `SHA256SUMS`, so an accidental
-  local edit (or a partial/corrupted re-download) fails CI loudly instead of
-  silently drifting from what a real xahaud node runs.
+  files and checks them against `SHA256SUMS`.
 
 ## License
 
@@ -108,7 +76,3 @@ WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
 ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ```
-
-The ISC license permits redistribution verbatim (with the copyright and
-permission notice intact, as reproduced above and in each file's header),
-which this vendoring satisfies.

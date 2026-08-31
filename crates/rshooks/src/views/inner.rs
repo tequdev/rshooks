@@ -15,20 +15,12 @@
 use crate::views::source::FieldSource as _;
 
 /// View of the `sfEmitDetails` inner object (STObject).
-///
-/// Wrap a child slot with [`EmitDetails::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
 pub struct EmitDetails {
     src: crate::views::source::SlotSource,
 }
 
 impl EmitDetails {
-    /// Views an already-navigated child slot as `EmitDetails`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -37,7 +29,7 @@ impl EmitDetails {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -83,20 +75,12 @@ impl EmitDetails {
 }
 
 /// View of the `sfSignerEntry` inner object (STObject).
-///
-/// Wrap a child slot with [`SignerEntry::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
 pub struct SignerEntry {
     src: crate::views::source::SlotSource,
 }
 
 impl SignerEntry {
-    /// Views an already-navigated child slot as `SignerEntry`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -105,7 +89,7 @@ impl SignerEntry {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -133,20 +117,12 @@ impl SignerEntry {
 }
 
 /// View of the `sfSigner` inner object (STObject).
-///
-/// Wrap a child slot with [`Signer::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
 pub struct Signer {
     src: crate::views::source::SlotSource,
 }
 
 impl Signer {
-    /// Views an already-navigated child slot as `Signer`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -155,7 +131,7 @@ impl Signer {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -169,8 +145,7 @@ impl Signer {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -182,8 +157,7 @@ impl Signer {
 
     /// `sfTxnSignature` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -194,20 +168,12 @@ impl Signer {
 }
 
 /// View of the `sfMajority` inner object (STObject).
-///
-/// Wrap a child slot with [`Majority::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
 pub struct Majority {
     src: crate::views::source::SlotSource,
 }
 
 impl Majority {
-    /// Views an already-navigated child slot as `Majority`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -216,7 +182,7 @@ impl Majority {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -236,20 +202,12 @@ impl Majority {
 }
 
 /// View of the `sfDisabledValidator` inner object (STObject).
-///
-/// Wrap a child slot with [`DisabledValidator::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
 pub struct DisabledValidator {
     src: crate::views::source::SlotSource,
 }
 
 impl DisabledValidator {
-    /// Views an already-navigated child slot as `DisabledValidator`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -258,7 +216,7 @@ impl DisabledValidator {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -266,8 +224,7 @@ impl DisabledValidator {
 
     /// `sfPublicKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -284,20 +241,12 @@ impl DisabledValidator {
 }
 
 /// View of the `sfHookExecution` inner object (STObject).
-///
-/// Wrap a child slot with [`HookExecution::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
 pub struct HookExecution {
     src: crate::views::source::SlotSource,
 }
 
 impl HookExecution {
-    /// Views an already-navigated child slot as `HookExecution`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -306,7 +255,7 @@ impl HookExecution {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -338,8 +287,7 @@ impl HookExecution {
 
     /// `sfHookReturnString` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn hook_return_string_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -383,20 +331,12 @@ impl HookExecution {
 }
 
 /// View of the `sfHookEmission` inner object (STObject).
-///
-/// Wrap a child slot with [`HookEmission::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
 pub struct HookEmission {
     src: crate::views::source::SlotSource,
 }
 
 impl HookEmission {
-    /// Views an already-navigated child slot as `HookEmission`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -405,7 +345,7 @@ impl HookEmission {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -439,20 +379,12 @@ impl HookEmission {
 }
 
 /// View of the `sfHook` inner object (STObject).
-///
-/// Wrap a child slot with [`Hook::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
 pub struct Hook {
     src: crate::views::source::SlotSource,
 }
 
 impl Hook {
-    /// Views an already-navigated child slot as `Hook`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -461,7 +393,7 @@ impl Hook {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -477,8 +409,7 @@ impl Hook {
 
     /// `sfCreateCode` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -492,10 +423,8 @@ impl Hook {
 
     /// `sfHookGrants` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_grants_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_grants_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -509,10 +438,7 @@ impl Hook {
 
     /// `sfHookGrants` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -532,10 +458,8 @@ impl Hook {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -549,10 +473,7 @@ impl Hook {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -604,8 +525,7 @@ impl Hook {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -626,20 +546,12 @@ impl Hook {
 }
 
 /// View of the `sfHookGrant` inner object (STObject).
-///
-/// Wrap a child slot with [`HookGrant::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
 pub struct HookGrant {
     src: crate::views::source::SlotSource,
 }
 
 impl HookGrant {
-    /// Views an already-navigated child slot as `HookGrant`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -648,7 +560,7 @@ impl HookGrant {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -678,20 +590,12 @@ impl HookGrant {
 }
 
 /// View of the `sfHookParameter` inner object (STObject).
-///
-/// Wrap a child slot with [`HookParameter::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
 pub struct HookParameter {
     src: crate::views::source::SlotSource,
 }
 
 impl HookParameter {
-    /// Views an already-navigated child slot as `HookParameter`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -700,7 +604,7 @@ impl HookParameter {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -708,8 +612,7 @@ impl HookParameter {
 
     /// `sfHookParameterName` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn hook_parameter_name_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -721,8 +624,7 @@ impl HookParameter {
 
     /// `sfHookParameterValue` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -737,13 +639,7 @@ impl HookParameter {
 
 /// View of the `sfNFToken` inner object (STObject).
 ///
-/// Wrap a child slot with [`NFToken::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct NFToken {
     src: crate::views::source::SlotSource,
@@ -751,12 +647,7 @@ pub struct NFToken {
 
 #[cfg(feature = "all-amendments")]
 impl NFToken {
-    /// Views an already-navigated child slot as `NFToken`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -765,7 +656,7 @@ impl NFToken {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -779,8 +670,7 @@ impl NFToken {
 
     /// `sfURI` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -793,20 +683,12 @@ impl NFToken {
 }
 
 /// View of the `sfGenesisMint` inner object (STObject).
-///
-/// Wrap a child slot with [`GenesisMint::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
 pub struct GenesisMint {
     src: crate::views::source::SlotSource,
 }
 
 impl GenesisMint {
-    /// Views an already-navigated child slot as `GenesisMint`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -815,7 +697,7 @@ impl GenesisMint {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -853,20 +735,12 @@ impl GenesisMint {
 }
 
 /// View of the `sfActiveValidator` inner object (STObject).
-///
-/// Wrap a child slot with [`ActiveValidator::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
 pub struct ActiveValidator {
     src: crate::views::source::SlotSource,
 }
 
 impl ActiveValidator {
-    /// Views an already-navigated child slot as `ActiveValidator`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -875,7 +749,7 @@ impl ActiveValidator {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -883,8 +757,7 @@ impl ActiveValidator {
 
     /// `sfPublicKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -903,20 +776,12 @@ impl ActiveValidator {
 }
 
 /// View of the `sfImportVLKey` inner object (STObject).
-///
-/// Wrap a child slot with [`ImportVLKey::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
 pub struct ImportVLKey {
     src: crate::views::source::SlotSource,
 }
 
 impl ImportVLKey {
-    /// Views an already-navigated child slot as `ImportVLKey`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -925,7 +790,7 @@ impl ImportVLKey {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -933,8 +798,7 @@ impl ImportVLKey {
 
     /// `sfPublicKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -953,20 +817,12 @@ impl ImportVLKey {
 }
 
 /// View of the `sfAmountEntry` inner object (STObject).
-///
-/// Wrap a child slot with [`AmountEntry::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
 pub struct AmountEntry {
     src: crate::views::source::SlotSource,
 }
 
 impl AmountEntry {
-    /// Views an already-navigated child slot as `AmountEntry`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -975,7 +831,7 @@ impl AmountEntry {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -989,20 +845,12 @@ impl AmountEntry {
 }
 
 /// View of the `sfMintURIToken` inner object (STObject).
-///
-/// Wrap a child slot with [`MintURIToken::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
 pub struct MintURIToken {
     src: crate::views::source::SlotSource,
 }
 
 impl MintURIToken {
-    /// Views an already-navigated child slot as `MintURIToken`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -1011,7 +859,7 @@ impl MintURIToken {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -1019,8 +867,7 @@ impl MintURIToken {
 
     /// `sfURI` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn uri_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> crate::error::Result<usize> {
         self.src.read_raw(crate::sfield::sfURI.code(), out)
@@ -1044,20 +891,12 @@ impl MintURIToken {
 }
 
 /// View of the `sfRemark` inner object (STObject).
-///
-/// Wrap a child slot with [`Remark::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
 pub struct Remark {
     src: crate::views::source::SlotSource,
 }
 
 impl Remark {
-    /// Views an already-navigated child slot as `Remark`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -1066,7 +905,7 @@ impl Remark {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -1074,8 +913,7 @@ impl Remark {
 
     /// `sfRemarkName` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn remark_name_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -1086,8 +924,7 @@ impl Remark {
 
     /// `sfRemarkValue` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1110,13 +947,7 @@ impl Remark {
 
 /// View of the `sfVoteEntry` inner object (STObject).
 ///
-/// Wrap a child slot with [`VoteEntry::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct VoteEntry {
     src: crate::views::source::SlotSource,
@@ -1124,12 +955,7 @@ pub struct VoteEntry {
 
 #[cfg(feature = "all-amendments")]
 impl VoteEntry {
-    /// Views an already-navigated child slot as `VoteEntry`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -1138,7 +964,7 @@ impl VoteEntry {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -1152,9 +978,7 @@ impl VoteEntry {
 
     /// `sfTradingFee` — UInt16, `soeDEFAULT`.
     ///
-    /// `Ok(None)` when the field is absent. `soeDEFAULT` means only that
-    /// upstream allows it to be left off the wire — there is no default
-    /// value to substitute, so absence is reported, not filled in.
+    /// `Ok(None)` when omitted; `soeDEFAULT` defines no value to substitute.
     #[inline(always)]
     pub fn trading_fee(&self) -> crate::error::Result<Option<u16>> {
         self.src.read_opt(crate::sfield::sfTradingFee)
@@ -1169,13 +993,7 @@ impl VoteEntry {
 
 /// View of the `sfAuctionSlot` inner object (STObject).
 ///
-/// Wrap a child slot with [`AuctionSlot::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct AuctionSlot {
     src: crate::views::source::SlotSource,
@@ -1183,12 +1001,7 @@ pub struct AuctionSlot {
 
 #[cfg(feature = "all-amendments")]
 impl AuctionSlot {
-    /// Views an already-navigated child slot as `AuctionSlot`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -1197,7 +1010,7 @@ impl AuctionSlot {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -1217,9 +1030,7 @@ impl AuctionSlot {
 
     /// `sfDiscountedFee` — UInt16, `soeDEFAULT`.
     ///
-    /// `Ok(None)` when the field is absent. `soeDEFAULT` means only that
-    /// upstream allows it to be left off the wire — there is no default
-    /// value to substitute, so absence is reported, not filled in.
+    /// `Ok(None)` when omitted; `soeDEFAULT` defines no value to substitute.
     #[inline(always)]
     pub fn discounted_fee(&self) -> crate::error::Result<Option<u16>> {
         self.src.read_opt(crate::sfield::sfDiscountedFee)
@@ -1233,10 +1044,8 @@ impl AuctionSlot {
 
     /// `sfAuthAccounts` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `auth_accounts_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `auth_accounts_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1250,10 +1059,7 @@ impl AuctionSlot {
 
     /// `sfAuthAccounts` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1266,13 +1072,7 @@ impl AuctionSlot {
 
 /// View of the `sfXChainClaimAttestationCollectionElement` inner object (STObject).
 ///
-/// Wrap a child slot with [`XChainClaimAttestationCollectionElement::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct XChainClaimAttestationCollectionElement {
     src: crate::views::source::SlotSource,
@@ -1280,12 +1080,7 @@ pub struct XChainClaimAttestationCollectionElement {
 
 #[cfg(feature = "all-amendments")]
 impl XChainClaimAttestationCollectionElement {
-    /// Views an already-navigated child slot as `XChainClaimAttestationCollectionElement`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -1294,7 +1089,7 @@ impl XChainClaimAttestationCollectionElement {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -1308,8 +1103,7 @@ impl XChainClaimAttestationCollectionElement {
 
     /// `sfPublicKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -1320,8 +1114,7 @@ impl XChainClaimAttestationCollectionElement {
 
     /// `sfSignature` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signature_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -1371,13 +1164,7 @@ impl XChainClaimAttestationCollectionElement {
 
 /// View of the `sfXChainCreateAccountAttestationCollectionElement` inner object (STObject).
 ///
-/// Wrap a child slot with [`XChainCreateAccountAttestationCollectionElement::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct XChainCreateAccountAttestationCollectionElement {
     src: crate::views::source::SlotSource,
@@ -1385,12 +1172,7 @@ pub struct XChainCreateAccountAttestationCollectionElement {
 
 #[cfg(feature = "all-amendments")]
 impl XChainCreateAccountAttestationCollectionElement {
-    /// Views an already-navigated child slot as `XChainCreateAccountAttestationCollectionElement`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -1399,7 +1181,7 @@ impl XChainCreateAccountAttestationCollectionElement {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -1413,8 +1195,7 @@ impl XChainCreateAccountAttestationCollectionElement {
 
     /// `sfPublicKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -1425,8 +1206,7 @@ impl XChainCreateAccountAttestationCollectionElement {
 
     /// `sfSignature` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signature_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -1480,13 +1260,7 @@ impl XChainCreateAccountAttestationCollectionElement {
 
 /// View of the `sfXChainClaimProofSig` inner object (STObject).
 ///
-/// Wrap a child slot with [`XChainClaimProofSig::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct XChainClaimProofSig {
     src: crate::views::source::SlotSource,
@@ -1494,12 +1268,7 @@ pub struct XChainClaimProofSig {
 
 #[cfg(feature = "all-amendments")]
 impl XChainClaimProofSig {
-    /// Views an already-navigated child slot as `XChainClaimProofSig`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -1508,7 +1277,7 @@ impl XChainClaimProofSig {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -1522,8 +1291,7 @@ impl XChainClaimProofSig {
 
     /// `sfPublicKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -1561,13 +1329,7 @@ impl XChainClaimProofSig {
 
 /// View of the `sfXChainCreateAccountProofSig` inner object (STObject).
 ///
-/// Wrap a child slot with [`XChainCreateAccountProofSig::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct XChainCreateAccountProofSig {
     src: crate::views::source::SlotSource,
@@ -1575,12 +1337,7 @@ pub struct XChainCreateAccountProofSig {
 
 #[cfg(feature = "all-amendments")]
 impl XChainCreateAccountProofSig {
-    /// Views an already-navigated child slot as `XChainCreateAccountProofSig`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -1589,7 +1346,7 @@ impl XChainCreateAccountProofSig {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -1603,8 +1360,7 @@ impl XChainCreateAccountProofSig {
 
     /// `sfPublicKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -1646,13 +1402,7 @@ impl XChainCreateAccountProofSig {
 
 /// View of the `sfAuthAccount` inner object (STObject).
 ///
-/// Wrap a child slot with [`AuthAccount::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct AuthAccount {
     src: crate::views::source::SlotSource,
@@ -1660,12 +1410,7 @@ pub struct AuthAccount {
 
 #[cfg(feature = "all-amendments")]
 impl AuthAccount {
-    /// Views an already-navigated child slot as `AuthAccount`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -1674,7 +1419,7 @@ impl AuthAccount {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -1688,20 +1433,12 @@ impl AuthAccount {
 }
 
 /// View of the `sfPriceData` inner object (STObject).
-///
-/// Wrap a child slot with [`PriceData::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
 pub struct PriceData {
     src: crate::views::source::SlotSource,
 }
 
 impl PriceData {
-    /// Views an already-navigated child slot as `PriceData`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -1710,7 +1447,7 @@ impl PriceData {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -1738,9 +1475,7 @@ impl PriceData {
 
     /// `sfScale` — UInt8, `soeDEFAULT`.
     ///
-    /// `Ok(None)` when the field is absent. `soeDEFAULT` means only that
-    /// upstream allows it to be left off the wire — there is no default
-    /// value to substitute, so absence is reported, not filled in.
+    /// `Ok(None)` when omitted; `soeDEFAULT` defines no value to substitute.
     #[inline(always)]
     pub fn scale(&self) -> crate::error::Result<Option<u8>> {
         self.src.read_opt(crate::sfield::sfScale)
@@ -1749,13 +1484,7 @@ impl PriceData {
 
 /// View of the `sfCredential` inner object (STObject).
 ///
-/// Wrap a child slot with [`Credential::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct Credential {
     src: crate::views::source::SlotSource,
@@ -1763,12 +1492,7 @@ pub struct Credential {
 
 #[cfg(feature = "all-amendments")]
 impl Credential {
-    /// Views an already-navigated child slot as `Credential`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -1777,7 +1501,7 @@ impl Credential {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -1791,8 +1515,7 @@ impl Credential {
 
     /// `sfCredentialType` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn credential_type_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -1804,20 +1527,12 @@ impl Credential {
 }
 
 /// View of the `sfHighReward` inner object (STObject).
-///
-/// Wrap a child slot with [`HighReward::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
 pub struct HighReward {
     src: crate::views::source::SlotSource,
 }
 
 impl HighReward {
-    /// Views an already-navigated child slot as `HighReward`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -1826,7 +1541,7 @@ impl HighReward {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -1860,20 +1575,12 @@ impl HighReward {
 }
 
 /// View of the `sfLowReward` inner object (STObject).
-///
-/// Wrap a child slot with [`LowReward::from_slot`] — typically one an
-/// enclosing view's `…_slot` accessor handed back, or an `STArray` element.
 pub struct LowReward {
     src: crate::views::source::SlotSource,
 }
 
 impl LowReward {
-    /// Views an already-navigated child slot as `LowReward`, taking ownership of
-    /// the slot.
-    ///
-    /// Infallible: an inner object carries no type field, so there is nothing
-    /// to verify. Wrapping the wrong slot produces read errors, not a wrong
-    /// answer.
+    /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
     pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
@@ -1882,7 +1589,7 @@ impl LowReward {
         }
     }
 
-    /// Hands the underlying slot back, consuming the view.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()

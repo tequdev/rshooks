@@ -68,34 +68,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::protocol_ir::ProtocolFormats;
 
-/// The cargo feature that *narrows* the surface to [`Tier::Active`] only.
-///
-/// Opt-in: without it, `pending` shapes are available too.
+/// Cargo feature that restricts the API to [`Tier::Active`] formats.
 pub const ACTIVE_ONLY_FEATURE: &str = "active-amendments";
 
-/// The cargo feature that *widens* the surface to everything, [`Tier::Dormant`]
-/// included.
-///
-/// Dominates [`ACTIVE_ONLY_FEATURE`] when both are on — see [`Tier::cfg_attr`]
-/// for why that direction is the safe one.
+/// Cargo feature that includes [`Tier::Dormant`] formats.
 pub const ALL_FEATURE: &str = "all-amendments";
 
-/// This artifact's schema version. Same additive-extension contract as
-/// [`crate::protocol_ir::PROTOCOL_FORMATS_VERSION`].
+/// Schema version of `format_availability.json`.
 pub const FORMAT_AVAILABILITY_VERSION: u32 = 1;
 
-/// How available a format is to a hook author on Xahau.
-///
-/// Every tier is *rendered*; what differs is the `#[cfg]` it carries, and so
-/// which cargo features have to be on for it to compile. See
-/// [`Tier::cfg_attr`] for the three states and the precedence rule.
+/// How available a generated format is on Xahau.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Tier {
-    /// Activated on Xahau mainnet. Generated normally.
-    ///
-    /// First in declaration order because [`Tier::best`] takes the minimum,
-    /// and "most available" is what a field's tier resolves to.
+    /// Activated on Xahau mainnet and always available.
     Active,
     /// Supported by the node but not activated as of the vendored snapshot.
     /// Available by default; excluded under [`ACTIVE_ONLY_FEATURE`].
@@ -106,11 +92,7 @@ pub enum Tier {
 }
 
 impl Tier {
-    /// The more available of two tiers.
-    ///
-    /// A field belongs to every format that lists it, so its availability is
-    /// the *best* of theirs: one active format referencing a field makes that
-    /// field reachable, whatever else also references it.
+    /// The more available tier. Declaration order is significant here.
     #[must_use]
     pub fn best(self, other: Self) -> Self {
         self.min(other)
@@ -127,21 +109,9 @@ impl Tier {
     /// | `all-amendments` | yes | yes | yes |
     /// | both | yes | yes | yes |
     ///
-    /// The default is deliberately the middle one: a `pending` shape is
-    /// something Xahau is expected to get, so writing against it early is a
-    /// reasonable thing to do without ceremony, while `dormant` shapes
-    /// cannot appear on Xahau mainnet and stay out of the way.
-    ///
-    /// **Both features on is widest-wins**, which is not a detail — cargo
-    /// unifies features across the whole dependency graph, so a crate that
-    /// enables `all-amendments` turns it on for every other user of
-    /// `rshooks` in that build. Making the wider feature dominate keeps
-    /// enabling a feature *additive in effect*: pulling in a dependency can
-    /// give you more API than you asked for, but it can never take API away
-    /// from you, which would be a build break you did not cause and cannot
-    /// see. That is why `pending` reads
-    /// `any(not(active-amendments), all-amendments)` rather than the more
-    /// obvious `not(active-amendments)`.
+    /// Pending formats are available by default. When both features are
+    /// enabled, `all-amendments` wins so Cargo feature unification can only
+    /// add API, never remove it. Hence the `any(not(active), all)` condition.
     #[must_use]
     pub fn cfg_attr(self) -> Option<String> {
         match self {
@@ -159,9 +129,7 @@ impl Tier {
 pub struct FormatAvailability {
     /// This artifact's schema version.
     pub version: u32,
-    /// A short explanation carried in the file itself, so the list is
-    /// readable without this module's source. Rewritten verbatim on every
-    /// `gen-core` run — edit [`DOC`], not the JSON.
+    /// Explanatory header refreshed from [`DOC`] by `gen-core`.
     pub doc: Vec<String>,
     /// Transaction formats, keyed by upstream type name (`Payment`).
     pub transactions: BTreeMap<String, Tier>,
@@ -170,116 +138,46 @@ pub struct FormatAvailability {
     /// Inner-object formats, keyed by the field name **without** its `sf`
     /// prefix (`EmitDetails`), matching the generated struct name.
     pub inner_objects: BTreeMap<String, Tier>,
-    /// Per-field tiers that **override** what the format-derivation rule
-    /// produces, applied afterwards and keyed by full `sfXxx` name.
-    ///
-    /// The escape hatch for the derivation rule's blind spot: it reasons
-    /// about formats, and an amendment can gate a *field* of an otherwise
-    /// available format. `sfCredentialIDs` is the worked example — `Payment`
-    /// is active, but the field is gated by `featureCredentials`, which
-    /// xahaud marks `Supported::no`, so a validated Xahau `Payment` can
-    /// never carry it (its transactor returns `temDISABLED` when it is
-    /// present). Derivation says active; the truth is dormant.
-    ///
-    /// Deliberately **not** auto-populated: nothing here derives what an
-    /// amendment gates at field level, so every entry is a human's
-    /// evidence-backed claim. [`FormatAvailability::auto_add`] never touches
-    /// this map, and [`FormatAvailability::validate`] rejects an entry
-    /// naming a field the artifact does not declare.
+    /// Curated per-field overrides, keyed by full `sfXxx` name. These cover
+    /// field-level amendment gates that format-based derivation cannot see
+    /// and are never populated by [`FormatAvailability::auto_add`].
     #[serde(default)]
     pub field_overrides: BTreeMap<String, Tier>,
 }
 
 /// The `doc` block written into the artifact.
 const DOC: &[&str] = &[
-    "Curated: which declared protocol formats a hook can actually use on Xahau.",
-    "NOT vendor data and NOT derived — a human maintains the tiers.",
+    "Curated availability of protocol formats on Xahau; not vendor data.",
     "",
-    "  active   activated on Xahau mainnet.",
-    "  pending  supported by the node, not yet activated.",
-    "  dormant  not expected to activate on Xahau mainnet -- either gated by",
-    "           an amendment features.macro marks Supported::no (or depending",
-    "           on one), or a curator judgment that Xahau will not adopt it",
-    "           (the NFToken family: Xahau ships URIToken instead). A custom",
-    "           network may still run it.",
+    "active: activated on mainnet; pending: supported but not activated;",
+    "dormant: not expected on mainnet, but potentially usable on custom networks.",
     "",
-    "Every tier is generated. Two cargo features on the rshooks crate decide",
-    "which ones compile:",
+    "Cargo features: default = active + pending; active-amendments = active only;",
+    "all-amendments = every tier. If both are enabled, all-amendments wins so",
+    "Cargo feature unification can only add API, never remove it.",
     "",
-    "  (neither)           active + pending   <- the default",
-    "  active-amendments   active only",
-    "  all-amendments      active + pending + dormant",
-    "  both                same as all-amendments (widest wins)",
+    "gen-core appends unknown formats as dormant. Humans must reclassify them;",
+    "validation rejects missing or stale classifications.",
     "",
-    "Widest-wins matters because cargo unifies features across the whole",
-    "dependency graph: a crate enabling all-amendments turns it on for every",
-    "other user of rshooks in that build. Making the wider feature dominate",
-    "keeps enabling a feature additive in effect -- a dependency can give you",
-    "more API than you asked for, never take API away.",
+    "Fields inherit the best tier among formats that reference them; unreferenced",
+    "structural fields stay active. Curated field_overrides handle field-level",
+    "amendment gates and opaque containers that derivation cannot see.",
+    "gen-core never mutates field_overrides.",
     "",
-    "`cargo xtask gen-core` appends unknown formats as `dormant` and does",
-    "nothing else to this file; moving an entry between tiers is a human",
-    "decision. `gen-core --check` fails on an unclassified format and on a",
-    "classification naming a format the artifact does not declare.",
-    "",
-    "Field constants in `rshooks::sfield` follow their formats: a field takes",
-    "the best tier among the formats referencing it, and a field no format",
-    "references stays active (those are usually structural/metadata fields,",
-    "not amendment-borne). The raw layers -- rshooks-core's sfcodes/tts/lets",
-    "-- and the TxType/LedgerEntryType decoders stay complete regardless:",
-    "they mirror the wire protocol, and a decoder that cannot name a code it",
-    "might receive is worse than one that can.",
-    "",
-    "`field_overrides` corrects that derivation where it is wrong, and is",
-    "applied after it. An amendment can gate a FIELD rather than a format:",
-    "sfCredentialIDs is on Payment (active) but needs featureCredentials,",
-    "which is Supported::no, so no validated Xahau Payment can carry it --",
-    "derivation says active, the truth is dormant. The reverse also happens:",
-    "sfLockingChainIssue/sfIssuingChainIssue live inside the opaque",
-    "sfXChainBridge wire type, so no format lists them and the",
-    "structural-fallback keeps them active.",
-    "",
-    "Nothing derives field_overrides -- gen-core never adds, removes or",
-    "retiers an entry there. Seed it only with fields whose gating amendment",
-    "is Supported::no (objectively dead); leave judgment cases such as",
-    "sfHookName/NamedHooks to deliberate manual curation.",
-    "",
-    "=== HOW THE active/pending SPLIT WAS VERIFIED ===",
-    "",
-    "Snapshot: Xahau mainnet, validated ledger 25441901, 2026-08-30,",
-    "via https://xahau.network. The Amendments ledger object at index",
+    "Verification snapshot: Xahau mainnet validated ledger 25441901, 2026-08-30.",
+    "The Amendments ledger object at index",
     "7DB0788C020F02780A673DC74757F23823FA3014C1866E72CC4CD8B226CD6EF4",
-    "listed 74 activated amendment hashes.",
+    "was queried through https://xahau.network. Compare its hashes with",
+    "sha512half(feature_name), the first 32 bytes of SHA-512 of the ASCII name.",
     "",
-    "An amendment is identified on-ledger by its hash, not its name:",
-    "",
-    "  amendment_id = sha512half(feature_name)   # first 32 bytes of SHA-512",
-    "                                            # of the ASCII name, e.g. \"Cron\"",
-    "",
-    "So the membership test for one amendment is:",
-    "",
-    "  curl -s https://xahau.network -H 'Content-Type: application/json' -d '{",
-    "    \"method\":\"ledger_entry\",",
-    "    \"params\":[{\"index\":\"7DB0788C020F02780A673DC74757F23823FA3014C1866E72CC4CD8B226CD6EF4\",",
-    "                \"ledger_index\":\"validated\"}]}' \\",
-    "  | python3 -c 'import sys,json,hashlib;",
-    "      n=sys.argv[1].encode();",
-    "      h=hashlib.sha512(n).hexdigest()[:64].upper();",
-    "      a=json.load(sys.stdin)[\"result\"][\"node\"][\"Amendments\"];",
-    "      print(sys.argv[1], h in a)' Cron",
-    "",
-    "CAVEAT — absence proves nothing on its own. A RETIRED amendment is",
-    "unconditionally on and is absent from the Amendments object (Escrow,",
-    "PaymentChannels, MultiSign and friends are retired in features.macro).",
-    "Never demote a format to `dormant` because its amendment is missing",
-    "from that list. Demotion needs either `Supported::no` in the vendored",
-    "features.macro or an explicit curator judgment; the ledger check only",
-    "distinguishes `active` from `pending` among amendments features.macro",
-    "still tracks.",
+    "Absence is not evidence of dormancy: retired amendments are always on but",
+    "absent from that object. Dormant requires Supported::no in features.macro",
+    "or an explicit curator decision; ledger membership only separates active",
+    "from pending for amendments that features.macro still tracks.",
 ];
 
 impl FormatAvailability {
-    /// An empty classification, for the first `gen-core` run.
+    /// An empty classification for the first `gen-core` run.
     #[must_use]
     pub fn empty() -> Self {
         Self {
@@ -321,14 +219,8 @@ impl FormatAvailability {
             .unwrap_or(Tier::Dormant)
     }
 
-    /// Appends every format the artifact declares and this file does not, as
-    /// [`Tier::Dormant`]. Returns the names added, for the `gen-core` log.
-    ///
-    /// Appends and **nothing else**: no tier is changed, no entry removed,
-    /// and [`Self::field_overrides`] is not touched at all. A run that finds
-    /// no new format leaves the file byte-identical, which a test pins.
-    /// Normalizing the `doc`/`version` header is a separate, explicit step
-    /// ([`Self::refresh_doc`]) applied when the file is rendered.
+    /// Appends unclassified formats as [`Tier::Dormant`] and returns their
+    /// names. Existing tiers and field overrides are left unchanged.
     pub fn auto_add(&mut self, formats: &ProtocolFormats) -> Vec<String> {
         let mut added = Vec::new();
         for t in &formats.transactions {
@@ -353,30 +245,14 @@ impl FormatAvailability {
         added
     }
 
-    /// Rewrites the `doc`/`version` header from this module's [`DOC`], so a
-    /// wording change here lands on the next `gen-core` run instead of
-    /// needing a hand edit.
-    ///
-    /// Separate from [`Self::auto_add`] on purpose: that function's contract
-    /// is "appends dormant entries and nothing else", and quietly
-    /// normalizing a header alongside it would make the contract false. This
-    /// is a rendering concern, applied where the file is serialized — so a
-    /// stale header shows up as an ordinary `gen-core --check` staleness
-    /// mismatch rather than being silently preserved.
+    /// Refreshes the generated header and schema version.
     pub fn refresh_doc(&mut self) {
         self.doc = DOC.iter().map(|s| (*s).to_owned()).collect();
         self.version = FORMAT_AVAILABILITY_VERSION;
     }
 
-    /// Fails when the two files have drifted apart in either direction.
-    ///
-    /// An **unclassified** format would silently render as dormant — a view
-    /// vanishing because nobody classified it is exactly the failure this
-    /// check exists to prevent, so it names the offenders and points at
-    /// `gen-core`. A **stale** classification (naming a format upstream no
-    /// longer declares) is the other direction, and equally worth failing:
-    /// it is dead policy that will outlive anyone's memory of why it is
-    /// there.
+    /// Rejects unclassified formats, stale classifications, and overrides
+    /// for fields absent from the protocol artifact.
     pub fn validate(&self, formats: &ProtocolFormats) -> Result<()> {
         if self.version != FORMAT_AVAILABILITY_VERSION {
             bail!(
@@ -455,9 +331,6 @@ impl FormatAvailability {
             );
         }
 
-        // An override naming a field upstream no longer declares is dead
-        // policy, the same way a stale format classification is — and more
-        // easily missed, since these are hand-written one at a time.
         let declared_fields: BTreeSet<&str> =
             formats.sfields.iter().map(|s| s.name.as_str()).collect();
         let unknown: Vec<&str> = self
@@ -478,41 +351,9 @@ impl FormatAvailability {
         Ok(())
     }
 
-    /// Every serialized field's tier: the best tier among the formats
-    /// referencing it.
-    ///
-    /// Fields no format references are **not** in the map, and callers treat
-    /// them as [`Tier::Active`]. That is deliberate: an unreferenced field is
-    /// usually structural rather than amendment-borne — metadata fields
-    /// (`sfAffectedNodes` and friends), hash and index plumbing, the four
-    /// container-typed pseudo-fields — and none of those arrive with an
-    /// amendment.
-    ///
-    /// # Where format-derivation is wrong, and what fixes it
-    ///
-    /// Deriving a field's tier from its formats has one blind spot, in both
-    /// directions, because **an amendment can gate a field rather than a
-    /// format**:
-    ///
-    /// - A field of an *available* format can still be unreachable.
-    ///   `sfCredentialIDs` is on `Payment`, `EscrowFinish`,
-    ///   `PaymentChannelClaim` and `AccountDelete` — all active — but is
-    ///   gated by `featureCredentials`, which xahaud marks `Supported::no`.
-    ///   A validated Xahau `Payment` can never carry it; its transactor
-    ///   returns `temDISABLED` when it is present. Derivation says active.
-    /// - A genuinely amendment-borne field can look *structural* because it
-    ///   is reachable only from inside an opaque wire type, so no format's
-    ///   field list names it: `sfLockingChainIssue` and
-    ///   `sfIssuingChainIssue` live inside `sfXChainBridge` (serialized type
-    ///   25, not an object), and the fallback above keeps them active.
-    ///
-    /// [`FormatAvailability::field_overrides`] is the remedy for both, and
-    /// is applied after derivation. It is curated rather than derived
-    /// because nothing in this repository knows what an amendment gates at
-    /// field level — so it is seeded only with cases whose amendment is
-    /// `Supported::no` (objectively dead), and judgment-tier cases
-    /// (`sfHookName` and `NamedHooks`, say) are left to manual curation
-    /// rather than guessed at.
+    /// Derives each field's best tier from the formats referencing it, then
+    /// applies [`Self::field_overrides`]. Unreferenced structural fields are
+    /// absent from the result and callers treat them as active.
     #[must_use]
     pub fn field_tiers(&self, formats: &ProtocolFormats) -> BTreeMap<String, Tier> {
         let mut out: BTreeMap<String, Tier> = BTreeMap::new();
@@ -522,9 +363,6 @@ impl FormatAvailability {
                 .or_insert(tier);
         };
 
-        // Common fields ride every format in their namespace, so they are as
-        // available as the most available format there — active, since both
-        // namespaces have active members.
         for f in formats.tx_common.iter().chain(&formats.le_common) {
             note(&f.sfield, Tier::Active);
         }
@@ -542,19 +380,12 @@ impl FormatAvailability {
         }
         for i in &formats.inner_objects {
             let tier = self.inner_object(&inner_key(&i.sfield));
-            // The field that *names* the inner object is as available as the
-            // object itself — `sfEmitDetails` is only meaningful because
-            // `EmitDetails` is.
             note(&i.sfield, tier);
             for f in &i.fields {
                 note(&f.sfield, tier);
             }
         }
 
-        // Overrides land last and win outright — including over the
-        // "unreferenced fields stay active" fallback, which is how
-        // `sfLockingChainIssue` (reachable only inside the opaque
-        // `sfXChainBridge` wire type) gets classified at all.
         for (field, tier) in &self.field_overrides {
             out.insert(field.clone(), *tier);
         }
@@ -562,9 +393,6 @@ impl FormatAvailability {
     }
 }
 
-/// The inner-object key: the field name without its `sf` prefix, matching
-/// the generated struct name. Names that somehow lack the prefix are used
-/// verbatim; [`FormatAvailability::validate`] would surface the mismatch.
 fn inner_key(sfield: &str) -> String {
     sfield.strip_prefix("sf").unwrap_or(sfield).to_owned()
 }

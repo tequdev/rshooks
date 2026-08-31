@@ -20,33 +20,14 @@
 //! assert_eq!(SEQ, rshooks::raw::sfcodes::sfSequence);
 //! ```
 //!
-//! # Which fields are here
+//! # Availability
 //!
-//! Not all of them, deliberately. [`rshooks_core::sfcodes`] is the complete
-//! 1:1 mirror of the wire protocol; this table is the *ergonomic* layer, and
-//! it carries a constant only for a field some usable format references.
-//! `crates/rshooks-core/format_availability.json` classifies every format:
-//!
-//! - a field referenced by at least one **active** format is always here;
-//! - a field whose best format is **pending** (supported by xahaud, not yet
-//!   activated on Xahau) is here by default, alongside the views that read
-//!   it, and excluded under the `active-amendments` cargo feature;
-//! - a field referenced only by **dormant** formats — gated by an amendment
-//!   xahaud marks `Supported::no`, so no Xahau object can carry it — needs
-//!   the `all-amendments` feature. `sfAsset` (AMM) and `sfXChainBridge`
-//!   (XChainBridge) are the shape of that group;
-//! - a field **no** format references is usually structural rather than
-//!   amendment-borne — metadata, hash and index plumbing — and stays. Where
-//!   that inference is wrong in either direction,
-//!   `format_availability.json`'s `field_overrides` corrects it:
-//!   `sfCredentialIDs` sits on an active `Payment` but needs a
-//!   `Supported::no` amendment, so it is overridden to dormant.
-//!
-//! Nothing is lost in any state: the raw `u32` is always available as
-//! `rshooks::raw::sfcodes::sfXxx`, and every API that takes a field code
-//! takes `impl Into<u32>`. What the gating buys is that the default table
-//! cannot offer an autocomplete entry for a field no Xahau object can
-//! contain.
+//! Constants follow the availability of the formats that use them: active
+//! fields are always present, pending fields are excluded by
+//! `active-amendments`, and dormant fields require `all-amendments`.
+//! Unreferenced structural fields stay available; curated overrides cover
+//! field-level amendment gates. Raw codes always remain in
+//! `rshooks::raw::sfcodes`.
 //!
 //! [`crate::tx_type::TxType`] and [`crate::ledger_entry_type::LedgerEntryType`]
 //! stay exhaustive for the opposite reason: they *decode* wire values rather
@@ -88,8 +69,7 @@ pub const sfTransactionResult: SField<u8> = SField::new((16 << 16) + 3);
 pub const sfScale: SField<u8> = SField::new((16 << 16) + 4);
 /// C: `sfAssetScale` (sfcodes.h) — UInt8, read as [`u8`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfAssetScale: SField<u8> = SField::new((16 << 16) + 5);
 /// C: `sfTickSize` (sfcodes.h) — UInt8, read as [`u8`].
@@ -100,8 +80,7 @@ pub const sfUNLModifyDisabling: SField<u8> = SField::new((16 << 16) + 17);
 pub const sfHookResult: SField<u8> = SField::new((16 << 16) + 18);
 /// C: `sfWasLockingChainSend` (sfcodes.h) — UInt8, read as [`u8`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfWasLockingChainSend: SField<u8> = SField::new((16 << 16) + 19);
 /// C: `sfLedgerEntryType` (sfcodes.h) — UInt16, read as [`u16`].
@@ -112,20 +91,17 @@ pub const sfTransactionType: SField<u16> = SField::new((1 << 16) + 2);
 pub const sfSignerWeight: SField<u16> = SField::new((1 << 16) + 3);
 /// C: `sfTransferFee` (sfcodes.h) — UInt16, read as [`u16`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfTransferFee: SField<u16> = SField::new((1 << 16) + 4);
 /// C: `sfTradingFee` (sfcodes.h) — UInt16, read as [`u16`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfTradingFee: SField<u16> = SField::new((1 << 16) + 5);
 /// C: `sfDiscountedFee` (sfcodes.h) — UInt16, read as [`u16`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfDiscountedFee: SField<u16> = SField::new((1 << 16) + 6);
 /// C: `sfVersion` (sfcodes.h) — UInt16, read as [`u16`].
@@ -142,8 +118,7 @@ pub const sfHookApiVersion: SField<u16> = SField::new((1 << 16) + 20);
 pub const sfHookStateScale: SField<u16> = SField::new((1 << 16) + 21);
 /// C: `sfLedgerFixType` (sfcodes.h) — UInt16, read as [`u16`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfLedgerFixType: SField<u16> = SField::new((1 << 16) + 22);
 /// C: `sfNetworkID` (sfcodes.h) — UInt32, read as [`u32`].
@@ -230,8 +205,7 @@ pub const sfTicketCount: SField<u32> = SField::new((2 << 16) + 40);
 pub const sfTicketSequence: SField<u32> = SField::new((2 << 16) + 41);
 /// C: `sfNFTokenTaxon` (sfcodes.h) — UInt32, read as [`u32`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfNFTokenTaxon: SField<u32> = SField::new((2 << 16) + 42);
 /// C: `sfMintedNFTokens` (sfcodes.h) — UInt32, read as [`u32`].
@@ -244,8 +218,7 @@ pub const sfHookStateCount: SField<u32> = SField::new((2 << 16) + 45);
 pub const sfEmitGeneration: SField<u32> = SField::new((2 << 16) + 46);
 /// C: `sfVoteWeight` (sfcodes.h) — UInt32, read as [`u32`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfVoteWeight: SField<u32> = SField::new((2 << 16) + 48);
 /// C: `sfLockCount` (sfcodes.h) — UInt32, read as [`u32`].
@@ -294,8 +267,7 @@ pub const sfCookie: SField<u64> = SField::new((3 << 16) + 10);
 pub const sfServerVersion: SField<u64> = SField::new((3 << 16) + 11);
 /// C: `sfNFTokenOfferNode` (sfcodes.h) — UInt64, read as [`u64`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfNFTokenOfferNode: SField<u64> = SField::new((3 << 16) + 12);
 /// C: `sfEmitBurden` (sfcodes.h) — UInt64, read as [`u64`].
@@ -308,52 +280,44 @@ pub const sfHookReturnCode: SField<u64> = SField::new((3 << 16) + 18);
 pub const sfReferenceCount: SField<u64> = SField::new((3 << 16) + 19);
 /// C: `sfXChainClaimID` (sfcodes.h) — UInt64, read as [`u64`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfXChainClaimID: SField<u64> = SField::new((3 << 16) + 20);
 /// C: `sfXChainAccountCreateCount` (sfcodes.h) — UInt64, read as [`u64`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfXChainAccountCreateCount: SField<u64> = SField::new((3 << 16) + 21);
 /// C: `sfXChainAccountClaimCount` (sfcodes.h) — UInt64, read as [`u64`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfXChainAccountClaimCount: SField<u64> = SField::new((3 << 16) + 22);
 /// C: `sfAssetPrice` (sfcodes.h) — UInt64, read as [`u64`].
 pub const sfAssetPrice: SField<u64> = SField::new((3 << 16) + 23);
 /// C: `sfMaximumAmount` (sfcodes.h) — UInt64, read as [`u64`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfMaximumAmount: SField<u64> = SField::new((3 << 16) + 24);
 /// C: `sfOutstandingAmount` (sfcodes.h) — UInt64, read as [`u64`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfOutstandingAmount: SField<u64> = SField::new((3 << 16) + 25);
 /// C: `sfMPTAmount` (sfcodes.h) — UInt64, read as [`u64`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfMPTAmount: SField<u64> = SField::new((3 << 16) + 26);
 /// C: `sfIssuerNode` (sfcodes.h) — UInt64, read as [`u64`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfIssuerNode: SField<u64> = SField::new((3 << 16) + 27);
 /// C: `sfSubjectNode` (sfcodes.h) — UInt64, read as [`u64`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfSubjectNode: SField<u64> = SField::new((3 << 16) + 28);
 /// C: `sfTouchCount` (sfcodes.h) — UInt64, read as [`u64`].
@@ -376,8 +340,7 @@ pub const sfTakerGetsCurrency: SField<crate::types::Opaque> = SField::new((17 <<
 pub const sfTakerGetsIssuer: SField<crate::types::Opaque> = SField::new((17 << 16) + 4);
 /// C: `sfMPTokenIssuanceID` (sfcodes.h) — UInt192, read as [`crate::types::Opaque`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfMPTokenIssuanceID: SField<crate::types::Opaque> = SField::new((21 << 16) + 1);
 /// C: `sfLedgerHash` (sfcodes.h) — Hash256, read as [`crate::types::Hash`].
@@ -432,26 +395,22 @@ pub const sfCheckID: SField<crate::types::Hash> = SField::new((5 << 16) + 24);
 pub const sfValidatedHash: SField<crate::types::Hash> = SField::new((5 << 16) + 25);
 /// C: `sfPreviousPageMin` (sfcodes.h) — Hash256, read as [`crate::types::Hash`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfPreviousPageMin: SField<crate::types::Hash> = SField::new((5 << 16) + 26);
 /// C: `sfNextPageMin` (sfcodes.h) — Hash256, read as [`crate::types::Hash`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfNextPageMin: SField<crate::types::Hash> = SField::new((5 << 16) + 27);
 /// C: `sfNFTokenBuyOffer` (sfcodes.h) — Hash256, read as [`crate::types::Hash`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfNFTokenBuyOffer: SField<crate::types::Hash> = SField::new((5 << 16) + 28);
 /// C: `sfNFTokenSellOffer` (sfcodes.h) — Hash256, read as [`crate::types::Hash`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfNFTokenSellOffer: SField<crate::types::Hash> = SField::new((5 << 16) + 29);
 /// C: `sfHookStateKey` (sfcodes.h) — Hash256, read as [`crate::types::Hash`].
@@ -470,8 +429,7 @@ pub const sfEscrowID: SField<crate::types::Hash> = SField::new((5 << 16) + 35);
 pub const sfURITokenID: SField<crate::types::Hash> = SField::new((5 << 16) + 36);
 /// C: `sfDomainID` (sfcodes.h) — Hash256, read as [`crate::types::Hash`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfDomainID: SField<crate::types::Hash> = SField::new((5 << 16) + 37);
 /// C: `sfHookOnOutgoing` (sfcodes.h) — Hash256, read as [`crate::types::Hash`].
@@ -512,20 +470,17 @@ pub const sfSendMax: SField<crate::types::Amount> = SField::new((6 << 16) + 9);
 pub const sfDeliverMin: SField<crate::types::Amount> = SField::new((6 << 16) + 10);
 /// C: `sfAmount2` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfAmount2: SField<crate::types::Amount> = SField::new((6 << 16) + 11);
 /// C: `sfBidMin` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfBidMin: SField<crate::types::Amount> = SField::new((6 << 16) + 12);
 /// C: `sfBidMax` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfBidMax: SField<crate::types::Amount> = SField::new((6 << 16) + 13);
 /// C: `sfMinimumOffer` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
@@ -536,8 +491,7 @@ pub const sfRippleEscrow: SField<crate::types::Amount> = SField::new((6 << 16) +
 pub const sfDeliveredAmount: SField<crate::types::Amount> = SField::new((6 << 16) + 18);
 /// C: `sfNFTokenBrokerFee` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfNFTokenBrokerFee: SField<crate::types::Amount> = SField::new((6 << 16) + 19);
 /// C: `sfHookCallbackFee` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
@@ -552,44 +506,37 @@ pub const sfReserveBaseDrops: SField<crate::types::Amount> = SField::new((6 << 1
 pub const sfReserveIncrementDrops: SField<crate::types::Amount> = SField::new((6 << 16) + 24);
 /// C: `sfLPTokenOut` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfLPTokenOut: SField<crate::types::Amount> = SField::new((6 << 16) + 25);
 /// C: `sfLPTokenIn` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfLPTokenIn: SField<crate::types::Amount> = SField::new((6 << 16) + 26);
 /// C: `sfEPrice` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfEPrice: SField<crate::types::Amount> = SField::new((6 << 16) + 27);
 /// C: `sfPrice` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfPrice: SField<crate::types::Amount> = SField::new((6 << 16) + 28);
 /// C: `sfSignatureReward` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfSignatureReward: SField<crate::types::Amount> = SField::new((6 << 16) + 29);
 /// C: `sfMinAccountCreateAmount` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfMinAccountCreateAmount: SField<crate::types::Amount> = SField::new((6 << 16) + 30);
 /// C: `sfLPTokenBalance` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfLPTokenBalance: SField<crate::types::Amount> = SField::new((6 << 16) + 31);
 /// C: `sfTrustLineRewardAccumulator` (sfcodes.h) — Amount, read as [`crate::types::Amount`].
@@ -646,14 +593,12 @@ pub const sfHookParameterValue: SField<crate::types::Opaque> = SField::new((7 <<
 pub const sfBlob: SField<crate::types::Opaque> = SField::new((7 << 16) + 26);
 /// C: `sfDIDDocument` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfDIDDocument: SField<crate::types::Opaque> = SField::new((7 << 16) + 27);
 /// C: `sfData` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfData: SField<crate::types::Opaque> = SField::new((7 << 16) + 28);
 /// C: `sfAssetClass` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
@@ -662,14 +607,12 @@ pub const sfAssetClass: SField<crate::types::Opaque> = SField::new((7 << 16) + 2
 pub const sfProvider: SField<crate::types::Opaque> = SField::new((7 << 16) + 30);
 /// C: `sfMPTokenMetadata` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfMPTokenMetadata: SField<crate::types::Opaque> = SField::new((7 << 16) + 31);
 /// C: `sfCredentialType` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfCredentialType: SField<crate::types::Opaque> = SField::new((7 << 16) + 32);
 /// C: `sfHookName` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
@@ -702,26 +645,22 @@ pub const sfHolder: SField<crate::types::AccountId> = SField::new((8 << 16) + 11
 pub const sfHookAccount: SField<crate::types::AccountId> = SField::new((8 << 16) + 16);
 /// C: `sfOtherChainSource` (sfcodes.h) — AccountID, read as [`crate::types::AccountId`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfOtherChainSource: SField<crate::types::AccountId> = SField::new((8 << 16) + 18);
 /// C: `sfOtherChainDestination` (sfcodes.h) — AccountID, read as [`crate::types::AccountId`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfOtherChainDestination: SField<crate::types::AccountId> = SField::new((8 << 16) + 19);
 /// C: `sfAttestationSignerAccount` (sfcodes.h) — AccountID, read as [`crate::types::AccountId`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfAttestationSignerAccount: SField<crate::types::AccountId> = SField::new((8 << 16) + 20);
 /// C: `sfAttestationRewardAccount` (sfcodes.h) — AccountID, read as [`crate::types::AccountId`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfAttestationRewardAccount: SField<crate::types::AccountId> = SField::new((8 << 16) + 21);
 /// C: `sfLockingChainDoor` (sfcodes.h) — AccountID, read as [`crate::types::AccountId`].
@@ -730,8 +669,7 @@ pub const sfLockingChainDoor: SField<crate::types::AccountId> = SField::new((8 <
 pub const sfIssuingChainDoor: SField<crate::types::AccountId> = SField::new((8 << 16) + 23);
 /// C: `sfSubject` (sfcodes.h) — AccountID, read as [`crate::types::AccountId`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfSubject: SField<crate::types::AccountId> = SField::new((8 << 16) + 24);
 /// C: `sfInform` (sfcodes.h) — AccountID, read as [`crate::types::AccountId`].
@@ -744,16 +682,14 @@ pub const sfHashes: SField<crate::types::Opaque> = SField::new((19 << 16) + 2);
 pub const sfAmendments: SField<crate::types::Opaque> = SField::new((19 << 16) + 3);
 /// C: `sfNFTokenOffers` (sfcodes.h) — Vector256, read as [`crate::types::Opaque`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfNFTokenOffers: SField<crate::types::Opaque> = SField::new((19 << 16) + 4);
 /// C: `sfHookNamespaces` (sfcodes.h) — Vector256, read as [`crate::types::Opaque`].
 pub const sfHookNamespaces: SField<crate::types::Opaque> = SField::new((19 << 16) + 5);
 /// C: `sfCredentialIDs` (sfcodes.h) — Vector256, read as [`crate::types::Opaque`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfCredentialIDs: SField<crate::types::Opaque> = SField::new((19 << 16) + 6);
 /// C: `sfURITokenIDs` (sfcodes.h) — Vector256, read as [`crate::types::Opaque`].
@@ -766,34 +702,29 @@ pub const sfBaseAsset: SField<crate::types::CurrencyCode> = SField::new((26 << 1
 pub const sfQuoteAsset: SField<crate::types::CurrencyCode> = SField::new((26 << 16) + 2);
 /// C: `sfLockingChainIssue` (sfcodes.h) — Issue, read as [`crate::types::Issue`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfLockingChainIssue: SField<crate::types::Issue> = SField::new((24 << 16) + 1);
 /// C: `sfIssuingChainIssue` (sfcodes.h) — Issue, read as [`crate::types::Issue`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfIssuingChainIssue: SField<crate::types::Issue> = SField::new((24 << 16) + 2);
 /// C: `sfAsset` (sfcodes.h) — Issue, read as [`crate::types::Issue`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfAsset: SField<crate::types::Issue> = SField::new((24 << 16) + 3);
 /// C: `sfAsset2` (sfcodes.h) — Issue, read as [`crate::types::Issue`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfAsset2: SField<crate::types::Issue> = SField::new((24 << 16) + 4);
 /// C: `sfClaimCurrency` (sfcodes.h) — Issue, read as [`crate::types::Issue`].
 pub const sfClaimCurrency: SField<crate::types::Issue> = SField::new((24 << 16) + 5);
 /// C: `sfXChainBridge` (sfcodes.h) — XChainBridge, read as [`crate::types::Opaque`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfXChainBridge: SField<crate::types::Opaque> = SField::new((25 << 16) + 1);
 /// C: `sfTransactionMetaData` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
@@ -818,8 +749,7 @@ pub const sfMemo: SField<crate::types::STObject> = SField::new((14 << 16) + 10);
 pub const sfSignerEntry: SField<crate::types::STObject> = SField::new((14 << 16) + 11);
 /// C: `sfNFToken` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfNFToken: SField<crate::types::STObject> = SField::new((14 << 16) + 12);
 /// C: `sfEmitDetails` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
@@ -842,46 +772,39 @@ pub const sfHookParameter: SField<crate::types::STObject> = SField::new((14 << 1
 pub const sfHookGrant: SField<crate::types::STObject> = SField::new((14 << 16) + 24);
 /// C: `sfVoteEntry` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfVoteEntry: SField<crate::types::STObject> = SField::new((14 << 16) + 25);
 /// C: `sfAuctionSlot` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfAuctionSlot: SField<crate::types::STObject> = SField::new((14 << 16) + 26);
 /// C: `sfAuthAccount` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfAuthAccount: SField<crate::types::STObject> = SField::new((14 << 16) + 27);
 /// C: `sfXChainClaimProofSig` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfXChainClaimProofSig: SField<crate::types::STObject> = SField::new((14 << 16) + 28);
 /// C: `sfXChainCreateAccountProofSig` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfXChainCreateAccountProofSig: SField<crate::types::STObject> =
     SField::new((14 << 16) + 29);
 /// C: `sfXChainClaimAttestationCollectionElement` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfXChainClaimAttestationCollectionElement: SField<crate::types::STObject> =
     SField::new((14 << 16) + 30);
 /// C: `sfXChainCreateAccountAttestationCollectionElement` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfXChainCreateAccountAttestationCollectionElement: SField<crate::types::STObject> =
     SField::new((14 << 16) + 31);
@@ -889,8 +812,7 @@ pub const sfXChainCreateAccountAttestationCollectionElement: SField<crate::types
 pub const sfPriceData: SField<crate::types::STObject> = SField::new((14 << 16) + 32);
 /// C: `sfCredential` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfCredential: SField<crate::types::STObject> = SField::new((14 << 16) + 33);
 /// C: `sfAmountEntry` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
@@ -927,16 +849,14 @@ pub const sfAffectedNodes: SField<crate::types::STArray> = SField::new((15 << 16
 pub const sfMemos: SField<crate::types::STArray> = SField::new((15 << 16) + 9);
 /// C: `sfNFTokens` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfNFTokens: SField<crate::types::STArray> = SField::new((15 << 16) + 10);
 /// C: `sfHooks` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
 pub const sfHooks: SField<crate::types::STArray> = SField::new((15 << 16) + 11);
 /// C: `sfVoteSlots` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfVoteSlots: SField<crate::types::STArray> = SField::new((15 << 16) + 12);
 /// C: `sfMajorities` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
@@ -951,14 +871,12 @@ pub const sfHookParameters: SField<crate::types::STArray> = SField::new((15 << 1
 pub const sfHookGrants: SField<crate::types::STArray> = SField::new((15 << 16) + 20);
 /// C: `sfXChainClaimAttestations` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfXChainClaimAttestations: SField<crate::types::STArray> = SField::new((15 << 16) + 21);
 /// C: `sfXChainCreateAccountAttestations` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfXChainCreateAccountAttestations: SField<crate::types::STArray> =
     SField::new((15 << 16) + 22);
@@ -966,8 +884,7 @@ pub const sfXChainCreateAccountAttestations: SField<crate::types::STArray> =
 pub const sfPriceDataSeries: SField<crate::types::STArray> = SField::new((15 << 16) + 24);
 /// C: `sfAuthAccounts` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfAuthAccounts: SField<crate::types::STArray> = SField::new((15 << 16) + 25);
 /// C: `sfAuthorizeCredentials` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
@@ -976,8 +893,7 @@ pub const sfAuthorizeCredentials: SField<crate::types::STArray> = SField::new((1
 pub const sfUnauthorizeCredentials: SField<crate::types::STArray> = SField::new((15 << 16) + 27);
 /// C: `sfAcceptedCredentials` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
 ///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau
-/// object can carry this field. Needs the `all-amendments` cargo feature.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfAcceptedCredentials: SField<crate::types::STArray> = SField::new((15 << 16) + 28);
 /// C: `sfAmounts` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
@@ -995,11 +911,7 @@ pub const sfRemarks: SField<crate::types::STArray> = SField::new((15 << 16) + 97
 
 #[cfg(test)]
 mod parity {
-    //! Every typed constant equals the raw `sfcodes` constant of the
-    //! same name. Holds by construction — both tables are rendered
-    //! from one parse by `cargo xtask gen-core` — which is exactly why
-    //! it is worth asserting: "by construction" stops being true the
-    //! moment either generator changes shape.
+    //! Verifies every typed constant against its raw counterpart.
 
     #[test]
     fn typed_field_codes_match_raw() {

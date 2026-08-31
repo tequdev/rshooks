@@ -130,26 +130,7 @@ fn slot_path_shapes() {
     assert!(r.is_err());
 }
 
-// ---------------------------------------------------------------------------
-// Field-table parity
-// ---------------------------------------------------------------------------
-//
-// The `typed.code() == raw` comparison is *generated* into `sfield.rs`
-// alongside the table it checks (`cargo xtask gen-core`), so it cannot drift
-// when upstream adds a field — run it with
-// `cargo test -p rshooks --lib parity`. What is left here is the shape check
-// the generated test cannot make: that both tables name the same fields, and
-// that the typed one gates each name by its amendment availability.
-//
-// `rshooks-core::sfcodes` is a complete 1:1 mirror of the wire protocol and
-// is never gated. `rshooks::sfield` declares the same names but attaches a
-// `#[cfg]` from `crates/rshooks-core/format_availability.json`: `pending`
-// fields are in by default and out under `active-amendments`, `dormant`
-// fields need `all-amendments`. So the two tables agree on *names* and
-// differ on *what compiles*.
-
-/// Maps each `pub const` in a generated table to the `#[cfg]` on the line
-/// above it, if any.
+// Generated parity tests compare values; this test checks names and cfg gates.
 fn gated_names(src: &str) -> std::collections::BTreeMap<String, Option<String>> {
     let lines: Vec<&str> = src.lines().collect();
     let mut out = std::collections::BTreeMap::new();
@@ -192,7 +173,6 @@ fn both_tables_name_the_same_fields_and_the_typed_one_gates_by_availability() {
         "#[cfg(any(not(feature = \"active-amendments\"), feature = \"all-amendments\"))]";
     const DORMANT: &str = "#[cfg(feature = \"all-amendments\")]";
 
-    // Active: always available, never gated.
     for n in [
         "sfAccount",
         "sfAmount",
@@ -201,10 +181,7 @@ fn both_tables_name_the_same_fields_and_the_typed_one_gates_by_availability() {
     ] {
         assert_eq!(cfg_of(n), None, "{n} is active and must not be gated");
     }
-    // Pending: in by default, out under `active-amendments`. The `any(...)`
-    // form is what makes both-features-on resolve to "in" (widest wins). The
-    // tier is currently empty; every gated field below must carry one of the
-    // two known expressions, so a future pending field cannot invent a third.
+    // The pending tier is empty, but no generated field may invent another gate.
     for (n, cfg) in &typed {
         if let Some(cfg) = cfg {
             assert!(
@@ -213,10 +190,7 @@ fn both_tables_name_the_same_fields_and_the_typed_one_gates_by_availability() {
             );
         }
     }
-    // Dormant: only under `all-amendments`. `sfAsset`/`sfXChainBridge` get
-    // there by their formats; `sfNFTokenTaxon` by the NFToken family's
-    // curator judgment; `sfCredentialIDs` by a `field_overrides` entry,
-    // since `Payment` is active but `featureCredentials` is Supported::no.
+    // Covers format-derived, curator-assigned, and field-override dormancy.
     for n in [
         "sfAsset",
         "sfAsset2",
@@ -228,13 +202,7 @@ fn both_tables_name_the_same_fields_and_the_typed_one_gates_by_availability() {
     }
 }
 
-// The checks above read source text. This one is the compile-time half: it
-// only exists in the feature state it describes, and `mise run test` runs
-// the suite in each state. (The pending tier is currently empty, so it has
-// no nameable-constant twin — restore one gated by the pending `any(...)`
-// expression if a field ever moves back to `pending`.)
-
-/// A dormant constant is not nameable until asked for.
+// Complements the source-text checks with a feature-gated compile-time check.
 #[cfg(feature = "all-amendments")]
 #[test]
 fn a_dormant_constant_is_nameable_under_all_amendments() {

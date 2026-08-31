@@ -1,8 +1,5 @@
-//! Generates `crates/rshooks/src/sfield.rs`: typed `SField<T>` field
-//! constants mirroring `rshooks_core::sfcodes`'s raw `sfXxx` `u32` codes, from
-//! `sfcodes.h`'s parsed [`ConstSpec`]s (`crates/xtask/src/ir.rs`,
-//! `hook_api.json`) — the same source data [`super::sfcodes`] renders as
-//! rshooks-core's raw `u32` constants.
+//! Generates typed `SField<T>` constants from the same parsed `sfcodes.h`
+//! data used for `rshooks_core::sfcodes`.
 //!
 //! Like [`super::tx_type`] — the two generators whose output lands in
 //! `rshooks` rather than `rshooks-core` — a typed mirror is the
@@ -12,10 +9,7 @@
 //! function of the serialized type ID packed into its own code — so it is
 //! generated rather than hand-maintained, exactly as `sfcodes.rs` is.
 //!
-//! The `SField<T>` type and the wire-type markers it names are hand-written
-//! in `rshooks`'s `types` module; only the 325 constants are generated
-//! here. That placement is deliberate: a field constant describes the wire
-//! format and must not depend on the slot layer that happens to read it.
+//! `SField<T>` and its wire markers remain hand-written in `rshooks::types`.
 
 use std::fmt::Write as _;
 
@@ -50,33 +44,14 @@ const MODULE_DOC: &str = "\
 //! assert_eq!(SEQ, rshooks::raw::sfcodes::sfSequence);
 //! ```
 //!
-//! # Which fields are here
+//! # Availability
 //!
-//! Not all of them, deliberately. [`rshooks_core::sfcodes`] is the complete
-//! 1:1 mirror of the wire protocol; this table is the *ergonomic* layer, and
-//! it carries a constant only for a field some usable format references.
-//! `crates/rshooks-core/format_availability.json` classifies every format:
-//!
-//! - a field referenced by at least one **active** format is always here;
-//! - a field whose best format is **pending** (supported by xahaud, not yet
-//!   activated on Xahau) is here by default, alongside the views that read
-//!   it, and excluded under the `active-amendments` cargo feature;
-//! - a field referenced only by **dormant** formats — gated by an amendment
-//!   xahaud marks `Supported::no`, so no Xahau object can carry it — needs
-//!   the `all-amendments` feature. `sfAsset` (AMM) and `sfXChainBridge`
-//!   (XChainBridge) are the shape of that group;
-//! - a field **no** format references is usually structural rather than
-//!   amendment-borne — metadata, hash and index plumbing — and stays. Where
-//!   that inference is wrong in either direction,
-//!   `format_availability.json`'s `field_overrides` corrects it:
-//!   `sfCredentialIDs` sits on an active `Payment` but needs a
-//!   `Supported::no` amendment, so it is overridden to dormant.
-//!
-//! Nothing is lost in any state: the raw `u32` is always available as
-//! `rshooks::raw::sfcodes::sfXxx`, and every API that takes a field code
-//! takes `impl Into<u32>`. What the gating buys is that the default table
-//! cannot offer an autocomplete entry for a field no Xahau object can
-//! contain.
+//! Constants follow the availability of the formats that use them: active
+//! fields are always present, pending fields are excluded by
+//! `active-amendments`, and dormant fields require `all-amendments`.
+//! Unreferenced structural fields stay available; curated overrides cover
+//! field-level amendment gates. Raw codes always remain in
+//! `rshooks::raw::sfcodes`.
 //!
 //! [`crate::tx_type::TxType`] and [`crate::ledger_entry_type::LedgerEntryType`]
 //! stay exhaustive for the opposite reason: they *decode* wire values rather
@@ -129,12 +104,7 @@ fn value_type(type_id: u32) -> Option<&'static str> {
     }
 }
 
-/// A human-readable name for a serialized type ID, for the generated
-/// per-constant doc comment. Unknown IDs are rendered numerically.
-///
-/// Shared with [`super::views`], whose accessor docs name the same types —
-/// one spelling of `Hash256`/`Blob`/`STArray`, so the two generated layers
-/// describe a field identically.
+/// Human-readable serialized type name shared with view documentation.
 pub fn type_id_name(type_id: u32) -> String {
     match type_id {
         1 => "UInt16".into(),
@@ -175,10 +145,6 @@ pub fn generate(sfcodes: &[ConstSpec], field_tiers: &BTreeMap<String, Tier>) -> 
     let mut rendered: Vec<&ConstSpec> = Vec::with_capacity(sfcodes.len());
 
     for d in sfcodes {
-        // A field no format references is not amendment-borne — it is
-        // structural (metadata, hash/index plumbing) — so it stays active.
-        // `crate::availability::FormatAvailability::field_tiers` documents
-        // that rule and the imprecision it accepts.
         let tier = field_tiers.get(&d.name).copied().unwrap_or(Tier::Active);
         rendered.push(d);
 
@@ -198,18 +164,13 @@ pub fn generate(sfcodes: &[ConstSpec], field_tiers: &BTreeMap<String, Tier>) -> 
             Tier::Active => {}
             Tier::Pending => writeln!(
                 body,
-                "///\n\
-                 /// **Amendment not yet active** as of the vendored snapshot. Available by\n\
-                 /// default alongside the views declaring it; excluded under the `{narrow}`\n\
-                 /// cargo feature.",
+                "///\n/// Pending amendment; excluded by the `{narrow}` feature.",
                 narrow = crate::availability::ACTIVE_ONLY_FEATURE,
             )
             .context("writing a pending-tier doc note")?,
             Tier::Dormant => writeln!(
                 body,
-                "///\n\
-                 /// **Gated by an amendment xahaud marks `Supported::no`**, so no Xahau\n\
-                 /// object can carry this field. Needs the `{all}` cargo feature.",
+                "///\n/// Dormant on Xahau mainnet; requires the `{all}` feature.",
                 all = crate::availability::ALL_FEATURE,
             )
             .context("writing a dormant-tier doc note")?,
@@ -225,18 +186,11 @@ pub fn generate(sfcodes: &[ConstSpec], field_tiers: &BTreeMap<String, Tier>) -> 
         .context("writing constant")?;
     }
 
-    // The parity check, generated alongside the table it checks: one
-    // assertion per constant, so "typed.code() == raw" is verified for all
-    // 325 names rather than a hand-picked sample. Generated because a
-    // hand-written list would drift the moment upstream adds a field — the
-    // exact failure it exists to catch.
     body.push_str(
-        "\n#[cfg(test)]\nmod parity {\n         //! Every typed constant equals the raw `sfcodes` constant of the\n         //! same name. Holds by construction — both tables are rendered\n         //! from one parse by `cargo xtask gen-core` — which is exactly why\n         //! it is worth asserting: \"by construction\" stops being true the\n         //! moment either generator changes shape.\n         \n    #[test]\n    fn typed_field_codes_match_raw() {\n",
+        "\n#[cfg(test)]\nmod parity {\n    //! Verifies every typed constant against its raw counterpart.\n\n    #[test]\n    fn typed_field_codes_match_raw() {\n",
     );
     for d in &rendered {
         let tier = field_tiers.get(&d.name).copied().unwrap_or(Tier::Active);
-        // The assertion needs the same gate as the constant it names, or the
-        // feature-off build fails to compile its own generated test.
         if let Some(attr) = tier.cfg_attr() {
             writeln!(body, "        {attr}").context("writing a parity-assertion cfg")?;
         }

@@ -48,25 +48,9 @@ pub fn slot<B: AsMut<[u8]> + ?Sized>(out: &mut B, slot_no: u32) -> Result<usize>
         .map(|v| v as usize)
 }
 
-/// [`slot`], reading into **uninitialized** storage.
-///
-/// The host call overwrites whatever it is handed, so zero-initializing a
-/// scratch buffer first is dead work — and not cheap dead work: a zeroed
-/// buffer whose address escapes into an `extern` call is a store LLVM
-/// cannot prove dead across the FFI boundary, so the Hook API's guard
-/// checker charges for every one of those stores.
-///
-/// The destination stays `&mut [MaybeUninit<u8>]` the whole way down and is
-/// never turned into a `&mut [u8]`: a reference must point to a valid value
-/// of its type, and uninitialized bytes are not valid `u8`s
-/// (`MaybeUninit`'s own docs say so, and `slice::from_raw_parts_mut`
-/// requires "`len` consecutive properly initialized values"). Only the
-/// address and the length cross the boundary, which is all the host wants.
-///
-/// The caller learns how many bytes were written and may treat exactly that
-/// prefix as initialized — see
-/// [`SlotObject::raw_exact`](crate::slot_obj::SlotObject::raw_exact)'s
-/// caller for the one full-length case this crate relies on.
+/// [`slot`] into uninitialized scratch. The caller may treat only the prefix
+/// reported as written as initialized; the buffer remains `MaybeUninit` across FFI
+/// to avoid invalid references and guard-charged zeroing stores.
 #[inline(always)]
 pub(crate) fn slot_uninit(out: &mut [core::mem::MaybeUninit<u8>], slot_no: u32) -> Result<usize> {
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]

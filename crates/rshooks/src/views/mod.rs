@@ -16,51 +16,23 @@
 //! # }
 //! ```
 //!
-//! # Where the shapes come from
-//!
-//! [`tx`], [`ledger`] and [`inner`] are **generated** by `cargo xtask
-//! gen-core` from `crates/rshooks-core/protocol_formats.json`, which is
-//! itself parsed from xahaud's own `transactions.macro`,
-//! `ledger_entries.macro` and `InnerObjectFormats.cpp`. Every struct, every
-//! accessor, every required/optional distinction is upstream's declaration,
-//! not this crate's opinion; an amendment that adds a field is picked up by
-//! `scripts/sync-vendor.sh` + `cargo xtask gen-core`, and `gen-core --check`
-//! fails CI if the checked-in output has drifted.
-//!
-//! That is what makes these shapes acceptable where hand-written ones are
-//! not — see `crate::txn`'s "Why there is no library-owned
-//! `PaymentTemplate` here", which this module amends rather than overturns.
+//! These modules are generated from xahaud's protocol format declarations;
+//! `cargo xtask gen-core --check` verifies that checked-in views are current.
 //!
 //! # Which views exist
 //!
-//! Upstream's format tables are inherited wholesale from rippled, so they
-//! declare a great deal Xahau cannot run. Generating all of it would offer
-//! you an `AMMBid` or an `XChainCommit` view that no real transaction can
-//! ever match, so `crates/rshooks-core/format_availability.json` classifies
-//! every format and the generator follows it:
+//! Upstream's format tables include formats unavailable on Xahau mainnet.
+//! `crates/rshooks-core/format_availability.json` classifies each format and
+//! the generator applies these tiers:
 //!
 //! - **active** — activated on Xahau mainnet.
-//! - **pending** — supported by xahaud but not yet activated as of the
-//!   vendored snapshot.
-//! - **dormant** — gated by an amendment xahaud marks `Supported::no`, so it
-//!   cannot appear on Xahau **mainnet** (activating it there would
-//!   amendment-block the node). A custom network may still run it.
+//! - **pending** — supported by xahaud but not yet activated.
+//! - **dormant** — not expected on Xahau mainnet; custom networks may enable it.
 //!
-//! Two cargo features decide which of those compile:
-//!
-//! | features on | active | pending | dormant |
-//! |---|---|---|---|
-//! | *(none)* — the default | yes | yes | no |
-//! | `active-amendments` | yes | no | no |
-//! | `all-amendments` | yes | yes | yes |
-//! | both | yes | yes | yes |
-//!
-//! So by default you get everything Xahau has or is expected to get. Add
-//! `active-amendments` to restrict the surface to what is live today; add
-//! `all-amendments` for a custom network where a `Supported::no` amendment
-//! is somehow in play. Both together behave as `all-amendments`: cargo
-//! unifies features across the dependency graph, so making the wider one
-//! win means a dependency can only ever *add* API, never remove it.
+//! The default includes active and pending formats. `active-amendments`
+//! narrows the surface to what is live; `all-amendments` exposes dormant
+//! formats for custom networks. If both are enabled, the wider surface wins
+//! so Cargo feature unification remains additive.
 //!
 //! The `sfield` constants a view reads follow the same tiers, so a pending
 //! view and its pending-only fields compile together or not at all. The raw
@@ -72,30 +44,16 @@
 //! [`source`] is hand-written: it holds the whole of the views' logic, so
 //! the generated files contain declarations and nothing else.
 //!
-//! # When to use a view, and when not to
-//!
-//! A view is worth it when you are reading **named fields of a known
-//! type**: it names the fields for you, gets their value types right, and
-//! checks on construction that the object really is what you think.
-//!
-//! Reach past it for anything else. [`crate::api::otxn`] and
-//! [`crate::slot_obj`] are unchanged and public: a hook that reads one
-//! field, walks an array, or works with an object whose type it does not
-//! know in advance is better served by those directly.
+//! Views suit named fields of a known object type. Use [`crate::api::otxn`]
+//! or [`crate::slot_obj`] directly for dynamic objects and array traversal.
 //!
 //! # Cost
 //!
-//! A view is not a layer over the Hook API, it is a spelling of it. The
-//! source types are monomorphized and every accessor is
-//! `#[inline(always)]`, so a `Payment<OtxnSource>` accessor compiles to the
-//! same single `otxn_field` call a hand-written hook would make, and the
-//! view value itself is zero-sized.
+//! Source types are monomorphized and accessors are `#[inline(always)]`;
+//! originating-transaction views add no bookkeeping.
 //!
-//! The one place a view spends something a hand-written hook need not is
-//! slot-backed reads: each one clears the child slot it opened, which is a
-//! `slot_clear` host call the C idiom skips. That is the price of an
-//! accessor that can be called any number of times without exhausting the
-//! 255-slot budget — [`source`]'s module docs make the argument in full.
+//! Slot-backed reads additionally clear each child slot, allowing repeated
+//! accessor calls without exhausting the 255-slot budget.
 //!
 //! # What is not here (yet)
 //!
@@ -107,10 +65,7 @@
 
 pub mod source;
 
-// The three generated modules carry their own `//!` docs. Deliberately no
-// `///` doc here as well: rustdoc merges an outer doc comment with the
-// module's own but then resolves the whole merged text's intra-doc links in
-// *this* module's scope, where `Payment` and `RippleState` do not exist.
+// Module docs live in the generated files so their links resolve there.
 pub mod inner;
 pub mod ledger;
 pub mod tx;

@@ -23,21 +23,12 @@
 //! [`crate::views::source`] for what one costs.
 
 /// View of the `Payment` transaction (`ttPAYMENT`, type code 0).
-///
-/// Build one with [`Payment::otxn`] (the originating transaction) or
-/// [`Payment::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct Payment<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl Payment<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `Payment`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttPAYMENT`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `Payment`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttPAYMENT).map(|src| Self { src })
@@ -45,14 +36,8 @@ impl Payment<crate::views::source::OtxnSource> {
 }
 
 impl Payment<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `Payment`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttPAYMENT`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttPAYMENT`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -65,10 +50,7 @@ impl Payment<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -76,10 +58,7 @@ impl Payment<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -91,10 +70,7 @@ impl Payment<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -106,10 +82,7 @@ impl Payment<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -121,10 +94,7 @@ impl Payment<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -158,12 +128,9 @@ impl<S: crate::views::source::FieldSource> Payment<S> {
 
     /// `sfPaths` — PathSet, `soeDEFAULT`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
-    /// `Ok(None)` when the field is absent. `soeDEFAULT` means only that
-    /// upstream allows it to be left off the wire — there is no default
-    /// value to substitute, so absence is reported, not filled in.
+    /// `Ok(None)` when omitted; `soeDEFAULT` defines no value to substitute.
     #[inline(always)]
     pub fn paths_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -198,13 +165,9 @@ impl<S: crate::views::source::FieldSource> Payment<S> {
 
     /// `sfCredentialIDs` — Vector256, `soeOPTIONAL`.
     ///
-    /// **Gated by an amendment xahaud marks `Supported::no`.** The enclosing
-    /// format is available, but this field is not: a validated Xahau
-    /// transaction can never carry it, so the accessor needs the `all-amendments` cargo
-    /// feature.
+    /// Dormant field; requires the `all-amendments` feature.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[cfg(feature = "all-amendments")]
@@ -291,10 +254,8 @@ impl<S: crate::views::source::FieldSource> Payment<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -307,8 +268,7 @@ impl<S: crate::views::source::FieldSource> Payment<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -328,8 +288,7 @@ impl<S: crate::views::source::FieldSource> Payment<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -343,10 +302,8 @@ impl<S: crate::views::source::FieldSource> Payment<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -359,10 +316,8 @@ impl<S: crate::views::source::FieldSource> Payment<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -392,10 +347,8 @@ impl<S: crate::views::source::FieldSource> Payment<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -409,8 +362,7 @@ impl<S: crate::views::source::FieldSource> Payment<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -423,21 +375,12 @@ impl<S: crate::views::source::FieldSource> Payment<S> {
 }
 
 /// View of the `EscrowCreate` transaction (`ttESCROW_CREATE`, type code 1).
-///
-/// Build one with [`EscrowCreate::otxn`] (the originating transaction) or
-/// [`EscrowCreate::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct EscrowCreate<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl EscrowCreate<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `EscrowCreate`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttESCROW_CREATE`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `EscrowCreate`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttESCROW_CREATE).map(|src| Self { src })
@@ -445,14 +388,8 @@ impl EscrowCreate<crate::views::source::OtxnSource> {
 }
 
 impl EscrowCreate<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `EscrowCreate`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttESCROW_CREATE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttESCROW_CREATE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -465,10 +402,7 @@ impl EscrowCreate<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -476,10 +410,7 @@ impl EscrowCreate<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -491,10 +422,7 @@ impl EscrowCreate<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -506,10 +434,7 @@ impl EscrowCreate<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -521,10 +446,7 @@ impl EscrowCreate<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -550,8 +472,7 @@ impl<S: crate::views::source::FieldSource> EscrowCreate<S> {
 
     /// `sfCondition` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -661,10 +582,8 @@ impl<S: crate::views::source::FieldSource> EscrowCreate<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -677,8 +596,7 @@ impl<S: crate::views::source::FieldSource> EscrowCreate<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -698,8 +616,7 @@ impl<S: crate::views::source::FieldSource> EscrowCreate<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -713,10 +630,8 @@ impl<S: crate::views::source::FieldSource> EscrowCreate<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -729,10 +644,8 @@ impl<S: crate::views::source::FieldSource> EscrowCreate<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -762,10 +675,8 @@ impl<S: crate::views::source::FieldSource> EscrowCreate<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -779,8 +690,7 @@ impl<S: crate::views::source::FieldSource> EscrowCreate<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -793,21 +703,12 @@ impl<S: crate::views::source::FieldSource> EscrowCreate<S> {
 }
 
 /// View of the `EscrowFinish` transaction (`ttESCROW_FINISH`, type code 2).
-///
-/// Build one with [`EscrowFinish::otxn`] (the originating transaction) or
-/// [`EscrowFinish::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct EscrowFinish<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl EscrowFinish<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `EscrowFinish`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttESCROW_FINISH`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `EscrowFinish`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttESCROW_FINISH).map(|src| Self { src })
@@ -815,14 +716,8 @@ impl EscrowFinish<crate::views::source::OtxnSource> {
 }
 
 impl EscrowFinish<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `EscrowFinish`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttESCROW_FINISH`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttESCROW_FINISH`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -835,10 +730,7 @@ impl EscrowFinish<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -846,10 +738,7 @@ impl EscrowFinish<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -861,10 +750,7 @@ impl EscrowFinish<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -876,10 +762,7 @@ impl EscrowFinish<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -891,10 +774,7 @@ impl EscrowFinish<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -930,8 +810,7 @@ impl<S: crate::views::source::FieldSource> EscrowFinish<S> {
 
     /// `sfFulfillment` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -945,8 +824,7 @@ impl<S: crate::views::source::FieldSource> EscrowFinish<S> {
 
     /// `sfCondition` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -960,13 +838,9 @@ impl<S: crate::views::source::FieldSource> EscrowFinish<S> {
 
     /// `sfCredentialIDs` — Vector256, `soeOPTIONAL`.
     ///
-    /// **Gated by an amendment xahaud marks `Supported::no`.** The enclosing
-    /// format is available, but this field is not: a validated Xahau
-    /// transaction can never carry it, so the accessor needs the `all-amendments` cargo
-    /// feature.
+    /// Dormant field; requires the `all-amendments` feature.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[cfg(feature = "all-amendments")]
@@ -1053,10 +927,8 @@ impl<S: crate::views::source::FieldSource> EscrowFinish<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1069,8 +941,7 @@ impl<S: crate::views::source::FieldSource> EscrowFinish<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -1090,8 +961,7 @@ impl<S: crate::views::source::FieldSource> EscrowFinish<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1105,10 +975,8 @@ impl<S: crate::views::source::FieldSource> EscrowFinish<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1121,10 +989,8 @@ impl<S: crate::views::source::FieldSource> EscrowFinish<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1154,10 +1020,8 @@ impl<S: crate::views::source::FieldSource> EscrowFinish<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1171,8 +1035,7 @@ impl<S: crate::views::source::FieldSource> EscrowFinish<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1185,21 +1048,12 @@ impl<S: crate::views::source::FieldSource> EscrowFinish<S> {
 }
 
 /// View of the `AccountSet` transaction (`ttACCOUNT_SET`, type code 3).
-///
-/// Build one with [`AccountSet::otxn`] (the originating transaction) or
-/// [`AccountSet::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct AccountSet<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl AccountSet<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `AccountSet`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttACCOUNT_SET`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `AccountSet`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttACCOUNT_SET).map(|src| Self { src })
@@ -1207,14 +1061,8 @@ impl AccountSet<crate::views::source::OtxnSource> {
 }
 
 impl AccountSet<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `AccountSet`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttACCOUNT_SET`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttACCOUNT_SET`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -1227,10 +1075,7 @@ impl AccountSet<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -1238,10 +1083,7 @@ impl AccountSet<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1253,10 +1095,7 @@ impl AccountSet<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1268,10 +1107,7 @@ impl AccountSet<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1283,10 +1119,7 @@ impl AccountSet<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1300,8 +1133,7 @@ impl AccountSet<crate::views::source::SlotSource> {
 impl<S: crate::views::source::FieldSource> AccountSet<S> {
     /// `sfEmailHash` — Hash128, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1331,8 +1163,7 @@ impl<S: crate::views::source::FieldSource> AccountSet<S> {
 
     /// `sfMessageKey` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1346,8 +1177,7 @@ impl<S: crate::views::source::FieldSource> AccountSet<S> {
 
     /// `sfDomain` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1480,10 +1310,8 @@ impl<S: crate::views::source::FieldSource> AccountSet<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1496,8 +1324,7 @@ impl<S: crate::views::source::FieldSource> AccountSet<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -1517,8 +1344,7 @@ impl<S: crate::views::source::FieldSource> AccountSet<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1532,10 +1358,8 @@ impl<S: crate::views::source::FieldSource> AccountSet<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1548,10 +1372,8 @@ impl<S: crate::views::source::FieldSource> AccountSet<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1581,10 +1403,8 @@ impl<S: crate::views::source::FieldSource> AccountSet<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1598,8 +1418,7 @@ impl<S: crate::views::source::FieldSource> AccountSet<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1612,21 +1431,12 @@ impl<S: crate::views::source::FieldSource> AccountSet<S> {
 }
 
 /// View of the `EscrowCancel` transaction (`ttESCROW_CANCEL`, type code 4).
-///
-/// Build one with [`EscrowCancel::otxn`] (the originating transaction) or
-/// [`EscrowCancel::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct EscrowCancel<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl EscrowCancel<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `EscrowCancel`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttESCROW_CANCEL`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `EscrowCancel`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttESCROW_CANCEL).map(|src| Self { src })
@@ -1634,14 +1444,8 @@ impl EscrowCancel<crate::views::source::OtxnSource> {
 }
 
 impl EscrowCancel<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `EscrowCancel`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttESCROW_CANCEL`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttESCROW_CANCEL`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -1654,10 +1458,7 @@ impl EscrowCancel<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -1665,10 +1466,7 @@ impl EscrowCancel<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1680,10 +1478,7 @@ impl EscrowCancel<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1695,10 +1490,7 @@ impl EscrowCancel<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1710,10 +1502,7 @@ impl EscrowCancel<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1821,10 +1610,8 @@ impl<S: crate::views::source::FieldSource> EscrowCancel<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1837,8 +1624,7 @@ impl<S: crate::views::source::FieldSource> EscrowCancel<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -1858,8 +1644,7 @@ impl<S: crate::views::source::FieldSource> EscrowCancel<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1873,10 +1658,8 @@ impl<S: crate::views::source::FieldSource> EscrowCancel<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1889,10 +1672,8 @@ impl<S: crate::views::source::FieldSource> EscrowCancel<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1922,10 +1703,8 @@ impl<S: crate::views::source::FieldSource> EscrowCancel<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1939,8 +1718,7 @@ impl<S: crate::views::source::FieldSource> EscrowCancel<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -1953,21 +1731,12 @@ impl<S: crate::views::source::FieldSource> EscrowCancel<S> {
 }
 
 /// View of the `SetRegularKey` transaction (`ttREGULAR_KEY_SET`, type code 5).
-///
-/// Build one with [`SetRegularKey::otxn`] (the originating transaction) or
-/// [`SetRegularKey::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct SetRegularKey<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl SetRegularKey<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `SetRegularKey`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttREGULAR_KEY_SET`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `SetRegularKey`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttREGULAR_KEY_SET).map(|src| Self { src })
@@ -1975,14 +1744,8 @@ impl SetRegularKey<crate::views::source::OtxnSource> {
 }
 
 impl SetRegularKey<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `SetRegularKey`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttREGULAR_KEY_SET`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttREGULAR_KEY_SET`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -1995,10 +1758,7 @@ impl SetRegularKey<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -2006,10 +1766,7 @@ impl SetRegularKey<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2021,10 +1778,7 @@ impl SetRegularKey<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2036,10 +1790,7 @@ impl SetRegularKey<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2051,10 +1802,7 @@ impl SetRegularKey<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2148,10 +1896,8 @@ impl<S: crate::views::source::FieldSource> SetRegularKey<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2164,8 +1910,7 @@ impl<S: crate::views::source::FieldSource> SetRegularKey<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -2185,8 +1930,7 @@ impl<S: crate::views::source::FieldSource> SetRegularKey<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2200,10 +1944,8 @@ impl<S: crate::views::source::FieldSource> SetRegularKey<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2216,10 +1958,8 @@ impl<S: crate::views::source::FieldSource> SetRegularKey<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2249,10 +1989,8 @@ impl<S: crate::views::source::FieldSource> SetRegularKey<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2266,8 +2004,7 @@ impl<S: crate::views::source::FieldSource> SetRegularKey<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2280,21 +2017,12 @@ impl<S: crate::views::source::FieldSource> SetRegularKey<S> {
 }
 
 /// View of the `OfferCreate` transaction (`ttOFFER_CREATE`, type code 7).
-///
-/// Build one with [`OfferCreate::otxn`] (the originating transaction) or
-/// [`OfferCreate::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct OfferCreate<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl OfferCreate<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `OfferCreate`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttOFFER_CREATE`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `OfferCreate`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttOFFER_CREATE).map(|src| Self { src })
@@ -2302,14 +2030,8 @@ impl OfferCreate<crate::views::source::OtxnSource> {
 }
 
 impl OfferCreate<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `OfferCreate`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttOFFER_CREATE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttOFFER_CREATE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -2322,10 +2044,7 @@ impl OfferCreate<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -2333,10 +2052,7 @@ impl OfferCreate<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2348,10 +2064,7 @@ impl OfferCreate<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2363,10 +2076,7 @@ impl OfferCreate<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2378,10 +2088,7 @@ impl OfferCreate<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2503,10 +2210,8 @@ impl<S: crate::views::source::FieldSource> OfferCreate<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2519,8 +2224,7 @@ impl<S: crate::views::source::FieldSource> OfferCreate<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -2540,8 +2244,7 @@ impl<S: crate::views::source::FieldSource> OfferCreate<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2555,10 +2258,8 @@ impl<S: crate::views::source::FieldSource> OfferCreate<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2571,10 +2272,8 @@ impl<S: crate::views::source::FieldSource> OfferCreate<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2604,10 +2303,8 @@ impl<S: crate::views::source::FieldSource> OfferCreate<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2621,8 +2318,7 @@ impl<S: crate::views::source::FieldSource> OfferCreate<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2635,21 +2331,12 @@ impl<S: crate::views::source::FieldSource> OfferCreate<S> {
 }
 
 /// View of the `OfferCancel` transaction (`ttOFFER_CANCEL`, type code 8).
-///
-/// Build one with [`OfferCancel::otxn`] (the originating transaction) or
-/// [`OfferCancel::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct OfferCancel<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl OfferCancel<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `OfferCancel`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttOFFER_CANCEL`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `OfferCancel`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttOFFER_CANCEL).map(|src| Self { src })
@@ -2657,14 +2344,8 @@ impl OfferCancel<crate::views::source::OtxnSource> {
 }
 
 impl OfferCancel<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `OfferCancel`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttOFFER_CANCEL`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttOFFER_CANCEL`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -2677,10 +2358,7 @@ impl OfferCancel<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -2688,10 +2366,7 @@ impl OfferCancel<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2703,10 +2378,7 @@ impl OfferCancel<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2718,10 +2390,7 @@ impl OfferCancel<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2733,10 +2402,7 @@ impl OfferCancel<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2838,10 +2504,8 @@ impl<S: crate::views::source::FieldSource> OfferCancel<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2854,8 +2518,7 @@ impl<S: crate::views::source::FieldSource> OfferCancel<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -2875,8 +2538,7 @@ impl<S: crate::views::source::FieldSource> OfferCancel<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2890,10 +2552,8 @@ impl<S: crate::views::source::FieldSource> OfferCancel<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2906,10 +2566,8 @@ impl<S: crate::views::source::FieldSource> OfferCancel<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2939,10 +2597,8 @@ impl<S: crate::views::source::FieldSource> OfferCancel<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2956,8 +2612,7 @@ impl<S: crate::views::source::FieldSource> OfferCancel<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -2970,21 +2625,12 @@ impl<S: crate::views::source::FieldSource> OfferCancel<S> {
 }
 
 /// View of the `TicketCreate` transaction (`ttTICKET_CREATE`, type code 10).
-///
-/// Build one with [`TicketCreate::otxn`] (the originating transaction) or
-/// [`TicketCreate::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct TicketCreate<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl TicketCreate<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `TicketCreate`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttTICKET_CREATE`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `TicketCreate`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttTICKET_CREATE).map(|src| Self { src })
@@ -2992,14 +2638,8 @@ impl TicketCreate<crate::views::source::OtxnSource> {
 }
 
 impl TicketCreate<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `TicketCreate`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttTICKET_CREATE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttTICKET_CREATE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -3012,10 +2652,7 @@ impl TicketCreate<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -3023,10 +2660,7 @@ impl TicketCreate<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3038,10 +2672,7 @@ impl TicketCreate<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3053,10 +2684,7 @@ impl TicketCreate<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3068,10 +2696,7 @@ impl TicketCreate<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3163,10 +2788,8 @@ impl<S: crate::views::source::FieldSource> TicketCreate<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3179,8 +2802,7 @@ impl<S: crate::views::source::FieldSource> TicketCreate<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -3200,8 +2822,7 @@ impl<S: crate::views::source::FieldSource> TicketCreate<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3215,10 +2836,8 @@ impl<S: crate::views::source::FieldSource> TicketCreate<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3231,10 +2850,8 @@ impl<S: crate::views::source::FieldSource> TicketCreate<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3264,10 +2881,8 @@ impl<S: crate::views::source::FieldSource> TicketCreate<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3281,8 +2896,7 @@ impl<S: crate::views::source::FieldSource> TicketCreate<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3295,21 +2909,12 @@ impl<S: crate::views::source::FieldSource> TicketCreate<S> {
 }
 
 /// View of the `SignerListSet` transaction (`ttSIGNER_LIST_SET`, type code 12).
-///
-/// Build one with [`SignerListSet::otxn`] (the originating transaction) or
-/// [`SignerListSet::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct SignerListSet<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl SignerListSet<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `SignerListSet`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttSIGNER_LIST_SET`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `SignerListSet`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttSIGNER_LIST_SET).map(|src| Self { src })
@@ -3317,14 +2922,8 @@ impl SignerListSet<crate::views::source::OtxnSource> {
 }
 
 impl SignerListSet<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `SignerListSet`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttSIGNER_LIST_SET`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttSIGNER_LIST_SET`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -3337,10 +2936,7 @@ impl SignerListSet<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -3348,10 +2944,7 @@ impl SignerListSet<crate::views::source::SlotSource> {
 
     /// `sfSignerEntries` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3363,10 +2956,7 @@ impl SignerListSet<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3378,10 +2968,7 @@ impl SignerListSet<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3393,10 +2980,7 @@ impl SignerListSet<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3408,10 +2992,7 @@ impl SignerListSet<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3431,10 +3012,8 @@ impl<S: crate::views::source::FieldSource> SignerListSet<S> {
 
     /// `sfSignerEntries` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signer_entries_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signer_entries_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3520,10 +3099,8 @@ impl<S: crate::views::source::FieldSource> SignerListSet<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3536,8 +3113,7 @@ impl<S: crate::views::source::FieldSource> SignerListSet<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -3557,8 +3133,7 @@ impl<S: crate::views::source::FieldSource> SignerListSet<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3572,10 +3147,8 @@ impl<S: crate::views::source::FieldSource> SignerListSet<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3588,10 +3161,8 @@ impl<S: crate::views::source::FieldSource> SignerListSet<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3621,10 +3192,8 @@ impl<S: crate::views::source::FieldSource> SignerListSet<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3638,8 +3207,7 @@ impl<S: crate::views::source::FieldSource> SignerListSet<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3652,21 +3220,12 @@ impl<S: crate::views::source::FieldSource> SignerListSet<S> {
 }
 
 /// View of the `PaymentChannelCreate` transaction (`ttPAYCHAN_CREATE`, type code 13).
-///
-/// Build one with [`PaymentChannelCreate::otxn`] (the originating transaction) or
-/// [`PaymentChannelCreate::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct PaymentChannelCreate<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl PaymentChannelCreate<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `PaymentChannelCreate`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttPAYCHAN_CREATE`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `PaymentChannelCreate`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttPAYCHAN_CREATE).map(|src| Self { src })
@@ -3674,14 +3233,8 @@ impl PaymentChannelCreate<crate::views::source::OtxnSource> {
 }
 
 impl PaymentChannelCreate<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `PaymentChannelCreate`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttPAYCHAN_CREATE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttPAYCHAN_CREATE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -3694,10 +3247,7 @@ impl PaymentChannelCreate<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -3705,10 +3255,7 @@ impl PaymentChannelCreate<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3720,10 +3267,7 @@ impl PaymentChannelCreate<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3735,10 +3279,7 @@ impl PaymentChannelCreate<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3750,10 +3291,7 @@ impl PaymentChannelCreate<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3785,8 +3323,7 @@ impl<S: crate::views::source::FieldSource> PaymentChannelCreate<S> {
 
     /// `sfPublicKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -3885,10 +3422,8 @@ impl<S: crate::views::source::FieldSource> PaymentChannelCreate<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3901,8 +3436,7 @@ impl<S: crate::views::source::FieldSource> PaymentChannelCreate<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -3922,8 +3456,7 @@ impl<S: crate::views::source::FieldSource> PaymentChannelCreate<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3937,10 +3470,8 @@ impl<S: crate::views::source::FieldSource> PaymentChannelCreate<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3953,10 +3484,8 @@ impl<S: crate::views::source::FieldSource> PaymentChannelCreate<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -3986,10 +3515,8 @@ impl<S: crate::views::source::FieldSource> PaymentChannelCreate<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4003,8 +3530,7 @@ impl<S: crate::views::source::FieldSource> PaymentChannelCreate<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4017,21 +3543,12 @@ impl<S: crate::views::source::FieldSource> PaymentChannelCreate<S> {
 }
 
 /// View of the `PaymentChannelFund` transaction (`ttPAYCHAN_FUND`, type code 14).
-///
-/// Build one with [`PaymentChannelFund::otxn`] (the originating transaction) or
-/// [`PaymentChannelFund::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct PaymentChannelFund<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl PaymentChannelFund<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `PaymentChannelFund`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttPAYCHAN_FUND`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `PaymentChannelFund`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttPAYCHAN_FUND).map(|src| Self { src })
@@ -4039,14 +3556,8 @@ impl PaymentChannelFund<crate::views::source::OtxnSource> {
 }
 
 impl PaymentChannelFund<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `PaymentChannelFund`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttPAYCHAN_FUND`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttPAYCHAN_FUND`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -4059,10 +3570,7 @@ impl PaymentChannelFund<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -4070,10 +3578,7 @@ impl PaymentChannelFund<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4085,10 +3590,7 @@ impl PaymentChannelFund<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4100,10 +3602,7 @@ impl PaymentChannelFund<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4115,10 +3614,7 @@ impl PaymentChannelFund<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4224,10 +3720,8 @@ impl<S: crate::views::source::FieldSource> PaymentChannelFund<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4240,8 +3734,7 @@ impl<S: crate::views::source::FieldSource> PaymentChannelFund<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -4261,8 +3754,7 @@ impl<S: crate::views::source::FieldSource> PaymentChannelFund<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4276,10 +3768,8 @@ impl<S: crate::views::source::FieldSource> PaymentChannelFund<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4292,10 +3782,8 @@ impl<S: crate::views::source::FieldSource> PaymentChannelFund<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4325,10 +3813,8 @@ impl<S: crate::views::source::FieldSource> PaymentChannelFund<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4342,8 +3828,7 @@ impl<S: crate::views::source::FieldSource> PaymentChannelFund<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4356,21 +3841,12 @@ impl<S: crate::views::source::FieldSource> PaymentChannelFund<S> {
 }
 
 /// View of the `PaymentChannelClaim` transaction (`ttPAYCHAN_CLAIM`, type code 15).
-///
-/// Build one with [`PaymentChannelClaim::otxn`] (the originating transaction) or
-/// [`PaymentChannelClaim::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct PaymentChannelClaim<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl PaymentChannelClaim<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `PaymentChannelClaim`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttPAYCHAN_CLAIM`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `PaymentChannelClaim`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttPAYCHAN_CLAIM).map(|src| Self { src })
@@ -4378,14 +3854,8 @@ impl PaymentChannelClaim<crate::views::source::OtxnSource> {
 }
 
 impl PaymentChannelClaim<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `PaymentChannelClaim`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttPAYCHAN_CLAIM`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttPAYCHAN_CLAIM`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -4398,10 +3868,7 @@ impl PaymentChannelClaim<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -4409,10 +3876,7 @@ impl PaymentChannelClaim<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4424,10 +3888,7 @@ impl PaymentChannelClaim<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4439,10 +3900,7 @@ impl PaymentChannelClaim<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4454,10 +3912,7 @@ impl PaymentChannelClaim<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4493,8 +3948,7 @@ impl<S: crate::views::source::FieldSource> PaymentChannelClaim<S> {
 
     /// `sfSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4508,8 +3962,7 @@ impl<S: crate::views::source::FieldSource> PaymentChannelClaim<S> {
 
     /// `sfPublicKey` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4523,13 +3976,9 @@ impl<S: crate::views::source::FieldSource> PaymentChannelClaim<S> {
 
     /// `sfCredentialIDs` — Vector256, `soeOPTIONAL`.
     ///
-    /// **Gated by an amendment xahaud marks `Supported::no`.** The enclosing
-    /// format is available, but this field is not: a validated Xahau
-    /// transaction can never carry it, so the accessor needs the `all-amendments` cargo
-    /// feature.
+    /// Dormant field; requires the `all-amendments` feature.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[cfg(feature = "all-amendments")]
@@ -4616,10 +4065,8 @@ impl<S: crate::views::source::FieldSource> PaymentChannelClaim<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4632,8 +4079,7 @@ impl<S: crate::views::source::FieldSource> PaymentChannelClaim<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -4653,8 +4099,7 @@ impl<S: crate::views::source::FieldSource> PaymentChannelClaim<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4668,10 +4113,8 @@ impl<S: crate::views::source::FieldSource> PaymentChannelClaim<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4684,10 +4127,8 @@ impl<S: crate::views::source::FieldSource> PaymentChannelClaim<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4717,10 +4158,8 @@ impl<S: crate::views::source::FieldSource> PaymentChannelClaim<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4734,8 +4173,7 @@ impl<S: crate::views::source::FieldSource> PaymentChannelClaim<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4748,21 +4186,12 @@ impl<S: crate::views::source::FieldSource> PaymentChannelClaim<S> {
 }
 
 /// View of the `CheckCreate` transaction (`ttCHECK_CREATE`, type code 16).
-///
-/// Build one with [`CheckCreate::otxn`] (the originating transaction) or
-/// [`CheckCreate::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct CheckCreate<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl CheckCreate<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `CheckCreate`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttCHECK_CREATE`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `CheckCreate`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttCHECK_CREATE).map(|src| Self { src })
@@ -4770,14 +4199,8 @@ impl CheckCreate<crate::views::source::OtxnSource> {
 }
 
 impl CheckCreate<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `CheckCreate`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttCHECK_CREATE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttCHECK_CREATE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -4790,10 +4213,7 @@ impl CheckCreate<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -4801,10 +4221,7 @@ impl CheckCreate<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4816,10 +4233,7 @@ impl CheckCreate<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4831,10 +4245,7 @@ impl CheckCreate<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4846,10 +4257,7 @@ impl CheckCreate<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4971,10 +4379,8 @@ impl<S: crate::views::source::FieldSource> CheckCreate<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -4987,8 +4393,7 @@ impl<S: crate::views::source::FieldSource> CheckCreate<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -5008,8 +4413,7 @@ impl<S: crate::views::source::FieldSource> CheckCreate<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5023,10 +4427,8 @@ impl<S: crate::views::source::FieldSource> CheckCreate<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5039,10 +4441,8 @@ impl<S: crate::views::source::FieldSource> CheckCreate<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5072,10 +4472,8 @@ impl<S: crate::views::source::FieldSource> CheckCreate<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5089,8 +4487,7 @@ impl<S: crate::views::source::FieldSource> CheckCreate<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5103,21 +4500,12 @@ impl<S: crate::views::source::FieldSource> CheckCreate<S> {
 }
 
 /// View of the `CheckCash` transaction (`ttCHECK_CASH`, type code 17).
-///
-/// Build one with [`CheckCash::otxn`] (the originating transaction) or
-/// [`CheckCash::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct CheckCash<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl CheckCash<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `CheckCash`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttCHECK_CASH`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `CheckCash`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttCHECK_CASH).map(|src| Self { src })
@@ -5125,14 +4513,8 @@ impl CheckCash<crate::views::source::OtxnSource> {
 }
 
 impl CheckCash<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `CheckCash`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttCHECK_CASH`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttCHECK_CASH`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -5145,10 +4527,7 @@ impl CheckCash<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -5156,10 +4535,7 @@ impl CheckCash<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5171,10 +4547,7 @@ impl CheckCash<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5186,10 +4559,7 @@ impl CheckCash<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5201,10 +4571,7 @@ impl CheckCash<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5312,10 +4679,8 @@ impl<S: crate::views::source::FieldSource> CheckCash<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5328,8 +4693,7 @@ impl<S: crate::views::source::FieldSource> CheckCash<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -5349,8 +4713,7 @@ impl<S: crate::views::source::FieldSource> CheckCash<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5364,10 +4727,8 @@ impl<S: crate::views::source::FieldSource> CheckCash<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5380,10 +4741,8 @@ impl<S: crate::views::source::FieldSource> CheckCash<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5413,10 +4772,8 @@ impl<S: crate::views::source::FieldSource> CheckCash<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5430,8 +4787,7 @@ impl<S: crate::views::source::FieldSource> CheckCash<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5444,21 +4800,12 @@ impl<S: crate::views::source::FieldSource> CheckCash<S> {
 }
 
 /// View of the `CheckCancel` transaction (`ttCHECK_CANCEL`, type code 18).
-///
-/// Build one with [`CheckCancel::otxn`] (the originating transaction) or
-/// [`CheckCancel::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct CheckCancel<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl CheckCancel<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `CheckCancel`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttCHECK_CANCEL`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `CheckCancel`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttCHECK_CANCEL).map(|src| Self { src })
@@ -5466,14 +4813,8 @@ impl CheckCancel<crate::views::source::OtxnSource> {
 }
 
 impl CheckCancel<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `CheckCancel`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttCHECK_CANCEL`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttCHECK_CANCEL`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -5486,10 +4827,7 @@ impl CheckCancel<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -5497,10 +4835,7 @@ impl CheckCancel<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5512,10 +4847,7 @@ impl CheckCancel<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5527,10 +4859,7 @@ impl CheckCancel<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5542,10 +4871,7 @@ impl CheckCancel<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5637,10 +4963,8 @@ impl<S: crate::views::source::FieldSource> CheckCancel<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5653,8 +4977,7 @@ impl<S: crate::views::source::FieldSource> CheckCancel<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -5674,8 +4997,7 @@ impl<S: crate::views::source::FieldSource> CheckCancel<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5689,10 +5011,8 @@ impl<S: crate::views::source::FieldSource> CheckCancel<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5705,10 +5025,8 @@ impl<S: crate::views::source::FieldSource> CheckCancel<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5738,10 +5056,8 @@ impl<S: crate::views::source::FieldSource> CheckCancel<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5755,8 +5071,7 @@ impl<S: crate::views::source::FieldSource> CheckCancel<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5769,21 +5084,12 @@ impl<S: crate::views::source::FieldSource> CheckCancel<S> {
 }
 
 /// View of the `DepositPreauth` transaction (`ttDEPOSIT_PREAUTH`, type code 19).
-///
-/// Build one with [`DepositPreauth::otxn`] (the originating transaction) or
-/// [`DepositPreauth::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct DepositPreauth<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl DepositPreauth<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `DepositPreauth`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttDEPOSIT_PREAUTH`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `DepositPreauth`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttDEPOSIT_PREAUTH).map(|src| Self { src })
@@ -5791,14 +5097,8 @@ impl DepositPreauth<crate::views::source::OtxnSource> {
 }
 
 impl DepositPreauth<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `DepositPreauth`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttDEPOSIT_PREAUTH`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttDEPOSIT_PREAUTH`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -5811,10 +5111,7 @@ impl DepositPreauth<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -5822,10 +5119,7 @@ impl DepositPreauth<crate::views::source::SlotSource> {
 
     /// `sfAuthorizeCredentials` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5838,10 +5132,7 @@ impl DepositPreauth<crate::views::source::SlotSource> {
 
     /// `sfUnauthorizeCredentials` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5854,10 +5145,7 @@ impl DepositPreauth<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5869,10 +5157,7 @@ impl DepositPreauth<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5884,10 +5169,7 @@ impl DepositPreauth<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5899,10 +5181,7 @@ impl DepositPreauth<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5932,10 +5211,8 @@ impl<S: crate::views::source::FieldSource> DepositPreauth<S> {
 
     /// `sfAuthorizeCredentials` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `authorize_credentials_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `authorize_credentials_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -5949,10 +5226,8 @@ impl<S: crate::views::source::FieldSource> DepositPreauth<S> {
 
     /// `sfUnauthorizeCredentials` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `unauthorize_credentials_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `unauthorize_credentials_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6038,10 +5313,8 @@ impl<S: crate::views::source::FieldSource> DepositPreauth<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6054,8 +5327,7 @@ impl<S: crate::views::source::FieldSource> DepositPreauth<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -6075,8 +5347,7 @@ impl<S: crate::views::source::FieldSource> DepositPreauth<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6090,10 +5361,8 @@ impl<S: crate::views::source::FieldSource> DepositPreauth<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6106,10 +5375,8 @@ impl<S: crate::views::source::FieldSource> DepositPreauth<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6139,10 +5406,8 @@ impl<S: crate::views::source::FieldSource> DepositPreauth<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6156,8 +5421,7 @@ impl<S: crate::views::source::FieldSource> DepositPreauth<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6170,21 +5434,12 @@ impl<S: crate::views::source::FieldSource> DepositPreauth<S> {
 }
 
 /// View of the `TrustSet` transaction (`ttTRUST_SET`, type code 20).
-///
-/// Build one with [`TrustSet::otxn`] (the originating transaction) or
-/// [`TrustSet::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct TrustSet<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl TrustSet<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `TrustSet`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttTRUST_SET`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `TrustSet`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttTRUST_SET).map(|src| Self { src })
@@ -6192,14 +5447,8 @@ impl TrustSet<crate::views::source::OtxnSource> {
 }
 
 impl TrustSet<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `TrustSet`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttTRUST_SET`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttTRUST_SET`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -6212,10 +5461,7 @@ impl TrustSet<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -6223,10 +5469,7 @@ impl TrustSet<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6238,10 +5481,7 @@ impl TrustSet<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6253,10 +5493,7 @@ impl TrustSet<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6268,10 +5505,7 @@ impl TrustSet<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6381,10 +5615,8 @@ impl<S: crate::views::source::FieldSource> TrustSet<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6397,8 +5629,7 @@ impl<S: crate::views::source::FieldSource> TrustSet<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -6418,8 +5649,7 @@ impl<S: crate::views::source::FieldSource> TrustSet<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6433,10 +5663,8 @@ impl<S: crate::views::source::FieldSource> TrustSet<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6449,10 +5677,8 @@ impl<S: crate::views::source::FieldSource> TrustSet<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6482,10 +5708,8 @@ impl<S: crate::views::source::FieldSource> TrustSet<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6499,8 +5723,7 @@ impl<S: crate::views::source::FieldSource> TrustSet<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6513,21 +5736,12 @@ impl<S: crate::views::source::FieldSource> TrustSet<S> {
 }
 
 /// View of the `AccountDelete` transaction (`ttACCOUNT_DELETE`, type code 21).
-///
-/// Build one with [`AccountDelete::otxn`] (the originating transaction) or
-/// [`AccountDelete::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct AccountDelete<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl AccountDelete<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `AccountDelete`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttACCOUNT_DELETE`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `AccountDelete`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttACCOUNT_DELETE).map(|src| Self { src })
@@ -6535,14 +5749,8 @@ impl AccountDelete<crate::views::source::OtxnSource> {
 }
 
 impl AccountDelete<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `AccountDelete`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttACCOUNT_DELETE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttACCOUNT_DELETE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -6555,10 +5763,7 @@ impl AccountDelete<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -6566,10 +5771,7 @@ impl AccountDelete<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6581,10 +5783,7 @@ impl AccountDelete<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6596,10 +5795,7 @@ impl AccountDelete<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6611,10 +5807,7 @@ impl AccountDelete<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6642,13 +5835,9 @@ impl<S: crate::views::source::FieldSource> AccountDelete<S> {
 
     /// `sfCredentialIDs` — Vector256, `soeOPTIONAL`.
     ///
-    /// **Gated by an amendment xahaud marks `Supported::no`.** The enclosing
-    /// format is available, but this field is not: a validated Xahau
-    /// transaction can never carry it, so the accessor needs the `all-amendments` cargo
-    /// feature.
+    /// Dormant field; requires the `all-amendments` feature.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[cfg(feature = "all-amendments")]
@@ -6735,10 +5924,8 @@ impl<S: crate::views::source::FieldSource> AccountDelete<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6751,8 +5938,7 @@ impl<S: crate::views::source::FieldSource> AccountDelete<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -6772,8 +5958,7 @@ impl<S: crate::views::source::FieldSource> AccountDelete<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6787,10 +5972,8 @@ impl<S: crate::views::source::FieldSource> AccountDelete<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6803,10 +5986,8 @@ impl<S: crate::views::source::FieldSource> AccountDelete<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6836,10 +6017,8 @@ impl<S: crate::views::source::FieldSource> AccountDelete<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6853,8 +6032,7 @@ impl<S: crate::views::source::FieldSource> AccountDelete<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6867,21 +6045,12 @@ impl<S: crate::views::source::FieldSource> AccountDelete<S> {
 }
 
 /// View of the `SetHook` transaction (`ttHOOK_SET`, type code 22).
-///
-/// Build one with [`SetHook::otxn`] (the originating transaction) or
-/// [`SetHook::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct SetHook<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl SetHook<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `SetHook`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttHOOK_SET`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `SetHook`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttHOOK_SET).map(|src| Self { src })
@@ -6889,14 +6058,8 @@ impl SetHook<crate::views::source::OtxnSource> {
 }
 
 impl SetHook<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `SetHook`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttHOOK_SET`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttHOOK_SET`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -6909,10 +6072,7 @@ impl SetHook<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -6920,10 +6080,7 @@ impl SetHook<crate::views::source::SlotSource> {
 
     /// `sfHooks` — STArray, `soeREQUIRED`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     #[inline(always)]
     pub fn hooks_slot(
         &self,
@@ -6933,10 +6090,7 @@ impl SetHook<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6948,10 +6102,7 @@ impl SetHook<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6963,10 +6114,7 @@ impl SetHook<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6978,10 +6126,7 @@ impl SetHook<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -6995,10 +6140,8 @@ impl SetHook<crate::views::source::SlotSource> {
 impl<S: crate::views::source::FieldSource> SetHook<S> {
     /// `sfHooks` — STArray, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hooks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hooks_slot` on a slot-backed view to navigate the container.
     #[inline(always)]
     pub fn hooks_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> crate::error::Result<usize> {
         self.src.read_raw(crate::sfield::sfHooks.code(), out)
@@ -7078,10 +6221,8 @@ impl<S: crate::views::source::FieldSource> SetHook<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -7094,8 +6235,7 @@ impl<S: crate::views::source::FieldSource> SetHook<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -7115,8 +6255,7 @@ impl<S: crate::views::source::FieldSource> SetHook<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -7130,10 +6269,8 @@ impl<S: crate::views::source::FieldSource> SetHook<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -7146,10 +6283,8 @@ impl<S: crate::views::source::FieldSource> SetHook<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -7179,10 +6314,8 @@ impl<S: crate::views::source::FieldSource> SetHook<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -7196,8 +6329,7 @@ impl<S: crate::views::source::FieldSource> SetHook<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -7211,14 +6343,7 @@ impl<S: crate::views::source::FieldSource> SetHook<S> {
 
 /// View of the `NFTokenMint` transaction (`ttNFTOKEN_MINT`, type code 25).
 ///
-/// Build one with [`NFTokenMint::otxn`] (the originating transaction) or
-/// [`NFTokenMint::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct NFTokenMint<S: crate::views::source::FieldSource> {
     src: S,
@@ -7226,12 +6351,7 @@ pub struct NFTokenMint<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl NFTokenMint<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `NFTokenMint`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttNFTOKEN_MINT`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `NFTokenMint`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttNFTOKEN_MINT).map(|src| Self { src })
@@ -7240,14 +6360,8 @@ impl NFTokenMint<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl NFTokenMint<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `NFTokenMint`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttNFTOKEN_MINT`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttNFTOKEN_MINT`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -7260,10 +6374,7 @@ impl NFTokenMint<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -7271,10 +6382,7 @@ impl NFTokenMint<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -7286,10 +6394,7 @@ impl NFTokenMint<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -7301,10 +6406,7 @@ impl NFTokenMint<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -7316,10 +6418,7 @@ impl NFTokenMint<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -7356,8 +6455,7 @@ impl<S: crate::views::source::FieldSource> NFTokenMint<S> {
 
     /// `sfURI` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -7466,10 +6564,8 @@ impl<S: crate::views::source::FieldSource> NFTokenMint<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -7482,8 +6578,7 @@ impl<S: crate::views::source::FieldSource> NFTokenMint<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -7503,8 +6598,7 @@ impl<S: crate::views::source::FieldSource> NFTokenMint<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -7518,10 +6612,8 @@ impl<S: crate::views::source::FieldSource> NFTokenMint<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -7534,10 +6626,8 @@ impl<S: crate::views::source::FieldSource> NFTokenMint<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -7567,10 +6657,8 @@ impl<S: crate::views::source::FieldSource> NFTokenMint<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -7584,8 +6672,7 @@ impl<S: crate::views::source::FieldSource> NFTokenMint<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -7599,14 +6686,7 @@ impl<S: crate::views::source::FieldSource> NFTokenMint<S> {
 
 /// View of the `NFTokenBurn` transaction (`ttNFTOKEN_BURN`, type code 26).
 ///
-/// Build one with [`NFTokenBurn::otxn`] (the originating transaction) or
-/// [`NFTokenBurn::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct NFTokenBurn<S: crate::views::source::FieldSource> {
     src: S,
@@ -7614,12 +6694,7 @@ pub struct NFTokenBurn<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl NFTokenBurn<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `NFTokenBurn`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttNFTOKEN_BURN`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `NFTokenBurn`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttNFTOKEN_BURN).map(|src| Self { src })
@@ -7628,14 +6703,8 @@ impl NFTokenBurn<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl NFTokenBurn<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `NFTokenBurn`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttNFTOKEN_BURN`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttNFTOKEN_BURN`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -7648,10 +6717,7 @@ impl NFTokenBurn<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -7659,10 +6725,7 @@ impl NFTokenBurn<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -7674,10 +6737,7 @@ impl NFTokenBurn<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -7689,10 +6749,7 @@ impl NFTokenBurn<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -7704,10 +6761,7 @@ impl NFTokenBurn<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -7808,10 +6862,8 @@ impl<S: crate::views::source::FieldSource> NFTokenBurn<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -7824,8 +6876,7 @@ impl<S: crate::views::source::FieldSource> NFTokenBurn<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -7845,8 +6896,7 @@ impl<S: crate::views::source::FieldSource> NFTokenBurn<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -7860,10 +6910,8 @@ impl<S: crate::views::source::FieldSource> NFTokenBurn<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -7876,10 +6924,8 @@ impl<S: crate::views::source::FieldSource> NFTokenBurn<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -7909,10 +6955,8 @@ impl<S: crate::views::source::FieldSource> NFTokenBurn<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -7926,8 +6970,7 @@ impl<S: crate::views::source::FieldSource> NFTokenBurn<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -7941,14 +6984,7 @@ impl<S: crate::views::source::FieldSource> NFTokenBurn<S> {
 
 /// View of the `NFTokenCreateOffer` transaction (`ttNFTOKEN_CREATE_OFFER`, type code 27).
 ///
-/// Build one with [`NFTokenCreateOffer::otxn`] (the originating transaction) or
-/// [`NFTokenCreateOffer::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct NFTokenCreateOffer<S: crate::views::source::FieldSource> {
     src: S,
@@ -7956,12 +6992,7 @@ pub struct NFTokenCreateOffer<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl NFTokenCreateOffer<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `NFTokenCreateOffer`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttNFTOKEN_CREATE_OFFER`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `NFTokenCreateOffer`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttNFTOKEN_CREATE_OFFER)
@@ -7971,14 +7002,8 @@ impl NFTokenCreateOffer<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl NFTokenCreateOffer<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `NFTokenCreateOffer`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttNFTOKEN_CREATE_OFFER`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttNFTOKEN_CREATE_OFFER`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -7991,10 +7016,7 @@ impl NFTokenCreateOffer<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -8002,10 +7024,7 @@ impl NFTokenCreateOffer<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8017,10 +7036,7 @@ impl NFTokenCreateOffer<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8032,10 +7048,7 @@ impl NFTokenCreateOffer<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8047,10 +7060,7 @@ impl NFTokenCreateOffer<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8173,10 +7183,8 @@ impl<S: crate::views::source::FieldSource> NFTokenCreateOffer<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8189,8 +7197,7 @@ impl<S: crate::views::source::FieldSource> NFTokenCreateOffer<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -8210,8 +7217,7 @@ impl<S: crate::views::source::FieldSource> NFTokenCreateOffer<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8225,10 +7231,8 @@ impl<S: crate::views::source::FieldSource> NFTokenCreateOffer<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8241,10 +7245,8 @@ impl<S: crate::views::source::FieldSource> NFTokenCreateOffer<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8274,10 +7276,8 @@ impl<S: crate::views::source::FieldSource> NFTokenCreateOffer<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8291,8 +7291,7 @@ impl<S: crate::views::source::FieldSource> NFTokenCreateOffer<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8306,14 +7305,7 @@ impl<S: crate::views::source::FieldSource> NFTokenCreateOffer<S> {
 
 /// View of the `NFTokenCancelOffer` transaction (`ttNFTOKEN_CANCEL_OFFER`, type code 28).
 ///
-/// Build one with [`NFTokenCancelOffer::otxn`] (the originating transaction) or
-/// [`NFTokenCancelOffer::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct NFTokenCancelOffer<S: crate::views::source::FieldSource> {
     src: S,
@@ -8321,12 +7313,7 @@ pub struct NFTokenCancelOffer<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl NFTokenCancelOffer<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `NFTokenCancelOffer`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttNFTOKEN_CANCEL_OFFER`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `NFTokenCancelOffer`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttNFTOKEN_CANCEL_OFFER)
@@ -8336,14 +7323,8 @@ impl NFTokenCancelOffer<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl NFTokenCancelOffer<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `NFTokenCancelOffer`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttNFTOKEN_CANCEL_OFFER`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttNFTOKEN_CANCEL_OFFER`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -8356,10 +7337,7 @@ impl NFTokenCancelOffer<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -8367,10 +7345,7 @@ impl NFTokenCancelOffer<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8382,10 +7357,7 @@ impl NFTokenCancelOffer<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8397,10 +7369,7 @@ impl NFTokenCancelOffer<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8412,10 +7381,7 @@ impl NFTokenCancelOffer<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8430,8 +7396,7 @@ impl NFTokenCancelOffer<crate::views::source::SlotSource> {
 impl<S: crate::views::source::FieldSource> NFTokenCancelOffer<S> {
     /// `sfNFTokenOffers` — Vector256, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn nftoken_offers_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -8515,10 +7480,8 @@ impl<S: crate::views::source::FieldSource> NFTokenCancelOffer<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8531,8 +7494,7 @@ impl<S: crate::views::source::FieldSource> NFTokenCancelOffer<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -8552,8 +7514,7 @@ impl<S: crate::views::source::FieldSource> NFTokenCancelOffer<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8567,10 +7528,8 @@ impl<S: crate::views::source::FieldSource> NFTokenCancelOffer<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8583,10 +7542,8 @@ impl<S: crate::views::source::FieldSource> NFTokenCancelOffer<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8616,10 +7573,8 @@ impl<S: crate::views::source::FieldSource> NFTokenCancelOffer<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8633,8 +7588,7 @@ impl<S: crate::views::source::FieldSource> NFTokenCancelOffer<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8648,14 +7602,7 @@ impl<S: crate::views::source::FieldSource> NFTokenCancelOffer<S> {
 
 /// View of the `NFTokenAcceptOffer` transaction (`ttNFTOKEN_ACCEPT_OFFER`, type code 29).
 ///
-/// Build one with [`NFTokenAcceptOffer::otxn`] (the originating transaction) or
-/// [`NFTokenAcceptOffer::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct NFTokenAcceptOffer<S: crate::views::source::FieldSource> {
     src: S,
@@ -8663,12 +7610,7 @@ pub struct NFTokenAcceptOffer<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl NFTokenAcceptOffer<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `NFTokenAcceptOffer`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttNFTOKEN_ACCEPT_OFFER`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `NFTokenAcceptOffer`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttNFTOKEN_ACCEPT_OFFER)
@@ -8678,14 +7620,8 @@ impl NFTokenAcceptOffer<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl NFTokenAcceptOffer<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `NFTokenAcceptOffer`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttNFTOKEN_ACCEPT_OFFER`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttNFTOKEN_ACCEPT_OFFER`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -8698,10 +7634,7 @@ impl NFTokenAcceptOffer<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -8709,10 +7642,7 @@ impl NFTokenAcceptOffer<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8724,10 +7654,7 @@ impl NFTokenAcceptOffer<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8739,10 +7666,7 @@ impl NFTokenAcceptOffer<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8754,10 +7678,7 @@ impl NFTokenAcceptOffer<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8868,10 +7789,8 @@ impl<S: crate::views::source::FieldSource> NFTokenAcceptOffer<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8884,8 +7803,7 @@ impl<S: crate::views::source::FieldSource> NFTokenAcceptOffer<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -8905,8 +7823,7 @@ impl<S: crate::views::source::FieldSource> NFTokenAcceptOffer<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8920,10 +7837,8 @@ impl<S: crate::views::source::FieldSource> NFTokenAcceptOffer<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8936,10 +7851,8 @@ impl<S: crate::views::source::FieldSource> NFTokenAcceptOffer<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8969,10 +7882,8 @@ impl<S: crate::views::source::FieldSource> NFTokenAcceptOffer<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -8986,8 +7897,7 @@ impl<S: crate::views::source::FieldSource> NFTokenAcceptOffer<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9000,21 +7910,12 @@ impl<S: crate::views::source::FieldSource> NFTokenAcceptOffer<S> {
 }
 
 /// View of the `Clawback` transaction (`ttCLAWBACK`, type code 30).
-///
-/// Build one with [`Clawback::otxn`] (the originating transaction) or
-/// [`Clawback::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct Clawback<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl Clawback<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `Clawback`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttCLAWBACK`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `Clawback`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttCLAWBACK).map(|src| Self { src })
@@ -9022,14 +7923,8 @@ impl Clawback<crate::views::source::OtxnSource> {
 }
 
 impl Clawback<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `Clawback`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttCLAWBACK`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttCLAWBACK`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -9042,10 +7937,7 @@ impl Clawback<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -9053,10 +7945,7 @@ impl Clawback<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9068,10 +7957,7 @@ impl Clawback<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9083,10 +7969,7 @@ impl Clawback<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9098,10 +7981,7 @@ impl Clawback<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9201,10 +8081,8 @@ impl<S: crate::views::source::FieldSource> Clawback<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9217,8 +8095,7 @@ impl<S: crate::views::source::FieldSource> Clawback<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -9238,8 +8115,7 @@ impl<S: crate::views::source::FieldSource> Clawback<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9253,10 +8129,8 @@ impl<S: crate::views::source::FieldSource> Clawback<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9269,10 +8143,8 @@ impl<S: crate::views::source::FieldSource> Clawback<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9302,10 +8174,8 @@ impl<S: crate::views::source::FieldSource> Clawback<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9319,8 +8189,7 @@ impl<S: crate::views::source::FieldSource> Clawback<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9334,14 +8203,7 @@ impl<S: crate::views::source::FieldSource> Clawback<S> {
 
 /// View of the `AMMClawback` transaction (`ttAMM_CLAWBACK`, type code 31).
 ///
-/// Build one with [`AMMClawback::otxn`] (the originating transaction) or
-/// [`AMMClawback::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct AMMClawback<S: crate::views::source::FieldSource> {
     src: S,
@@ -9349,12 +8211,7 @@ pub struct AMMClawback<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl AMMClawback<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `AMMClawback`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttAMM_CLAWBACK`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `AMMClawback`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttAMM_CLAWBACK).map(|src| Self { src })
@@ -9363,14 +8220,8 @@ impl AMMClawback<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl AMMClawback<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `AMMClawback`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttAMM_CLAWBACK`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttAMM_CLAWBACK`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -9383,10 +8234,7 @@ impl AMMClawback<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -9394,10 +8242,7 @@ impl AMMClawback<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9409,10 +8254,7 @@ impl AMMClawback<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9424,10 +8266,7 @@ impl AMMClawback<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9439,10 +8278,7 @@ impl AMMClawback<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9555,10 +8391,8 @@ impl<S: crate::views::source::FieldSource> AMMClawback<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9571,8 +8405,7 @@ impl<S: crate::views::source::FieldSource> AMMClawback<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -9592,8 +8425,7 @@ impl<S: crate::views::source::FieldSource> AMMClawback<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9607,10 +8439,8 @@ impl<S: crate::views::source::FieldSource> AMMClawback<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9623,10 +8453,8 @@ impl<S: crate::views::source::FieldSource> AMMClawback<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9656,10 +8484,8 @@ impl<S: crate::views::source::FieldSource> AMMClawback<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9673,8 +8499,7 @@ impl<S: crate::views::source::FieldSource> AMMClawback<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9688,14 +8513,7 @@ impl<S: crate::views::source::FieldSource> AMMClawback<S> {
 
 /// View of the `AMMCreate` transaction (`ttAMM_CREATE`, type code 35).
 ///
-/// Build one with [`AMMCreate::otxn`] (the originating transaction) or
-/// [`AMMCreate::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct AMMCreate<S: crate::views::source::FieldSource> {
     src: S,
@@ -9703,12 +8521,7 @@ pub struct AMMCreate<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl AMMCreate<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `AMMCreate`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttAMM_CREATE`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `AMMCreate`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttAMM_CREATE).map(|src| Self { src })
@@ -9717,14 +8530,8 @@ impl AMMCreate<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl AMMCreate<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `AMMCreate`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttAMM_CREATE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttAMM_CREATE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -9737,10 +8544,7 @@ impl AMMCreate<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -9748,10 +8552,7 @@ impl AMMCreate<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9763,10 +8564,7 @@ impl AMMCreate<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9778,10 +8576,7 @@ impl AMMCreate<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9793,10 +8588,7 @@ impl AMMCreate<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9901,10 +8693,8 @@ impl<S: crate::views::source::FieldSource> AMMCreate<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9917,8 +8707,7 @@ impl<S: crate::views::source::FieldSource> AMMCreate<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -9938,8 +8727,7 @@ impl<S: crate::views::source::FieldSource> AMMCreate<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9953,10 +8741,8 @@ impl<S: crate::views::source::FieldSource> AMMCreate<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -9969,10 +8755,8 @@ impl<S: crate::views::source::FieldSource> AMMCreate<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -10002,10 +8786,8 @@ impl<S: crate::views::source::FieldSource> AMMCreate<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -10019,8 +8801,7 @@ impl<S: crate::views::source::FieldSource> AMMCreate<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -10034,14 +8815,7 @@ impl<S: crate::views::source::FieldSource> AMMCreate<S> {
 
 /// View of the `AMMDeposit` transaction (`ttAMM_DEPOSIT`, type code 36).
 ///
-/// Build one with [`AMMDeposit::otxn`] (the originating transaction) or
-/// [`AMMDeposit::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct AMMDeposit<S: crate::views::source::FieldSource> {
     src: S,
@@ -10049,12 +8823,7 @@ pub struct AMMDeposit<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl AMMDeposit<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `AMMDeposit`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttAMM_DEPOSIT`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `AMMDeposit`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttAMM_DEPOSIT).map(|src| Self { src })
@@ -10063,14 +8832,8 @@ impl AMMDeposit<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl AMMDeposit<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `AMMDeposit`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttAMM_DEPOSIT`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttAMM_DEPOSIT`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -10083,10 +8846,7 @@ impl AMMDeposit<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -10094,10 +8854,7 @@ impl AMMDeposit<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -10109,10 +8866,7 @@ impl AMMDeposit<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -10124,10 +8878,7 @@ impl AMMDeposit<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -10139,10 +8890,7 @@ impl AMMDeposit<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -10281,10 +9029,8 @@ impl<S: crate::views::source::FieldSource> AMMDeposit<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -10297,8 +9043,7 @@ impl<S: crate::views::source::FieldSource> AMMDeposit<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -10318,8 +9063,7 @@ impl<S: crate::views::source::FieldSource> AMMDeposit<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -10333,10 +9077,8 @@ impl<S: crate::views::source::FieldSource> AMMDeposit<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -10349,10 +9091,8 @@ impl<S: crate::views::source::FieldSource> AMMDeposit<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -10382,10 +9122,8 @@ impl<S: crate::views::source::FieldSource> AMMDeposit<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -10399,8 +9137,7 @@ impl<S: crate::views::source::FieldSource> AMMDeposit<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -10414,14 +9151,7 @@ impl<S: crate::views::source::FieldSource> AMMDeposit<S> {
 
 /// View of the `AMMWithdraw` transaction (`ttAMM_WITHDRAW`, type code 37).
 ///
-/// Build one with [`AMMWithdraw::otxn`] (the originating transaction) or
-/// [`AMMWithdraw::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct AMMWithdraw<S: crate::views::source::FieldSource> {
     src: S,
@@ -10429,12 +9159,7 @@ pub struct AMMWithdraw<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl AMMWithdraw<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `AMMWithdraw`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttAMM_WITHDRAW`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `AMMWithdraw`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttAMM_WITHDRAW).map(|src| Self { src })
@@ -10443,14 +9168,8 @@ impl AMMWithdraw<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl AMMWithdraw<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `AMMWithdraw`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttAMM_WITHDRAW`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttAMM_WITHDRAW`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -10463,10 +9182,7 @@ impl AMMWithdraw<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -10474,10 +9190,7 @@ impl AMMWithdraw<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -10489,10 +9202,7 @@ impl AMMWithdraw<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -10504,10 +9214,7 @@ impl AMMWithdraw<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -10519,10 +9226,7 @@ impl AMMWithdraw<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -10653,10 +9357,8 @@ impl<S: crate::views::source::FieldSource> AMMWithdraw<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -10669,8 +9371,7 @@ impl<S: crate::views::source::FieldSource> AMMWithdraw<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -10690,8 +9391,7 @@ impl<S: crate::views::source::FieldSource> AMMWithdraw<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -10705,10 +9405,8 @@ impl<S: crate::views::source::FieldSource> AMMWithdraw<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -10721,10 +9419,8 @@ impl<S: crate::views::source::FieldSource> AMMWithdraw<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -10754,10 +9450,8 @@ impl<S: crate::views::source::FieldSource> AMMWithdraw<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -10771,8 +9465,7 @@ impl<S: crate::views::source::FieldSource> AMMWithdraw<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -10786,14 +9479,7 @@ impl<S: crate::views::source::FieldSource> AMMWithdraw<S> {
 
 /// View of the `AMMVote` transaction (`ttAMM_VOTE`, type code 38).
 ///
-/// Build one with [`AMMVote::otxn`] (the originating transaction) or
-/// [`AMMVote::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct AMMVote<S: crate::views::source::FieldSource> {
     src: S,
@@ -10801,12 +9487,7 @@ pub struct AMMVote<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl AMMVote<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `AMMVote`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttAMM_VOTE`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `AMMVote`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttAMM_VOTE).map(|src| Self { src })
@@ -10815,14 +9496,8 @@ impl AMMVote<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl AMMVote<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `AMMVote`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttAMM_VOTE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttAMM_VOTE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -10835,10 +9510,7 @@ impl AMMVote<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -10846,10 +9518,7 @@ impl AMMVote<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -10861,10 +9530,7 @@ impl AMMVote<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -10876,10 +9542,7 @@ impl AMMVote<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -10891,10 +9554,7 @@ impl AMMVote<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -10999,10 +9659,8 @@ impl<S: crate::views::source::FieldSource> AMMVote<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11015,8 +9673,7 @@ impl<S: crate::views::source::FieldSource> AMMVote<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -11036,8 +9693,7 @@ impl<S: crate::views::source::FieldSource> AMMVote<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11051,10 +9707,8 @@ impl<S: crate::views::source::FieldSource> AMMVote<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11067,10 +9721,8 @@ impl<S: crate::views::source::FieldSource> AMMVote<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11100,10 +9752,8 @@ impl<S: crate::views::source::FieldSource> AMMVote<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11117,8 +9767,7 @@ impl<S: crate::views::source::FieldSource> AMMVote<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11132,14 +9781,7 @@ impl<S: crate::views::source::FieldSource> AMMVote<S> {
 
 /// View of the `AMMBid` transaction (`ttAMM_BID`, type code 39).
 ///
-/// Build one with [`AMMBid::otxn`] (the originating transaction) or
-/// [`AMMBid::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct AMMBid<S: crate::views::source::FieldSource> {
     src: S,
@@ -11147,12 +9789,7 @@ pub struct AMMBid<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl AMMBid<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `AMMBid`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttAMM_BID`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `AMMBid`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttAMM_BID).map(|src| Self { src })
@@ -11161,14 +9798,8 @@ impl AMMBid<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl AMMBid<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `AMMBid`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttAMM_BID`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttAMM_BID`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -11181,10 +9812,7 @@ impl AMMBid<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -11192,10 +9820,7 @@ impl AMMBid<crate::views::source::SlotSource> {
 
     /// `sfAuthAccounts` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11207,10 +9832,7 @@ impl AMMBid<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11222,10 +9844,7 @@ impl AMMBid<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11237,10 +9856,7 @@ impl AMMBid<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11252,10 +9868,7 @@ impl AMMBid<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11298,10 +9911,8 @@ impl<S: crate::views::source::FieldSource> AMMBid<S> {
 
     /// `sfAuthAccounts` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `auth_accounts_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `auth_accounts_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11387,10 +9998,8 @@ impl<S: crate::views::source::FieldSource> AMMBid<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11403,8 +10012,7 @@ impl<S: crate::views::source::FieldSource> AMMBid<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -11424,8 +10032,7 @@ impl<S: crate::views::source::FieldSource> AMMBid<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11439,10 +10046,8 @@ impl<S: crate::views::source::FieldSource> AMMBid<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11455,10 +10060,8 @@ impl<S: crate::views::source::FieldSource> AMMBid<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11488,10 +10091,8 @@ impl<S: crate::views::source::FieldSource> AMMBid<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11505,8 +10106,7 @@ impl<S: crate::views::source::FieldSource> AMMBid<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11520,14 +10120,7 @@ impl<S: crate::views::source::FieldSource> AMMBid<S> {
 
 /// View of the `AMMDelete` transaction (`ttAMM_DELETE`, type code 40).
 ///
-/// Build one with [`AMMDelete::otxn`] (the originating transaction) or
-/// [`AMMDelete::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct AMMDelete<S: crate::views::source::FieldSource> {
     src: S,
@@ -11535,12 +10128,7 @@ pub struct AMMDelete<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl AMMDelete<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `AMMDelete`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttAMM_DELETE`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `AMMDelete`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttAMM_DELETE).map(|src| Self { src })
@@ -11549,14 +10137,8 @@ impl AMMDelete<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl AMMDelete<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `AMMDelete`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttAMM_DELETE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttAMM_DELETE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -11569,10 +10151,7 @@ impl AMMDelete<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -11580,10 +10159,7 @@ impl AMMDelete<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11595,10 +10171,7 @@ impl AMMDelete<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11610,10 +10183,7 @@ impl AMMDelete<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11625,10 +10195,7 @@ impl AMMDelete<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11727,10 +10294,8 @@ impl<S: crate::views::source::FieldSource> AMMDelete<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11743,8 +10308,7 @@ impl<S: crate::views::source::FieldSource> AMMDelete<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -11764,8 +10328,7 @@ impl<S: crate::views::source::FieldSource> AMMDelete<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11779,10 +10342,8 @@ impl<S: crate::views::source::FieldSource> AMMDelete<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11795,10 +10356,8 @@ impl<S: crate::views::source::FieldSource> AMMDelete<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11828,10 +10387,8 @@ impl<S: crate::views::source::FieldSource> AMMDelete<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11845,8 +10402,7 @@ impl<S: crate::views::source::FieldSource> AMMDelete<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11859,21 +10415,12 @@ impl<S: crate::views::source::FieldSource> AMMDelete<S> {
 }
 
 /// View of the `URITokenMint` transaction (`ttURITOKEN_MINT`, type code 45).
-///
-/// Build one with [`URITokenMint::otxn`] (the originating transaction) or
-/// [`URITokenMint::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct URITokenMint<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl URITokenMint<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `URITokenMint`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttURITOKEN_MINT`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `URITokenMint`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttURITOKEN_MINT).map(|src| Self { src })
@@ -11881,14 +10428,8 @@ impl URITokenMint<crate::views::source::OtxnSource> {
 }
 
 impl URITokenMint<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `URITokenMint`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttURITOKEN_MINT`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttURITOKEN_MINT`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -11901,10 +10442,7 @@ impl URITokenMint<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -11912,10 +10450,7 @@ impl URITokenMint<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11927,10 +10462,7 @@ impl URITokenMint<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11942,10 +10474,7 @@ impl URITokenMint<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11957,10 +10486,7 @@ impl URITokenMint<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -11974,8 +10500,7 @@ impl URITokenMint<crate::views::source::SlotSource> {
 impl<S: crate::views::source::FieldSource> URITokenMint<S> {
     /// `sfURI` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn uri_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> crate::error::Result<usize> {
         self.src.read_raw(crate::sfield::sfURI.code(), out)
@@ -12079,10 +10604,8 @@ impl<S: crate::views::source::FieldSource> URITokenMint<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12095,8 +10618,7 @@ impl<S: crate::views::source::FieldSource> URITokenMint<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -12116,8 +10638,7 @@ impl<S: crate::views::source::FieldSource> URITokenMint<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12131,10 +10652,8 @@ impl<S: crate::views::source::FieldSource> URITokenMint<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12147,10 +10666,8 @@ impl<S: crate::views::source::FieldSource> URITokenMint<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12180,10 +10697,8 @@ impl<S: crate::views::source::FieldSource> URITokenMint<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12197,8 +10712,7 @@ impl<S: crate::views::source::FieldSource> URITokenMint<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12211,21 +10725,12 @@ impl<S: crate::views::source::FieldSource> URITokenMint<S> {
 }
 
 /// View of the `URITokenBurn` transaction (`ttURITOKEN_BURN`, type code 46).
-///
-/// Build one with [`URITokenBurn::otxn`] (the originating transaction) or
-/// [`URITokenBurn::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct URITokenBurn<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl URITokenBurn<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `URITokenBurn`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttURITOKEN_BURN`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `URITokenBurn`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttURITOKEN_BURN).map(|src| Self { src })
@@ -12233,14 +10738,8 @@ impl URITokenBurn<crate::views::source::OtxnSource> {
 }
 
 impl URITokenBurn<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `URITokenBurn`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttURITOKEN_BURN`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttURITOKEN_BURN`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -12253,10 +10752,7 @@ impl URITokenBurn<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -12264,10 +10760,7 @@ impl URITokenBurn<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12279,10 +10772,7 @@ impl URITokenBurn<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12294,10 +10784,7 @@ impl URITokenBurn<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12309,10 +10796,7 @@ impl URITokenBurn<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12404,10 +10888,8 @@ impl<S: crate::views::source::FieldSource> URITokenBurn<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12420,8 +10902,7 @@ impl<S: crate::views::source::FieldSource> URITokenBurn<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -12441,8 +10922,7 @@ impl<S: crate::views::source::FieldSource> URITokenBurn<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12456,10 +10936,8 @@ impl<S: crate::views::source::FieldSource> URITokenBurn<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12472,10 +10950,8 @@ impl<S: crate::views::source::FieldSource> URITokenBurn<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12505,10 +10981,8 @@ impl<S: crate::views::source::FieldSource> URITokenBurn<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12522,8 +10996,7 @@ impl<S: crate::views::source::FieldSource> URITokenBurn<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12536,21 +11009,12 @@ impl<S: crate::views::source::FieldSource> URITokenBurn<S> {
 }
 
 /// View of the `URITokenBuy` transaction (`ttURITOKEN_BUY`, type code 47).
-///
-/// Build one with [`URITokenBuy::otxn`] (the originating transaction) or
-/// [`URITokenBuy::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct URITokenBuy<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl URITokenBuy<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `URITokenBuy`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttURITOKEN_BUY`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `URITokenBuy`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttURITOKEN_BUY).map(|src| Self { src })
@@ -12558,14 +11022,8 @@ impl URITokenBuy<crate::views::source::OtxnSource> {
 }
 
 impl URITokenBuy<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `URITokenBuy`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttURITOKEN_BUY`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttURITOKEN_BUY`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -12578,10 +11036,7 @@ impl URITokenBuy<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -12589,10 +11044,7 @@ impl URITokenBuy<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12604,10 +11056,7 @@ impl URITokenBuy<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12619,10 +11068,7 @@ impl URITokenBuy<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12634,10 +11080,7 @@ impl URITokenBuy<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12735,10 +11178,8 @@ impl<S: crate::views::source::FieldSource> URITokenBuy<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12751,8 +11192,7 @@ impl<S: crate::views::source::FieldSource> URITokenBuy<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -12772,8 +11212,7 @@ impl<S: crate::views::source::FieldSource> URITokenBuy<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12787,10 +11226,8 @@ impl<S: crate::views::source::FieldSource> URITokenBuy<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12803,10 +11240,8 @@ impl<S: crate::views::source::FieldSource> URITokenBuy<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12836,10 +11271,8 @@ impl<S: crate::views::source::FieldSource> URITokenBuy<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12853,8 +11286,7 @@ impl<S: crate::views::source::FieldSource> URITokenBuy<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12867,21 +11299,12 @@ impl<S: crate::views::source::FieldSource> URITokenBuy<S> {
 }
 
 /// View of the `URITokenCreateSellOffer` transaction (`ttURITOKEN_CREATE_SELL_OFFER`, type code 48).
-///
-/// Build one with [`URITokenCreateSellOffer::otxn`] (the originating transaction) or
-/// [`URITokenCreateSellOffer::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct URITokenCreateSellOffer<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl URITokenCreateSellOffer<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `URITokenCreateSellOffer`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttURITOKEN_CREATE_SELL_OFFER`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `URITokenCreateSellOffer`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttURITOKEN_CREATE_SELL_OFFER)
@@ -12890,14 +11313,8 @@ impl URITokenCreateSellOffer<crate::views::source::OtxnSource> {
 }
 
 impl URITokenCreateSellOffer<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `URITokenCreateSellOffer`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttURITOKEN_CREATE_SELL_OFFER`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttURITOKEN_CREATE_SELL_OFFER`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -12910,10 +11327,7 @@ impl URITokenCreateSellOffer<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -12921,10 +11335,7 @@ impl URITokenCreateSellOffer<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12936,10 +11347,7 @@ impl URITokenCreateSellOffer<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12951,10 +11359,7 @@ impl URITokenCreateSellOffer<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -12966,10 +11371,7 @@ impl URITokenCreateSellOffer<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13075,10 +11477,8 @@ impl<S: crate::views::source::FieldSource> URITokenCreateSellOffer<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13091,8 +11491,7 @@ impl<S: crate::views::source::FieldSource> URITokenCreateSellOffer<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -13112,8 +11511,7 @@ impl<S: crate::views::source::FieldSource> URITokenCreateSellOffer<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13127,10 +11525,8 @@ impl<S: crate::views::source::FieldSource> URITokenCreateSellOffer<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13143,10 +11539,8 @@ impl<S: crate::views::source::FieldSource> URITokenCreateSellOffer<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13176,10 +11570,8 @@ impl<S: crate::views::source::FieldSource> URITokenCreateSellOffer<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13193,8 +11585,7 @@ impl<S: crate::views::source::FieldSource> URITokenCreateSellOffer<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13207,21 +11598,12 @@ impl<S: crate::views::source::FieldSource> URITokenCreateSellOffer<S> {
 }
 
 /// View of the `URITokenCancelSellOffer` transaction (`ttURITOKEN_CANCEL_SELL_OFFER`, type code 49).
-///
-/// Build one with [`URITokenCancelSellOffer::otxn`] (the originating transaction) or
-/// [`URITokenCancelSellOffer::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct URITokenCancelSellOffer<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl URITokenCancelSellOffer<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `URITokenCancelSellOffer`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttURITOKEN_CANCEL_SELL_OFFER`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `URITokenCancelSellOffer`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttURITOKEN_CANCEL_SELL_OFFER)
@@ -13230,14 +11612,8 @@ impl URITokenCancelSellOffer<crate::views::source::OtxnSource> {
 }
 
 impl URITokenCancelSellOffer<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `URITokenCancelSellOffer`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttURITOKEN_CANCEL_SELL_OFFER`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttURITOKEN_CANCEL_SELL_OFFER`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -13250,10 +11626,7 @@ impl URITokenCancelSellOffer<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -13261,10 +11634,7 @@ impl URITokenCancelSellOffer<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13276,10 +11646,7 @@ impl URITokenCancelSellOffer<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13291,10 +11658,7 @@ impl URITokenCancelSellOffer<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13306,10 +11670,7 @@ impl URITokenCancelSellOffer<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13401,10 +11762,8 @@ impl<S: crate::views::source::FieldSource> URITokenCancelSellOffer<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13417,8 +11776,7 @@ impl<S: crate::views::source::FieldSource> URITokenCancelSellOffer<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -13438,8 +11796,7 @@ impl<S: crate::views::source::FieldSource> URITokenCancelSellOffer<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13453,10 +11810,8 @@ impl<S: crate::views::source::FieldSource> URITokenCancelSellOffer<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13469,10 +11824,8 @@ impl<S: crate::views::source::FieldSource> URITokenCancelSellOffer<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13502,10 +11855,8 @@ impl<S: crate::views::source::FieldSource> URITokenCancelSellOffer<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13519,8 +11870,7 @@ impl<S: crate::views::source::FieldSource> URITokenCancelSellOffer<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13534,14 +11884,7 @@ impl<S: crate::views::source::FieldSource> URITokenCancelSellOffer<S> {
 
 /// View of the `XChainCreateClaimID` transaction (`ttXCHAIN_CREATE_CLAIM_ID`, type code 50).
 ///
-/// Build one with [`XChainCreateClaimID::otxn`] (the originating transaction) or
-/// [`XChainCreateClaimID::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct XChainCreateClaimID<S: crate::views::source::FieldSource> {
     src: S,
@@ -13549,12 +11892,7 @@ pub struct XChainCreateClaimID<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl XChainCreateClaimID<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `XChainCreateClaimID`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttXCHAIN_CREATE_CLAIM_ID`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `XChainCreateClaimID`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttXCHAIN_CREATE_CLAIM_ID)
@@ -13564,14 +11902,8 @@ impl XChainCreateClaimID<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl XChainCreateClaimID<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `XChainCreateClaimID`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttXCHAIN_CREATE_CLAIM_ID`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttXCHAIN_CREATE_CLAIM_ID`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -13584,10 +11916,7 @@ impl XChainCreateClaimID<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -13595,10 +11924,7 @@ impl XChainCreateClaimID<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13610,10 +11936,7 @@ impl XChainCreateClaimID<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13625,10 +11948,7 @@ impl XChainCreateClaimID<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13640,10 +11960,7 @@ impl XChainCreateClaimID<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13658,8 +11975,7 @@ impl XChainCreateClaimID<crate::views::source::SlotSource> {
 impl<S: crate::views::source::FieldSource> XChainCreateClaimID<S> {
     /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -13754,10 +12070,8 @@ impl<S: crate::views::source::FieldSource> XChainCreateClaimID<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13770,8 +12084,7 @@ impl<S: crate::views::source::FieldSource> XChainCreateClaimID<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -13791,8 +12104,7 @@ impl<S: crate::views::source::FieldSource> XChainCreateClaimID<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13806,10 +12118,8 @@ impl<S: crate::views::source::FieldSource> XChainCreateClaimID<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13822,10 +12132,8 @@ impl<S: crate::views::source::FieldSource> XChainCreateClaimID<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13855,10 +12163,8 @@ impl<S: crate::views::source::FieldSource> XChainCreateClaimID<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13872,8 +12178,7 @@ impl<S: crate::views::source::FieldSource> XChainCreateClaimID<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13887,14 +12192,7 @@ impl<S: crate::views::source::FieldSource> XChainCreateClaimID<S> {
 
 /// View of the `XChainCommit` transaction (`ttXCHAIN_COMMIT`, type code 51).
 ///
-/// Build one with [`XChainCommit::otxn`] (the originating transaction) or
-/// [`XChainCommit::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct XChainCommit<S: crate::views::source::FieldSource> {
     src: S,
@@ -13902,12 +12200,7 @@ pub struct XChainCommit<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl XChainCommit<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `XChainCommit`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttXCHAIN_COMMIT`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `XChainCommit`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttXCHAIN_COMMIT).map(|src| Self { src })
@@ -13916,14 +12209,8 @@ impl XChainCommit<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl XChainCommit<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `XChainCommit`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttXCHAIN_COMMIT`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttXCHAIN_COMMIT`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -13936,10 +12223,7 @@ impl XChainCommit<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -13947,10 +12231,7 @@ impl XChainCommit<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13962,10 +12243,7 @@ impl XChainCommit<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13977,10 +12255,7 @@ impl XChainCommit<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -13992,10 +12267,7 @@ impl XChainCommit<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -14010,8 +12282,7 @@ impl XChainCommit<crate::views::source::SlotSource> {
 impl<S: crate::views::source::FieldSource> XChainCommit<S> {
     /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -14114,10 +12385,8 @@ impl<S: crate::views::source::FieldSource> XChainCommit<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -14130,8 +12399,7 @@ impl<S: crate::views::source::FieldSource> XChainCommit<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -14151,8 +12419,7 @@ impl<S: crate::views::source::FieldSource> XChainCommit<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -14166,10 +12433,8 @@ impl<S: crate::views::source::FieldSource> XChainCommit<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -14182,10 +12447,8 @@ impl<S: crate::views::source::FieldSource> XChainCommit<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -14215,10 +12478,8 @@ impl<S: crate::views::source::FieldSource> XChainCommit<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -14232,8 +12493,7 @@ impl<S: crate::views::source::FieldSource> XChainCommit<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -14247,14 +12507,7 @@ impl<S: crate::views::source::FieldSource> XChainCommit<S> {
 
 /// View of the `XChainClaim` transaction (`ttXCHAIN_CLAIM`, type code 52).
 ///
-/// Build one with [`XChainClaim::otxn`] (the originating transaction) or
-/// [`XChainClaim::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct XChainClaim<S: crate::views::source::FieldSource> {
     src: S,
@@ -14262,12 +12515,7 @@ pub struct XChainClaim<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl XChainClaim<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `XChainClaim`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttXCHAIN_CLAIM`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `XChainClaim`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttXCHAIN_CLAIM).map(|src| Self { src })
@@ -14276,14 +12524,8 @@ impl XChainClaim<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl XChainClaim<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `XChainClaim`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttXCHAIN_CLAIM`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttXCHAIN_CLAIM`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -14296,10 +12538,7 @@ impl XChainClaim<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -14307,10 +12546,7 @@ impl XChainClaim<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -14322,10 +12558,7 @@ impl XChainClaim<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -14337,10 +12570,7 @@ impl XChainClaim<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -14352,10 +12582,7 @@ impl XChainClaim<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -14370,8 +12597,7 @@ impl XChainClaim<crate::views::source::SlotSource> {
 impl<S: crate::views::source::FieldSource> XChainClaim<S> {
     /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -14480,10 +12706,8 @@ impl<S: crate::views::source::FieldSource> XChainClaim<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -14496,8 +12720,7 @@ impl<S: crate::views::source::FieldSource> XChainClaim<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -14517,8 +12740,7 @@ impl<S: crate::views::source::FieldSource> XChainClaim<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -14532,10 +12754,8 @@ impl<S: crate::views::source::FieldSource> XChainClaim<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -14548,10 +12768,8 @@ impl<S: crate::views::source::FieldSource> XChainClaim<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -14581,10 +12799,8 @@ impl<S: crate::views::source::FieldSource> XChainClaim<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -14598,8 +12814,7 @@ impl<S: crate::views::source::FieldSource> XChainClaim<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -14613,14 +12828,7 @@ impl<S: crate::views::source::FieldSource> XChainClaim<S> {
 
 /// View of the `XChainAccountCreateCommit` transaction (`ttXCHAIN_ACCOUNT_CREATE_COMMIT`, type code 53).
 ///
-/// Build one with [`XChainAccountCreateCommit::otxn`] (the originating transaction) or
-/// [`XChainAccountCreateCommit::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct XChainAccountCreateCommit<S: crate::views::source::FieldSource> {
     src: S,
@@ -14628,12 +12836,7 @@ pub struct XChainAccountCreateCommit<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl XChainAccountCreateCommit<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `XChainAccountCreateCommit`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttXCHAIN_ACCOUNT_CREATE_COMMIT`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `XChainAccountCreateCommit`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttXCHAIN_ACCOUNT_CREATE_COMMIT)
@@ -14643,14 +12846,8 @@ impl XChainAccountCreateCommit<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl XChainAccountCreateCommit<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `XChainAccountCreateCommit`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttXCHAIN_ACCOUNT_CREATE_COMMIT`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttXCHAIN_ACCOUNT_CREATE_COMMIT`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -14663,10 +12860,7 @@ impl XChainAccountCreateCommit<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -14674,10 +12868,7 @@ impl XChainAccountCreateCommit<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -14689,10 +12880,7 @@ impl XChainAccountCreateCommit<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -14704,10 +12892,7 @@ impl XChainAccountCreateCommit<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -14719,10 +12904,7 @@ impl XChainAccountCreateCommit<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -14737,8 +12919,7 @@ impl XChainAccountCreateCommit<crate::views::source::SlotSource> {
 impl<S: crate::views::source::FieldSource> XChainAccountCreateCommit<S> {
     /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -14839,10 +13020,8 @@ impl<S: crate::views::source::FieldSource> XChainAccountCreateCommit<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -14855,8 +13034,7 @@ impl<S: crate::views::source::FieldSource> XChainAccountCreateCommit<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -14876,8 +13054,7 @@ impl<S: crate::views::source::FieldSource> XChainAccountCreateCommit<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -14891,10 +13068,8 @@ impl<S: crate::views::source::FieldSource> XChainAccountCreateCommit<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -14907,10 +13082,8 @@ impl<S: crate::views::source::FieldSource> XChainAccountCreateCommit<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -14940,10 +13113,8 @@ impl<S: crate::views::source::FieldSource> XChainAccountCreateCommit<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -14957,8 +13128,7 @@ impl<S: crate::views::source::FieldSource> XChainAccountCreateCommit<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -14972,14 +13142,7 @@ impl<S: crate::views::source::FieldSource> XChainAccountCreateCommit<S> {
 
 /// View of the `XChainAddClaimAttestation` transaction (`ttXCHAIN_ADD_CLAIM_ATTESTATION`, type code 54).
 ///
-/// Build one with [`XChainAddClaimAttestation::otxn`] (the originating transaction) or
-/// [`XChainAddClaimAttestation::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct XChainAddClaimAttestation<S: crate::views::source::FieldSource> {
     src: S,
@@ -14987,12 +13150,7 @@ pub struct XChainAddClaimAttestation<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl XChainAddClaimAttestation<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `XChainAddClaimAttestation`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttXCHAIN_ADD_CLAIM_ATTESTATION`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `XChainAddClaimAttestation`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttXCHAIN_ADD_CLAIM_ATTESTATION)
@@ -15002,14 +13160,8 @@ impl XChainAddClaimAttestation<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl XChainAddClaimAttestation<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `XChainAddClaimAttestation`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttXCHAIN_ADD_CLAIM_ATTESTATION`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttXCHAIN_ADD_CLAIM_ATTESTATION`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -15022,10 +13174,7 @@ impl XChainAddClaimAttestation<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -15033,10 +13182,7 @@ impl XChainAddClaimAttestation<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -15048,10 +13194,7 @@ impl XChainAddClaimAttestation<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -15063,10 +13206,7 @@ impl XChainAddClaimAttestation<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -15078,10 +13218,7 @@ impl XChainAddClaimAttestation<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -15096,8 +13233,7 @@ impl XChainAddClaimAttestation<crate::views::source::SlotSource> {
 impl<S: crate::views::source::FieldSource> XChainAddClaimAttestation<S> {
     /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -15114,8 +13250,7 @@ impl<S: crate::views::source::FieldSource> XChainAddClaimAttestation<S> {
 
     /// `sfPublicKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -15126,8 +13261,7 @@ impl<S: crate::views::source::FieldSource> XChainAddClaimAttestation<S> {
 
     /// `sfSignature` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signature_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -15248,10 +13382,8 @@ impl<S: crate::views::source::FieldSource> XChainAddClaimAttestation<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -15264,8 +13396,7 @@ impl<S: crate::views::source::FieldSource> XChainAddClaimAttestation<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -15285,8 +13416,7 @@ impl<S: crate::views::source::FieldSource> XChainAddClaimAttestation<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -15300,10 +13430,8 @@ impl<S: crate::views::source::FieldSource> XChainAddClaimAttestation<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -15316,10 +13444,8 @@ impl<S: crate::views::source::FieldSource> XChainAddClaimAttestation<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -15349,10 +13475,8 @@ impl<S: crate::views::source::FieldSource> XChainAddClaimAttestation<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -15366,8 +13490,7 @@ impl<S: crate::views::source::FieldSource> XChainAddClaimAttestation<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -15381,14 +13504,7 @@ impl<S: crate::views::source::FieldSource> XChainAddClaimAttestation<S> {
 
 /// View of the `XChainAddAccountCreateAttestation` transaction (`ttXCHAIN_ADD_ACCOUNT_CREATE_ATTESTATION`, type code 55).
 ///
-/// Build one with [`XChainAddAccountCreateAttestation::otxn`] (the originating transaction) or
-/// [`XChainAddAccountCreateAttestation::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct XChainAddAccountCreateAttestation<S: crate::views::source::FieldSource> {
     src: S,
@@ -15396,12 +13512,7 @@ pub struct XChainAddAccountCreateAttestation<S: crate::views::source::FieldSourc
 
 #[cfg(feature = "all-amendments")]
 impl XChainAddAccountCreateAttestation<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `XChainAddAccountCreateAttestation`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttXCHAIN_ADD_ACCOUNT_CREATE_ATTESTATION`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `XChainAddAccountCreateAttestation`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttXCHAIN_ADD_ACCOUNT_CREATE_ATTESTATION)
@@ -15411,14 +13522,8 @@ impl XChainAddAccountCreateAttestation<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl XChainAddAccountCreateAttestation<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `XChainAddAccountCreateAttestation`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttXCHAIN_ADD_ACCOUNT_CREATE_ATTESTATION`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttXCHAIN_ADD_ACCOUNT_CREATE_ATTESTATION`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -15431,10 +13536,7 @@ impl XChainAddAccountCreateAttestation<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -15442,10 +13544,7 @@ impl XChainAddAccountCreateAttestation<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -15457,10 +13556,7 @@ impl XChainAddAccountCreateAttestation<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -15472,10 +13568,7 @@ impl XChainAddAccountCreateAttestation<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -15487,10 +13580,7 @@ impl XChainAddAccountCreateAttestation<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -15505,8 +13595,7 @@ impl XChainAddAccountCreateAttestation<crate::views::source::SlotSource> {
 impl<S: crate::views::source::FieldSource> XChainAddAccountCreateAttestation<S> {
     /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -15523,8 +13612,7 @@ impl<S: crate::views::source::FieldSource> XChainAddAccountCreateAttestation<S> 
 
     /// `sfPublicKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -15535,8 +13623,7 @@ impl<S: crate::views::source::FieldSource> XChainAddAccountCreateAttestation<S> 
 
     /// `sfSignature` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signature_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -15661,10 +13748,8 @@ impl<S: crate::views::source::FieldSource> XChainAddAccountCreateAttestation<S> 
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -15677,8 +13762,7 @@ impl<S: crate::views::source::FieldSource> XChainAddAccountCreateAttestation<S> 
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -15698,8 +13782,7 @@ impl<S: crate::views::source::FieldSource> XChainAddAccountCreateAttestation<S> 
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -15713,10 +13796,8 @@ impl<S: crate::views::source::FieldSource> XChainAddAccountCreateAttestation<S> 
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -15729,10 +13810,8 @@ impl<S: crate::views::source::FieldSource> XChainAddAccountCreateAttestation<S> 
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -15762,10 +13841,8 @@ impl<S: crate::views::source::FieldSource> XChainAddAccountCreateAttestation<S> 
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -15779,8 +13856,7 @@ impl<S: crate::views::source::FieldSource> XChainAddAccountCreateAttestation<S> 
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -15794,14 +13870,7 @@ impl<S: crate::views::source::FieldSource> XChainAddAccountCreateAttestation<S> 
 
 /// View of the `XChainModifyBridge` transaction (`ttXCHAIN_MODIFY_BRIDGE`, type code 56).
 ///
-/// Build one with [`XChainModifyBridge::otxn`] (the originating transaction) or
-/// [`XChainModifyBridge::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct XChainModifyBridge<S: crate::views::source::FieldSource> {
     src: S,
@@ -15809,12 +13878,7 @@ pub struct XChainModifyBridge<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl XChainModifyBridge<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `XChainModifyBridge`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttXCHAIN_MODIFY_BRIDGE`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `XChainModifyBridge`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttXCHAIN_MODIFY_BRIDGE)
@@ -15824,14 +13888,8 @@ impl XChainModifyBridge<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl XChainModifyBridge<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `XChainModifyBridge`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttXCHAIN_MODIFY_BRIDGE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttXCHAIN_MODIFY_BRIDGE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -15844,10 +13902,7 @@ impl XChainModifyBridge<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -15855,10 +13910,7 @@ impl XChainModifyBridge<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -15870,10 +13922,7 @@ impl XChainModifyBridge<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -15885,10 +13934,7 @@ impl XChainModifyBridge<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -15900,10 +13946,7 @@ impl XChainModifyBridge<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -15918,8 +13961,7 @@ impl XChainModifyBridge<crate::views::source::SlotSource> {
 impl<S: crate::views::source::FieldSource> XChainModifyBridge<S> {
     /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -16020,10 +14062,8 @@ impl<S: crate::views::source::FieldSource> XChainModifyBridge<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16036,8 +14076,7 @@ impl<S: crate::views::source::FieldSource> XChainModifyBridge<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -16057,8 +14096,7 @@ impl<S: crate::views::source::FieldSource> XChainModifyBridge<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16072,10 +14110,8 @@ impl<S: crate::views::source::FieldSource> XChainModifyBridge<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16088,10 +14124,8 @@ impl<S: crate::views::source::FieldSource> XChainModifyBridge<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16121,10 +14155,8 @@ impl<S: crate::views::source::FieldSource> XChainModifyBridge<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16138,8 +14170,7 @@ impl<S: crate::views::source::FieldSource> XChainModifyBridge<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16153,14 +14184,7 @@ impl<S: crate::views::source::FieldSource> XChainModifyBridge<S> {
 
 /// View of the `XChainCreateBridge` transaction (`ttXCHAIN_CREATE_BRIDGE`, type code 57).
 ///
-/// Build one with [`XChainCreateBridge::otxn`] (the originating transaction) or
-/// [`XChainCreateBridge::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct XChainCreateBridge<S: crate::views::source::FieldSource> {
     src: S,
@@ -16168,12 +14192,7 @@ pub struct XChainCreateBridge<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl XChainCreateBridge<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `XChainCreateBridge`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttXCHAIN_CREATE_BRIDGE`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `XChainCreateBridge`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttXCHAIN_CREATE_BRIDGE)
@@ -16183,14 +14202,8 @@ impl XChainCreateBridge<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl XChainCreateBridge<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `XChainCreateBridge`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttXCHAIN_CREATE_BRIDGE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttXCHAIN_CREATE_BRIDGE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -16203,10 +14216,7 @@ impl XChainCreateBridge<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -16214,10 +14224,7 @@ impl XChainCreateBridge<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16229,10 +14236,7 @@ impl XChainCreateBridge<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16244,10 +14248,7 @@ impl XChainCreateBridge<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16259,10 +14260,7 @@ impl XChainCreateBridge<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16277,8 +14275,7 @@ impl XChainCreateBridge<crate::views::source::SlotSource> {
 impl<S: crate::views::source::FieldSource> XChainCreateBridge<S> {
     /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -16377,10 +14374,8 @@ impl<S: crate::views::source::FieldSource> XChainCreateBridge<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16393,8 +14388,7 @@ impl<S: crate::views::source::FieldSource> XChainCreateBridge<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -16414,8 +14408,7 @@ impl<S: crate::views::source::FieldSource> XChainCreateBridge<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16429,10 +14422,8 @@ impl<S: crate::views::source::FieldSource> XChainCreateBridge<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16445,10 +14436,8 @@ impl<S: crate::views::source::FieldSource> XChainCreateBridge<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16478,10 +14467,8 @@ impl<S: crate::views::source::FieldSource> XChainCreateBridge<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16495,8 +14482,7 @@ impl<S: crate::views::source::FieldSource> XChainCreateBridge<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16510,14 +14496,7 @@ impl<S: crate::views::source::FieldSource> XChainCreateBridge<S> {
 
 /// View of the `DIDSet` transaction (`ttDID_SET`, type code 58).
 ///
-/// Build one with [`DIDSet::otxn`] (the originating transaction) or
-/// [`DIDSet::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct DIDSet<S: crate::views::source::FieldSource> {
     src: S,
@@ -16525,12 +14504,7 @@ pub struct DIDSet<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl DIDSet<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `DIDSet`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttDID_SET`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `DIDSet`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttDID_SET).map(|src| Self { src })
@@ -16539,14 +14513,8 @@ impl DIDSet<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl DIDSet<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `DIDSet`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttDID_SET`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttDID_SET`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -16559,10 +14527,7 @@ impl DIDSet<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -16570,10 +14535,7 @@ impl DIDSet<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16585,10 +14547,7 @@ impl DIDSet<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16600,10 +14559,7 @@ impl DIDSet<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16615,10 +14571,7 @@ impl DIDSet<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16633,8 +14586,7 @@ impl DIDSet<crate::views::source::SlotSource> {
 impl<S: crate::views::source::FieldSource> DIDSet<S> {
     /// `sfDIDDocument` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16648,8 +14600,7 @@ impl<S: crate::views::source::FieldSource> DIDSet<S> {
 
     /// `sfURI` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16662,8 +14613,7 @@ impl<S: crate::views::source::FieldSource> DIDSet<S> {
 
     /// `sfData` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16748,10 +14698,8 @@ impl<S: crate::views::source::FieldSource> DIDSet<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16764,8 +14712,7 @@ impl<S: crate::views::source::FieldSource> DIDSet<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -16785,8 +14732,7 @@ impl<S: crate::views::source::FieldSource> DIDSet<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16800,10 +14746,8 @@ impl<S: crate::views::source::FieldSource> DIDSet<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16816,10 +14760,8 @@ impl<S: crate::views::source::FieldSource> DIDSet<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16849,10 +14791,8 @@ impl<S: crate::views::source::FieldSource> DIDSet<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16866,8 +14806,7 @@ impl<S: crate::views::source::FieldSource> DIDSet<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16881,14 +14820,7 @@ impl<S: crate::views::source::FieldSource> DIDSet<S> {
 
 /// View of the `DIDDelete` transaction (`ttDID_DELETE`, type code 59).
 ///
-/// Build one with [`DIDDelete::otxn`] (the originating transaction) or
-/// [`DIDDelete::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct DIDDelete<S: crate::views::source::FieldSource> {
     src: S,
@@ -16896,12 +14828,7 @@ pub struct DIDDelete<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl DIDDelete<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `DIDDelete`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttDID_DELETE`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `DIDDelete`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttDID_DELETE).map(|src| Self { src })
@@ -16910,14 +14837,8 @@ impl DIDDelete<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl DIDDelete<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `DIDDelete`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttDID_DELETE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttDID_DELETE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -16930,10 +14851,7 @@ impl DIDDelete<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -16941,10 +14859,7 @@ impl DIDDelete<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16956,10 +14871,7 @@ impl DIDDelete<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16971,10 +14883,7 @@ impl DIDDelete<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -16986,10 +14895,7 @@ impl DIDDelete<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17076,10 +14982,8 @@ impl<S: crate::views::source::FieldSource> DIDDelete<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17092,8 +14996,7 @@ impl<S: crate::views::source::FieldSource> DIDDelete<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -17113,8 +15016,7 @@ impl<S: crate::views::source::FieldSource> DIDDelete<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17128,10 +15030,8 @@ impl<S: crate::views::source::FieldSource> DIDDelete<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17144,10 +15044,8 @@ impl<S: crate::views::source::FieldSource> DIDDelete<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17177,10 +15075,8 @@ impl<S: crate::views::source::FieldSource> DIDDelete<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17194,8 +15090,7 @@ impl<S: crate::views::source::FieldSource> DIDDelete<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17208,21 +15103,12 @@ impl<S: crate::views::source::FieldSource> DIDDelete<S> {
 }
 
 /// View of the `OracleSet` transaction (`ttORACLE_SET`, type code 60).
-///
-/// Build one with [`OracleSet::otxn`] (the originating transaction) or
-/// [`OracleSet::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct OracleSet<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl OracleSet<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `OracleSet`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttORACLE_SET`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `OracleSet`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttORACLE_SET).map(|src| Self { src })
@@ -17230,14 +15116,8 @@ impl OracleSet<crate::views::source::OtxnSource> {
 }
 
 impl OracleSet<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `OracleSet`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttORACLE_SET`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttORACLE_SET`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -17250,10 +15130,7 @@ impl OracleSet<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -17261,10 +15138,7 @@ impl OracleSet<crate::views::source::SlotSource> {
 
     /// `sfPriceDataSeries` — STArray, `soeREQUIRED`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     #[inline(always)]
     pub fn price_data_series_slot(
         &self,
@@ -17274,10 +15148,7 @@ impl OracleSet<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17289,10 +15160,7 @@ impl OracleSet<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17304,10 +15172,7 @@ impl OracleSet<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17319,10 +15184,7 @@ impl OracleSet<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17342,8 +15204,7 @@ impl<S: crate::views::source::FieldSource> OracleSet<S> {
 
     /// `sfProvider` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17356,8 +15217,7 @@ impl<S: crate::views::source::FieldSource> OracleSet<S> {
 
     /// `sfURI` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17370,8 +15230,7 @@ impl<S: crate::views::source::FieldSource> OracleSet<S> {
 
     /// `sfAssetClass` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17391,10 +15250,8 @@ impl<S: crate::views::source::FieldSource> OracleSet<S> {
 
     /// `sfPriceDataSeries` — STArray, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `price_data_series_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `price_data_series_slot` on a slot-backed view to navigate the container.
     #[inline(always)]
     pub fn price_data_series_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -17478,10 +15335,8 @@ impl<S: crate::views::source::FieldSource> OracleSet<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17494,8 +15349,7 @@ impl<S: crate::views::source::FieldSource> OracleSet<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -17515,8 +15369,7 @@ impl<S: crate::views::source::FieldSource> OracleSet<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17530,10 +15383,8 @@ impl<S: crate::views::source::FieldSource> OracleSet<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17546,10 +15397,8 @@ impl<S: crate::views::source::FieldSource> OracleSet<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17579,10 +15428,8 @@ impl<S: crate::views::source::FieldSource> OracleSet<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17596,8 +15443,7 @@ impl<S: crate::views::source::FieldSource> OracleSet<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17610,21 +15456,12 @@ impl<S: crate::views::source::FieldSource> OracleSet<S> {
 }
 
 /// View of the `OracleDelete` transaction (`ttORACLE_DELETE`, type code 61).
-///
-/// Build one with [`OracleDelete::otxn`] (the originating transaction) or
-/// [`OracleDelete::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct OracleDelete<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl OracleDelete<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `OracleDelete`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttORACLE_DELETE`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `OracleDelete`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttORACLE_DELETE).map(|src| Self { src })
@@ -17632,14 +15469,8 @@ impl OracleDelete<crate::views::source::OtxnSource> {
 }
 
 impl OracleDelete<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `OracleDelete`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttORACLE_DELETE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttORACLE_DELETE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -17652,10 +15483,7 @@ impl OracleDelete<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -17663,10 +15491,7 @@ impl OracleDelete<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17678,10 +15503,7 @@ impl OracleDelete<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17693,10 +15515,7 @@ impl OracleDelete<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17708,10 +15527,7 @@ impl OracleDelete<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17803,10 +15619,8 @@ impl<S: crate::views::source::FieldSource> OracleDelete<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17819,8 +15633,7 @@ impl<S: crate::views::source::FieldSource> OracleDelete<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -17840,8 +15653,7 @@ impl<S: crate::views::source::FieldSource> OracleDelete<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17855,10 +15667,8 @@ impl<S: crate::views::source::FieldSource> OracleDelete<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17871,10 +15681,8 @@ impl<S: crate::views::source::FieldSource> OracleDelete<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17904,10 +15712,8 @@ impl<S: crate::views::source::FieldSource> OracleDelete<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17921,8 +15727,7 @@ impl<S: crate::views::source::FieldSource> OracleDelete<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -17936,14 +15741,7 @@ impl<S: crate::views::source::FieldSource> OracleDelete<S> {
 
 /// View of the `LedgerStateFix` transaction (`ttLEDGER_STATE_FIX`, type code 62).
 ///
-/// Build one with [`LedgerStateFix::otxn`] (the originating transaction) or
-/// [`LedgerStateFix::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct LedgerStateFix<S: crate::views::source::FieldSource> {
     src: S,
@@ -17951,12 +15749,7 @@ pub struct LedgerStateFix<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl LedgerStateFix<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `LedgerStateFix`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttLEDGER_STATE_FIX`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `LedgerStateFix`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttLEDGER_STATE_FIX).map(|src| Self { src })
@@ -17965,14 +15758,8 @@ impl LedgerStateFix<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl LedgerStateFix<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `LedgerStateFix`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttLEDGER_STATE_FIX`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttLEDGER_STATE_FIX`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -17985,10 +15772,7 @@ impl LedgerStateFix<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -17996,10 +15780,7 @@ impl LedgerStateFix<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18011,10 +15792,7 @@ impl LedgerStateFix<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18026,10 +15804,7 @@ impl LedgerStateFix<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18041,10 +15816,7 @@ impl LedgerStateFix<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18145,10 +15917,8 @@ impl<S: crate::views::source::FieldSource> LedgerStateFix<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18161,8 +15931,7 @@ impl<S: crate::views::source::FieldSource> LedgerStateFix<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -18182,8 +15951,7 @@ impl<S: crate::views::source::FieldSource> LedgerStateFix<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18197,10 +15965,8 @@ impl<S: crate::views::source::FieldSource> LedgerStateFix<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18213,10 +15979,8 @@ impl<S: crate::views::source::FieldSource> LedgerStateFix<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18246,10 +16010,8 @@ impl<S: crate::views::source::FieldSource> LedgerStateFix<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18263,8 +16025,7 @@ impl<S: crate::views::source::FieldSource> LedgerStateFix<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18278,14 +16039,7 @@ impl<S: crate::views::source::FieldSource> LedgerStateFix<S> {
 
 /// View of the `MPTokenIssuanceCreate` transaction (`ttMPTOKEN_ISSUANCE_CREATE`, type code 63).
 ///
-/// Build one with [`MPTokenIssuanceCreate::otxn`] (the originating transaction) or
-/// [`MPTokenIssuanceCreate::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct MPTokenIssuanceCreate<S: crate::views::source::FieldSource> {
     src: S,
@@ -18293,12 +16047,7 @@ pub struct MPTokenIssuanceCreate<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl MPTokenIssuanceCreate<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `MPTokenIssuanceCreate`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttMPTOKEN_ISSUANCE_CREATE`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `MPTokenIssuanceCreate`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttMPTOKEN_ISSUANCE_CREATE)
@@ -18308,14 +16057,8 @@ impl MPTokenIssuanceCreate<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl MPTokenIssuanceCreate<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `MPTokenIssuanceCreate`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttMPTOKEN_ISSUANCE_CREATE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttMPTOKEN_ISSUANCE_CREATE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -18328,10 +16071,7 @@ impl MPTokenIssuanceCreate<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -18339,10 +16079,7 @@ impl MPTokenIssuanceCreate<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18354,10 +16091,7 @@ impl MPTokenIssuanceCreate<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18369,10 +16103,7 @@ impl MPTokenIssuanceCreate<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18384,10 +16115,7 @@ impl MPTokenIssuanceCreate<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18426,8 +16154,7 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceCreate<S> {
 
     /// `sfMPTokenMetadata` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18513,10 +16240,8 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceCreate<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18529,8 +16254,7 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceCreate<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -18550,8 +16274,7 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceCreate<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18565,10 +16288,8 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceCreate<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18581,10 +16302,8 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceCreate<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18614,10 +16333,8 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceCreate<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18631,8 +16348,7 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceCreate<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18646,14 +16362,7 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceCreate<S> {
 
 /// View of the `MPTokenIssuanceDestroy` transaction (`ttMPTOKEN_ISSUANCE_DESTROY`, type code 64).
 ///
-/// Build one with [`MPTokenIssuanceDestroy::otxn`] (the originating transaction) or
-/// [`MPTokenIssuanceDestroy::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct MPTokenIssuanceDestroy<S: crate::views::source::FieldSource> {
     src: S,
@@ -18661,12 +16370,7 @@ pub struct MPTokenIssuanceDestroy<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl MPTokenIssuanceDestroy<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `MPTokenIssuanceDestroy`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttMPTOKEN_ISSUANCE_DESTROY`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `MPTokenIssuanceDestroy`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttMPTOKEN_ISSUANCE_DESTROY)
@@ -18676,14 +16380,8 @@ impl MPTokenIssuanceDestroy<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl MPTokenIssuanceDestroy<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `MPTokenIssuanceDestroy`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttMPTOKEN_ISSUANCE_DESTROY`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttMPTOKEN_ISSUANCE_DESTROY`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -18696,10 +16394,7 @@ impl MPTokenIssuanceDestroy<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -18707,10 +16402,7 @@ impl MPTokenIssuanceDestroy<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18722,10 +16414,7 @@ impl MPTokenIssuanceDestroy<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18737,10 +16426,7 @@ impl MPTokenIssuanceDestroy<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18752,10 +16438,7 @@ impl MPTokenIssuanceDestroy<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18770,8 +16453,7 @@ impl MPTokenIssuanceDestroy<crate::views::source::SlotSource> {
 impl<S: crate::views::source::FieldSource> MPTokenIssuanceDestroy<S> {
     /// `sfMPTokenIssuanceID` — UInt192, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn mptoken_issuance_id_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -18855,10 +16537,8 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceDestroy<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18871,8 +16551,7 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceDestroy<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -18892,8 +16571,7 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceDestroy<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18907,10 +16585,8 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceDestroy<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18923,10 +16599,8 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceDestroy<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18956,10 +16630,8 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceDestroy<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18973,8 +16645,7 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceDestroy<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -18988,14 +16659,7 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceDestroy<S> {
 
 /// View of the `MPTokenIssuanceSet` transaction (`ttMPTOKEN_ISSUANCE_SET`, type code 65).
 ///
-/// Build one with [`MPTokenIssuanceSet::otxn`] (the originating transaction) or
-/// [`MPTokenIssuanceSet::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct MPTokenIssuanceSet<S: crate::views::source::FieldSource> {
     src: S,
@@ -19003,12 +16667,7 @@ pub struct MPTokenIssuanceSet<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl MPTokenIssuanceSet<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `MPTokenIssuanceSet`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttMPTOKEN_ISSUANCE_SET`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `MPTokenIssuanceSet`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttMPTOKEN_ISSUANCE_SET)
@@ -19018,14 +16677,8 @@ impl MPTokenIssuanceSet<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl MPTokenIssuanceSet<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `MPTokenIssuanceSet`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttMPTOKEN_ISSUANCE_SET`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttMPTOKEN_ISSUANCE_SET`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -19038,10 +16691,7 @@ impl MPTokenIssuanceSet<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -19049,10 +16699,7 @@ impl MPTokenIssuanceSet<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19064,10 +16711,7 @@ impl MPTokenIssuanceSet<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19079,10 +16723,7 @@ impl MPTokenIssuanceSet<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19094,10 +16735,7 @@ impl MPTokenIssuanceSet<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19112,8 +16750,7 @@ impl MPTokenIssuanceSet<crate::views::source::SlotSource> {
 impl<S: crate::views::source::FieldSource> MPTokenIssuanceSet<S> {
     /// `sfMPTokenIssuanceID` — UInt192, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn mptoken_issuance_id_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -19205,10 +16842,8 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceSet<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19221,8 +16856,7 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceSet<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -19242,8 +16876,7 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceSet<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19257,10 +16890,8 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceSet<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19273,10 +16904,8 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceSet<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19306,10 +16935,8 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceSet<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19323,8 +16950,7 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceSet<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19338,14 +16964,7 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceSet<S> {
 
 /// View of the `MPTokenAuthorize` transaction (`ttMPTOKEN_AUTHORIZE`, type code 66).
 ///
-/// Build one with [`MPTokenAuthorize::otxn`] (the originating transaction) or
-/// [`MPTokenAuthorize::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct MPTokenAuthorize<S: crate::views::source::FieldSource> {
     src: S,
@@ -19353,12 +16972,7 @@ pub struct MPTokenAuthorize<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl MPTokenAuthorize<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `MPTokenAuthorize`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttMPTOKEN_AUTHORIZE`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `MPTokenAuthorize`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttMPTOKEN_AUTHORIZE)
@@ -19368,14 +16982,8 @@ impl MPTokenAuthorize<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl MPTokenAuthorize<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `MPTokenAuthorize`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttMPTOKEN_AUTHORIZE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttMPTOKEN_AUTHORIZE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -19388,10 +16996,7 @@ impl MPTokenAuthorize<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -19399,10 +17004,7 @@ impl MPTokenAuthorize<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19414,10 +17016,7 @@ impl MPTokenAuthorize<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19429,10 +17028,7 @@ impl MPTokenAuthorize<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19444,10 +17040,7 @@ impl MPTokenAuthorize<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19462,8 +17055,7 @@ impl MPTokenAuthorize<crate::views::source::SlotSource> {
 impl<S: crate::views::source::FieldSource> MPTokenAuthorize<S> {
     /// `sfMPTokenIssuanceID` — UInt192, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn mptoken_issuance_id_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -19555,10 +17147,8 @@ impl<S: crate::views::source::FieldSource> MPTokenAuthorize<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19571,8 +17161,7 @@ impl<S: crate::views::source::FieldSource> MPTokenAuthorize<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -19592,8 +17181,7 @@ impl<S: crate::views::source::FieldSource> MPTokenAuthorize<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19607,10 +17195,8 @@ impl<S: crate::views::source::FieldSource> MPTokenAuthorize<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19623,10 +17209,8 @@ impl<S: crate::views::source::FieldSource> MPTokenAuthorize<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19656,10 +17240,8 @@ impl<S: crate::views::source::FieldSource> MPTokenAuthorize<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19673,8 +17255,7 @@ impl<S: crate::views::source::FieldSource> MPTokenAuthorize<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19688,14 +17269,7 @@ impl<S: crate::views::source::FieldSource> MPTokenAuthorize<S> {
 
 /// View of the `CredentialCreate` transaction (`ttCREDENTIAL_CREATE`, type code 67).
 ///
-/// Build one with [`CredentialCreate::otxn`] (the originating transaction) or
-/// [`CredentialCreate::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct CredentialCreate<S: crate::views::source::FieldSource> {
     src: S,
@@ -19703,12 +17277,7 @@ pub struct CredentialCreate<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl CredentialCreate<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `CredentialCreate`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttCREDENTIAL_CREATE`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `CredentialCreate`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttCREDENTIAL_CREATE)
@@ -19718,14 +17287,8 @@ impl CredentialCreate<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl CredentialCreate<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `CredentialCreate`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttCREDENTIAL_CREATE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttCREDENTIAL_CREATE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -19738,10 +17301,7 @@ impl CredentialCreate<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -19749,10 +17309,7 @@ impl CredentialCreate<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19764,10 +17321,7 @@ impl CredentialCreate<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19779,10 +17333,7 @@ impl CredentialCreate<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19794,10 +17345,7 @@ impl CredentialCreate<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19818,8 +17366,7 @@ impl<S: crate::views::source::FieldSource> CredentialCreate<S> {
 
     /// `sfCredentialType` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn credential_type_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -19839,8 +17386,7 @@ impl<S: crate::views::source::FieldSource> CredentialCreate<S> {
 
     /// `sfURI` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19925,10 +17471,8 @@ impl<S: crate::views::source::FieldSource> CredentialCreate<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19941,8 +17485,7 @@ impl<S: crate::views::source::FieldSource> CredentialCreate<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -19962,8 +17505,7 @@ impl<S: crate::views::source::FieldSource> CredentialCreate<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19977,10 +17519,8 @@ impl<S: crate::views::source::FieldSource> CredentialCreate<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -19993,10 +17533,8 @@ impl<S: crate::views::source::FieldSource> CredentialCreate<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20026,10 +17564,8 @@ impl<S: crate::views::source::FieldSource> CredentialCreate<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20043,8 +17579,7 @@ impl<S: crate::views::source::FieldSource> CredentialCreate<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20058,14 +17593,7 @@ impl<S: crate::views::source::FieldSource> CredentialCreate<S> {
 
 /// View of the `CredentialAccept` transaction (`ttCREDENTIAL_ACCEPT`, type code 68).
 ///
-/// Build one with [`CredentialAccept::otxn`] (the originating transaction) or
-/// [`CredentialAccept::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct CredentialAccept<S: crate::views::source::FieldSource> {
     src: S,
@@ -20073,12 +17601,7 @@ pub struct CredentialAccept<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl CredentialAccept<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `CredentialAccept`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttCREDENTIAL_ACCEPT`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `CredentialAccept`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttCREDENTIAL_ACCEPT)
@@ -20088,14 +17611,8 @@ impl CredentialAccept<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl CredentialAccept<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `CredentialAccept`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttCREDENTIAL_ACCEPT`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttCREDENTIAL_ACCEPT`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -20108,10 +17625,7 @@ impl CredentialAccept<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -20119,10 +17633,7 @@ impl CredentialAccept<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20134,10 +17645,7 @@ impl CredentialAccept<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20149,10 +17657,7 @@ impl CredentialAccept<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20164,10 +17669,7 @@ impl CredentialAccept<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20188,8 +17690,7 @@ impl<S: crate::views::source::FieldSource> CredentialAccept<S> {
 
     /// `sfCredentialType` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn credential_type_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -20273,10 +17774,8 @@ impl<S: crate::views::source::FieldSource> CredentialAccept<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20289,8 +17788,7 @@ impl<S: crate::views::source::FieldSource> CredentialAccept<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -20310,8 +17808,7 @@ impl<S: crate::views::source::FieldSource> CredentialAccept<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20325,10 +17822,8 @@ impl<S: crate::views::source::FieldSource> CredentialAccept<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20341,10 +17836,8 @@ impl<S: crate::views::source::FieldSource> CredentialAccept<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20374,10 +17867,8 @@ impl<S: crate::views::source::FieldSource> CredentialAccept<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20391,8 +17882,7 @@ impl<S: crate::views::source::FieldSource> CredentialAccept<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20406,14 +17896,7 @@ impl<S: crate::views::source::FieldSource> CredentialAccept<S> {
 
 /// View of the `CredentialDelete` transaction (`ttCREDENTIAL_DELETE`, type code 69).
 ///
-/// Build one with [`CredentialDelete::otxn`] (the originating transaction) or
-/// [`CredentialDelete::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct CredentialDelete<S: crate::views::source::FieldSource> {
     src: S,
@@ -20421,12 +17904,7 @@ pub struct CredentialDelete<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl CredentialDelete<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `CredentialDelete`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttCREDENTIAL_DELETE`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `CredentialDelete`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttCREDENTIAL_DELETE)
@@ -20436,14 +17914,8 @@ impl CredentialDelete<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl CredentialDelete<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `CredentialDelete`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttCREDENTIAL_DELETE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttCREDENTIAL_DELETE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -20456,10 +17928,7 @@ impl CredentialDelete<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -20467,10 +17936,7 @@ impl CredentialDelete<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20482,10 +17948,7 @@ impl CredentialDelete<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20497,10 +17960,7 @@ impl CredentialDelete<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20512,10 +17972,7 @@ impl CredentialDelete<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20546,8 +18003,7 @@ impl<S: crate::views::source::FieldSource> CredentialDelete<S> {
 
     /// `sfCredentialType` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn credential_type_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -20631,10 +18087,8 @@ impl<S: crate::views::source::FieldSource> CredentialDelete<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20647,8 +18101,7 @@ impl<S: crate::views::source::FieldSource> CredentialDelete<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -20668,8 +18121,7 @@ impl<S: crate::views::source::FieldSource> CredentialDelete<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20683,10 +18135,8 @@ impl<S: crate::views::source::FieldSource> CredentialDelete<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20699,10 +18149,8 @@ impl<S: crate::views::source::FieldSource> CredentialDelete<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20732,10 +18180,8 @@ impl<S: crate::views::source::FieldSource> CredentialDelete<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20749,8 +18195,7 @@ impl<S: crate::views::source::FieldSource> CredentialDelete<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20764,14 +18209,7 @@ impl<S: crate::views::source::FieldSource> CredentialDelete<S> {
 
 /// View of the `NFTokenModify` transaction (`ttNFTOKEN_MODIFY`, type code 70).
 ///
-/// Build one with [`NFTokenModify::otxn`] (the originating transaction) or
-/// [`NFTokenModify::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct NFTokenModify<S: crate::views::source::FieldSource> {
     src: S,
@@ -20779,12 +18217,7 @@ pub struct NFTokenModify<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl NFTokenModify<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `NFTokenModify`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttNFTOKEN_MODIFY`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `NFTokenModify`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttNFTOKEN_MODIFY).map(|src| Self { src })
@@ -20793,14 +18226,8 @@ impl NFTokenModify<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl NFTokenModify<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `NFTokenModify`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttNFTOKEN_MODIFY`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttNFTOKEN_MODIFY`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -20813,10 +18240,7 @@ impl NFTokenModify<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -20824,10 +18248,7 @@ impl NFTokenModify<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20839,10 +18260,7 @@ impl NFTokenModify<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20854,10 +18272,7 @@ impl NFTokenModify<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20869,10 +18284,7 @@ impl NFTokenModify<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20901,8 +18313,7 @@ impl<S: crate::views::source::FieldSource> NFTokenModify<S> {
 
     /// `sfURI` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -20987,10 +18398,8 @@ impl<S: crate::views::source::FieldSource> NFTokenModify<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21003,8 +18412,7 @@ impl<S: crate::views::source::FieldSource> NFTokenModify<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -21024,8 +18432,7 @@ impl<S: crate::views::source::FieldSource> NFTokenModify<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21039,10 +18446,8 @@ impl<S: crate::views::source::FieldSource> NFTokenModify<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21055,10 +18460,8 @@ impl<S: crate::views::source::FieldSource> NFTokenModify<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21088,10 +18491,8 @@ impl<S: crate::views::source::FieldSource> NFTokenModify<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21105,8 +18506,7 @@ impl<S: crate::views::source::FieldSource> NFTokenModify<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21120,14 +18520,7 @@ impl<S: crate::views::source::FieldSource> NFTokenModify<S> {
 
 /// View of the `PermissionedDomainSet` transaction (`ttPERMISSIONED_DOMAIN_SET`, type code 71).
 ///
-/// Build one with [`PermissionedDomainSet::otxn`] (the originating transaction) or
-/// [`PermissionedDomainSet::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct PermissionedDomainSet<S: crate::views::source::FieldSource> {
     src: S,
@@ -21135,12 +18528,7 @@ pub struct PermissionedDomainSet<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl PermissionedDomainSet<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `PermissionedDomainSet`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttPERMISSIONED_DOMAIN_SET`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `PermissionedDomainSet`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttPERMISSIONED_DOMAIN_SET)
@@ -21150,14 +18538,8 @@ impl PermissionedDomainSet<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl PermissionedDomainSet<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `PermissionedDomainSet`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttPERMISSIONED_DOMAIN_SET`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttPERMISSIONED_DOMAIN_SET`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -21170,10 +18552,7 @@ impl PermissionedDomainSet<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -21181,10 +18560,7 @@ impl PermissionedDomainSet<crate::views::source::SlotSource> {
 
     /// `sfAcceptedCredentials` — STArray, `soeREQUIRED`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     #[inline(always)]
     pub fn accepted_credentials_slot(
         &self,
@@ -21194,10 +18570,7 @@ impl PermissionedDomainSet<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21209,10 +18582,7 @@ impl PermissionedDomainSet<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21224,10 +18594,7 @@ impl PermissionedDomainSet<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21239,10 +18606,7 @@ impl PermissionedDomainSet<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21265,10 +18629,8 @@ impl<S: crate::views::source::FieldSource> PermissionedDomainSet<S> {
 
     /// `sfAcceptedCredentials` — STArray, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `accepted_credentials_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `accepted_credentials_slot` on a slot-backed view to navigate the container.
     #[inline(always)]
     pub fn accepted_credentials_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -21352,10 +18714,8 @@ impl<S: crate::views::source::FieldSource> PermissionedDomainSet<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21368,8 +18728,7 @@ impl<S: crate::views::source::FieldSource> PermissionedDomainSet<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -21389,8 +18748,7 @@ impl<S: crate::views::source::FieldSource> PermissionedDomainSet<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21404,10 +18762,8 @@ impl<S: crate::views::source::FieldSource> PermissionedDomainSet<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21420,10 +18776,8 @@ impl<S: crate::views::source::FieldSource> PermissionedDomainSet<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21453,10 +18807,8 @@ impl<S: crate::views::source::FieldSource> PermissionedDomainSet<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21470,8 +18822,7 @@ impl<S: crate::views::source::FieldSource> PermissionedDomainSet<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21485,14 +18836,7 @@ impl<S: crate::views::source::FieldSource> PermissionedDomainSet<S> {
 
 /// View of the `PermissionedDomainDelete` transaction (`ttPERMISSIONED_DOMAIN_DELETE`, type code 72).
 ///
-/// Build one with [`PermissionedDomainDelete::otxn`] (the originating transaction) or
-/// [`PermissionedDomainDelete::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
-///
-/// **Gated by an amendment xahaud marks `Supported::no`**, so it cannot
-/// appear on Xahau mainnet — activating it would amendment-block the node.
-/// Needs the `all-amendments` cargo feature, which is there for a custom network
-/// whose operator knows otherwise. Enable it at your own judgment.
+/// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub struct PermissionedDomainDelete<S: crate::views::source::FieldSource> {
     src: S,
@@ -21500,12 +18844,7 @@ pub struct PermissionedDomainDelete<S: crate::views::source::FieldSource> {
 
 #[cfg(feature = "all-amendments")]
 impl PermissionedDomainDelete<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `PermissionedDomainDelete`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttPERMISSIONED_DOMAIN_DELETE`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `PermissionedDomainDelete`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttPERMISSIONED_DOMAIN_DELETE)
@@ -21515,14 +18854,8 @@ impl PermissionedDomainDelete<crate::views::source::OtxnSource> {
 
 #[cfg(feature = "all-amendments")]
 impl PermissionedDomainDelete<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `PermissionedDomainDelete`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttPERMISSIONED_DOMAIN_DELETE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttPERMISSIONED_DOMAIN_DELETE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -21535,10 +18868,7 @@ impl PermissionedDomainDelete<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -21546,10 +18876,7 @@ impl PermissionedDomainDelete<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21561,10 +18888,7 @@ impl PermissionedDomainDelete<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21576,10 +18900,7 @@ impl PermissionedDomainDelete<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21591,10 +18912,7 @@ impl PermissionedDomainDelete<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21687,10 +19005,8 @@ impl<S: crate::views::source::FieldSource> PermissionedDomainDelete<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21703,8 +19019,7 @@ impl<S: crate::views::source::FieldSource> PermissionedDomainDelete<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -21724,8 +19039,7 @@ impl<S: crate::views::source::FieldSource> PermissionedDomainDelete<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21739,10 +19053,8 @@ impl<S: crate::views::source::FieldSource> PermissionedDomainDelete<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21755,10 +19067,8 @@ impl<S: crate::views::source::FieldSource> PermissionedDomainDelete<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21788,10 +19098,8 @@ impl<S: crate::views::source::FieldSource> PermissionedDomainDelete<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21805,8 +19113,7 @@ impl<S: crate::views::source::FieldSource> PermissionedDomainDelete<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21819,21 +19126,12 @@ impl<S: crate::views::source::FieldSource> PermissionedDomainDelete<S> {
 }
 
 /// View of the `Cron` transaction (`ttCRON`, type code 92).
-///
-/// Build one with [`Cron::otxn`] (the originating transaction) or
-/// [`Cron::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct Cron<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl Cron<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `Cron`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttCRON`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `Cron`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttCRON).map(|src| Self { src })
@@ -21841,14 +19139,8 @@ impl Cron<crate::views::source::OtxnSource> {
 }
 
 impl Cron<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `Cron`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttCRON`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttCRON`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -21861,10 +19153,7 @@ impl Cron<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -21872,10 +19161,7 @@ impl Cron<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21887,10 +19173,7 @@ impl Cron<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21902,10 +19185,7 @@ impl Cron<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -21917,10 +19197,7 @@ impl Cron<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22018,10 +19295,8 @@ impl<S: crate::views::source::FieldSource> Cron<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22034,8 +19309,7 @@ impl<S: crate::views::source::FieldSource> Cron<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -22055,8 +19329,7 @@ impl<S: crate::views::source::FieldSource> Cron<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22070,10 +19343,8 @@ impl<S: crate::views::source::FieldSource> Cron<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22086,10 +19357,8 @@ impl<S: crate::views::source::FieldSource> Cron<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22119,10 +19388,8 @@ impl<S: crate::views::source::FieldSource> Cron<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22136,8 +19403,7 @@ impl<S: crate::views::source::FieldSource> Cron<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22150,21 +19416,12 @@ impl<S: crate::views::source::FieldSource> Cron<S> {
 }
 
 /// View of the `CronSet` transaction (`ttCRON_SET`, type code 93).
-///
-/// Build one with [`CronSet::otxn`] (the originating transaction) or
-/// [`CronSet::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct CronSet<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl CronSet<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `CronSet`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttCRON_SET`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `CronSet`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttCRON_SET).map(|src| Self { src })
@@ -22172,14 +19429,8 @@ impl CronSet<crate::views::source::OtxnSource> {
 }
 
 impl CronSet<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `CronSet`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttCRON_SET`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttCRON_SET`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -22192,10 +19443,7 @@ impl CronSet<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -22203,10 +19451,7 @@ impl CronSet<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22218,10 +19463,7 @@ impl CronSet<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22233,10 +19475,7 @@ impl CronSet<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22248,10 +19487,7 @@ impl CronSet<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22361,10 +19597,8 @@ impl<S: crate::views::source::FieldSource> CronSet<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22377,8 +19611,7 @@ impl<S: crate::views::source::FieldSource> CronSet<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -22398,8 +19631,7 @@ impl<S: crate::views::source::FieldSource> CronSet<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22413,10 +19645,8 @@ impl<S: crate::views::source::FieldSource> CronSet<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22429,10 +19659,8 @@ impl<S: crate::views::source::FieldSource> CronSet<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22462,10 +19690,8 @@ impl<S: crate::views::source::FieldSource> CronSet<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22479,8 +19705,7 @@ impl<S: crate::views::source::FieldSource> CronSet<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22493,21 +19718,12 @@ impl<S: crate::views::source::FieldSource> CronSet<S> {
 }
 
 /// View of the `SetRemarks` transaction (`ttREMARKS_SET`, type code 94).
-///
-/// Build one with [`SetRemarks::otxn`] (the originating transaction) or
-/// [`SetRemarks::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct SetRemarks<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl SetRemarks<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `SetRemarks`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttREMARKS_SET`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `SetRemarks`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttREMARKS_SET).map(|src| Self { src })
@@ -22515,14 +19731,8 @@ impl SetRemarks<crate::views::source::OtxnSource> {
 }
 
 impl SetRemarks<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `SetRemarks`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttREMARKS_SET`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttREMARKS_SET`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -22535,10 +19745,7 @@ impl SetRemarks<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -22546,10 +19753,7 @@ impl SetRemarks<crate::views::source::SlotSource> {
 
     /// `sfRemarks` — STArray, `soeREQUIRED`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     #[inline(always)]
     pub fn remarks_slot(
         &self,
@@ -22559,10 +19763,7 @@ impl SetRemarks<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22574,10 +19775,7 @@ impl SetRemarks<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22589,10 +19787,7 @@ impl SetRemarks<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22604,10 +19799,7 @@ impl SetRemarks<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22627,10 +19819,8 @@ impl<S: crate::views::source::FieldSource> SetRemarks<S> {
 
     /// `sfRemarks` — STArray, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `remarks_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     #[inline(always)]
     pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -22713,10 +19903,8 @@ impl<S: crate::views::source::FieldSource> SetRemarks<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22729,8 +19917,7 @@ impl<S: crate::views::source::FieldSource> SetRemarks<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -22750,8 +19937,7 @@ impl<S: crate::views::source::FieldSource> SetRemarks<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22765,10 +19951,8 @@ impl<S: crate::views::source::FieldSource> SetRemarks<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22781,10 +19965,8 @@ impl<S: crate::views::source::FieldSource> SetRemarks<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22814,10 +19996,8 @@ impl<S: crate::views::source::FieldSource> SetRemarks<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22831,8 +20011,7 @@ impl<S: crate::views::source::FieldSource> SetRemarks<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22845,21 +20024,12 @@ impl<S: crate::views::source::FieldSource> SetRemarks<S> {
 }
 
 /// View of the `Remit` transaction (`ttREMIT`, type code 95).
-///
-/// Build one with [`Remit::otxn`] (the originating transaction) or
-/// [`Remit::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct Remit<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl Remit<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `Remit`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttREMIT`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `Remit`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttREMIT).map(|src| Self { src })
@@ -22867,14 +20037,8 @@ impl Remit<crate::views::source::OtxnSource> {
 }
 
 impl Remit<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `Remit`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttREMIT`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttREMIT`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -22887,10 +20051,7 @@ impl Remit<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -22898,10 +20059,7 @@ impl Remit<crate::views::source::SlotSource> {
 
     /// `sfAmounts` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22913,10 +20071,7 @@ impl Remit<crate::views::source::SlotSource> {
 
     /// `sfMintURIToken` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22928,10 +20083,7 @@ impl Remit<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22943,10 +20095,7 @@ impl Remit<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22958,10 +20107,7 @@ impl Remit<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22973,10 +20119,7 @@ impl Remit<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -22996,10 +20139,8 @@ impl<S: crate::views::source::FieldSource> Remit<S> {
 
     /// `sfAmounts` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `amounts_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `amounts_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23012,8 +20153,7 @@ impl<S: crate::views::source::FieldSource> Remit<S> {
 
     /// `sfURITokenIDs` — Vector256, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23027,10 +20167,8 @@ impl<S: crate::views::source::FieldSource> Remit<S> {
 
     /// `sfMintURIToken` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `mint_uri_token_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `mint_uri_token_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23060,8 +20198,7 @@ impl<S: crate::views::source::FieldSource> Remit<S> {
 
     /// `sfBlob` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23154,10 +20291,8 @@ impl<S: crate::views::source::FieldSource> Remit<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23170,8 +20305,7 @@ impl<S: crate::views::source::FieldSource> Remit<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -23191,8 +20325,7 @@ impl<S: crate::views::source::FieldSource> Remit<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23206,10 +20339,8 @@ impl<S: crate::views::source::FieldSource> Remit<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23222,10 +20353,8 @@ impl<S: crate::views::source::FieldSource> Remit<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23255,10 +20384,8 @@ impl<S: crate::views::source::FieldSource> Remit<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23272,8 +20399,7 @@ impl<S: crate::views::source::FieldSource> Remit<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23286,21 +20412,12 @@ impl<S: crate::views::source::FieldSource> Remit<S> {
 }
 
 /// View of the `GenesisMint` transaction (`ttGENESIS_MINT`, type code 96).
-///
-/// Build one with [`GenesisMint::otxn`] (the originating transaction) or
-/// [`GenesisMint::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct GenesisMint<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl GenesisMint<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `GenesisMint`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttGENESIS_MINT`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `GenesisMint`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttGENESIS_MINT).map(|src| Self { src })
@@ -23308,14 +20425,8 @@ impl GenesisMint<crate::views::source::OtxnSource> {
 }
 
 impl GenesisMint<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `GenesisMint`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttGENESIS_MINT`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttGENESIS_MINT`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -23328,10 +20439,7 @@ impl GenesisMint<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -23339,10 +20447,7 @@ impl GenesisMint<crate::views::source::SlotSource> {
 
     /// `sfGenesisMints` — STArray, `soeREQUIRED`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     #[inline(always)]
     pub fn genesis_mints_slot(
         &self,
@@ -23352,10 +20457,7 @@ impl GenesisMint<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23367,10 +20469,7 @@ impl GenesisMint<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23382,10 +20481,7 @@ impl GenesisMint<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23397,10 +20493,7 @@ impl GenesisMint<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23414,10 +20507,8 @@ impl GenesisMint<crate::views::source::SlotSource> {
 impl<S: crate::views::source::FieldSource> GenesisMint<S> {
     /// `sfGenesisMints` — STArray, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `genesis_mints_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `genesis_mints_slot` on a slot-backed view to navigate the container.
     #[inline(always)]
     pub fn genesis_mints_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -23500,10 +20591,8 @@ impl<S: crate::views::source::FieldSource> GenesisMint<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23516,8 +20605,7 @@ impl<S: crate::views::source::FieldSource> GenesisMint<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -23537,8 +20625,7 @@ impl<S: crate::views::source::FieldSource> GenesisMint<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23552,10 +20639,8 @@ impl<S: crate::views::source::FieldSource> GenesisMint<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23568,10 +20653,8 @@ impl<S: crate::views::source::FieldSource> GenesisMint<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23601,10 +20684,8 @@ impl<S: crate::views::source::FieldSource> GenesisMint<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23618,8 +20699,7 @@ impl<S: crate::views::source::FieldSource> GenesisMint<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23632,21 +20712,12 @@ impl<S: crate::views::source::FieldSource> GenesisMint<S> {
 }
 
 /// View of the `Import` transaction (`ttIMPORT`, type code 97).
-///
-/// Build one with [`Import::otxn`] (the originating transaction) or
-/// [`Import::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct Import<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl Import<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `Import`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttIMPORT`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `Import`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttIMPORT).map(|src| Self { src })
@@ -23654,14 +20725,8 @@ impl Import<crate::views::source::OtxnSource> {
 }
 
 impl Import<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `Import`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttIMPORT`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttIMPORT`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -23674,10 +20739,7 @@ impl Import<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -23685,10 +20747,7 @@ impl Import<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23700,10 +20759,7 @@ impl Import<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23715,10 +20771,7 @@ impl Import<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23730,10 +20783,7 @@ impl Import<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23747,8 +20797,7 @@ impl Import<crate::views::source::SlotSource> {
 impl<S: crate::views::source::FieldSource> Import<S> {
     /// `sfBlob` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn blob_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> crate::error::Result<usize> {
         self.src.read_raw(crate::sfield::sfBlob.code(), out)
@@ -23836,10 +20885,8 @@ impl<S: crate::views::source::FieldSource> Import<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23852,8 +20899,7 @@ impl<S: crate::views::source::FieldSource> Import<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -23873,8 +20919,7 @@ impl<S: crate::views::source::FieldSource> Import<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23888,10 +20933,8 @@ impl<S: crate::views::source::FieldSource> Import<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23904,10 +20947,8 @@ impl<S: crate::views::source::FieldSource> Import<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23937,10 +20978,8 @@ impl<S: crate::views::source::FieldSource> Import<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23954,8 +20993,7 @@ impl<S: crate::views::source::FieldSource> Import<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -23968,21 +21006,12 @@ impl<S: crate::views::source::FieldSource> Import<S> {
 }
 
 /// View of the `ClaimReward` transaction (`ttCLAIM_REWARD`, type code 98).
-///
-/// Build one with [`ClaimReward::otxn`] (the originating transaction) or
-/// [`ClaimReward::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct ClaimReward<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl ClaimReward<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `ClaimReward`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttCLAIM_REWARD`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `ClaimReward`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttCLAIM_REWARD).map(|src| Self { src })
@@ -23990,14 +21019,8 @@ impl ClaimReward<crate::views::source::OtxnSource> {
 }
 
 impl ClaimReward<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `ClaimReward`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttCLAIM_REWARD`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttCLAIM_REWARD`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -24010,10 +21033,7 @@ impl ClaimReward<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -24021,10 +21041,7 @@ impl ClaimReward<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24036,10 +21053,7 @@ impl ClaimReward<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24051,10 +21065,7 @@ impl ClaimReward<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24066,10 +21077,7 @@ impl ClaimReward<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24171,10 +21179,8 @@ impl<S: crate::views::source::FieldSource> ClaimReward<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24187,8 +21193,7 @@ impl<S: crate::views::source::FieldSource> ClaimReward<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -24208,8 +21213,7 @@ impl<S: crate::views::source::FieldSource> ClaimReward<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24223,10 +21227,8 @@ impl<S: crate::views::source::FieldSource> ClaimReward<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24239,10 +21241,8 @@ impl<S: crate::views::source::FieldSource> ClaimReward<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24272,10 +21272,8 @@ impl<S: crate::views::source::FieldSource> ClaimReward<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24289,8 +21287,7 @@ impl<S: crate::views::source::FieldSource> ClaimReward<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24303,21 +21300,12 @@ impl<S: crate::views::source::FieldSource> ClaimReward<S> {
 }
 
 /// View of the `Invoke` transaction (`ttINVOKE`, type code 99).
-///
-/// Build one with [`Invoke::otxn`] (the originating transaction) or
-/// [`Invoke::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct Invoke<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl Invoke<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `Invoke`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttINVOKE`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `Invoke`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttINVOKE).map(|src| Self { src })
@@ -24325,14 +21313,8 @@ impl Invoke<crate::views::source::OtxnSource> {
 }
 
 impl Invoke<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `Invoke`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttINVOKE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttINVOKE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -24345,10 +21327,7 @@ impl Invoke<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -24356,10 +21335,7 @@ impl Invoke<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24371,10 +21347,7 @@ impl Invoke<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24386,10 +21359,7 @@ impl Invoke<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24401,10 +21371,7 @@ impl Invoke<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24418,8 +21385,7 @@ impl Invoke<crate::views::source::SlotSource> {
 impl<S: crate::views::source::FieldSource> Invoke<S> {
     /// `sfBlob` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24528,10 +21494,8 @@ impl<S: crate::views::source::FieldSource> Invoke<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24544,8 +21508,7 @@ impl<S: crate::views::source::FieldSource> Invoke<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -24565,8 +21528,7 @@ impl<S: crate::views::source::FieldSource> Invoke<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24580,10 +21542,8 @@ impl<S: crate::views::source::FieldSource> Invoke<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24596,10 +21556,8 @@ impl<S: crate::views::source::FieldSource> Invoke<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24629,10 +21587,8 @@ impl<S: crate::views::source::FieldSource> Invoke<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24646,8 +21602,7 @@ impl<S: crate::views::source::FieldSource> Invoke<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24660,21 +21615,12 @@ impl<S: crate::views::source::FieldSource> Invoke<S> {
 }
 
 /// View of the `EnableAmendment` transaction (`ttAMENDMENT`, type code 100).
-///
-/// Build one with [`EnableAmendment::otxn`] (the originating transaction) or
-/// [`EnableAmendment::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct EnableAmendment<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl EnableAmendment<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `EnableAmendment`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttAMENDMENT`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `EnableAmendment`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttAMENDMENT).map(|src| Self { src })
@@ -24682,14 +21628,8 @@ impl EnableAmendment<crate::views::source::OtxnSource> {
 }
 
 impl EnableAmendment<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `EnableAmendment`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttAMENDMENT`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttAMENDMENT`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -24702,10 +21642,7 @@ impl EnableAmendment<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -24713,10 +21650,7 @@ impl EnableAmendment<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24728,10 +21662,7 @@ impl EnableAmendment<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24743,10 +21674,7 @@ impl EnableAmendment<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24758,10 +21686,7 @@ impl EnableAmendment<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24859,10 +21784,8 @@ impl<S: crate::views::source::FieldSource> EnableAmendment<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24875,8 +21798,7 @@ impl<S: crate::views::source::FieldSource> EnableAmendment<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -24896,8 +21818,7 @@ impl<S: crate::views::source::FieldSource> EnableAmendment<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24911,10 +21832,8 @@ impl<S: crate::views::source::FieldSource> EnableAmendment<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24927,10 +21846,8 @@ impl<S: crate::views::source::FieldSource> EnableAmendment<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24960,10 +21877,8 @@ impl<S: crate::views::source::FieldSource> EnableAmendment<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24977,8 +21892,7 @@ impl<S: crate::views::source::FieldSource> EnableAmendment<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -24991,21 +21905,12 @@ impl<S: crate::views::source::FieldSource> EnableAmendment<S> {
 }
 
 /// View of the `SetFee` transaction (`ttFEE`, type code 101).
-///
-/// Build one with [`SetFee::otxn`] (the originating transaction) or
-/// [`SetFee::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct SetFee<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl SetFee<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `SetFee`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttFEE`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `SetFee`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttFEE).map(|src| Self { src })
@@ -25013,14 +21918,8 @@ impl SetFee<crate::views::source::OtxnSource> {
 }
 
 impl SetFee<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `SetFee`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttFEE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttFEE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -25033,10 +21932,7 @@ impl SetFee<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -25044,10 +21940,7 @@ impl SetFee<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -25059,10 +21952,7 @@ impl SetFee<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -25074,10 +21964,7 @@ impl SetFee<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -25089,10 +21976,7 @@ impl SetFee<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -25244,10 +22128,8 @@ impl<S: crate::views::source::FieldSource> SetFee<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -25260,8 +22142,7 @@ impl<S: crate::views::source::FieldSource> SetFee<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -25281,8 +22162,7 @@ impl<S: crate::views::source::FieldSource> SetFee<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -25296,10 +22176,8 @@ impl<S: crate::views::source::FieldSource> SetFee<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -25312,10 +22190,8 @@ impl<S: crate::views::source::FieldSource> SetFee<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -25345,10 +22221,8 @@ impl<S: crate::views::source::FieldSource> SetFee<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -25362,8 +22236,7 @@ impl<S: crate::views::source::FieldSource> SetFee<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -25376,21 +22249,12 @@ impl<S: crate::views::source::FieldSource> SetFee<S> {
 }
 
 /// View of the `UNLModify` transaction (`ttUNL_MODIFY`, type code 102).
-///
-/// Build one with [`UNLModify::otxn`] (the originating transaction) or
-/// [`UNLModify::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct UNLModify<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl UNLModify<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `UNLModify`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttUNL_MODIFY`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `UNLModify`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttUNL_MODIFY).map(|src| Self { src })
@@ -25398,14 +22262,8 @@ impl UNLModify<crate::views::source::OtxnSource> {
 }
 
 impl UNLModify<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `UNLModify`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttUNL_MODIFY`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttUNL_MODIFY`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -25418,10 +22276,7 @@ impl UNLModify<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -25429,10 +22284,7 @@ impl UNLModify<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -25444,10 +22296,7 @@ impl UNLModify<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -25459,10 +22308,7 @@ impl UNLModify<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -25474,10 +22320,7 @@ impl UNLModify<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -25503,8 +22346,7 @@ impl<S: crate::views::source::FieldSource> UNLModify<S> {
 
     /// `sfUNLModifyValidator` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn unl_modify_validator_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -25588,10 +22430,8 @@ impl<S: crate::views::source::FieldSource> UNLModify<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -25604,8 +22444,7 @@ impl<S: crate::views::source::FieldSource> UNLModify<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -25625,8 +22464,7 @@ impl<S: crate::views::source::FieldSource> UNLModify<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -25640,10 +22478,8 @@ impl<S: crate::views::source::FieldSource> UNLModify<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -25656,10 +22492,8 @@ impl<S: crate::views::source::FieldSource> UNLModify<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -25689,10 +22523,8 @@ impl<S: crate::views::source::FieldSource> UNLModify<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -25706,8 +22538,7 @@ impl<S: crate::views::source::FieldSource> UNLModify<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -25720,21 +22551,12 @@ impl<S: crate::views::source::FieldSource> UNLModify<S> {
 }
 
 /// View of the `EmitFailure` transaction (`ttEMIT_FAILURE`, type code 103).
-///
-/// Build one with [`EmitFailure::otxn`] (the originating transaction) or
-/// [`EmitFailure::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct EmitFailure<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl EmitFailure<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `EmitFailure`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttEMIT_FAILURE`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `EmitFailure`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttEMIT_FAILURE).map(|src| Self { src })
@@ -25742,14 +22564,8 @@ impl EmitFailure<crate::views::source::OtxnSource> {
 }
 
 impl EmitFailure<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `EmitFailure`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttEMIT_FAILURE`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttEMIT_FAILURE`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -25762,10 +22578,7 @@ impl EmitFailure<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -25773,10 +22586,7 @@ impl EmitFailure<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -25788,10 +22598,7 @@ impl EmitFailure<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -25803,10 +22610,7 @@ impl EmitFailure<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -25818,10 +22622,7 @@ impl EmitFailure<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -25919,10 +22720,8 @@ impl<S: crate::views::source::FieldSource> EmitFailure<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -25935,8 +22734,7 @@ impl<S: crate::views::source::FieldSource> EmitFailure<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -25956,8 +22754,7 @@ impl<S: crate::views::source::FieldSource> EmitFailure<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -25971,10 +22768,8 @@ impl<S: crate::views::source::FieldSource> EmitFailure<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -25987,10 +22782,8 @@ impl<S: crate::views::source::FieldSource> EmitFailure<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -26020,10 +22813,8 @@ impl<S: crate::views::source::FieldSource> EmitFailure<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -26037,8 +22828,7 @@ impl<S: crate::views::source::FieldSource> EmitFailure<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -26051,21 +22841,12 @@ impl<S: crate::views::source::FieldSource> EmitFailure<S> {
 }
 
 /// View of the `UNLReport` transaction (`ttUNL_REPORT`, type code 104).
-///
-/// Build one with [`UNLReport::otxn`] (the originating transaction) or
-/// [`UNLReport::from_slot`] (an already-loaded transaction slot); both check the
-/// transaction type before handing the view back.
 pub struct UNLReport<S: crate::views::source::FieldSource> {
     src: S,
 }
 
 impl UNLReport<crate::views::source::OtxnSource> {
-    /// Views the originating transaction as `UNLReport`.
-    ///
-    /// One `otxn_type` host call and one integer compare against `ttUNL_REPORT`;
-    /// [`HookError::DoesNotMatch`](crate::error::HookError::DoesNotMatch) if the
-    /// originating transaction is something else. The view itself is zero-sized,
-    /// and each accessor below is a single `otxn_field` call.
+    /// Views the originating transaction as `UNLReport`, checking its type.
     #[inline(always)]
     pub fn otxn() -> crate::error::Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttUNL_REPORT).map(|src| Self { src })
@@ -26073,14 +22854,8 @@ impl UNLReport<crate::views::source::OtxnSource> {
 }
 
 impl UNLReport<crate::views::source::SlotSource> {
-    /// Views an already-loaded transaction slot as `UNLReport`, taking ownership
-    /// of the slot.
-    ///
-    /// Verifies the slot's `sfTransactionType` is `ttUNL_REPORT`. On any failure the
-    /// slot is consumed and best-effort cleared, so a rejected view costs no
-    /// slot — see
-    /// [`SlotObject::try_cast`](crate::slot_obj::SlotObject::try_cast), which
-    /// behaves the same way for the same reason.
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttUNL_REPORT`.
+    /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
     pub fn from_slot(
         obj: crate::slot_obj::SlotObject<crate::types::STObject>,
@@ -26093,10 +22868,7 @@ impl UNLReport<crate::views::source::SlotSource> {
         .map(|src| Self { src })
     }
 
-    /// Hands the underlying slot back, consuming the view.
-    ///
-    /// The escape hatch for anything not generated here: everything
-    /// [`crate::slot_obj`] offers is available on the returned handle.
+    /// Consumes the view and returns its slot.
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
@@ -26104,10 +22876,7 @@ impl UNLReport<crate::views::source::SlotSource> {
 
     /// `sfActiveValidator` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -26119,10 +22888,7 @@ impl UNLReport<crate::views::source::SlotSource> {
 
     /// `sfImportVLKey` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -26134,10 +22900,7 @@ impl UNLReport<crate::views::source::SlotSource> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -26149,10 +22912,7 @@ impl UNLReport<crate::views::source::SlotSource> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -26164,10 +22924,7 @@ impl UNLReport<crate::views::source::SlotSource> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -26179,10 +22936,7 @@ impl UNLReport<crate::views::source::SlotSource> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// Navigates to the field and hands its **child slot** to the caller, who
-    /// owns it from here (the one place a view does not clear what it opens —
-    /// a container has no terminal read to clear after). Clear it, or read a
-    /// value out of it with the `take_*` family, before deriving many more.
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -26202,10 +22956,8 @@ impl<S: crate::views::source::FieldSource> UNLReport<S> {
 
     /// `sfActiveValidator` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `active_validator_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `active_validator_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -26219,10 +22971,8 @@ impl<S: crate::views::source::FieldSource> UNLReport<S> {
 
     /// `sfImportVLKey` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `import_vl_key_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `import_vl_key_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -26308,10 +23058,8 @@ impl<S: crate::views::source::FieldSource> UNLReport<S> {
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `memos_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -26324,8 +23072,7 @@ impl<S: crate::views::source::FieldSource> UNLReport<S> {
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
     pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
@@ -26345,8 +23092,7 @@ impl<S: crate::views::source::FieldSource> UNLReport<S> {
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -26360,10 +23106,8 @@ impl<S: crate::views::source::FieldSource> UNLReport<S> {
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `signers_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -26376,10 +23120,8 @@ impl<S: crate::views::source::FieldSource> UNLReport<S> {
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `emit_details_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -26409,10 +23151,8 @@ impl<S: crate::views::source::FieldSource> UNLReport<S> {
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
-    /// This is the whole container serialized; navigating *into* it needs
-    /// `hook_parameters_slot`, which only a slot-backed view has.
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]
@@ -26426,8 +23166,7 @@ impl<S: crate::views::source::FieldSource> UNLReport<S> {
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
     ///
-    /// **Raw wire bytes**, not a typed value: written into `out`, big-endian,
-    /// exactly as the host holds them. Returns the number of bytes written.
+    /// Writes the raw wire bytes to `out`.
     ///
     /// `Ok(None)` when the field is absent.
     #[inline(always)]

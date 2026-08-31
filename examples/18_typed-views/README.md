@@ -186,11 +186,6 @@ the only places a view spends something a hand-written hook need not:
   and it is opt-out: `SlotObject::from_keylet` plus the view's `from_slot`
   is still available if you have already established the type.
 
-Nothing else is read. The hook does not touch the sender's `AccountRoot`,
-or `owner_count`, or the line's `balance`, because no decision here depends
-on them — every unused read is a host call charged against the worst-case
-instruction count for nothing.
-
 The side determination (`low_limit()`, 3 more calls) is deliberately
 deferred into the freeze-rejection branch, so the accept path never pays
 for a fact it only needs in order to phrase an error message. See "Fewer
@@ -204,10 +199,8 @@ profile):
 |---|---:|---:|---:|
 | `main` (index 0) | 845 | 2559 bytes | 3 |
 
-Well inside the 32-level nesting budget, the 65,535-instruction WCE ceiling
-and the 65,535-byte `SetHook` size limit. Comparable to `17_sto-writer`
-(746 / 2282), which does a similar amount of work; the difference is mostly
-the second ledger object and its type check.
+These values are recorded in `metrics.json`; refresh it with
+`mise run record-example-metrics` when the generated wasm changes.
 
 `hook_is_low_side` and `issuer_charges_fee` are `#[inline(never)]`: both
 are only reached on rejection paths, and keeping their `match` ladders out
@@ -220,10 +213,7 @@ hatch `examples/15_slot-objects` and `examples/80_governance` use.
 cargo run -p rshooks-build -- build --manifest-path examples/18_typed-views/Cargo.toml
 ```
 
-No extra flags needed. There is no large stack buffer here — the widest
-thing read is a 48-byte `Amount`, which stays under the 64-byte zero-init
-threshold `opt-level = 3` gives (see `examples/Cargo.toml`'s profile
-comment), so no compiler-generated `memset` loop appears.
+No extra flags are required.
 
 ## Unit tests
 
