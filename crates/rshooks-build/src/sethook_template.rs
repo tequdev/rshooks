@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 use serde::Serialize;
 
-use crate::carriers::{EntryDecl, resolve_trigger_masks};
+use crate::carriers::{EntryDecl, SigParamDecl, resolve_trigger_masks};
 use crate::metadata::{hook_mask, utf8_hex};
 
 /// `hsfOVERRIDE` (vendor/xahaud Enum.h `HookSetFlags`): permits replacing an
@@ -94,10 +94,30 @@ struct HookEntryTemplate {
     hook_namespace: String,
     #[serde(rename = "HookApiVersion")]
     hook_api_version: u8,
+    #[serde(rename = "HookParameters", skip_serializing_if = "Option::is_none")]
+    hook_parameters: Option<Vec<HookParameterItem>>,
     #[serde(rename = "HookName", skip_serializing_if = "Option::is_none")]
     hook_name: Option<String>,
     #[serde(rename = "Flags", skip_serializing_if = "Option::is_none")]
     flags: Option<u32>,
+}
+
+/// One `HookParameters[i]` array element — a declaration entry
+/// (`docs/PARAM_SIGNATURE_DESIGN.md` §4): `HookParameterValue` is always
+/// the literal `"00"` placeholder byte, per the interface draft's
+/// declaration-entry convention (§0 of that doc).
+#[derive(Serialize)]
+struct HookParameterItem {
+    #[serde(rename = "HookParameter")]
+    hook_parameter: HookParameterFields,
+}
+
+#[derive(Serialize)]
+struct HookParameterFields {
+    #[serde(rename = "HookParameterName")]
+    hook_parameter_name: String,
+    #[serde(rename = "HookParameterValue")]
+    hook_parameter_value: &'static str,
 }
 
 #[derive(Serialize)]
@@ -180,9 +200,34 @@ fn build_entry_template(
         hook_can_emit,
         hook_namespace: namespace.map_or_else(|| "<NAMESPACE>".to_string(), str::to_string),
         hook_api_version: 0,
+        hook_parameters: build_hook_parameters(&entry.sig_params),
         hook_name: entry.hook_name.as_deref().map(utf8_hex),
         flags: override_flag.then_some(HSF_OVERRIDE),
     })
+}
+
+/// Builds the `HookParameters` declaration array for one entry's declared
+/// signature parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §4) — `None`
+/// (the whole key omitted) for an entry with no `sig_params`, superseding
+/// the general "`HookParameters` is never generated" rule
+/// (`docs/MULTI_HOOK_STRUCT_DESIGN.md` §9 point #10) only for declared
+/// signature parameters; `sig_params` is already carrier-order (= wire
+/// index) ascending, so no re-sorting is needed here.
+fn build_hook_parameters(sig_params: &[SigParamDecl]) -> Option<Vec<HookParameterItem>> {
+    if sig_params.is_empty() {
+        return None;
+    }
+    Some(
+        sig_params
+            .iter()
+            .map(|p| HookParameterItem {
+                hook_parameter: HookParameterFields {
+                    hook_parameter_name: p.name_hex.clone(),
+                    hook_parameter_value: "00",
+                },
+            })
+            .collect(),
+    )
 }
 
 /// Derives `required_amendments` from what the template's own fields
@@ -316,6 +361,7 @@ mod tests {
             on,
             hook_can_emit: None,
             description: None,
+            sig_params: Vec::new(),
         }
     }
 
@@ -569,6 +615,101 @@ mod tests {
             value["generated_at"]
                 .as_str()
                 .is_some_and(|s| s.ends_with('Z') && s.contains('T'))
+        );
+    }
+
+    // --- `HookParameters` (docs/PARAM_SIGNATURE_DESIGN.md §4) ---
+
+    fn sig_param(field: &str, type_byte: u8, name_hex: &str) -> SigParamDecl {
+        SigParamDecl {
+            field: field.to_string(),
+            type_byte,
+            name_hex: name_hex.to_string(),
+        }
+    }
+
+    #[test]
+    fn entry_without_sig_params_emits_no_hook_parameters_key() {
+        let e = entry(0, "deposit", omitted_on(), None);
+        let wasm = b"AA".as_slice();
+        let declared: Vec<TemplateInput<'_>> = vec![(0, &e, wasm)];
+        let bytes = build_template_json(&declared, None, None, false).expect("template builds");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
+        assert!(value["Hooks"][0]["Hook"].get("HookParameters").is_none());
+    }
+
+    #[test]
+    fn entry_with_sig_params_emits_hook_parameters_in_index_order_with_zero_value() {
+        let mut e = entry(0, "increment", omitted_on(), None);
+        e.sig_params = vec![
+            sig_param("account", 0x08, "5F5F005F085F6163636F756E74"),
+            sig_param("count", 0x01, "5F5F015F015F636F756E74"),
+        ];
+        let wasm = b"AA".as_slice();
+        let declared: Vec<TemplateInput<'_>> = vec![(0, &e, wasm)];
+        let bytes = build_template_json(&declared, None, None, false).expect("template builds");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
+        let params = value["Hooks"][0]["Hook"]["HookParameters"]
+            .as_array()
+            .expect("HookParameters array");
+        assert_eq!(params.len(), 2);
+        assert_eq!(
+            params[0]["HookParameter"]["HookParameterName"],
+            "5F5F005F085F6163636F756E74"
+        );
+        assert_eq!(params[0]["HookParameter"]["HookParameterValue"], "00");
+        assert_eq!(
+            params[1]["HookParameter"]["HookParameterName"],
+            "5F5F015F015F636F756E74"
+        );
+        assert_eq!(params[1]["HookParameter"]["HookParameterValue"], "00");
+    }
+
+    #[test]
+    fn hook_parameters_key_sits_between_hook_api_version_and_hook_name() {
+        let mut e = entry(0, "increment", omitted_on(), Some("inc"));
+        e.sig_params = vec![sig_param("count", 0x01, "5F5F015F015F636F756E74")];
+        let wasm = b"AA".as_slice();
+        let declared: Vec<TemplateInput<'_>> = vec![(0, &e, wasm)];
+        let bytes = build_template_json(&declared, None, None, false).expect("template builds");
+        let text = String::from_utf8(bytes).expect("utf8");
+        let api_version_pos = text
+            .find("\"HookApiVersion\"")
+            .expect("HookApiVersion present");
+        let params_pos = text
+            .find("\"HookParameters\"")
+            .expect("HookParameters present");
+        let name_pos = text.find("\"HookName\"").expect("HookName present");
+        assert!(api_version_pos < params_pos);
+        assert!(params_pos < name_pos);
+    }
+
+    #[test]
+    fn mixed_chain_gap_and_no_sig_and_sig_entries_only_the_sig_entry_gets_hook_parameters() {
+        // A gap at 1, a plain entry at 0, a sig-param entry at 2 — the gap
+        // must stay exactly `{"Hook": {}}` and the plain entry must not
+        // gain `HookParameters` just because a sibling entry has one.
+        let e0 = entry(0, "deposit", omitted_on(), None);
+        let mut e2 = entry(2, "increment", omitted_on(), None);
+        e2.sig_params = vec![sig_param("count", 0x01, "5F5F015F015F636F756E74")];
+        let wasm = b"AA".as_slice();
+        let declared: Vec<TemplateInput<'_>> = vec![(0, &e0, wasm), (2, &e2, wasm)];
+        let bytes = build_template_json(&declared, None, None, false).expect("template builds");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
+
+        assert!(
+            value["Hooks"][1]["Hook"]
+                .as_object()
+                .expect("gap object")
+                .is_empty()
+        );
+        assert!(value["Hooks"][0]["Hook"].get("HookParameters").is_none());
+        assert_eq!(
+            value["Hooks"][2]["Hook"]["HookParameters"]
+                .as_array()
+                .expect("HookParameters array")
+                .len(),
+            1
         );
     }
 }

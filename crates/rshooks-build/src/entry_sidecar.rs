@@ -106,6 +106,10 @@ impl Serialize for EntrySidecarDocument {
             &hook_mask(self.entry.hook_can_emit.as_deref()).map_err(serde::ser::Error::custom)?,
         )?;
         map.serialize_entry("HookName", &self.entry.hook_name.as_deref().map(utf8_hex))?;
+        // Declared signature parameters (`docs/PARAM_SIGNATURE_DESIGN.md`
+        // §1/§4), carried verbatim from the carrier — empty for an entry
+        // with no `#[hook(..)]` fn arguments.
+        map.serialize_entry("sig_params", &self.entry.sig_params)?;
         map.serialize_entry("HookHash", &self.hook_hash)?;
         map.serialize_entry("WCE", &self.wce)?;
         map.serialize_entry("builder", &self.builder)?;
@@ -174,6 +178,7 @@ mod tests {
             on,
             hook_can_emit: Some(vec!["Payment".to_string()]),
             description: Some("records a deposit".to_string()),
+            sig_params: Vec::new(),
         }
     }
 
@@ -234,6 +239,46 @@ mod tests {
         assert!(value.get("HookOn").is_none());
         assert!(value["HookOnIncoming"].is_string());
         assert!(value["HookOnOutgoing"].is_string());
+    }
+
+    #[test]
+    fn sig_params_are_carried_verbatim_into_the_sidecar() {
+        use crate::carriers::SigParamDecl;
+
+        let mut e = entry(omitted_on());
+        e.sig_params = vec![
+            SigParamDecl {
+                field: "account".to_string(),
+                type_byte: 0x08,
+                name_hex: "5F5F005F085F6163636F756E74".to_string(),
+            },
+            SigParamDecl {
+                field: "count".to_string(),
+                type_byte: 0x01,
+                name_hex: "5F5F015F015F636F756E74".to_string(),
+            },
+        ];
+        let report = ValidationReport::default();
+        let built =
+            build_entry_sidecar(&e, &chain(), b"AAAA", &report, None).expect("sidecar builds");
+        let value: serde_json::Value = serde_json::from_slice(&built.bytes).expect("valid json");
+
+        let sig_params = value["sig_params"].as_array().expect("sig_params array");
+        assert_eq!(sig_params.len(), 2);
+        assert_eq!(sig_params[0]["field"], "account");
+        assert_eq!(sig_params[0]["type_byte"], 8);
+        assert_eq!(sig_params[0]["name_hex"], "5F5F005F085F6163636F756E74");
+        assert_eq!(sig_params[1]["field"], "count");
+        assert_eq!(sig_params[1]["type_byte"], 1);
+    }
+
+    #[test]
+    fn sig_params_empty_by_default_in_sidecar() {
+        let report = ValidationReport::default();
+        let built = build_entry_sidecar(&entry(omitted_on()), &chain(), b"AAAA", &report, None)
+            .expect("sidecar builds");
+        let value: serde_json::Value = serde_json::from_slice(&built.bytes).expect("valid json");
+        assert_eq!(value["sig_params"], serde_json::json!([]));
     }
 
     #[test]

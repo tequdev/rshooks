@@ -34,6 +34,10 @@ cargo test -p rshooks --features active-amendments
 cargo test -p rshooks --all-features
 """
 
+[tasks."test:unstable"]
+description = "Run workspace tests with unstable draft-spec features (unstable-param-sig-interface) enabled"
+run = "cargo test --workspace --features rshooks/unstable-param-sig-interface,rshooks-testenv/unstable-param-sig-interface"
+
 [tasks.build-wasm]
 description = "Build the no_std crates for the wasm32v1-none Hook target"
 run = "cargo build -p rshooks-core -p rshooks --target wasm32v1-none --release"
@@ -60,6 +64,11 @@ done
 cargo run -p rshooks-build -- build --manifest-path examples/16_typed-results/Cargo.toml --out examples/16_typed-results/out
 cargo run -p rshooks-build -- check examples/16_typed-results/out/current/0.deposit.wasm
 cargo run -p rshooks-build -- check examples/16_typed-results/out/current/1.reset.wasm
+
+# 19_param-signature's `#[hook(0, ..)]` entry fn is named `increment`, not
+# `main` (docs/PARAM_SIGNATURE_DESIGN.md's own worked example).
+cargo run -p rshooks-build -- build --manifest-path examples/19_param-signature/Cargo.toml --out examples/19_param-signature/out
+cargo run -p rshooks-build -- check examples/19_param-signature/out/current/0.increment.wasm
 
 # 80_governance declares two hooks in one chain: `0.govern` and `1.reward`.
 cargo run -p rshooks-build -- build --manifest-path examples/80_governance/Cargo.toml --out examples/80_governance/out

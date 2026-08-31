@@ -74,7 +74,7 @@ represents the on-ledger `HookName`.
 | 7 | Build strategy | Adopt **Approach A (discovery + per-index `--cfg` recompilation)** first. Approach B (compile once + split the wasm) is the ideal form and will replace A as a future optimization (§7) |
 | 8 | Gas Hook (HookApiVersion 1) | **Out of scope.** v0.2 covers only the Guard type (api_version 0) |
 | 9 | Relationship to the manifest | The manifest (docs/spec.md etc.) is still under discussion, so **this design does not take it into account** |
-| 10 | Parameter defaults | The attribute's `default` is **a runtime fallback expression only**. Embedding the installed value into the SetHook template is not done in v0.2 (§5.6, §9.2) |
+| 10 | Parameter defaults | The attribute's `default` is **a runtime fallback expression only**. Embedding the installed value into the SetHook template is not done in v0.2 (§5.6, §9.2). **Scoped exception:** the Hook Parameter Signature Interface's declared signature parameters (extra `#[hook(..)]` fn arguments, `docs/PARAM_SIGNATURE_DESIGN.md` §1) are a distinct declaration mechanism from `#[hook_param]`/`#[otxn_param]` fields and their `default` — for those, `HookParameters` declaration entries (`HookParameterValue = "00"`) ARE emitted (§9.2, realizing §10 D5). Ordinary `#[hook_param]`/`#[otxn_param]` fields are still never emitted |
 | 11 | Template semantics | A SetHook template is an **owned-position patch**, not a declarative realization of the whole chain. Default is fail-closed (no override) (§9) |
 | 12 | Trigger omission | Omitting the trigger entirely is legal and means "**do not place an installation override**" (for a new HookDefinition, the protocol default fires on every type except `SetHook`; reusing an existing definition inherits its value). **Guaranteed all-type firing is written explicitly as `on = all`** (§5.3) |
 | 13 | Descriptive names | No descriptive `name` on the struct attribute (crate identity comes from the Cargo package name). The entry attribute's `name` is reserved for the on-ledger `HookName` |
@@ -949,12 +949,21 @@ existing implementation). **All generated hex is normalized to uppercase**
   interpreted and rejected as a different operation — so **gap objects
   always stay strictly empty** (gapped-layout + `--override` verification
   cases are included in Phase 3).
-- **`HookParameters` is never generated** (settled point #10). To set an
-  installed parameter, add it to the template by hand. On the wire, the
-  three states are "omission = inherit the HookDefinition default," "name
-  only = clear the inherited value," and "name+value = set explicitly";
-  omission does not guarantee "no parameter." This caveat is documented in
-  the template's own documentation.
+- **`HookParameters` is never generated for ordinary `#[hook_param]`/
+  `#[otxn_param]` fields** (settled point #10). To set an installed
+  parameter for one of those, add it to the template by hand. On the wire,
+  the three states are "omission = inherit the HookDefinition default,"
+  "name only = clear the inherited value," and "name+value = set
+  explicitly"; omission does not guarantee "no parameter." This caveat is
+  documented in the template's own documentation. **Scoped exception,
+  realizing §10 D5:** an entry with declared signature parameters
+  (`docs/PARAM_SIGNATURE_DESIGN.md` §1/§4 — extra `#[hook(..)]` fn
+  arguments) DOES get a `HookParameters` array, one declaration entry per
+  argument in wire-index order (`HookParameterValue` always the literal
+  `"00"` placeholder — a signature parameter is always REQUIRED, so there is
+  no default to embed and no "omission means inherit" ambiguity to
+  preserve). An entry with no declared signature parameters still emits no
+  `HookParameters` key at all.
 - **Generation info goes in a separate sidecar**
   (`sethook.template.meta.json`); the template body itself stays
   protocol-shaped JSON. The sidecar includes an RFC 3339 `generated_at`,
@@ -1004,7 +1013,7 @@ position.
 | D2 | Per-hook state/param usage declarations (`uses = [...]`) | Not included in v0.2 (every declaration = the shared schema) | The sidecar's declarations are labeled "a transcription of the shared schema" (§5.4). Detection-based narrowing is a future concern |
 | D3 | Execution-mode attributes like weak/collect/again | Not included in v0.2 | Add the attribute once it's needed |
 | D4 | The switchover condition from build strategy A to B | Once measurement shows build time is a real problem | The equivalence definition is already fixed in §7 (byte identity is not required) |
-| D5 | Carrying the encoded default into the artifact | Future concern | Either a const-evaluable encoding, or extraction via the wasm carrier. If realized, revisit emitting `HookParameters` into the template |
+| D5 | Carrying the encoded default into the artifact | **Realized for declared signature parameters** (`docs/PARAM_SIGNATURE_DESIGN.md` §1/§4): the name/type-byte encoding is resolved at macro time and extracted via the `#[hooks] impl` wasm carrier (`EntryDecl::sig_params`, §4 of that doc), and `sethook_template.rs` emits a `HookParameters` declaration entry per argument (§9.2's scoped exception to settled point #10). Still open for ordinary `#[hook_param]`/`#[otxn_param]` fields' `default` — those have no wire-format REQUIRED-ness guarantee backing a fixed placeholder value the way a signature parameter does, so this remains a future concern for them | Either a const-evaluable encoding, or extraction via the wasm carrier — the signature-parameter case took the latter route |
 | D6 | Conditional-compilation (`#[cfg]`) support | Forbidden in v0.2 (§5.1) | Define the consistency semantics with discovery once needed, then lift the ban |
 
 ## 11. Overall developer-experience assessment

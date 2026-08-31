@@ -1,0 +1,16 @@
+{
+  "schema": "rshooks-example-metrics-v1",
+  "entries": [
+    {
+      "artifact": "0.increment.wasm",
+      "index": 0,
+      "hook_fn": "increment",
+      "bytes": 836,
+      "wce": {
+        "hook": 249,
+        "cbak": 0
+      },
+      "max_nesting": 1
+    }
+  ]
+}

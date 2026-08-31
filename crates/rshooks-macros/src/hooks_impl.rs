@@ -29,6 +29,7 @@ use crate::hooks_shared::{
     AttrEntry, is_punct, parse_attr_entries, parse_balanced_angle, parse_string_value,
     split_top_level_commas,
 };
+use crate::shape::tokens_to_string;
 use crate::{err, sha256};
 
 /// Wasm export-name prefix for the entries carrier — contract §B2.
@@ -237,6 +238,11 @@ struct HookEntry {
     /// Fallback span for an implicit `-> ()` (`return_tokens` empty): the
     /// fn's own name, so the diagnostic still names the function.
     return_span: Span,
+    /// Extra `ident: Type` arguments after `&self` — declared signature
+    /// parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §1), in declaration
+    /// (= wire index) order. Empty for an ordinary no-arg entry, in which
+    /// case codegen is byte-identical to before this feature existed.
+    sig_args: Vec<SigArg>,
 }
 
 struct CbakEntry {
@@ -269,6 +275,204 @@ struct ParsedBody {
     tokens: Vec<TokenTree>,
     hooks: Vec<HookEntry>,
     cbaks: Vec<CbakEntry>,
+}
+
+// ---------------------------------------------------------------------
+// Signature parameters — `docs/PARAM_SIGNATURE_DESIGN.md` §1: extra
+// `ident: Type` arguments on a `#[hook(..)]` entry fn declare Hook
+// Parameter Signature Interface parameters.
+// ---------------------------------------------------------------------
+
+/// The diagnostic listing every supported signature-parameter type token —
+/// shared by [`classify_sig_type`]'s only call site so the list can't drift
+/// out of sync with the match arms below it.
+const SIG_TYPE_MSG: &str = "#[hooks]: unsupported signature parameter type — supported types are \
+                             u8, u16, u32, u64, [u8; 16], [u8; 32], Hash, AccountId, [u8; 20], \
+                             CurrencyCode, AmountBytes, IssueBytes, Blob<N> (write the type as a \
+                             bare name — a path-qualified or aliased spelling is not resolved)";
+
+/// The interface draft's display-name diagnostic — shared by every
+/// rejection [`is_valid_sig_arg_name`] backs.
+const SIG_NAME_MSG: &str = "#[hooks]: a signature parameter name must be 1..=16 ASCII bytes \
+                             matching [A-Za-z][A-Za-z0-9]* (the Hook Parameter Signature \
+                             Interface's display-name rule) — rename the argument";
+
+/// Diagnostic for an extra argument on a `#[hook(..)]` fn when the
+/// `unstable-param-sig-interface` feature is off — the interface's whole
+/// surface (this module's [`parse_sig_args`] and downstream codegen) stays
+/// compiled but unreachable in that configuration, so an extra argument is
+/// rejected here instead. A `#[cbak(..)]` extra argument never reaches this
+/// diagnostic: the callback-specific rejection above it is unconditional.
+#[cfg(not(feature = "unstable-param-sig-interface"))]
+const SIG_FEATURE_GATE_MSG: &str = "#[hooks]: extra arguments after `&self` declare Hook \
+                                     Parameter Signature Interface parameters (draft spec) — \
+                                     enable rshooks's `unstable-param-sig-interface` feature to \
+                                     use them (only #[hook(..)] entry fns may declare them; the \
+                                     interface may change while the spec is a draft)";
+
+/// One parsed `ident: Type` signature-parameter argument (`docs/PARAM_SIGNATURE_DESIGN.md`
+/// §1) — a `#[hook(..)]` entry fn's extra argument after `&self`. Wire
+/// index is this entry's position in [`HookEntry::sig_args`], not stored
+/// here.
+struct SigArg {
+    /// The argument's identifier, already validated against the
+    /// interface's display-name charset/length rule — usable verbatim as
+    /// both the declared name's bytes and the generated local's suffix.
+    name: String,
+    /// The argument's type, reconstructed as source text (see
+    /// [`tokens_to_string`]) — spliced verbatim into the generated
+    /// prologue so an aliased type is decoded, and const-asserted, exactly
+    /// as written (never re-derived from `type_byte`).
+    type_text: String,
+    /// The `STI_*` type byte [`classify_sig_type`] derived from the type
+    /// token's own shape — see `docs/PARAM_SIGNATURE_DESIGN.md` §1's type
+    /// table.
+    type_byte: u8,
+}
+
+/// Whether `name` matches the interface draft's display-name charset:
+/// `[A-Za-z][A-Za-z0-9]*`, 1..=16 bytes — the macro-time twin of
+/// [`crate::sig`]'s (rshooks crate) `is_valid_name` const fn, checked here
+/// so a bad name is a diagnostic at the argument's own span rather than a
+/// `const`-eval failure blamed on the generated prologue.
+fn is_valid_sig_arg_name(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    if bytes.is_empty() || bytes.len() > 16 {
+        return false;
+    }
+    bytes.iter().enumerate().all(|(i, &b)| {
+        if i == 0 {
+            b.is_ascii_alphabetic()
+        } else {
+            b.is_ascii_alphanumeric()
+        }
+    })
+}
+
+/// Classifies a signature-parameter argument's type tokens into its
+/// `STI_*` type byte (`docs/PARAM_SIGNATURE_DESIGN.md` §1's table),
+/// matching on the token *shape* (a whitespace-normalized textual
+/// comparison, plus a structural check for `Blob<N>` since angle brackets
+/// never arrive as a single token — see [`crate::hooks_shared::AngleTok`]'s
+/// doc comment). Does not resolve type aliases: an aliased type is caught
+/// later by the monomorphized `const` assert the caller emits alongside
+/// this byte (`docs/PARAM_SIGNATURE_DESIGN.md` §1).
+fn classify_sig_type(tokens: &[TokenTree]) -> Option<u8> {
+    if let [TokenTree::Ident(id), TokenTree::Punct(lt), rest @ ..] = tokens {
+        if id.to_string() == "Blob" && lt.as_char() == '<' && rest.len() >= 2 {
+            if let Some(TokenTree::Punct(gt)) = rest.last() {
+                if gt.as_char() == '>' {
+                    return Some(0x07); // STI_VL
+                }
+            }
+        }
+    }
+    classify_sig_type_text(&tokens_to_string(tokens).replace(' ', ""))
+}
+
+/// The non-`Blob<N>` half of [`classify_sig_type`]'s table, over an already
+/// whitespace-stripped flattened type string — `TokenTree`-free purely for
+/// unit-testability, following this crate's standard "kind tag" boundary
+/// pattern (see [`qualifier_token_kind`]'s doc comment).
+fn classify_sig_type_text(flat: &str) -> Option<u8> {
+    match flat {
+        "u8" => Some(0x10),               // STI_UINT8
+        "u16" => Some(0x01),              // STI_UINT16
+        "u32" => Some(0x02),              // STI_UINT32
+        "u64" => Some(0x03),              // STI_UINT64
+        "[u8;16]" => Some(0x04),          // STI_UINT128
+        "[u8;32]" | "Hash" => Some(0x05), // STI_UINT256
+        "AmountBytes" => Some(0x06),      // STI_AMOUNT
+        "AccountId" => Some(0x08),        // STI_ACCOUNT
+        "[u8;20]" => Some(0x11),          // STI_UINT160
+        "IssueBytes" => Some(0x18),       // STI_ISSUE
+        "CurrencyCode" => Some(0x1A),     // STI_CURRENCY
+        _ => None,
+    }
+}
+
+/// Parses a `#[hook(..)]` entry fn's extra arguments (everything
+/// [`scan_fn_item`] captured in [`ScannedFn::extra_args`] past the `&self`
+/// receiver) into signature parameters, in declaration order. `entry_span`
+/// anchors diagnostics that have no more specific token to point at (an
+/// empty argument list past a trailing comma never reaches here — the
+/// caller only calls this when `extra_args` is non-empty).
+///
+/// At most 16 arguments are accepted (`0x00..=0x0F` — the interface's
+/// index range); a 17th is a macro-time error at its own first token's
+/// span.
+fn parse_sig_args(extra_args: &[TokenTree], entry_span: Span) -> Result<Vec<SigArg>, TokenStream> {
+    // `extra_args` starts with the comma separating `&self` from the first
+    // real argument (see `scan_fn_item`'s doc comment) unless it is the
+    // single-trailing-comma case, which is already cleared to empty by the
+    // caller before this function is ever invoked.
+    let rest = match extra_args.first() {
+        Some(tt) if is_punct(tt, ',') => extra_args.get(1..).unwrap_or_default(),
+        _ => extra_args,
+    };
+    let groups = split_top_level_commas(rest);
+
+    if let Some(seventeenth) = groups.get(16) {
+        let span = seventeenth.first().map_or(entry_span, TokenTree::span);
+        return Err(err(
+            span,
+            "#[hooks]: a hook entry function may declare at most 16 signature parameters \
+             (index 0x00..=0x0F)",
+        ));
+    }
+
+    let mut out = Vec::with_capacity(groups.len());
+    for group in &groups {
+        let (name_id, after_name) = match group.split_first() {
+            Some((TokenTree::Ident(id), rest)) => (id.clone(), rest),
+            Some((other, _)) => {
+                return Err(err(
+                    other.span(),
+                    "#[hooks]: expected a signature parameter here, e.g. `count: u16`",
+                ));
+            }
+            None => return Err(err(entry_span, "#[hooks]: expected a signature parameter")),
+        };
+        let after_colon = match after_name.split_first() {
+            Some((tt, after)) if is_punct(tt, ':') => after,
+            _ => {
+                return Err(err(
+                    name_id.span(),
+                    "#[hooks]: expected `: Type` after the signature parameter's name",
+                ));
+            }
+        };
+        if after_colon.is_empty() {
+            return Err(err(name_id.span(), "#[hooks]: expected a type after `:`"));
+        }
+
+        let name = name_id.to_string();
+        if !is_valid_sig_arg_name(&name) {
+            return Err(err(name_id.span(), SIG_NAME_MSG));
+        }
+
+        let Some(type_byte) = classify_sig_type(after_colon) else {
+            let span = after_colon.first().map_or(name_id.span(), TokenTree::span);
+            return Err(err(span, SIG_TYPE_MSG));
+        };
+
+        out.push(SigArg {
+            name,
+            type_text: tokens_to_string(after_colon),
+            type_byte,
+        });
+    }
+    Ok(out)
+}
+
+/// Builds one declared `HookParameterName`'s wire bytes, as uppercase hex —
+/// the carrier's `name_hex` field (`docs/PARAM_SIGNATURE_DESIGN.md` §4).
+/// Mirrors [`crate::sig::sig_param_name`] (the rshooks crate's runtime/const
+/// builder) exactly, over plain bytes instead of a `const`-generic array.
+fn sig_param_name_hex(index: u8, type_byte: u8, name: &str) -> String {
+    let mut bytes = vec![0x5Fu8, 0x5F, index, 0x5F, type_byte, 0x5F];
+    bytes.extend_from_slice(name.as_bytes());
+    hex_upper(&bytes)
 }
 
 /// Walks the impl body's flat token list item by item, stripping consumed
@@ -403,15 +607,33 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
                         "#[hooks]: an entry function cannot be generic",
                     ));
                 }
-                if !scanned.extra_args.is_empty() {
+                // Extra arguments after `&self` declare signature
+                // parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §1) — but
+                // only on `#[hook(..)]`. A `#[cbak(..)]`'s originating
+                // transaction is the emitted transaction, not the
+                // invocation, so the interface doesn't apply there; it
+                // keeps the original "no arguments other than `&self`"
+                // rejection.
+                if !scanned.extra_args.is_empty() && cbak_attr.is_some() {
                     let bad_span = scanned
                         .extra_args
                         .first()
                         .map_or_else(|| scanned.args_group.span(), TokenTree::span);
                     return Err(err(
                         bad_span,
-                        "#[hooks]: entry functions must take no arguments other than `&self`",
+                        "#[hooks]: #[cbak] entry functions must take no arguments other than \
+                         `&self` — a callback's originating transaction is the emitted \
+                         transaction, not the invocation, so the signature parameter interface \
+                         does not apply",
                     ));
+                }
+                #[cfg(not(feature = "unstable-param-sig-interface"))]
+                if !scanned.extra_args.is_empty() {
+                    let bad_span = scanned
+                        .extra_args
+                        .first()
+                        .map_or_else(|| scanned.args_group.span(), TokenTree::span);
+                    return Err(err(bad_span, SIG_FEATURE_GATE_MSG));
                 }
                 // The return type itself is deliberately unchecked here: an
                 // entry must return a type implementing
@@ -442,6 +664,11 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
 
             let fn_name = scanned.name.to_string();
             if let Some((data, index, index_span)) = hook_attr {
+                let sig_args = if scanned.extra_args.is_empty() {
+                    Vec::new()
+                } else {
+                    parse_sig_args(&scanned.extra_args, scanned.args_group.span())?
+                };
                 hooks.push(HookEntry {
                     index,
                     index_span,
@@ -449,6 +676,7 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
                     attr: data,
                     return_tokens: scanned.return_tokens.clone(),
                     return_span: scanned.return_span,
+                    sig_args,
                 });
             } else if let Some((index, index_span)) = cbak_attr {
                 cbaks.push(CbakEntry {
@@ -1368,6 +1596,7 @@ fn generate(
                 hook_fn: h.fn_name.as_str(),
                 cbak_fn: cbak.map(|c| c.fn_name.as_str()),
                 hook: &h.attr,
+                sig_args: &h.sig_args,
             }
         })
         .collect();
@@ -1496,6 +1725,7 @@ struct EntrySource<'a> {
     hook_fn: &'a str,
     cbak_fn: Option<&'a str>,
     hook: &'a HookAttrData,
+    sig_args: &'a [SigArg],
 }
 
 impl EntrySource<'_> {
@@ -1531,6 +1761,20 @@ impl EntrySource<'_> {
                 .as_ref()
                 .map(|list| list.iter().map(|(n, _)| n.clone()).collect()),
             description: self.hook.description.clone(),
+            sig_params: self
+                .sig_args
+                .iter()
+                .enumerate()
+                .map(|(idx, a)| {
+                    let idx = u8::try_from(idx).unwrap_or(u8::MAX);
+                    SigParamJson {
+                        field: a.name.clone(),
+                        type_text: a.type_text.clone(),
+                        type_byte: a.type_byte,
+                        name_hex: sig_param_name_hex(idx, a.type_byte, &a.name),
+                    }
+                })
+                .collect(),
         }
     }
 }
@@ -1550,6 +1794,26 @@ struct EntryJson {
     hook_on_outgoing: Option<Vec<String>>,
     hook_can_emit: Option<Vec<String>>,
     description: Option<String>,
+    /// Declared signature parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §1),
+    /// in wire-index order. Empty for an ordinary entry.
+    sig_params: Vec<SigParamJson>,
+}
+
+/// One declared signature parameter, as carried by [`EntryJson`]. Only
+/// `field`/`type_byte`/`name_hex` are part of the wire carrier
+/// (`docs/PARAM_SIGNATURE_DESIGN.md` §4) — `type_text` is codegen-only (the
+/// exact type token text spliced into the generated prologue) and never
+/// serialized into the carrier JSON.
+struct SigParamJson {
+    /// The declared name — the argument's own identifier.
+    field: String,
+    /// The argument's type, as source text (see [`tokens_to_string`]) —
+    /// codegen-only, not part of the wire carrier.
+    type_text: String,
+    /// The `STI_*` type byte.
+    type_byte: u8,
+    /// The full declared `HookParameterName`, uppercase hex.
+    name_hex: String,
 }
 
 #[derive(Clone, Copy)]
@@ -1675,19 +1939,37 @@ fn render_entry_body_and_wrappers(
     // generated same-named static, or a unit struct's constructor value —
     // no extra static is ever needed.
     //
+    // Declared signature parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §1)
+    // are decoded into locals *before* the call, one `otxn_sig_param` read
+    // per argument, then passed through in declaration order — empty
+    // `sig_params` (every entry before this feature, and every no-arg entry
+    // since) makes `prologue` the empty string and `call_args` exactly
+    // `&{struct_name}`, so this is byte-identical to the pre-signature-params
+    // codegen in that case.
+    //
     // The call is wrapped in `EntryReturn::finish` unconditionally
     // (TYPED_ENTRY_RESULTS_DESIGN.md §1.3/§7): it is what makes a
     // `HookResult` return type legal here at all, and a diverging body
     // (every call ends in `accept!`/`rollback!`) makes the match dead code
     // once inlined (this body fn is itself `#[inline(always)]`).
+    let prologue = render_sig_param_prologue(&entry.sig_params);
+    let call_args: String = std::iter::once(format!("&{struct_name}"))
+        .chain(
+            entry
+                .sig_params
+                .iter()
+                .map(|p| format!("__rshooks_sig_{}", p.field)),
+        )
+        .collect::<Vec<_>>()
+        .join(", ");
     let hook_call = format!(
-        "::rshooks::exit::EntryReturn::finish({struct_name}::{}(&{struct_name}))",
+        "::rshooks::exit::EntryReturn::finish({struct_name}::{}({call_args}))",
         entry.hook_fn
     );
     let mut out = format!(
         "#[inline(always)]\n\
          #[doc(hidden)]\n\
-         pub fn __rshooks_entry_body_{i}(_reserved: u32) -> i64 {{ {hook_call} }}\n\
+         pub fn __rshooks_entry_body_{i}(_reserved: u32) -> i64 {{ {prologue}{hook_call} }}\n\
          #[cfg(rshooks_entry = \"{i}\")]\n\
          #[unsafe(export_name = \"hook\")]\n\
          pub extern \"C\" fn __rshooks_hook_sel_{i}(_reserved: u32) -> i64 {{ \
@@ -1713,6 +1995,53 @@ fn render_entry_body_and_wrappers(
              #[unsafe(export_name = \"__rshooks_cbak_{i}\")]\n\
              pub extern \"C\" fn __rshooks_cbak_disc_{i}(_reserved: u32) -> i64 {{ \
                  __rshooks_cbak_body_{i}(_reserved) }}\n"
+        ));
+    }
+    out
+}
+
+/// Renders the per-argument decode prologue for one entry's declared
+/// signature parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §1), in
+/// declaration (= wire index) order. Empty input yields the empty string —
+/// see [`render_entry_body_and_wrappers`]'s doc comment for why that keeps
+/// a no-arg entry's generated code byte-identical to before this feature.
+///
+/// Per argument:
+///
+/// 1. A monomorphized `const` assert that the type token's own `type_byte`
+///    (decided at macro time, purely from the token's shape — see
+///    [`classify_sig_type`]) matches `<Ty as SigParamType>::TYPE_BYTE` —
+///    catches a type alias resolving to a different wire type.
+/// 2. Builds the declared name inside a `const { .. }` block (per
+///    `docs/PARAM_SIGNATURE_DESIGN.md` §1's "Generated prologue": every MUST
+///    of the wire format is `const`-evaluable, so a malformed name — dead
+///    code here, since [`parse_sig_args`] already validated it — would be a
+///    compile error, never a runtime panic) and reads it via
+///    `otxn_sig_param`.
+/// 3. On `Err`, rolls back with `b"rshooks: bad sig param '<name>'"` and the
+///    argument's own 0-based index as the rollback code — `rollback!`
+///    diverges (`!`), so it coerces to the match's `Ty` arm directly, no
+///    separate early-return plumbing needed.
+fn render_sig_param_prologue(sig_params: &[SigParamJson]) -> String {
+    let mut out = String::new();
+    for (idx, p) in sig_params.iter().enumerate() {
+        let total_len = 6usize.wrapping_add(p.field.len());
+        out.push_str(&format!(
+            "const _: () = {{ assert!(<{ty} as ::rshooks::sig::SigParamType>::TYPE_BYTE == \
+             {type_byte}u8, \"rshooks: signature parameter '{field}' resolves to a different \
+             wire type than its declared type token (check for a type alias mismatch)\"); }};\n\
+             let __rshooks_sig_{field}: {ty} = match ::rshooks::sig::otxn_sig_param::<{ty}>(&const {{ \
+             ::rshooks::sig::sig_param_name::<{total_len}>({idx}, {type_byte}u8, b\"{field}\") \
+             }}) {{\n\
+             ::core::result::Result::Ok(__v) => __v,\n\
+             ::core::result::Result::Err(_) => ::rshooks::rollback!(\
+             b\"rshooks: bad sig param '{field}'\", {idx}i64),\n\
+             }};\n",
+            ty = p.type_text,
+            type_byte = p.type_byte,
+            field = p.field,
+            total_len = total_len,
+            idx = idx,
         ));
     }
     out
@@ -1820,6 +2149,22 @@ fn encode_entries_json(struct_name: &str, entries: &[EntryJson]) -> Result<Vec<u
                 .clone()
                 .map_or(serde_json::Value::Null, Into::into),
         );
+
+        // Only `field`/`type_byte`/`name_hex` are part of the wire carrier
+        // (`docs/PARAM_SIGNATURE_DESIGN.md` §4) — `SigParamJson::type_text`
+        // is codegen-only and deliberately not serialized here.
+        let sig_params: Vec<serde_json::Value> = e
+            .sig_params
+            .iter()
+            .map(|p| {
+                let mut sp = serde_json::Map::new();
+                sp.insert("field".into(), p.field.clone().into());
+                sp.insert("type_byte".into(), u64::from(p.type_byte).into());
+                sp.insert("name_hex".into(), p.name_hex.clone().into());
+                serde_json::Value::Object(sp)
+            })
+            .collect();
+        obj.insert("sig_params".into(), sig_params.into());
 
         arr.push(serde_json::Value::Object(obj));
     }
@@ -2118,6 +2463,7 @@ mod tests {
             hook_on_outgoing: None,
             hook_can_emit: Some(Vec::new()),
             description: Some("a \"quoted\" desc".to_string()),
+            sig_params: Vec::new(),
         }
     }
 
@@ -2326,5 +2672,161 @@ mod tests {
         assert!(table.contains("name: \"withdraw\","));
         assert!(table.contains("cbak: Some(__rshooks_cbak_body_0),"));
         assert!(table.contains("cbak: None,"));
+    }
+
+    // --- Signature parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §1) ---
+
+    #[test]
+    fn sig_arg_name_accepts_the_interface_charset() {
+        assert!(is_valid_sig_arg_name("account"));
+        assert!(is_valid_sig_arg_name("count"));
+        assert!(is_valid_sig_arg_name("a"));
+        assert!(is_valid_sig_arg_name("abcdefghijklmnop")); // exactly 16
+        assert!(is_valid_sig_arg_name("A1"));
+    }
+
+    #[test]
+    fn sig_arg_name_rejects_underscore_digit_start_and_overlength() {
+        assert!(!is_valid_sig_arg_name("my_count")); // underscore
+        assert!(!is_valid_sig_arg_name("_count")); // leading underscore
+        assert!(!is_valid_sig_arg_name("1count")); // leading digit
+        assert!(!is_valid_sig_arg_name("")); // empty
+        assert!(!is_valid_sig_arg_name("abcdefghijklmnopq")); // 17 bytes
+    }
+
+    #[test]
+    fn sig_type_text_covers_every_declared_table_entry() {
+        // docs/PARAM_SIGNATURE_DESIGN.md §2's table, minus `Blob<N>` (needs
+        // real tokens — see `classify_sig_type`, exercised via the trybuild
+        // pass fixture instead).
+        assert_eq!(classify_sig_type_text("u8"), Some(0x10));
+        assert_eq!(classify_sig_type_text("u16"), Some(0x01));
+        assert_eq!(classify_sig_type_text("u32"), Some(0x02));
+        assert_eq!(classify_sig_type_text("u64"), Some(0x03));
+        assert_eq!(classify_sig_type_text("[u8;16]"), Some(0x04));
+        assert_eq!(classify_sig_type_text("[u8;32]"), Some(0x05));
+        assert_eq!(classify_sig_type_text("Hash"), Some(0x05));
+        assert_eq!(classify_sig_type_text("AmountBytes"), Some(0x06));
+        assert_eq!(classify_sig_type_text("AccountId"), Some(0x08));
+        assert_eq!(classify_sig_type_text("[u8;20]"), Some(0x11));
+        assert_eq!(classify_sig_type_text("IssueBytes"), Some(0x18));
+        assert_eq!(classify_sig_type_text("CurrencyCode"), Some(0x1A));
+    }
+
+    #[test]
+    fn sig_type_text_rejects_unsupported_type() {
+        assert_eq!(classify_sig_type_text("i64"), None);
+        assert_eq!(classify_sig_type_text("String"), None);
+        assert_eq!(classify_sig_type_text("Blob<32>"), None); // Blob needs real tokens
+    }
+
+    #[test]
+    fn sig_param_name_hex_matches_the_wire_vector() {
+        // Same vector as `rshooks::sig::sig_param_name`'s own doctest:
+        // account(0), STI_ACCOUNT (0x08), 7-byte name.
+        assert_eq!(
+            sig_param_name_hex(0, 0x08, "account"),
+            "5F5F005F085F6163636F756E74"
+        );
+        // count(1), STI_UINT16 (0x01), 5-byte name.
+        assert_eq!(
+            sig_param_name_hex(1, 0x01, "count"),
+            "5F5F015F015F636F756E74"
+        );
+    }
+
+    fn sig_param(field: &str, type_text: &str, type_byte: u8, index: u8) -> SigParamJson {
+        SigParamJson {
+            field: field.to_string(),
+            type_text: type_text.to_string(),
+            type_byte,
+            name_hex: sig_param_name_hex(index, type_byte, field),
+        }
+    }
+
+    #[test]
+    fn entries_json_includes_sig_params_field_type_byte_and_name_hex_only() {
+        let mut entry = sample();
+        entry.sig_params = vec![
+            sig_param("account", "AccountId", 0x08, 0),
+            sig_param("count", "u16", 0x01, 1),
+        ];
+        let bytes = encode_entries_json("Vault", &[entry]).expect("json");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
+        let sig_params = value["entries"][0]["sig_params"]
+            .as_array()
+            .expect("sig_params array");
+        assert_eq!(sig_params.len(), 2);
+        assert_eq!(sig_params[0]["field"], "account");
+        assert_eq!(sig_params[0]["type_byte"], 0x08);
+        assert_eq!(sig_params[0]["name_hex"], "5F5F005F085F6163636F756E74");
+        assert_eq!(sig_params[1]["field"], "count");
+        assert_eq!(sig_params[1]["type_byte"], 0x01);
+        // `type_text` is codegen-only and must never leak into the carrier.
+        assert!(sig_params[0].get("type_text").is_none());
+    }
+
+    #[test]
+    fn entries_json_sig_params_empty_by_default() {
+        let bytes = encode_entries_json("Vault", &[sample()]).expect("json");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
+        assert_eq!(value["entries"][0]["sig_params"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn no_sig_params_prologue_is_empty() {
+        assert_eq!(render_sig_param_prologue(&[]), "");
+    }
+
+    #[test]
+    fn entry_body_with_sig_params_decodes_before_the_call_in_declaration_order() {
+        let mut entry = sample(); // index 0, hook_fn "deposit"
+        entry.sig_params = vec![
+            sig_param("account", "AccountId", 0x08, 0),
+            sig_param("count", "u16", 0x01, 1),
+        ];
+        let out = render_entry_body_and_wrappers("Vault", &entry, &not_any_list());
+
+        // The call passes decoded locals through, in declaration order,
+        // after `&Vault`.
+        assert!(out.contains(
+            "::rshooks::exit::EntryReturn::finish(Vault::deposit(&Vault, __rshooks_sig_account, \
+             __rshooks_sig_count))"
+        ));
+
+        // Each argument's prologue: the type-byte const assert, the
+        // `const { sig_param_name::<N>(..) }` name build, and the
+        // documented rollback message/code on `Err`.
+        assert!(out.contains("<AccountId as ::rshooks::sig::SigParamType>::TYPE_BYTE == 8u8"));
+        assert!(out.contains("::rshooks::sig::sig_param_name::<13>(0, 8u8, b\"account\")"));
+        assert!(out.contains("b\"rshooks: bad sig param 'account'\", 0i64"));
+
+        assert!(out.contains("<u16 as ::rshooks::sig::SigParamType>::TYPE_BYTE == 1u8"));
+        assert!(out.contains("::rshooks::sig::sig_param_name::<11>(1, 1u8, b\"count\")"));
+        assert!(out.contains("b\"rshooks: bad sig param 'count'\", 1i64"));
+
+        // The account decode's prologue textually precedes count's, which
+        // in turn precedes the call — declaration order is preserved.
+        let account_pos = out
+            .find("__rshooks_sig_account:")
+            .expect("account decode present");
+        let count_pos = out
+            .find("__rshooks_sig_count:")
+            .expect("count decode present");
+        let call_pos = out
+            .find("EntryReturn::finish(Vault::deposit")
+            .expect("call present");
+        assert!(account_pos < count_pos);
+        assert!(count_pos < call_pos);
+    }
+
+    #[test]
+    fn entry_body_without_sig_params_is_byte_identical_to_legacy_call_shape() {
+        // Parity requirement (PARAM_SIGNATURE_DESIGN.md §1): a no-arg entry
+        // must generate exactly the pre-signature-params call shape.
+        let out = render_entry_body_and_wrappers("Vault", &sample(), &not_any_list());
+        assert!(out.contains("::rshooks::exit::EntryReturn::finish(Vault::deposit(&Vault))"));
+        assert!(!out.contains("__rshooks_sig_"));
+        assert!(!out.contains("otxn_sig_param"));
     }
 }

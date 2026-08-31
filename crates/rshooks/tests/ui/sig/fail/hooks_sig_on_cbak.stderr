@@ -1,5 +1,5 @@
-error: #[hooks]: entry functions must take no arguments other than `&self`
-  --> tests/ui/fail/hooks_self_receiver_extra_arg.rs:11:1
+error: #[hooks]: #[cbak] entry functions must take no arguments other than `&self` — a callback's originating transaction is the emitted transaction, not the invocation, so the signature parameter interface does not apply
+  --> tests/ui/sig/fail/hooks_sig_on_cbak.rs:11:1
    |
 11 | #[hooks]
    | ^^^^^^^^
@@ -7,13 +7,13 @@ error: #[hooks]: entry functions must take no arguments other than `&self`
    = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0277]: the trait bound `Vault: HookChainImpl` is not satisfied
- --> tests/ui/fail/hooks_self_receiver_extra_arg.rs:8:1
+ --> tests/ui/sig/fail/hooks_sig_on_cbak.rs:8:1
   |
 8 | #[hooks]
   | ^^^^^^^^ the trait `HookChainImpl` is not implemented for `Vault`
   |
 note: required by a bound in `assert`
- --> tests/ui/fail/hooks_self_receiver_extra_arg.rs:8:1
+ --> tests/ui/sig/fail/hooks_sig_on_cbak.rs:8:1
   |
 8 | #[hooks]
   | ^^^^^^^^ required by this bound in `assert`

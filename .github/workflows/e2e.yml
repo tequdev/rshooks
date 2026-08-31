@@ -42,16 +42,23 @@ jobs:
       # `out/current/<index>.<entry-fn>.wasm`, matching `rshooks build`'s
       # own publication layout (see mise.toml's `build-examples` task) —
       # reconstruct that same layout from the flat per-example artifact
-      # downloaded above.
-      - name: Place downloaded wasm files back under examples/*/out/current/
+      # downloaded above. Also place any uploaded `sethook.template.json`
+      # (see build-examples.yml's "Upload hook binary" step) the same way,
+      # for e2e suites that read the generated template directly (e.g.
+      # `e2e/test/param-signature.test.ts`) instead of hand-writing its
+      # declarations.
+      - name: Place downloaded wasm/template files back under examples/*/out/current/
         run: |
           set -e
           for dir in examples-out/example-hooks-*; do
             example="$(basename "$dir" | sed 's/^example-hooks-//')"
             mkdir -p "examples/${example}/out/current"
             cp "$dir"/*.wasm "examples/${example}/out/current/"
+            if [ -f "$dir/sethook.template.json" ]; then
+              cp "$dir/sethook.template.json" "examples/${example}/out/current/"
+            fi
           done
-          find examples -name '*.wasm'
+          find examples -name '*.wasm' -o -name 'sethook.template.json'
 
       - uses: actions/setup-node@v6
         with:

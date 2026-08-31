@@ -46,8 +46,14 @@ jobs:
       - name: Clippy (host, deny warnings)
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      - name: Clippy (host, unstable-param-sig-interface, deny warnings)
+        run: cargo clippy --workspace --all-targets --features rshooks/unstable-param-sig-interface,rshooks-testenv/unstable-param-sig-interface -- -D warnings
+
       - name: Clippy (wasm32v1-none, deny warnings)
         run: cargo clippy -p rshooks-core -p rshooks --target wasm32v1-none -- -D warnings
+
+      - name: Clippy (wasm32v1-none, unstable-param-sig-interface, deny warnings)
+        run: cargo clippy -p rshooks --target wasm32v1-none --features unstable-param-sig-interface -- -D warnings
 
       - name: Build
         run: cargo build --workspace
@@ -55,8 +61,14 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+      - name: Test (unstable-param-sig-interface)
+        run: cargo test --workspace --features rshooks/unstable-param-sig-interface,rshooks-testenv/unstable-param-sig-interface
+
       - name: Build no_std crates for wasm32v1-none
         run: cargo build -p rshooks-core -p rshooks --target wasm32v1-none --release
+
+      - name: Build no_std crates for wasm32v1-none (unstable-param-sig-interface)
+        run: cargo build -p rshooks --target wasm32v1-none --release --features unstable-param-sig-interface
 
   # Build & check every example (end-to-end): one independent job per
   # example (matrix, fail-fast: false), so one example failing never

@@ -15,6 +15,8 @@ pub mod exit;
 pub mod ledger_entry_type;
 mod macros;
 pub mod sfield;
+#[cfg(feature = "unstable-param-sig-interface")]
+pub mod sig;
 pub mod slot_obj;
 pub mod state;
 pub mod static_cell;
@@ -952,6 +954,10 @@ pub mod prelude {
     pub use crate::ledger_entry_type::LedgerEntryType;
     pub use crate::macros::no_unroll;
     pub use crate::sfield::*;
+    #[cfg(feature = "unstable-param-sig-interface")]
+    pub use crate::sig::{
+        Blob, IssueBytes, SigName, SigParamType, hook_sig_param, otxn_sig_param, otxn_sig_param_opt,
+    };
     pub use crate::slot_obj::{AmountBytes, CastTarget, IssueData, SlotKey, SlotObject};
     pub use crate::state::{
         StateKeyEncode, TypedStateKey, state_delete, state_foreign_get, state_foreign_get_typed,

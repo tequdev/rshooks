@@ -119,6 +119,28 @@ pub struct EntryDecl {
     pub hook_can_emit: Option<Vec<String>>,
     /// The `description = "..."` attribute value, if declared.
     pub description: Option<String>,
+    /// Declared signature parameters
+    /// (`docs/PARAM_SIGNATURE_DESIGN.md` §1/§4) — extra `ident: Type`
+    /// arguments on the `#[hook(..)]` fn, in wire-index order. `#[serde(default)]`
+    /// so a carrier built before this feature (no `sig_params` key at all)
+    /// still parses, as an empty list.
+    #[serde(default)]
+    pub sig_params: Vec<SigParamDecl>,
+}
+
+/// One declared signature parameter (`docs/PARAM_SIGNATURE_DESIGN.md`
+/// §1/§4). Index is the position within [`EntryDecl::sig_params`].
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SigParamDecl {
+    /// The declared name — the entry fn argument's own identifier.
+    pub field: String,
+    /// The `STI_*` type byte (`docs/PARAM_SIGNATURE_DESIGN.md` §2's table).
+    pub type_byte: u8,
+    /// The full declared `HookParameterName`, uppercase hex — resolved at
+    /// macro time (`docs/PARAM_SIGNATURE_DESIGN.md` §4), so the build tool
+    /// never re-derives it.
+    pub name_hex: String,
 }
 
 /// The trigger declaration for one entry, in the three-state-preserving wire
@@ -665,5 +687,44 @@ mod tests {
         assert!(resolved.hook_on.is_none());
         assert!(resolved.hook_on_incoming.is_some());
         assert!(resolved.hook_on_outgoing.is_some());
+    }
+
+    // --- `sig_params` (docs/PARAM_SIGNATURE_DESIGN.md §1/§4) ---
+
+    #[test]
+    fn entry_decl_without_sig_params_key_defaults_to_empty() {
+        // A carrier built before this feature has no `sig_params` key at
+        // all — `#[serde(default)]` must still parse it, as an empty list.
+        let on = r#"{"form":"omitted","HookOn":null,"HookOnIncoming":null,"HookOnOutgoing":null}"#;
+        let wasm = wasm_with_carriers(CHAIN_JSON, &entries_json(on, "null"));
+        let carriers = extract_chain_carriers(&wasm, "vault").expect("extraction succeeds");
+        assert!(carriers.hooks.entries[0].sig_params.is_empty());
+    }
+
+    #[test]
+    fn entry_decl_round_trips_sig_params() {
+        let on = r#"{"form":"omitted","HookOn":null,"HookOnIncoming":null,"HookOnOutgoing":null}"#;
+        let hooks = format!(
+            r#"{{"schema":"rshooks-hooks-v2","impl":"Vault","entries":[{{"index":0,"hook_fn":"increment","cbak_fn":null,"HookName":null,"on":{on},"HookCanEmit":null,"description":null,"sig_params":[{{"field":"account","type_byte":8,"name_hex":"5F5F005F085F6163636F756E74"}},{{"field":"count","type_byte":1,"name_hex":"5F5F015F015F636F756E74"}}]}}]}}"#
+        );
+        let wasm = wasm_with_carriers(CHAIN_JSON, &hooks);
+        let carriers = extract_chain_carriers(&wasm, "vault").expect("extraction succeeds");
+        let sig_params = &carriers.hooks.entries[0].sig_params;
+        assert_eq!(sig_params.len(), 2);
+        assert_eq!(sig_params[0].field, "account");
+        assert_eq!(sig_params[0].type_byte, 8);
+        assert_eq!(sig_params[0].name_hex, "5F5F005F085F6163636F756E74");
+        assert_eq!(sig_params[1].field, "count");
+        assert_eq!(sig_params[1].type_byte, 1);
+    }
+
+    #[test]
+    fn entry_decl_rejects_unknown_sig_param_field() {
+        let on = r#"{"form":"omitted","HookOn":null,"HookOnIncoming":null,"HookOnOutgoing":null}"#;
+        let hooks = format!(
+            r#"{{"schema":"rshooks-hooks-v2","impl":"Vault","entries":[{{"index":0,"hook_fn":"increment","cbak_fn":null,"HookName":null,"on":{on},"HookCanEmit":null,"description":null,"sig_params":[{{"field":"account","type_byte":8,"name_hex":"AA","unknown":1}}]}}]}}"#
+        );
+        let wasm = wasm_with_carriers(CHAIN_JSON, &hooks);
+        assert!(extract_chain_carriers(&wasm, "vault").is_err());
     }
 }

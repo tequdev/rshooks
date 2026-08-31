@@ -43,6 +43,17 @@ all-amendments = []
 # Default-off; forwards to `rshooks-core/testenv`. Never enable this from a
 # `wasm32` target.
 testenv = ["rshooks-core/testenv"]
+# Enables signature parameters on `#[hook(..)]` entry fns, per the Hook
+# Parameter Signature Interface draft (`docs/PARAM_SIGNATURE_DESIGN.md`).
+# `unstable-*` features are exempt from semver — breaking changes may land
+# in minor releases while the spec is a draft.
+unstable-param-sig-interface = ["rshooks-macros/unstable-param-sig-interface"]
+
+# Built with `unstable-param-sig-interface` on, so `rshooks::sig` appears in
+# published rustdoc — not `all-features`, since `host-panic-handler` must
+# never be enabled from a `std` context (see that feature's own comment).
+[package.metadata.docs.rs]
+features = ["unstable-param-sig-interface"]
 
 [lints]
 workspace = true
