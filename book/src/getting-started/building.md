@@ -58,32 +58,45 @@ and validation steps:
    sidecar. Covered in [Hook Chains](../concepts/chains.md) and [Per-Hook
    Attributes](../build/metadata.md).
 7. **Publish** — stages every artifact from this run, then atomically
-   updates `out/current` to point at it. A failed run never touches
-   `current`; it always resolves to the most recent complete, validated
-   build.
+   updates the output root's `current` entry (`out/current` below —
+   wherever `--out` points, or `<target>/rshooks/<crate-name>` by default;
+   see [Your First Hook](../getting-started/first-hook.md#what-lands-in-out))
+   to point at it. A failed run never touches `current`; it always resolves
+   to the most recent complete, validated build.
 
 Every wasm-producing step runs against the exact bytes that will be
-deployed — the printed WCE and `HookHash` describe the file actually
-written to `out/current/`, not an intermediate artifact.
+deployed — the WCE and `HookHash` recorded in that entry's metadata
+sidecar describe the file actually written to `out/current/`, not an
+intermediate artifact.
 
 ## Reading the printed report
 
-A successful `build` prints, per index, in order:
+`build` prints its progress as it goes: a discovery line, one
+`building entry <index> (...)` line per declared entry, then a `wrote ...`
+line for every published artifact once the whole chain has built
+successfully:
 
 ```text
-[0] main: worst-case instructions: hook=15 cbak=0
-[0] main: max nesting depth: 0
-[0] main: wrote out/current/0.main.wasm
-[0] main: size: 174 bytes
-[0] main: estimated SetHook fee: 870000 drops (0.870000 XAH)
-[0] main: wrote out/current/0.main.metadata.json
-```
-
-followed by the template lines once every index is done:
-
-```text
+discovery build (accept-all)
+building entry 0 (`main`)
+wrote out/current/0.main.wasm (174 bytes, estimated SetHook fee 870000 drops)
+wrote out/current/0.main.metadata.json
 wrote out/current/sethook.template.json
 wrote out/current/sethook.template.meta.json
+```
+
+`build` itself doesn't print the guard checker's or validator's numbers —
+those land in that entry's `<index>.<fn>.metadata.json` sidecar (the `WCE`
+object) instead. To see them on the terminal, run `rshooks check` against
+the binary `build` just wrote:
+
+```text
+$ rshooks check out/current/0.main.wasm
+worst-case instructions: hook=14 cbak=0
+max nesting depth: 0
+OK: out/current/0.main.wasm is a valid SetHook wasm binary
+size: 174 bytes
+estimated SetHook fee: 870000 drops (0.870000 XAH)
 ```
 
 - **`worst-case instructions`** is the guard checker's static upper bound

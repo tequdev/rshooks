@@ -233,3 +233,15 @@ Attributes](../build/metadata.md) for the full attribute reference,
 including the three-state semantics of an omitted vs. explicitly empty
 `can_emit`, and how it interacts with `on` and the other per-entry
 attributes.
+
+## Runtime-shaped transactions: `StoWriter`
+
+`txn_template!` requires the transaction's shape to be known at compile
+time — every field, and whether a nested `STArray`/`STObject` exists at
+all, is fixed by the declaration. A transaction whose shape depends on
+runtime data (Remit's `sfAmounts`, one entry per destination) needs
+[`rshooks::sto_writer::StoWriter`](sto-writer.md) instead: a bounded,
+allocation-free cursor over caller-owned storage with its own
+`prepare_for_emit()`/`Prepared::emit()` lifecycle, built directly on top of
+the same `Prepared` type this page's `prepare_for_emit()` returns. See
+[The `StoWriter` API](sto-writer.md).

@@ -139,37 +139,45 @@ Rollback, and Errors](../concepts/errors.md).
 From the crate's own directory:
 
 ```sh
-rshooks build
+rshooks build --out out
 ```
 
 or from elsewhere, pointing at its manifest:
 
 ```sh
-rshooks build --manifest-path my-hook/Cargo.toml
+rshooks build --manifest-path my-hook/Cargo.toml --out my-hook/out
 ```
 
-This compiles your crate once to discover its declared Hook(s), then once
-more per declared index, and post-processes each result — see [Building a
-Hook](building.md) for exactly what that pipeline does. A successful build
-prints something like:
+`--out out` picks where the build publishes its output; omit it and
+`rshooks build` publishes under `<target>/rshooks/<crate-name>` instead
+(see "What lands in `out/`" below). This compiles your crate once to
+discover its declared Hook(s), then once more per declared index, and
+post-processes each result — see [Building a Hook](building.md) for
+exactly what that pipeline does. A successful build prints something like:
 
 ```text
-[0] main: worst-case instructions: hook=15 cbak=0
-[0] main: max nesting depth: 0
-[0] main: wrote out/current/0.main.wasm
-[0] main: size: 174 bytes
-[0] main: estimated SetHook fee: 870000 drops (0.870000 XAH)
-[0] main: wrote out/current/0.main.metadata.json
+discovery build (my-hook)
+building entry 0 (`main`)
+wrote out/current/0.main.wasm (174 bytes, estimated SetHook fee 870000 drops)
+wrote out/current/0.main.metadata.json
 wrote out/current/sethook.template.json
 wrote out/current/sethook.template.meta.json
 ```
 
+The guard checker's/validator's own numbers (worst-case instructions, max
+nesting depth) aren't printed here — they land in the metadata sidecar
+below instead, or print on the terminal via `rshooks check out/current/0.main.wasm`;
+see [Building a Hook](building.md#reading-the-printed-report) for that
+report's exact shape.
+
 ## What lands in `out/`
 
-`rshooks build` writes into a generation directory under `out/`, with
-`out/current` symlinked to the latest one (see [Hook
-Chains](../concepts/chains.md) for why generations exist). For `AcceptAll`,
-`out/current/` contains:
+`rshooks build` writes into a generation directory under its output root
+— `out/` above, since `--out out` was passed; the default, if `--out` is
+omitted, is `<target>/rshooks/<crate-name>`, where `<target>` is cargo's
+own target directory — with `<root>/current` symlinked to the latest
+generation (see [Hook Chains](../concepts/chains.md) for why generations
+exist). For `AcceptAll`, `out/current/` contains:
 
 - **`0.main.wasm`** — the cleaned, SetHook-valid binary for index `0`:
   cargo's raw `cdylib` output with the `memory` export stripped and every
@@ -189,13 +197,24 @@ Chains](../concepts/chains.md) for why generations exist). For `AcceptAll`,
   "HookOn": "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF7FFFFFFFFFFFFFFFFFFBFFFFF",
   "HookCanEmit": null,
   "HookName": "616363657074",
-  "HookHash": "DCE6A3F81224AE89C557F04D73420D808D9009BCF1CFC1474396CD2DA2D4DF16",
+  "sig_params": [],
+  "HookHash": "12D34D6FE164F231503B564495565595F2246396497EBEC72606CC4FA2FAD28B",
   "WCE": {
-    "hook": 15,
+    "hook": 14,
     "cbak": 0
   },
+  "builder": {
+    "name": "rshooks-build",
+    "version": "0.1.1",
+    "rustc": "rustc 1.89.0 (29483883e 2025-08-04)"
+  },
   "human": {
-    "HookOn": ["Invoke"],
+    "on": {
+      "form": "list",
+      "HookOn": ["Invoke"],
+      "HookOnIncoming": null,
+      "HookOnOutgoing": null
+    },
     "HookCanEmit": null,
     "HookName": "accept"
   },
@@ -206,6 +225,12 @@ Chains](../concepts/chains.md) for why generations exist). For `AcceptAll`,
   }
 }
 ```
+
+  `sig_params` (the entry's declared typed signature parameters — empty
+  unless the `unstable-param-sig-interface` feature is on) and `builder`
+  (the toolchain provenance for this build) are additional fields this
+  sidecar carries; the full grammar for every field here is covered in
+  [Per-Hook Attributes](../build/metadata.md).
 
 - **`sethook.template.json`** / **`sethook.template.meta.json`** — a
   ready-to-edit `SetHook` transaction template covering every index this

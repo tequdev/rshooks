@@ -55,7 +55,24 @@ otxn/state accessors take. See [Slots and Ledger Objects](../data/slots.md).
 `crate::buf_eq::*` — `buf_eq_8`/`_20`/`_32`/`_33`/`_34`/`_40`/`_48`/`_64`:
 fixed-size buffer equality as straight-line word-compare code, avoiding the
 compiler-generated `bcmp`-style loop a plain `==` on a `[u8; N]` can lower to
-at `opt-level = "z"`. See [Guards and Loops](../concepts/guards.md).
+at `opt-level = "z"`. The same module also has `buf_cmp_20`, a loop-free
+160-bit big-endian ordering for two 20-byte buffers (e.g. two `AccountId`s)
+— XRPL/Xahau's "high"/"low" account ordering, used to canonicalize a pair of
+accounts (picking the low/high side of a `RippleState` trustline keylet).
+See [Guards and Loops](../concepts/guards.md).
+
+## `no_unroll`
+
+`crate::no_unroll` (re-exported at the crate root too) — routes a loop's
+induction variable through `core::hint::black_box` at its comparison, so
+LLVM can no longer prove the trip count at compile time and keeps the loop
+as one real `loop` construct instead of fully unrolling it. Only worth
+reaching for when a small, provably-bounded *outer* loop wrapping a
+`guard!`-protected *inner* loop would otherwise get fully unrolled at
+`opt-level = 3` — unrolling physically duplicates the inner loop, and the
+guard checker (which walks compiled bytecode) then counts its worst-case
+cost once per duplicate instead of once total. `while no_unroll(i) < N { ..
+}` in place of `while i < N { .. }`.
 
 ## Convert traits
 
@@ -67,14 +84,17 @@ Derives](../data/typed-data.md).
 
 ## The `decl` module: struct field handle types
 
-`crate::decl::{State, HookParam, OtxnParam, StateEntry, HookParamAt,
-OtxnParamAt}` — re-exported at the crate root *and* here in the prelude,
-since `State<V>`/`HookParam<V>`/`OtxnParam<V>` are the field types a
+`crate::decl::{State, HookParam, OtxnParam}` — re-exported at the crate
+root *and* here in the prelude, since these are the field types a
 `#[hooks]` struct's `#[state]`/`#[hook_param]`/`#[otxn_param]` fields are
 written with (see [Hook State](../data/state.md) and [Hook and Transaction
-Parameters](../data/parameters.md)). `StateEntry`/`HookParamAt`/
-`OtxnParamAt` are the handles `.at(args)` returns for a keyed/named-family
-field.
+Parameters](../data/parameters.md)). The rest of `decl` — `StateEntry`,
+`HookParamAt`, `OtxnParamAt` (the handles `.at(args)` returns for a
+keyed/named-family field) and the `*Spec`/`HookChainEntries` traits — is
+the macro-generated side of the handshake, not re-exported here or at the
+crate root; reach it at `rshooks::decl::StateEntry` etc. when a field's own
+`.at(args)` return type needs naming (e.g. in a helper function's
+signature).
 
 ## `HookError`/`Result`
 
@@ -110,6 +130,49 @@ take-once cell for templates and large buffers that should land in a wasm
 data segment/BSS rather than be materialized by runtime stores. See [Anatomy
 of a Hook](../concepts/anatomy.md).
 
+## Typed read views
+
+`crate::views::ledger::LedgerEntryCommonFields` and
+`crate::views::tx::{TransactionCommonFields, TransactionCommonSlotFields}`
+— the common-field traits every generated view (`views::tx::Payment`,
+`views::ledger::AccountRoot`, ...) implements, covering the fields every
+transaction (`sfAccount`, `sfFee`, `sfMemos`, ...) or every ledger entry
+(`sfLedgerEntryType`, `sfFlags`, ...) carries. Importing the prelude is
+enough to call these common accessors on any view; the view types
+themselves (one per transaction/ledger-entry format) live under
+`rshooks::views::{tx, ledger}` and are not globbed into the prelude —
+`use rshooks::views::tx::Payment;` explicitly. See `rshooks::views`'s own
+module doc comment for the full model (originating-transaction vs.
+slot-backed sources, `soeREQUIRED`/`soeOPTIONAL` field typing, the
+`active-amendments`/`all-amendments` format tiers).
+
+## `StoWriter`
+
+`crate::sto_writer::StoWriter` — the bounded, allocation-free writer for a
+runtime-sized `STObject`/`STArray` (a transaction whose shape
+`txn_template!` can't describe at compile time, e.g. Remit's `sfAmounts`).
+See [Emitting Transactions](../emit/emitting.md) and
+[The `StoWriter` API](../emit/sto-writer.md).
+
+## `LedgerEntryType`
+
+`crate::ledger_entry_type::LedgerEntryType` — the typed ledger-entry-type
+enum (`LedgerEntryType::AccountRoot`, ...), decoded from a ledger object's
+`sfLedgerEntryType` the same way `TxType` decodes a transaction's type.
+
+## Hook Parameter Signature Interface (`sig`), behind `unstable-param-sig-interface`
+
+`crate::sig::{Blob, IssueBytes, SigName, SigParamType, hook_sig_param,
+otxn_sig_param, otxn_sig_param_opt}` — re-exported in the prelude only when
+the **unstable** `unstable-param-sig-interface` cargo feature is enabled on
+`rshooks`; the `sig` module itself doesn't exist in the crate at all
+otherwise. This is the support layer behind `#[hook(..)]`'s signature-
+parameter fn arguments — see [Hook and Transaction
+Parameters](../data/parameters.md#signature-parameters-fn-arguments). (The
+module also has a `hook_sig_param_opt` function, the `hook_param` twin of
+`otxn_sig_param_opt`; it is not re-exported in the prelude, so reach it at
+`rshooks::sig::hook_sig_param_opt` if needed.)
+
 ## `TxType`
 
 `crate::tx_type::TxType` — the typed transaction-type enum (`TxType::Payment`,
@@ -118,8 +181,11 @@ lists. See [Reading the Originating Transaction](../data/otxn.md).
 
 ## Types
 
-`crate::types::*` — protocol value newtypes: `AccountId`, `Hash`, `StateKey`,
-`NameSpace`, `CurrencyCode`, and the length constants (`ACC_ID_LEN`,
+`crate::types::*` — protocol value newtypes: `AccountId`, `Hash`, `Keylet`,
+`StateKey`, `NameSpace`, `Nonce`, `PublicKey`, `CurrencyCode`,
+`IssuedAsset` (a `CurrencyCode` + issuing `AccountId` pair), the `STObject`/
+`STArray`/`Amount`/`Issue`/`Opaque` marker types `SField<T>` and
+`StoWriter`'s field writers take, and the length constants (`ACC_ID_LEN`,
 `STATE_KEY_LEN`, `EMIT_DETAILS_MAX_LEN`, ...).
 
 ## XFL / `XFLUnchecked`
@@ -137,11 +203,12 @@ and `#[derive(Clone)]` (macro) have.
 
 ## Constant families
 
-`rshooks_core::{consts::*, ls_flags::*, tts::*, tx_flags::*}` — the
-C-verbatim constant tables: `KEYLET_*`/`COMPARE_*` (`consts`), `lsfXxx`
-ledger-entry flags, `ttXxx` transaction-type codes, and `tfXxx`/`asfXxx`
-transaction/account flags. See [The Raw Layer](raw.md) for the full family
-list, including the two not re-exported here (`sfcodes`, `error`).
+`rshooks_core::{consts::*, lets::*, ls_flags::*, tts::*, tx_flags::*}` — the
+C-verbatim constant tables: `KEYLET_*`/`COMPARE_*` (`consts`), `ltXxx`
+ledger-entry-type codes, `lsfXxx` ledger-entry flags, `ttXxx`
+transaction-type codes, and `tfXxx`/`asfXxx` transaction/account flags. See
+[The Raw Layer](raw.md) for the full family list, including the ones not
+re-exported here (`sfcodes`, `error`, `backend`).
 
 ## Two deliberate absences
 
