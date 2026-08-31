@@ -16,15 +16,23 @@ cargo fmt --all --manifest-path examples/Cargo.toml
 """
 
 [tasks.lint]
-description = "Lint the root workspace (all targets) and the examples workspace (wasm32v1-none), denying warnings"
+description = "Lint the root workspace (all targets, plus rshooks in each amendment-availability state) and the examples workspace (wasm32v1-none), denying warnings"
 run = """
 cargo clippy --workspace --all-targets -- -D warnings
+# Cover the active-only and widest-wins generated surfaces too.
+cargo clippy -p rshooks --all-targets --features active-amendments -- -D warnings
+cargo clippy -p rshooks --all-targets --all-features -- -D warnings
 cargo clippy --manifest-path examples/Cargo.toml --workspace --target wasm32v1-none -- -D warnings
 """
 
 [tasks.test]
-description = "Run all workspace tests"
-run = "cargo test --workspace"
+description = "Run all workspace tests, plus rshooks in each amendment-availability state"
+run = """
+cargo test --workspace
+# Exercise generated availability gates in every state.
+cargo test -p rshooks --features active-amendments
+cargo test -p rshooks --all-features
+"""
 
 [tasks.build-wasm]
 description = "Build the no_std crates for the wasm32v1-none Hook target"
@@ -41,6 +49,7 @@ for dir in \
   01_accept-all 02_state-counter 03_hook-params 04_errors 05_firewall \
   06_guard-patterns 07_xfl-math 08_slot-ledger 09_state-foreign 10_emit-txn \
   12_typed-data 13_keylets 14_account-id-macro 15_slot-objects 17_sto-writer \
+  18_typed-views \
 ; do
   cargo run -p rshooks-build -- build --manifest-path "examples/${dir}/Cargo.toml" --out "examples/${dir}/out"
   cargo run -p rshooks-build -- check "examples/${dir}/out/current/0.main.wasm"

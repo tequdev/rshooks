@@ -266,7 +266,7 @@ impl TxType {
     /// known or unknown.
     #[inline(always)]
     #[must_use]
-    pub fn code(&self) -> u16 {
+    pub const fn code(&self) -> u16 {
         match *self {
             TxType::Payment => rshooks_core::ttPAYMENT,
             TxType::EscrowCreate => rshooks_core::ttESCROW_CREATE,
@@ -355,6 +355,7 @@ mod tests {
 
     #[test]
     fn round_trips_known_codes() {
+        const _: u16 = TxType::Unknown(0).code();
         let known: &[u16] = &[
             0, 1, 2, 3, 4, 5, 7, 8, 10, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 25, 26, 27, 28,
             29, 30, 31, 35, 36, 37, 38, 39, 40, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57,

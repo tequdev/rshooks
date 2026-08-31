@@ -6,10 +6,13 @@
 #![allow(clippy::arithmetic_side_effects, clippy::indexing_slicing)]
 #![allow(clippy::print_stderr)]
 
+mod availability;
 mod codegen;
 mod gen_core;
 mod ir;
 mod parse;
+mod protocol_ir;
+mod protocol_parse;
 mod render;
 
 use clap::{Parser, Subcommand};

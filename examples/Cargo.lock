@@ -597,6 +597,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "typed-views"
+version = "0.1.1"
+dependencies = [
+ "rshooks",
+ "rshooks-testenv",
+ "sha2",
+]
+
+[[package]]
 name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

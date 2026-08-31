@@ -138,7 +138,7 @@ pub fn generate(tts: &[ConstSpec]) -> Result<String> {
          /// known or unknown.\n\
          #[inline(always)]\n\
          #[must_use]\n\
-         pub fn code(&self) -> u16 {\n\
+         pub const fn code(&self) -> u16 {\n\
          match *self {\n",
     );
     body.push_str(&code_arms);
@@ -154,6 +154,7 @@ pub fn generate(tts: &[ConstSpec]) -> Result<String> {
          \n\
          #[test]\n\
          fn round_trips_known_codes() {{\n\
+         const _: u16 = TxType::Unknown(0).code();\n\
          let known: &[u16] = &[{known_codes}];\n\
          for &code in known {{\n\
          assert_eq!(\n\

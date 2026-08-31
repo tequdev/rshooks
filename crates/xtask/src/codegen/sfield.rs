@@ -1,8 +1,5 @@
-//! Generates `crates/rshooks/src/sfield.rs`: typed `SField<T>` field
-//! constants mirroring `rshooks_core::sfcodes`'s raw `sfXxx` `u32` codes, from
-//! `sfcodes.h`'s parsed [`ConstSpec`]s (`crates/xtask/src/ir.rs`,
-//! `hook_api.json`) — the same source data [`super::sfcodes`] renders as
-//! rshooks-core's raw `u32` constants.
+//! Generates typed `SField<T>` constants from the same parsed `sfcodes.h`
+//! data used for `rshooks_core::sfcodes`.
 //!
 //! Like [`super::tx_type`] — the two generators whose output lands in
 //! `rshooks` rather than `rshooks-core` — a typed mirror is the
@@ -12,24 +9,24 @@
 //! function of the serialized type ID packed into its own code — so it is
 //! generated rather than hand-maintained, exactly as `sfcodes.rs` is.
 //!
-//! The `SField<T>` type and the wire-type markers it names are hand-written
-//! in `rshooks`'s `types` module; only the 325 constants are generated
-//! here. That placement is deliberate: a field constant describes the wire
-//! format and must not depend on the slot layer that happens to read it.
+//! `SField<T>` and its wire markers remain hand-written in `rshooks::types`.
 
 use std::fmt::Write as _;
 
 use anyhow::{Context, Result};
 
+use std::collections::BTreeMap;
+
 use super::with_generated_marker;
+use crate::availability::Tier;
 use crate::ir::ConstSpec;
 use crate::render::render_shift_add;
 
 const MODULE_DOC: &str = "\
 //! Typed serialized-field constants ([`SField<T>`](crate::types::SField)).
 //!
-//! One constant per `sfXxx` code in [`rshooks_core::sfcodes`], carrying the
-//! Rust type that field's value reads back as. `sfSequence` is an
+//! One constant per **usable** `sfXxx` code, carrying the Rust type that
+//! field's value reads back as. `sfSequence` is an
 //! `SField<u32>`, `sfAccount` an `SField<AccountId>`, `sfBalance` an
 //! `SField<Amount>` — so
 //! [`SlotObject::get`](crate::slot_obj::SlotObject::get) can hand back an
@@ -46,6 +43,20 @@ const MODULE_DOC: &str = "\
 //! const SEQ: u32 = sfSequence.code();
 //! assert_eq!(SEQ, rshooks::raw::sfcodes::sfSequence);
 //! ```
+//!
+//! # Availability
+//!
+//! Constants follow the availability of the formats that use them: active
+//! fields are always present, pending fields are excluded by
+//! `active-amendments`, and dormant fields require `all-amendments`.
+//! Unreferenced structural fields stay available; curated overrides cover
+//! field-level amendment gates. Raw codes always remain in
+//! `rshooks::raw::sfcodes`.
+//!
+//! [`crate::tx_type::TxType`] and [`crate::ledger_entry_type::LedgerEntryType`]
+//! stay exhaustive for the opposite reason: they *decode* wire values rather
+//! than offering capability, and a decoder that cannot name a code it might
+//! receive is strictly worse than one that can.
 //!
 //! # How the value type is chosen
 //!
@@ -93,9 +104,8 @@ fn value_type(type_id: u32) -> Option<&'static str> {
     }
 }
 
-/// A human-readable name for a serialized type ID, for the generated
-/// per-constant doc comment. Unknown IDs are rendered numerically.
-fn type_id_name(type_id: u32) -> String {
+/// Human-readable serialized type name shared with view documentation.
+pub fn type_id_name(type_id: u32) -> String {
     match type_id {
         1 => "UInt16".into(),
         2 => "UInt32".into(),
@@ -129,11 +139,15 @@ fn type_id_name(type_id: u32) -> String {
 /// parse, and `typed.code() == raw` holds by construction (pinned anyway by
 /// a 325-name parity test, because "by construction" is a claim worth
 /// checking).
-pub fn generate(sfcodes: &[ConstSpec]) -> Result<String> {
+pub fn generate(sfcodes: &[ConstSpec], field_tiers: &BTreeMap<String, Tier>) -> Result<String> {
     let mut body =
         String::from("\n#![allow(non_upper_case_globals)]\n\nuse crate::types::SField;\n\n");
+    let mut rendered: Vec<&ConstSpec> = Vec::with_capacity(sfcodes.len());
 
     for d in sfcodes {
+        let tier = field_tiers.get(&d.name).copied().unwrap_or(Tier::Active);
+        rendered.push(d);
+
         let value = render_shift_add(&d.c_expr)?;
         let type_id = serialized_type_id(&value)
             .with_context(|| format!("deriving the serialized type ID of `{}`", d.name))?;
@@ -146,6 +160,24 @@ pub fn generate(sfcodes: &[ConstSpec]) -> Result<String> {
             id_name = type_id_name(type_id),
         )
         .context("writing constant doc")?;
+        match tier {
+            Tier::Active => {}
+            Tier::Pending => writeln!(
+                body,
+                "///\n/// Pending amendment; excluded by the `{narrow}` feature.",
+                narrow = crate::availability::ACTIVE_ONLY_FEATURE,
+            )
+            .context("writing a pending-tier doc note")?,
+            Tier::Dormant => writeln!(
+                body,
+                "///\n/// Dormant on Xahau mainnet; requires the `{all}` feature.",
+                all = crate::availability::ALL_FEATURE,
+            )
+            .context("writing a dormant-tier doc note")?,
+        }
+        if let Some(attr) = tier.cfg_attr() {
+            writeln!(body, "{attr}").context("writing a tier cfg")?;
+        }
         writeln!(
             body,
             "pub const {name}: SField<{ty}> = SField::new({value});",
@@ -154,15 +186,14 @@ pub fn generate(sfcodes: &[ConstSpec]) -> Result<String> {
         .context("writing constant")?;
     }
 
-    // The parity check, generated alongside the table it checks: one
-    // assertion per constant, so "typed.code() == raw" is verified for all
-    // 325 names rather than a hand-picked sample. Generated because a
-    // hand-written list would drift the moment upstream adds a field — the
-    // exact failure it exists to catch.
     body.push_str(
-        "\n#[cfg(test)]\nmod parity {\n         //! Every typed constant equals the raw `sfcodes` constant of the\n         //! same name. Holds by construction — both tables are rendered\n         //! from one parse by `cargo xtask gen-core` — which is exactly why\n         //! it is worth asserting: \"by construction\" stops being true the\n         //! moment either generator changes shape.\n         \n    #[test]\n    fn typed_field_codes_match_raw() {\n",
+        "\n#[cfg(test)]\nmod parity {\n    //! Verifies every typed constant against its raw counterpart.\n\n    #[test]\n    fn typed_field_codes_match_raw() {\n",
     );
-    for d in sfcodes {
+    for d in &rendered {
+        let tier = field_tiers.get(&d.name).copied().unwrap_or(Tier::Active);
+        if let Some(attr) = tier.cfg_attr() {
+            writeln!(body, "        {attr}").context("writing a parity-assertion cfg")?;
+        }
         writeln!(
             body,
             "        assert_eq!(super::{name}.code(), ::rshooks_core::sfcodes::{name}, \"{name}\");",
@@ -173,7 +204,7 @@ pub fn generate(sfcodes: &[ConstSpec]) -> Result<String> {
     writeln!(
         body,
         "        assert_eq!({count}, {count}, \"generated for {count} constants\");",
-        count = sfcodes.len(),
+        count = rendered.len(),
     )
     .context("writing parity count")?;
     body.push_str("    }\n}\n");

@@ -39,21 +39,30 @@ trap 'rm -rf "${TMP_DIR}"' EXIT INT TERM
 
 overall_status=0
 
+#   sync_group <label> <vendor-dir> <upstream-dir> <file>...
+#
+# Pass an empty <upstream-dir> and repo-relative file paths when a group spans
+# multiple upstream directories. Files are always vendored by basename.
 sync_group() {
     name="$1"
-    vendor_dir="${ROOT_DIR}/$2"
+    vendor_rel="$2"
+    vendor_dir="${ROOT_DIR}/${vendor_rel}"
     upstream_path="$3"
     shift 3
     files="$*"
 
-    base_url="https://raw.githubusercontent.com/${REPO}/refs/heads/${BRANCH}/${upstream_path}"
+    base_url="https://raw.githubusercontent.com/${REPO}/refs/heads/${BRANCH}"
+    if [ -n "${upstream_path}" ]; then
+        base_url="${base_url}/${upstream_path}"
+    fi
     sums_file="${vendor_dir}/SHA256SUMS"
     group_tmp="${TMP_DIR}/${name}"
     mkdir -p "${group_tmp}"
 
     echo "[${name}] fetching from ${REPO}@${BRANCH}/${upstream_path} ..."
     for f in ${files}; do
-        if ! curl -sfL "${base_url}/${f}" -o "${group_tmp}/${f}"; then
+        b="$(basename "${f}")"
+        if ! curl -sfL "${base_url}/${f}" -o "${group_tmp}/${b}"; then
             echo "error: failed to download ${base_url}/${f}" >&2
             exit 1
         fi
@@ -63,18 +72,20 @@ sync_group() {
         group_status=0
 
         for f in ${files}; do
-            if ! cmp -s "${group_tmp}/${f}" "${vendor_dir}/${f}"; then
-                echo "DRIFT: [${name}] ${f} differs from upstream ${REPO}@${BRANCH}" >&2
-                diff -u "${vendor_dir}/${f}" "${group_tmp}/${f}" | head -40 >&2 || true
+            b="$(basename "${f}")"
+            if ! cmp -s "${group_tmp}/${b}" "${vendor_dir}/${b}"; then
+                echo "DRIFT: [${name}] ${b} differs from upstream ${REPO}@${BRANCH}" >&2
+                diff -u "${vendor_dir}/${b}" "${group_tmp}/${b}" | head -40 >&2 || true
                 group_status=1
             fi
         done
 
         for f in ${files}; do
-            want="$(awk -v f="${f}" '$2 == f {print $1}' "${sums_file}")"
-            got="$(sha256 "${vendor_dir}/${f}")"
+            b="$(basename "${f}")"
+            want="$(awk -v f="${b}" '$2 == f {print $1}' "${sums_file}")"
+            got="$(sha256 "${vendor_dir}/${b}")"
             if [ "${want}" != "${got}" ]; then
-                echo "DRIFT: [${name}] ${f} does not match SHA256SUMS (want ${want}, got ${got})" >&2
+                echo "DRIFT: [${name}] ${b} does not match SHA256SUMS (want ${want}, got ${got})" >&2
                 group_status=1
             fi
         done
@@ -89,22 +100,24 @@ sync_group() {
 
     changed=0
     for f in ${files}; do
-        if ! cmp -s "${group_tmp}/${f}" "${vendor_dir}/${f}"; then
-            cp "${group_tmp}/${f}" "${vendor_dir}/${f}"
-            echo "[${name}] updated: ${f}"
+        b="$(basename "${f}")"
+        if ! cmp -s "${group_tmp}/${b}" "${vendor_dir}/${b}"; then
+            cp "${group_tmp}/${b}" "${vendor_dir}/${b}"
+            echo "[${name}] updated: ${b}"
             changed=1
         else
-            echo "[${name}] unchanged: ${f}"
+            echo "[${name}] unchanged: ${b}"
         fi
     done
 
     : > "${sums_file}"
     for f in ${files}; do
-        printf '%s  %s\n' "$(sha256 "${vendor_dir}/${f}")" "${f}" >> "${sums_file}"
+        b="$(basename "${f}")"
+        printf '%s  %s\n' "$(sha256 "${vendor_dir}/${b}")" "${b}" >> "${sums_file}"
     done
 
     if [ "${changed}" -eq 1 ]; then
-        echo "[${name}] vendored files updated. Review with:  git diff ${2}"
+        echo "[${name}] vendored files updated. Review with:  git diff ${vendor_rel}"
     else
         echo "[${name}] already in sync with ${REPO}@${BRANCH}"
     fi
@@ -120,6 +133,20 @@ sync_group "hook-headers" \
     "hook" \
     error.h extern.h hookapi.h ls_flags.h macro.h sfcodes.h tts.h tx_flags.h
 
+# These files span two upstream directories, hence the empty upstream path.
+# features.macro is evidence for the curated format_availability.json; the
+# generator does not parse it.
+sync_group "protocol-formats" \
+    "crates/rshooks-core/vendor/xahaud-protocol" \
+    "" \
+    include/xrpl/protocol/detail/sfields.macro \
+    include/xrpl/protocol/detail/transactions.macro \
+    include/xrpl/protocol/detail/ledger_entries.macro \
+    include/xrpl/protocol/detail/features.macro \
+    src/libxrpl/protocol/TxFormats.cpp \
+    src/libxrpl/protocol/LedgerFormats.cpp \
+    src/libxrpl/protocol/InnerObjectFormats.cpp
+
 if [ "${MODE}" = "check" ]; then
     if [ "${overall_status}" -ne 0 ]; then
         echo "" >&2
@@ -131,7 +158,8 @@ fi
 
 echo ""
 echo "Done. Review any changes with:  git diff crates/rshooks-build/vendor/ crates/rshooks-core/vendor/"
-echo "If the hook-headers group changed, regenerate rshooks-core's translated sources:"
+echo "If the hook headers or protocol definitions changed, regenerate:"
 echo "  cargo xtask gen-core"
+echo "If features.macro changed, review format_availability.json."
 echo "Then run the test suite (vendored behavior/translations may have changed):"
 echo "  cargo test --workspace"

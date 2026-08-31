@@ -43,7 +43,7 @@ fn surface() {
     let _: SField<u8> = sfCloseResolution;
     let _: SField<u16> = sfTransactionType;
     let _: SField<STObject> = sfMemo;
-    let _: SField<Issue> = sfAsset;
+    let _: SField<Issue> = sfClaimCurrency;
     // Blob / Hash160 / PathSet -> Opaque
     let _: SField<Opaque> = sfSigningPubKey;
     let _: SField<Opaque> = sfTakerPaysCurrency;
@@ -98,7 +98,7 @@ fn navigation_types() {
             .assume_type::<CurrencyCode>()
             .value()?;
         let _: AmountBytes = root.get(sfBalance)?.value()?;
-        let _: IssueData = root.get(sfAsset)?.value()?;
+        let _: IssueData = root.get(sfClaimCurrency)?.value()?;
         // take_* recycling
         let _: u32 = root.get(sfSequence)?.take_value()?;
         let _: XFL = root.get(sfBalance)?.take_xfl()?;
@@ -130,37 +130,83 @@ fn slot_path_shapes() {
     assert!(r.is_err());
 }
 
-// ---------------------------------------------------------------------------
-// Field-table parity
-// ---------------------------------------------------------------------------
-//
-// The full 325-name `typed.code() == raw` comparison is *generated* into
-// `sfield.rs` alongside the table it checks (`cargo xtask gen-core`), so it
-// cannot drift when upstream adds a field — run it with
-// `cargo test -p rshooks --lib parity`. What is left here is the shape
-// check the generated test cannot make: that both files declare the same
-// set of names in the first place.
+// Generated parity tests compare values; this test checks names and cfg gates.
+fn gated_names(src: &str) -> std::collections::BTreeMap<String, Option<String>> {
+    let lines: Vec<&str> = src.lines().collect();
+    let mut out = std::collections::BTreeMap::new();
+    for (i, line) in lines.iter().enumerate() {
+        let Some(rest) = line.trim().strip_prefix("pub const ") else {
+            continue;
+        };
+        let Some(name) = rest.split(':').next() else {
+            continue;
+        };
+        let cfg = i
+            .checked_sub(1)
+            .and_then(|j| lines.get(j))
+            .map(|l| l.trim())
+            .filter(|l| l.starts_with("#[cfg"))
+            .map(str::to_string);
+        out.insert(name.to_string(), cfg);
+    }
+    out
+}
 
 #[test]
-fn both_tables_declare_the_same_names() {
-    let typed = include_str!("../src/sfield.rs");
-    let raw = include_str!("../../rshooks-core/src/sfcodes.rs");
+fn both_tables_name_the_same_fields_and_the_typed_one_gates_by_availability() {
+    let typed = gated_names(include_str!("../src/sfield.rs"));
+    let raw = gated_names(include_str!("../../rshooks-core/src/sfcodes.rs"));
 
-    let names = |src: &str| -> std::collections::BTreeSet<String> {
-        src.lines()
-            .filter_map(|l| l.trim().strip_prefix("pub const "))
-            .filter_map(|l| l.split(':').next())
-            .map(str::to_string)
-            .collect()
-    };
-    let typed_names = names(typed);
-    let raw_names = names(raw);
-
-    assert_eq!(typed_names.len(), 325, "expected 325 typed constants");
+    assert_eq!(raw.len(), 325, "the raw table must stay complete");
     assert_eq!(
-        typed_names, raw_names,
-        "the typed and raw field tables declare different names",
+        typed.keys().collect::<Vec<_>>(),
+        raw.keys().collect::<Vec<_>>(),
+        "the two tables name different fields",
     );
+    assert!(
+        raw.values().all(Option::is_none),
+        "the raw table must never be gated — it mirrors the wire protocol",
+    );
+
+    let cfg_of = |n: &str| typed.get(n).cloned().flatten();
+    const PENDING: &str =
+        "#[cfg(any(not(feature = \"active-amendments\"), feature = \"all-amendments\"))]";
+    const DORMANT: &str = "#[cfg(feature = \"all-amendments\")]";
+
+    for n in [
+        "sfAccount",
+        "sfAmount",
+        "sfClaimCurrency",
+        "sfLedgerEntryType",
+    ] {
+        assert_eq!(cfg_of(n), None, "{n} is active and must not be gated");
+    }
+    // The pending tier is empty, but no generated field may invent another gate.
+    for (n, cfg) in &typed {
+        if let Some(cfg) = cfg {
+            assert!(
+                cfg == PENDING || cfg == DORMANT,
+                "{n} carries an unknown gate: {cfg}",
+            );
+        }
+    }
+    // Covers format-derived, curator-assigned, and field-override dormancy.
+    for n in [
+        "sfAsset",
+        "sfAsset2",
+        "sfXChainBridge",
+        "sfNFTokenTaxon",
+        "sfCredentialIDs",
+    ] {
+        assert_eq!(cfg_of(n).as_deref(), Some(DORMANT), "{n} should be dormant");
+    }
+}
+
+// Complements the source-text checks with a feature-gated compile-time check.
+#[cfg(feature = "all-amendments")]
+#[test]
+fn a_dormant_constant_is_nameable_under_all_amendments() {
+    assert_eq!(sfAsset.code(), rshooks::raw::sfcodes::sfAsset);
 }
 
 // ---------------------------------------------------------------------------
