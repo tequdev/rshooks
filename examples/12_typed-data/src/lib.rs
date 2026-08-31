@@ -1,16 +1,8 @@
-//! A per-account deposit ledger using typed state, Hook parameters, and
-//! signature parameters.
+//! A per-account deposit ledger using typed state and Hook parameters.
 //!
 //! `deposit` creates or extends a locked balance; `withdraw` removes it once
 //! its lock window expires. The `CFG` parameter configures the minimum amount
-//! and lock window, while `ADMIN_PAUSE` can disable new deposits. Which
-//! action to run, and how much, arrive as declared *signature parameters*
-//! (`docs/PARAM_SIGNATURE_DESIGN.md`) — `main`'s own `action`/`amount`
-//! arguments — rather than a hand-packed `#[otxn_param(..)]` struct: this
-//! example pairs the two parameter surfaces this crate offers side by side,
-//! `CFG`/`ADMIN_PAUSE` (struct-field `HookParam`) and `action`/`amount`
-//! (entry-fn signature parameters), so their differences are visible in one
-//! hook.
+//! and lock window, while `ADMIN_PAUSE` can disable new deposits.
 
 #![no_std]
 
@@ -20,9 +12,9 @@ use rshooks::*;
 /// Discriminant for deposit records.
 const DEPOSIT_TAG: u8 = 1;
 
-/// `action` signature parameter value for a deposit.
+/// `Instruction::action` value for a deposit.
 const ACTION_DEPOSIT: u8 = 1;
-/// `action` signature parameter value for a withdrawal.
+/// `Instruction::action` value for a withdrawal.
 const ACTION_WITHDRAW: u8 = 2;
 
 /// Default minimum deposit in drops.
@@ -53,6 +45,14 @@ struct Config {
     lock_ledgers: u32,
 }
 
+/// Per-invocation instruction, read from the `INS` originating-transaction
+/// parameter.
+#[derive(ParamValue)]
+struct Instruction {
+    action: u8,
+    amount: u64,
+}
+
 /// Composite name for administrative parameters.
 #[derive(ParamName, Clone, Copy)]
 struct AdminName {
@@ -77,42 +77,33 @@ const ADMIN_PAUSE_NAME: AdminName = AdminName {
 
 hook_errors! {
     /// `typed-data` rollback codes.
-    ///
-    /// Numbered from 16, not 1: this hook declares signature parameters
-    /// (`main`'s own `action`/`amount` arguments — `docs/PARAM_SIGNATURE_DESIGN.md`
-    /// §1), and the `#[hooks]`-generated prologue rolls back with the
-    /// argument's own 0-based index as its code (here, `0` or `1`). A
-    /// hook-authored code has to stay clear of every possible argument
-    /// index (`0x00..=0x0F`, i.e. `0..=15`) or the two rollback sources
-    /// become ambiguous by code alone — so every variant here starts at
-    /// `16`, the convention `book/src/data/parameters.md` documents for any
-    /// hook that declares signature parameters.
     pub enum TypedDataError {
         /// The originating transaction has no `sfAccount` field (should be
         /// unreachable — every real transaction has one).
-        AccountFieldMissing = 16,
-        /// `action` is neither [`ACTION_DEPOSIT`] nor [`ACTION_WITHDRAW`].
-        /// (A missing/malformed `action`/`amount` signature parameter is
-        /// caught earlier — by the `#[hooks]`-generated prologue, before
-        /// `main`'s body ever runs — and never reaches this variant.)
-        UnknownAction = 17,
+        AccountFieldMissing = 1,
+        /// The `INS` Hook parameter is missing, or not exactly 9 bytes
+        /// (`Instruction`'s encoded length).
+        InstructionMissing = 2,
+        /// `Instruction::action` is neither [`ACTION_DEPOSIT`] nor
+        /// [`ACTION_WITHDRAW`].
+        UnknownAction = 3,
         /// A `deposit` instruction's amount fell below [`Config::min_amount`].
-        BelowMinimum = 18,
+        BelowMinimum = 4,
         /// A `withdraw` instruction, but the account has no outstanding
         /// deposit.
-        NothingToWithdraw = 19,
+        NothingToWithdraw = 5,
         /// A `withdraw` instruction, but the deposit's lock window hasn't
         /// elapsed yet.
-        StillLocked = 20,
+        StillLocked = 6,
         /// Reading this account's `DepositValue` failed with something
         /// other than "no entry" (`state`'s `DOESNT_EXIST`).
-        StateReadFailed = 21,
+        StateReadFailed = 7,
         /// Writing the updated `DepositValue` back — or, on a full
         /// withdrawal, deleting it — failed.
-        StateSetFailed = 22,
+        StateSetFailed = 8,
         /// A `deposit` instruction, but the [`AdminName`] pause switch is
         /// currently set. Withdrawals are never rejected for this reason.
-        DepositsPaused = 23,
+        DepositsPaused = 9,
     }
 }
 
@@ -128,6 +119,11 @@ pub struct TypedData {
     /// [`DEFAULT_MIN_AMOUNT`]/[`DEFAULT_LOCK_LEDGERS`] when absent.
     #[hook_param(name = b"CFG", default = Config { min_amount: DEFAULT_MIN_AMOUNT, lock_ledgers: DEFAULT_LOCK_LEDGERS })]
     config: HookParam<Config>,
+
+    /// Per-invocation instruction (`INS`). Missing or malformed is a
+    /// rollback, never a silent default.
+    #[otxn_param(name = b"INS", required)]
+    instruction: OtxnParam<Instruction>,
 
     /// Administrative deposit pause switch, addressed by [`AdminName`].
     /// Falls back to "not paused" when absent.
@@ -171,23 +167,20 @@ const EMPTY_DEPOSIT: DepositValue = DepositValue {
 
 #[hooks]
 impl TypedData {
-    /// Hook entry point. `action`(0)/`amount`(1) are declared signature
-    /// parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §1) — extra arguments
-    /// after `&self` on this `#[hook(..)]` fn. Both are already decoded by
-    /// the time this body runs: the `#[hooks]`-generated prologue reads and
-    /// big-endian-decodes each from the originating transaction's own Hook
-    /// parameters (`otxn_param`, per the interface's declared
-    /// `HookParameterName` convention — never this crate's own
-    /// little-endian `ParamValue` wire format, contrast `CFG` below), and
-    /// rolls back with `b"rshooks: bad sig param '<name>'"` (code = the
-    /// argument's index) before the body ever sees a partially-decoded
-    /// value. See the module doc comment for the full behavior.
+    /// Hook entry point. See the module doc comment for the full behavior.
     #[hook(0, on = [Invoke])]
-    fn main(&self, action: u8, amount: u64) -> HookResult {
+    fn main(&self) -> HookResult {
         let Ok(owner) = otxn_field_typed(sfAccount) else {
             rollback!(
                 b"typed-data: sfAccount missing from the originating transaction",
                 TypedDataError::AccountFieldMissing
+            )
+        };
+
+        let Ok(instruction) = self.otxn_param.instruction.get_required() else {
+            rollback!(
+                b"typed-data: INS parameter missing or malformed",
+                TypedDataError::InstructionMissing
             )
         };
 
@@ -206,7 +199,7 @@ impl TypedData {
 
         let cfg = config();
 
-        let next = match action {
+        let next = match instruction.action {
             ACTION_DEPOSIT => {
                 if deposits_paused() {
                     rollback!(
@@ -214,14 +207,14 @@ impl TypedData {
                         TypedDataError::DepositsPaused
                     );
                 }
-                if amount < cfg.min_amount {
+                if instruction.amount < cfg.min_amount {
                     rollback!(
                         b"typed-data: deposit below configured minimum",
                         TypedDataError::BelowMinimum
                     );
                 }
                 DepositValue {
-                    amount: current.amount.wrapping_add(amount),
+                    amount: current.amount.wrapping_add(instruction.amount),
                     deadline: ledger_seq().wrapping_add(cfg.lock_ledgers),
                     flags: 1,
                 }
@@ -248,7 +241,10 @@ impl TypedData {
                 }
                 accept!(b"typed-data: ok", 0)
             }
-            _ => rollback!(b"typed-data: unknown action", TypedDataError::UnknownAction),
+            _ => rollback!(
+                b"typed-data: unknown INS action",
+                TypedDataError::UnknownAction
+            ),
         };
 
         if deposit.set(&next).is_err() {

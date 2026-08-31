@@ -2,29 +2,20 @@
 //! `TestEnv::invoke` against the real `TypedResults` chain — no wasm build,
 //! no node. Covers both entries: the typed `deposit` (`Ok`/`?`-rollback
 //! paths, and that the msg-clause message from `DepositError` reaches
-//! `HookExit.msg` byte-for-byte) and the raw-style `reset`. `deposit`'s own
-//! `amount` is a declared signature parameter
-//! (`docs/PARAM_SIGNATURE_DESIGN.md` §1) — seeded here via
-//! [`rshooks::sig_name!`], exactly like
-//! `crates/rshooks-testenv/tests/sig_params.rs`. See
+//! `HookExit.msg` byte-for-byte) and the raw-style `reset`. See
 //! `book/src/testing/unit-tests.md` for the general walkthrough this file
 //! follows.
 
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, missing_docs)]
 
-use rshooks::sig_name;
 use rshooks_testenv::prelude::*;
 use typed_results::{DepositError, TypedResults};
-
-/// The declared `HookParameterName` for `deposit`'s own `amount` argument
-/// (index 0, `u64`/`STI_UINT64`).
-const AMOUNT_NAME: [u8; 12] = sig_name!(0, u64, b"amount");
 
 fn env_with_amount(amount: u64) -> TestEnv {
     TestEnv::new().hook_account([1u8; 20]).otxn(
         Otxn::new(TxType::Invoke)
             .account([2u8; 20])
-            .param(&AMOUNT_NAME, &amount.to_be_bytes()),
+            .param(b"AMT", &amount.to_be_bytes()),
     )
 }
 
@@ -47,33 +38,19 @@ fn deposit_sums_across_invocations() {
 }
 
 #[test]
-fn missing_amount_rolls_back_from_the_generated_prologue() {
-    // No `amount` signature parameter configured: the `#[hooks]`-generated
-    // prologue's own `otxn_sig_param` read fails, and it rolls back
-    // directly — `deposit`'s body (and so `DepositError`) is never reached
-    // at all (`docs/PARAM_SIGNATURE_DESIGN.md` §1's "Generated prologue").
+fn missing_amount_rolls_back_with_the_msg_clause_text() {
+    // No `AMT` param configured: `get_required()` fails, `?` propagates
+    // `DepositError::BadAmount` into `HookResult`'s `Err` side, and
+    // `EntryReturn::finish` calls `rollback` with the `hook_errors!`
+    // msg-clause bytes and the variant's code — proving both travel through
+    // the `From<DepositError> for Rollback` conversion intact.
     let env = TestEnv::new()
         .hook_account([1u8; 20])
         .otxn(Otxn::new(TxType::Invoke).account([2u8; 20]));
     let exit = env.invoke::<TypedResults>(0);
     assert_eq!(exit.exit, ExitType::Rollback, "{exit:?}");
-    assert_eq!(exit.code, 0); // `amount` is argument index 0.
-    assert_eq!(exit.msg, b"rshooks: bad sig param 'amount'");
-    assert_eq!(env.state_typed::<u64>(b"counter"), None);
-}
-
-#[test]
-fn short_amount_value_rolls_back_from_the_generated_prologue() {
-    // `amount` decodes as `u64` (8 bytes BE); one byte is too short.
-    let env = TestEnv::new().hook_account([1u8; 20]).otxn(
-        Otxn::new(TxType::Invoke)
-            .account([2u8; 20])
-            .param(&AMOUNT_NAME, &[0x07]),
-    );
-    let exit = env.invoke::<TypedResults>(0);
-    assert_eq!(exit.exit, ExitType::Rollback, "{exit:?}");
-    assert_eq!(exit.code, 0);
-    assert_eq!(exit.msg, b"rshooks: bad sig param 'amount'");
+    assert_eq!(exit.code, DepositError::BadAmount.code());
+    assert_eq!(exit.msg, b"typed-results: bad AMT parameter");
     assert_eq!(env.state_typed::<u64>(b"counter"), None);
 }
 
