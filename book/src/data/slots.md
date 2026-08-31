@@ -162,10 +162,10 @@ while i < LOOP_ITERATIONS {
 }
 ```
 
-`examples/15_slot-objects` proves this live: a 260-iteration loop of plain
+`examples/15_slot-objects` proves this live: a 256-iteration loop of plain
 `.get()` + `.value()` calls (over the 255-slot budget) would exhaust the
 budget partway through, but the same loop through `take_value()` completes
-all 260 iterations — including a separate 260-iteration loop of *failing*
+all 256 iterations — including a separate 256-iteration loop of *failing*
 `take_value()` calls, proving the clear happens on the failure path too, and
 one of failing `try_cast`s, proving the same for cast failures.
 
