@@ -252,6 +252,11 @@ near-zero cost of the plain `CFG` tag used elsewhere in that same hook.
 
 ## Signature parameters (fn arguments)
 
+> This section's surface requires the `unstable-param-sig-interface`
+> feature: `rshooks = { version = "…", features = ["unstable-param-sig-interface"] }`.
+> `unstable-*` features track draft specs and are exempt from semver —
+> breaking changes may land in a minor release while the spec is a draft.
+
 Both surfaces above pair a name with a value type through this crate's own
 choices (a struct field, `default`/`required`). The **Hook Parameter
 Signature Interface** is a different, protocol-level convention: a
@@ -341,8 +346,8 @@ immediately, with:
 - code = the argument's own 0-based index
 
 before the body ever runs, so the body never sees a partially-decoded
-invocation. See `examples/18_param-signature` and `examples/12_typed-data`
-for this rollback exercised end-to-end (both hand-written unit tests via
+invocation. See `examples/18_param-signature` for this rollback exercised
+end-to-end (both a hand-written unit test via
 `rshooks_testenv::TestEnv::invoke`, and e2e).
 
 #### The `>= 16` convention for hook-authored rollback codes
@@ -355,8 +360,8 @@ and your own body) become ambiguous by code alone: a caller inspecting
 `HookReturnCode` in isolation can no longer tell "argument 3 was malformed"
 from "my own error variant 3" without also checking the message. Every
 `rshooks` example that declares signature parameters and its own
-`hook_errors!` enum (`examples/12_typed-data`, `examples/18_param-signature`)
-follows the same fix: number every hook-authored variant from `16`, one
+`hook_errors!` enum (currently just `examples/18_param-signature`) follows
+the same fix: number every hook-authored variant from `16`, one
 past the highest possible argument index, rather than the usual `1`. This
 is a convention, not something the macro enforces — `hook_errors!` accepts
 any `i64` discriminant — but it is the one this crate's own examples use

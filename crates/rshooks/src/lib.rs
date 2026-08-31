@@ -14,6 +14,7 @@ mod errors;
 pub mod exit;
 mod macros;
 pub mod sfield;
+#[cfg(feature = "unstable-param-sig-interface")]
 pub mod sig;
 pub mod slot_obj;
 pub mod state;
@@ -950,6 +951,7 @@ pub mod prelude {
     pub use crate::exit::{Accept, HookResult, Rollback};
     pub use crate::macros::no_unroll;
     pub use crate::sfield::*;
+    #[cfg(feature = "unstable-param-sig-interface")]
     pub use crate::sig::{
         Blob, IssueBytes, SigName, SigParamType, hook_sig_param, otxn_sig_param, otxn_sig_param_opt,
     };

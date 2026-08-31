@@ -297,6 +297,19 @@ const SIG_NAME_MSG: &str = "#[hooks]: a signature parameter name must be 1..=16 
                              matching [A-Za-z][A-Za-z0-9]* (the Hook Parameter Signature \
                              Interface's display-name rule) — rename the argument";
 
+/// Diagnostic for an extra argument on a `#[hook(..)]` fn when the
+/// `unstable-param-sig-interface` feature is off — the interface's whole
+/// surface (this module's [`parse_sig_args`] and downstream codegen) stays
+/// compiled but unreachable in that configuration, so an extra argument is
+/// rejected here instead. A `#[cbak(..)]` extra argument never reaches this
+/// diagnostic: the callback-specific rejection above it is unconditional.
+#[cfg(not(feature = "unstable-param-sig-interface"))]
+const SIG_FEATURE_GATE_MSG: &str = "#[hooks]: extra arguments after `&self` declare Hook \
+                                     Parameter Signature Interface parameters (draft spec) — \
+                                     enable rshooks's `unstable-param-sig-interface` feature to \
+                                     use them (only #[hook(..)] entry fns may declare them; the \
+                                     interface may change while the spec is a draft)";
+
 /// One parsed `ident: Type` signature-parameter argument (`docs/PARAM_SIGNATURE_DESIGN.md`
 /// §1) — a `#[hook(..)]` entry fn's extra argument after `&self`. Wire
 /// index is this entry's position in [`HookEntry::sig_args`], not stored
@@ -613,6 +626,14 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
                          transaction, not the invocation, so the signature parameter interface \
                          does not apply",
                     ));
+                }
+                #[cfg(not(feature = "unstable-param-sig-interface"))]
+                if !scanned.extra_args.is_empty() {
+                    let bad_span = scanned
+                        .extra_args
+                        .first()
+                        .map_or_else(|| scanned.args_group.span(), TokenTree::span);
+                    return Err(err(bad_span, SIG_FEATURE_GATE_MSG));
                 }
                 // The return type itself is deliberately unchecked here: an
                 // entry must return a type implementing

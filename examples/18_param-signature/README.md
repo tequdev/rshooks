@@ -10,8 +10,12 @@ this is the entry fn's own signature — extra arguments after `&self` on a
 This example is the interface draft's own worked example,
 `increment(account: AccountID, count: UInt16)`, kept deliberately small so
 its generated declarations (in `sethook.template.json`) are easy to read in
-full — see `examples/12_typed-data` for the signature-parameter surface
-used alongside the crate's other parameter mechanisms in a larger hook.
+full.
+
+The surface is still a draft, so this crate's `rshooks` dependency enables
+the `unstable-param-sig-interface` feature (see this example's own
+`Cargo.toml`) — without it, an extra `#[hook(..)]` fn argument is a compile
+error.
 
 ## The hook
 

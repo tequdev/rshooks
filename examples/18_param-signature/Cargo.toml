@@ -13,7 +13,10 @@ crate-type = ["cdylib"]
 test = false
 
 [dependencies]
-rshooks = { path = "../../crates/rshooks", features = ["host-panic-handler"] }
+rshooks = { path = "../../crates/rshooks", features = [
+    "host-panic-handler",
+    "unstable-param-sig-interface",
+] }
 
 [lints]
 workspace = true

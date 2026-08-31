@@ -1,0 +1,20 @@
+error: #[hooks]: a hook entry function may declare at most 16 signature parameters (index 0x00..=0x0F)
+  --> tests/ui/sig/fail/hooks_sig_too_many_args.rs:16:1
+   |
+16 | #[hooks]
+   | ^^^^^^^^
+   |
+   = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `Vault: HookChainImpl` is not satisfied
+  --> tests/ui/sig/fail/hooks_sig_too_many_args.rs:13:1
+   |
+13 | #[hooks]
+   | ^^^^^^^^ the trait `HookChainImpl` is not implemented for `Vault`
+   |
+note: required by a bound in `assert`
+  --> tests/ui/sig/fail/hooks_sig_too_many_args.rs:13:1
+   |
+13 | #[hooks]
+   | ^^^^^^^^ required by this bound in `assert`
+   = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)

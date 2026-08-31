@@ -1,20 +1,20 @@
-error: #[hooks]: #[cbak] entry functions must take no arguments other than `&self` — a callback's originating transaction is the emitted transaction, not the invocation, so the signature parameter interface does not apply
-  --> tests/ui/fail/hooks_sig_on_cbak.rs:11:1
+error: #[hooks]: extra arguments after `&self` declare Hook Parameter Signature Interface parameters (draft spec) — enable rshooks's `unstable-param-sig-interface` feature to use them (only #[hook(..)] entry fns may declare them; the interface may change while the spec is a draft)
+  --> tests/ui/no_sig_feature/hooks_sig_feature_gate.rs:12:1
    |
-11 | #[hooks]
+12 | #[hooks]
    | ^^^^^^^^
    |
    = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0277]: the trait bound `Vault: HookChainImpl` is not satisfied
- --> tests/ui/fail/hooks_sig_on_cbak.rs:8:1
+ --> tests/ui/no_sig_feature/hooks_sig_feature_gate.rs:9:1
   |
-8 | #[hooks]
+9 | #[hooks]
   | ^^^^^^^^ the trait `HookChainImpl` is not implemented for `Vault`
   |
 note: required by a bound in `assert`
- --> tests/ui/fail/hooks_sig_on_cbak.rs:8:1
+ --> tests/ui/no_sig_feature/hooks_sig_feature_gate.rs:9:1
   |
-8 | #[hooks]
+9 | #[hooks]
   | ^^^^^^^^ required by this bound in `assert`
   = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)

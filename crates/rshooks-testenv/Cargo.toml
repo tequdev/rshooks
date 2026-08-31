@@ -28,5 +28,12 @@ k256 = { version = "0.13", default-features = false, features = [
     "std",
 ] }
 
+[features]
+unstable-param-sig-interface = ["rshooks/unstable-param-sig-interface"]
+
+[[test]]
+name = "sig_params"
+required-features = ["unstable-param-sig-interface"]
+
 [lints]
 workspace = true

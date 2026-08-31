@@ -4,8 +4,7 @@
 // big-endian-encodes invocation values — the TS-side mirror of
 // `rshooks::sig::sig_param_name`/`sig_name!` on the Rust side (see
 // `crates/rshooks/src/sig.rs`). Shared by every e2e suite exercising a
-// `#[hook(..)]` entry with signature-parameter fn arguments: typed-data,
-// param-signature.
+// `#[hook(..)]` entry with signature-parameter fn arguments: param-signature.
 
 // The `STI_*` type bytes this interface supports
 // (docs/PARAM_SIGNATURE_DESIGN.md §2's table) that these suites need.

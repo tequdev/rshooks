@@ -17,5 +17,12 @@ proc-macro = true
 serde_json = "1.0"
 syn = "3.0"
 
+[features]
+# Gates the Hook Parameter Signature Interface draft's macro-time surface
+# (extra `ident: Type` arguments on a `#[hook(..)]` entry fn — see
+# `docs/PARAM_SIGNATURE_DESIGN.md`). Enabled through rshooks's facade
+# feature of the same name; not meant to be enabled directly.
+unstable-param-sig-interface = []
+
 [lints]
 workspace = true

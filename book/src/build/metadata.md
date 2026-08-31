@@ -272,7 +272,8 @@ Generation rules, precisely:
   template by hand if a position needs one of those installed.
 - The one exception: an entry with **signature-parameter fn arguments**
   (the Hook Parameter Signature Interface, [Hook and Transaction
-  Parameters](../data/parameters.md#signature-parameters-fn-arguments))
+  Parameters](../data/parameters.md#signature-parameters-fn-arguments) —
+  requires the `unstable-param-sig-interface` feature)
   *does* get a generated `HookParameters` block — one *declaration* entry
   per declared argument, in index order, each with
   `HookParameterValue = "00"` (the interface's own placeholder for "this

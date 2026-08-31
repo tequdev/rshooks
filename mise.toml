@@ -26,6 +26,10 @@ cargo clippy --manifest-path examples/Cargo.toml --workspace --target wasm32v1-n
 description = "Run all workspace tests"
 run = "cargo test --workspace"
 
+[tasks."test:unstable"]
+description = "Run workspace tests with unstable draft-spec features (unstable-param-sig-interface) enabled"
+run = "cargo test --workspace --features rshooks/unstable-param-sig-interface,rshooks-testenv/unstable-param-sig-interface"
+
 [tasks.build-wasm]
 description = "Build the no_std crates for the wasm32v1-none Hook target"
 run = "cargo build -p rshooks-core -p rshooks --target wasm32v1-none --release"
