@@ -1,6 +1,6 @@
 // Shared helpers for the Hook Parameter Signature Interface
 // (docs/PARAM_SIGNATURE_DESIGN.md): builds a declared `HookParameterName`
-// (`0x5F 0x5F | index | 0x5F | type | 0x5F | name`, 7..=22 bytes) and
+// (`0x5F 0x50 0x53 | 0x00 | index | type | name_len | name`, 8..=23 bytes) and
 // big-endian-encodes invocation values — the TS-side mirror of
 // `rshooks::sig::sig_param_name`/`sig_name!` on the Rust side (see
 // `crates/rshooks/src/sig.rs`). Shared by every e2e suite exercising a
@@ -15,7 +15,7 @@ export const STI_UINT64 = 0x03
 /** Builds one declared `HookParameterName`, as uppercase hex. */
 export function sigParamName(index: number, typeByte: number, name: string): string {
   const bytes = Buffer.concat([
-    Buffer.from([0x5f, 0x5f, index, 0x5f, typeByte, 0x5f]),
+    Buffer.from([0x5f, 0x50, 0x53, 0x00, index, typeByte, name.length]),
     Buffer.from(name, 'ascii'),
   ])
   return bytes.toString('hex').toUpperCase()
