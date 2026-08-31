@@ -35,8 +35,8 @@ cargo test -p rshooks --all-features
 """
 
 [tasks."test:unstable"]
-description = "Run workspace tests with unstable draft-spec features (unstable-param-sig-interface) enabled"
-run = "cargo test --workspace --features rshooks/unstable-param-sig-interface,rshooks-testenv/unstable-param-sig-interface"
+description = "Run workspace tests with unstable draft-spec features (unstable-param-sig-interface, unstable-state-interface) enabled"
+run = "cargo test --workspace --features rshooks/unstable-param-sig-interface,rshooks/unstable-state-interface,rshooks-testenv/unstable-param-sig-interface,rshooks-testenv/unstable-state-interface"
 
 [tasks.build-wasm]
 description = "Build the no_std crates for the wasm32v1-none Hook target"
@@ -69,6 +69,9 @@ cargo run -p rshooks-build -- check examples/16_typed-results/out/current/1.rese
 # `main` (docs/PARAM_SIGNATURE_DESIGN.md's own worked example).
 cargo run -p rshooks-build -- build --manifest-path examples/19_param-signature/Cargo.toml --out examples/19_param-signature/out
 cargo run -p rshooks-build -- check examples/19_param-signature/out/current/0.increment.wasm
+
+cargo run -p rshooks-build -- build --manifest-path examples/20_state-interface/Cargo.toml --out examples/20_state-interface/out
+cargo run -p rshooks-build -- check examples/20_state-interface/out/current/0.main.wasm
 
 # 80_governance declares two hooks in one chain: `0.govern` and `1.reward`.
 cargo run -p rshooks-build -- build --manifest-path examples/80_governance/Cargo.toml --out examples/80_governance/out

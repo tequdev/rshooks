@@ -1,5 +1,5 @@
-error: #[hooks]: every chain-struct field must carry exactly one of `#[state(..)]`, `#[hook_param(..)]`, `#[otxn_param(..)]`, `#[state_interface(..)]`
- --> tests/ui/fail/hooks_field_missing_decl_attr.rs:7:1
+error: #[state_interface]: a key/value field name must be 1..=16 ASCII bytes matching [A-Za-z][A-Za-z0-9]* (the Hook State Interface's field-name rule) — rename the field
+ --> tests/ui/si/fail/hooks_si_invalid_field_name.rs:7:1
   |
 7 | #[hooks]
   | ^^^^^^^^
@@ -7,7 +7,7 @@ error: #[hooks]: every chain-struct field must carry exactly one of `#[state(..)
   = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 warning: unused import: `rshooks::decl::State`
- --> tests/ui/fail/hooks_field_missing_decl_attr.rs:4:5
+ --> tests/ui/si/fail/hooks_si_invalid_field_name.rs:4:5
   |
 4 | use rshooks::decl::State;
   |     ^^^^^^^^^^^^^^^^^^^^

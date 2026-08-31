@@ -32,6 +32,7 @@ with a digit, so only the directory is prefixed).
 | 15 | `slot-objects` | the typed slot layer's live acceptance harness: account-root walk, native-amount drops round-trip, parent-clear/child-read, and two 300-iteration loops proving `take_*` recycling and leak-free `slot_path!` failures | [Slots and Ledger Objects](../data/slots.md) |
 | 16 | `typed-results` | typed entry returns (`HookResult`): an idiomatic `?`/`Ok` entry with a `hook_errors!` message clause, alongside a raw `accept!`/`rollback!`-style entry in the same chain | [Accept, Rollback, and Errors](../concepts/errors.md#typed-entry-returns-hookresult) |
 | 19 | `param-signature` | the Hook Parameter Signature Interface: `#[hook(..)]` fn arguments (`increment(account: AccountID, count: UInt16)`) as declared, typed, machine-readable Hook parameters | [Hook and Transaction Parameters](../data/parameters.md#signature-parameters-fn-arguments) |
+| 20 | `state-interface` | the Hook State Interface: `#[state_interface(id = .., key(..), value(..))]` chain-struct fields as a declared, typed, machine-readable on-ledger state schema | [Hook State](../data/state.md#state-interface-typed-on-ledger-schema) |
 
 There is no `11` in the numbering — the numbering follows the historical
 example order, with gaps where an example was retired. `17_sto-writer`

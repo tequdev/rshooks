@@ -15,6 +15,8 @@ pub mod exit;
 pub mod ledger_entry_type;
 mod macros;
 pub mod sfield;
+#[cfg(feature = "unstable-state-interface")]
+pub mod si;
 #[cfg(feature = "unstable-param-sig-interface")]
 pub mod sig;
 pub mod slot_obj;

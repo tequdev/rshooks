@@ -23,6 +23,11 @@ syn = "3.0"
 # `docs/PARAM_SIGNATURE_DESIGN.md`). Enabled through rshooks's facade
 # feature of the same name; not meant to be enabled directly.
 unstable-param-sig-interface = []
+# Gates the Hook State Interface draft's macro-time surface
+# (`#[state_interface(..)]` fields on a `#[hooks]` struct — see
+# `docs/STATE_INTERFACE_DESIGN.md`). Enabled through rshooks's facade
+# feature of the same name; not meant to be enabled directly.
+unstable-state-interface = []
 
 [lints]
 workspace = true

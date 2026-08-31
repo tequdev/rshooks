@@ -75,6 +75,7 @@ Loops](../concepts/guards.md).
 | `state_keys!` | Declare an enum of hook-state keys, each variant its own real byte length. | `state_keys! { enum DataKey { Counter, Balance(AccountId) } }` |
 | `#[hook_param(name = ...)]` / `#[hook_param(name_by = ...)]` | On a `#[hooks]` struct field of type `HookParam<V>`: declares a Hook parameter (this hook's own installed parameters) — name + value pairing, `.get()`/`.get_or_default()`/`.get_required()` (and `.at(args)` for `name_by`). | `#[hook_param(name = b"CFG", default = Config::default())] config: HookParam<Config>,` |
 | `#[otxn_param(name = ...)]` / `#[otxn_param(name_by = ...)]` | Identical grammar to `#[hook_param]`, but reads the *originating transaction's* parameters. | `#[otxn_param(name = b"INS", required)] instruction: OtxnParam<Instruction>,` |
+| `#[state_interface(id = .., key(..), value(..))]` | (`unstable-state-interface`) On a `#[hooks]` struct field of type `State<VName>`: declares a Hook State Interface entity — the macro generates `struct VName` from `value(..)` and a typed key encoder from `key(..)`, sharing `#[state]`'s `.get()`/`.set()`/`.update()`/`.delete()`/`.at(args)` accessors. | `#[state_interface(id = 0, key(account: AccountId), value(amount: u64))] balances: State<Balance>,` |
 
 See [Hook State](../data/state.md), [Hook and Transaction
 Parameters](../data/parameters.md), and [Typed Data with

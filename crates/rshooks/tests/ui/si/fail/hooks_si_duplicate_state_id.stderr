@@ -1,5 +1,5 @@
-error: #[hooks]: every chain-struct field must carry exactly one of `#[state(..)]`, `#[hook_param(..)]`, `#[otxn_param(..)]`, `#[state_interface(..)]`
- --> tests/ui/fail/hooks_field_missing_decl_attr.rs:7:1
+error: #[state_interface]: duplicate State ID 0 (State IDs must be unique across every `#[state_interface(..)]` field on this struct)
+ --> tests/ui/si/fail/hooks_si_duplicate_state_id.rs:7:1
   |
 7 | #[hooks]
   | ^^^^^^^^
@@ -7,7 +7,7 @@ error: #[hooks]: every chain-struct field must carry exactly one of `#[state(..)
   = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 warning: unused import: `rshooks::decl::State`
- --> tests/ui/fail/hooks_field_missing_decl_attr.rs:4:5
+ --> tests/ui/si/fail/hooks_si_duplicate_state_id.rs:4:5
   |
 4 | use rshooks::decl::State;
   |     ^^^^^^^^^^^^^^^^^^^^

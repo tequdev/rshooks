@@ -281,6 +281,37 @@ mod tests {
     }
 
     #[test]
+    fn state_interface_decls_are_transcribed_via_the_chain_summary() {
+        use crate::carriers::SiDecl;
+
+        let mut c = chain();
+        c.decls.state_interface = vec![SiDecl {
+            field: "balances".to_string(),
+            id: 0,
+            name_hex: "5F534900000208076163636F756E740205746F6B656E".to_string(),
+            value_hex: "020306616D6F756E74020775706461746564".to_string(),
+            key: "(account: AccountId, token: u32)".to_string(),
+            value: "(amount: u64, updated: u32)".to_string(),
+        }];
+        let report = ValidationReport::default();
+        let built = build_entry_sidecar(&entry(omitted_on()), &c, b"AAAA", &report, None)
+            .expect("sidecar builds");
+        let value: serde_json::Value = serde_json::from_slice(&built.bytes).expect("valid json");
+
+        let si = value["chain"]["decls"]["state_interface"]
+            .as_array()
+            .expect("state_interface array");
+        assert_eq!(si.len(), 1);
+        assert_eq!(si[0]["field"], "balances");
+        assert_eq!(si[0]["id"], 0);
+        assert_eq!(
+            si[0]["name_hex"],
+            "5F534900000208076163636F756E740205746F6B656E"
+        );
+        assert_eq!(si[0]["value_hex"], "020306616D6F756E74020775706461746564");
+    }
+
+    #[test]
     fn hook_name_byte_length_warning_matches_protocol_window() {
         let mut short_named = entry(omitted_on());
         short_named.hook_name = Some("ab".to_string());

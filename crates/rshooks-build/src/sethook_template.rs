@@ -4,10 +4,10 @@
 use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::Serialize;
 
-use crate::carriers::{EntryDecl, SigParamDecl, resolve_trigger_masks};
+use crate::carriers::{EntryDecl, SiDecl, SigParamDecl, resolve_trigger_masks};
 use crate::metadata::{hook_mask, utf8_hex};
 
 /// `hsfOVERRIDE` (vendor/xahaud Enum.h `HookSetFlags`): permits replacing an
@@ -102,10 +102,12 @@ struct HookEntryTemplate {
     flags: Option<u32>,
 }
 
-/// One `HookParameters[i]` array element — a declaration entry
-/// (`docs/PARAM_SIGNATURE_DESIGN.md` §4): `HookParameterValue` is always
-/// the literal `"00"` placeholder byte, per the interface draft's
-/// declaration-entry convention (§0 of that doc).
+/// One `HookParameters[i]` array element — a declaration entry.
+/// `HookParameterValue` carries either the signature-parameter interface's
+/// literal `"00"` placeholder byte (`docs/PARAM_SIGNATURE_DESIGN.md` §4's
+/// declaration-entry convention) or the state interface's real value schema
+/// (`docs/STATE_INTERFACE_DESIGN.md` §5), depending on which declaration
+/// produced this entry.
 #[derive(Serialize)]
 struct HookParameterItem {
     #[serde(rename = "HookParameter")]
@@ -117,7 +119,7 @@ struct HookParameterFields {
     #[serde(rename = "HookParameterName")]
     hook_parameter_name: String,
     #[serde(rename = "HookParameterValue")]
-    hook_parameter_value: &'static str,
+    hook_parameter_value: String,
 }
 
 #[derive(Serialize)]
@@ -143,8 +145,15 @@ pub type TemplateInput<'a> = (u8, &'a EntryDecl, &'a [u8]);
 /// when given, else the literal placeholder strings `<ACCOUNT>` /
 /// `<NAMESPACE>` are emitted. When `override_flag` is set, `Flags: 1`
 /// (`hsfOVERRIDE`) is added to every declared (non-gap) entry only.
+///
+/// `si_decls` is the chain's `#[state_interface(..)]` declarations
+/// (`docs/STATE_INTERFACE_DESIGN.md` §5) — chain-level, not per-entry, so
+/// the same list is emitted on every declared (non-gap) entry's
+/// `HookParameters`, after that entry's own signature-parameter
+/// declarations if any.
 pub fn build_template_json(
     declared: &[TemplateInput<'_>],
+    si_decls: &[SiDecl],
     account: Option<&str>,
     namespace: Option<&str>,
     override_flag: bool,
@@ -162,6 +171,7 @@ pub fn build_template_json(
             Some((_, entry, wasm)) => HookSlot::Entry(Box::new(build_entry_template(
                 entry,
                 wasm,
+                si_decls,
                 namespace,
                 override_flag,
             )?)),
@@ -184,6 +194,7 @@ pub fn build_template_json(
 fn build_entry_template(
     entry: &EntryDecl,
     wasm: &[u8],
+    si_decls: &[SiDecl],
     namespace: Option<&str>,
     override_flag: bool,
 ) -> Result<HookEntryTemplate> {
@@ -200,33 +211,68 @@ fn build_entry_template(
         hook_can_emit,
         hook_namespace: namespace.map_or_else(|| "<NAMESPACE>".to_string(), str::to_string),
         hook_api_version: 0,
-        hook_parameters: build_hook_parameters(&entry.sig_params),
+        hook_parameters: build_hook_parameters(entry.index, &entry.sig_params, si_decls)
+            .with_context(|| format!("entry {} (`{}`)", entry.index, entry.hook_fn))?,
         hook_name: entry.hook_name.as_deref().map(utf8_hex),
         flags: override_flag.then_some(HSF_OVERRIDE),
     })
 }
 
-/// Builds the `HookParameters` declaration array for one entry's declared
-/// signature parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §4) — `None` (key
-/// omitted) for an entry with no `sig_params`. This is the sole exception
-/// to the "`HookParameters` is never generated" rule
-/// (`docs/MULTI_HOOK_STRUCT_DESIGN.md` §9 point #10). `sig_params` is
-/// already carrier-order (= wire index) ascending, so no re-sorting needed.
-fn build_hook_parameters(sig_params: &[SigParamDecl]) -> Option<Vec<HookParameterItem>> {
-    if sig_params.is_empty() {
-        return None;
+/// The protocol's maximum `HookParameters` entries per `Hook` object —
+/// xahaud `validateHookParams`
+/// (`src/xrpld/app/tx/detail/SetHook.cpp`): `paramCount > 16` is rejected
+/// as malformed. Both declaration sources below share this one limit, so
+/// it's enforced where they're merged, not per-source.
+const MAX_HOOK_PARAMETERS_PER_ENTRY: usize = 16;
+
+/// Builds the `HookParameters` declaration array for one entry: its own
+/// declared signature parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §4,
+/// `HookParameterValue = "00"`), then the chain's state interface
+/// declarations (`docs/STATE_INTERFACE_DESIGN.md` §5, `HookParameterValue`
+/// = the real value schema) — `None` (key omitted) only when both are
+/// empty. This is the sole exception to the "`HookParameters` is never
+/// generated" rule (`docs/MULTI_HOOK_STRUCT_DESIGN.md` §9 point #10).
+/// `sig_params` is already carrier-order (= wire index) ascending, so no
+/// re-sorting needed; `si_decls` is chain-level and identical across every
+/// entry.
+///
+/// # Errors
+///
+/// If the combined count exceeds [`MAX_HOOK_PARAMETERS_PER_ENTRY`] — the
+/// generated template would otherwise be rejected on submit
+/// (`temMALFORMED`) by the same xahaud check this constant cites.
+fn build_hook_parameters(
+    index: u8,
+    sig_params: &[SigParamDecl],
+    si_decls: &[SiDecl],
+) -> Result<Option<Vec<HookParameterItem>>> {
+    if sig_params.is_empty() && si_decls.is_empty() {
+        return Ok(None);
     }
-    Some(
-        sig_params
-            .iter()
-            .map(|p| HookParameterItem {
-                hook_parameter: HookParameterFields {
-                    hook_parameter_name: p.name_hex.clone(),
-                    hook_parameter_value: "00",
-                },
-            })
-            .collect(),
-    )
+    let total = sig_params.len().wrapping_add(si_decls.len());
+    if total > MAX_HOOK_PARAMETERS_PER_ENTRY {
+        bail!(
+            "entry {index}: {total} HookParameters ({} signature-parameter declaration(s) + \
+             {} state interface declaration(s)) exceeds the protocol's \
+             {MAX_HOOK_PARAMETERS_PER_ENTRY}-per-entry limit (xahaud `validateHookParams`, \
+             src/xrpld/app/tx/detail/SetHook.cpp)",
+            sig_params.len(),
+            si_decls.len(),
+        );
+    }
+    let sig_items = sig_params.iter().map(|p| HookParameterItem {
+        hook_parameter: HookParameterFields {
+            hook_parameter_name: p.name_hex.clone(),
+            hook_parameter_value: "00".to_string(),
+        },
+    });
+    let si_items = si_decls.iter().map(|d| HookParameterItem {
+        hook_parameter: HookParameterFields {
+            hook_parameter_name: d.name_hex.clone(),
+            hook_parameter_value: d.value_hex.clone(),
+        },
+    });
+    Ok(Some(sig_items.chain(si_items).collect()))
 }
 
 /// Derives `required_amendments` from what the template's own fields
@@ -432,7 +478,8 @@ mod tests {
         let wasm2 = b"BB".as_slice();
         let declared: Vec<TemplateInput<'_>> = vec![(0, &e0, wasm0), (2, &e2, wasm2)];
 
-        let bytes = build_template_json(&declared, None, None, false).expect("template builds");
+        let bytes =
+            build_template_json(&declared, &[], None, None, false).expect("template builds");
         let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
 
         let hooks = value["Hooks"].as_array().expect("Hooks array");
@@ -457,6 +504,7 @@ mod tests {
 
         let bytes = build_template_json(
             &declared,
+            &[],
             Some("rACCOUNT"),
             Some("00".repeat(32).as_str()),
             true,
@@ -466,8 +514,8 @@ mod tests {
         assert_eq!(value["Hooks"][0]["Hook"]["Flags"], 1);
         assert_eq!(value["Account"], "rACCOUNT");
 
-        let bytes =
-            build_template_json(&declared_with_gap, None, None, true).expect("template builds");
+        let bytes = build_template_json(&declared_with_gap, &[], None, None, true)
+            .expect("template builds");
         let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
         assert!(
             value["Hooks"][0]["Hook"]
@@ -494,7 +542,8 @@ mod tests {
         ] {
             let wasm = b"AA".as_slice();
             let declared: Vec<TemplateInput<'_>> = vec![(0, e, wasm)];
-            let bytes = build_template_json(&declared, None, None, false).expect("template builds");
+            let bytes =
+                build_template_json(&declared, &[], None, None, false).expect("template builds");
             let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
             assert_eq!(
                 value["Hooks"][0]["Hook"].get("HookCanEmit").is_some(),
@@ -526,7 +575,8 @@ mod tests {
             let e = entry(0, "a", on, None);
             let wasm = b"AA".as_slice();
             let declared: Vec<TemplateInput<'_>> = vec![(0, &e, wasm)];
-            let bytes = build_template_json(&declared, None, None, false).expect("template builds");
+            let bytes =
+                build_template_json(&declared, &[], None, None, false).expect("template builds");
             let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
             let hook = &value["Hooks"][0]["Hook"];
             assert_eq!(hook.get("HookOn").is_some(), expect_hook_on);
@@ -540,7 +590,8 @@ mod tests {
         let named = entry(0, "a", omitted_on(), Some("dep"));
         let wasm = b"AA".as_slice();
         let declared: Vec<TemplateInput<'_>> = vec![(0, &named, wasm)];
-        let bytes = build_template_json(&declared, None, None, false).expect("template builds");
+        let bytes =
+            build_template_json(&declared, &[], None, None, false).expect("template builds");
         let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
         assert_eq!(value["Hooks"][0]["Hook"]["HookName"], "646570");
     }
@@ -632,7 +683,8 @@ mod tests {
         let e = entry(0, "deposit", omitted_on(), None);
         let wasm = b"AA".as_slice();
         let declared: Vec<TemplateInput<'_>> = vec![(0, &e, wasm)];
-        let bytes = build_template_json(&declared, None, None, false).expect("template builds");
+        let bytes =
+            build_template_json(&declared, &[], None, None, false).expect("template builds");
         let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
         assert!(value["Hooks"][0]["Hook"].get("HookParameters").is_none());
     }
@@ -646,7 +698,8 @@ mod tests {
         ];
         let wasm = b"AA".as_slice();
         let declared: Vec<TemplateInput<'_>> = vec![(0, &e, wasm)];
-        let bytes = build_template_json(&declared, None, None, false).expect("template builds");
+        let bytes =
+            build_template_json(&declared, &[], None, None, false).expect("template builds");
         let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
         let params = value["Hooks"][0]["Hook"]["HookParameters"]
             .as_array()
@@ -670,7 +723,8 @@ mod tests {
         e.sig_params = vec![sig_param("count", 0x01, "5F5F015F015F636F756E74")];
         let wasm = b"AA".as_slice();
         let declared: Vec<TemplateInput<'_>> = vec![(0, &e, wasm)];
-        let bytes = build_template_json(&declared, None, None, false).expect("template builds");
+        let bytes =
+            build_template_json(&declared, &[], None, None, false).expect("template builds");
         let text = String::from_utf8(bytes).expect("utf8");
         let api_version_pos = text
             .find("\"HookApiVersion\"")
@@ -693,7 +747,8 @@ mod tests {
         e2.sig_params = vec![sig_param("count", 0x01, "5F5F015F015F636F756E74")];
         let wasm = b"AA".as_slice();
         let declared: Vec<TemplateInput<'_>> = vec![(0, &e0, wasm), (2, &e2, wasm)];
-        let bytes = build_template_json(&declared, None, None, false).expect("template builds");
+        let bytes =
+            build_template_json(&declared, &[], None, None, false).expect("template builds");
         let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
 
         assert!(
@@ -710,5 +765,128 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    // --- `HookParameters` (docs/STATE_INTERFACE_DESIGN.md §5) ---
+
+    fn si_decl(field: &str, id: u8, name_hex: &str, value_hex: &str) -> SiDecl {
+        SiDecl {
+            field: field.to_string(),
+            id,
+            name_hex: name_hex.to_string(),
+            value_hex: value_hex.to_string(),
+            key: "(account: AccountId, token: u32)".to_string(),
+            value: "(amount: u64, updated: u32)".to_string(),
+        }
+    }
+
+    #[test]
+    fn si_declarations_are_chain_level_and_emitted_on_every_declared_entry() {
+        // Two declared entries, neither with sig_params — the same chain-level
+        // `si_decls` list must appear on both.
+        let e0 = entry(0, "a", omitted_on(), None);
+        let e1 = entry(1, "b", omitted_on(), None);
+        let wasm = b"AA".as_slice();
+        let declared: Vec<TemplateInput<'_>> = vec![(0, &e0, wasm), (1, &e1, wasm)];
+        let si = vec![si_decl(
+            "balances",
+            0,
+            "5F534900000208076163636F756E740205746F6B656E",
+            "020306616D6F756E74020775706461746564",
+        )];
+        let bytes =
+            build_template_json(&declared, &si, None, None, false).expect("template builds");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
+
+        for i in 0..2 {
+            let params = value["Hooks"][i]["Hook"]["HookParameters"]
+                .as_array()
+                .expect("HookParameters array");
+            assert_eq!(params.len(), 1);
+            assert_eq!(
+                params[0]["HookParameter"]["HookParameterName"],
+                "5F534900000208076163636F756E740205746F6B656E"
+            );
+            assert_eq!(
+                params[0]["HookParameter"]["HookParameterValue"],
+                "020306616D6F756E74020775706461746564"
+            );
+        }
+    }
+
+    #[test]
+    fn si_declarations_follow_sig_param_declarations_on_the_same_entry() {
+        let mut e = entry(0, "increment", omitted_on(), None);
+        e.sig_params = vec![sig_param("count", 0x01, "5F5F015F015F636F756E74")];
+        let wasm = b"AA".as_slice();
+        let declared: Vec<TemplateInput<'_>> = vec![(0, &e, wasm)];
+        let si = vec![si_decl("balances", 0, "AABB", "CCDD")];
+        let bytes =
+            build_template_json(&declared, &si, None, None, false).expect("template builds");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
+
+        let params = value["Hooks"][0]["Hook"]["HookParameters"]
+            .as_array()
+            .expect("HookParameters array");
+        assert_eq!(params.len(), 2);
+        assert_eq!(
+            params[0]["HookParameter"]["HookParameterName"],
+            "5F5F015F015F636F756E74"
+        );
+        assert_eq!(params[0]["HookParameter"]["HookParameterValue"], "00");
+        assert_eq!(params[1]["HookParameter"]["HookParameterName"], "AABB");
+        assert_eq!(params[1]["HookParameter"]["HookParameterValue"], "CCDD");
+    }
+
+    #[test]
+    fn no_sig_params_and_no_si_decls_emits_no_hook_parameters_key() {
+        let e = entry(0, "deposit", omitted_on(), None);
+        let wasm = b"AA".as_slice();
+        let declared: Vec<TemplateInput<'_>> = vec![(0, &e, wasm)];
+        let bytes =
+            build_template_json(&declared, &[], None, None, false).expect("template builds");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
+        assert!(value["Hooks"][0]["Hook"].get("HookParameters").is_none());
+    }
+
+    /// `n` distinct single-value-field SI declarations, `id`s `0..n`.
+    fn si_decls(n: u8) -> Vec<SiDecl> {
+        (0..n)
+            .map(|i| si_decl(&format!("f{i}"), i, &format!("{i:02X}"), "00"))
+            .collect()
+    }
+
+    #[test]
+    fn sixteen_combined_hook_parameters_is_the_boundary_that_still_builds() {
+        let mut e = entry(0, "deposit", omitted_on(), None);
+        e.sig_params = vec![sig_param("count", 0x01, "5F5F015F015F636F756E74")];
+        let wasm = b"AA".as_slice();
+        let declared: Vec<TemplateInput<'_>> = vec![(0, &e, wasm)];
+        // 1 sig param + 15 SI declarations = 16, exactly at the limit.
+        let si = si_decls(15);
+        let bytes = build_template_json(&declared, &si, None, None, false).expect("16 builds");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
+        assert_eq!(
+            value["Hooks"][0]["Hook"]["HookParameters"]
+                .as_array()
+                .expect("HookParameters array")
+                .len(),
+            16
+        );
+    }
+
+    #[test]
+    fn seventeen_combined_hook_parameters_is_rejected_naming_entry_counts_and_limit() {
+        let mut e = entry(0, "deposit", omitted_on(), None);
+        e.sig_params = vec![sig_param("count", 0x01, "5F5F015F015F636F756E74")];
+        let wasm = b"AA".as_slice();
+        let declared: Vec<TemplateInput<'_>> = vec![(0, &e, wasm)];
+        // 1 sig param + 16 SI declarations = 17, one over the limit.
+        let si = si_decls(16);
+        let err = build_template_json(&declared, &si, None, None, false).expect_err("must fail");
+        let message = format!("{err:#}");
+        assert!(message.contains("entry 0"), "{message}");
+        assert!(message.contains("17"), "{message}");
+        assert!(message.contains("16-per-entry"), "{message}");
     }
 }

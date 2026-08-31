@@ -1,0 +1,15 @@
+error: #[state_interface]: the declared HookParameterName would be 42 bytes, exceeds the protocol's 32-byte HookParameterName limit
+  --> tests/ui/si/fail/hooks_si_name_too_long.rs:11:1
+   |
+11 | #[hooks]
+   | ^^^^^^^^
+   |
+   = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unused import: `rshooks::decl::State`
+ --> tests/ui/si/fail/hooks_si_name_too_long.rs:8:5
+  |
+8 | use rshooks::decl::State;
+  |     ^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default

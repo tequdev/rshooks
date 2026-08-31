@@ -1,0 +1,15 @@
+error: #[hooks]: `#[state_interface(..)]` declares Hook State Interface fields (draft spec) — enable rshooks's `unstable-state-interface` feature to use them (the interface may change while the spec is a draft)
+ --> tests/ui/no_si_feature/hooks_si_feature_gate.rs:9:1
+  |
+9 | #[hooks]
+  | ^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unused import: `rshooks::decl::State`
+ --> tests/ui/no_si_feature/hooks_si_feature_gate.rs:6:5
+  |
+6 | use rshooks::decl::State;
+  |     ^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default

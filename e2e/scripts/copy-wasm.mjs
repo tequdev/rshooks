@@ -41,6 +41,7 @@ const examples = {
   '14_account-id-macro': [['0.main', 'account_id_macro']],
   '15_slot-objects': [['0.main', 'slot_objects']],
   '19_param-signature': [['0.increment', 'param_signature']],
+  '20_state-interface': [['0.main', 'state_interface']],
   '80_governance': [
     ['0.govern', 'govern'],
     ['1.reward', 'reward'],

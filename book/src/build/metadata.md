@@ -301,6 +301,38 @@ Generation rules, precisely:
   An entry with no signature-parameter arguments omits the key entirely,
   exactly like before this feature — this is additive, not a change to the
   general rule above.
+- A second, independent exception: a chain declaring **state interface
+  fields** (the Hook State Interface,
+  [Hook State](../data/state.md#state-interface-typed-on-ledger-schema) —
+  requires the `unstable-state-interface` feature) gets one declaration
+  entry per `#[state_interface(..)]` field on **every** non-gap entry —
+  state is chain-level, shared by every entry, so the declarations aren't
+  tied to one particular entry the way signature parameters are. They're
+  appended after that entry's own signature-parameter declarations, if any.
+  Unlike a signature-parameter declaration, `HookParameterValue` here
+  carries the real **value schema**, not a `"00"` placeholder — see the
+  book section linked above for the exact wire format. For
+  `examples/20_state-interface`'s `balances(id=0)`/`config(id=1)`:
+
+  ```json
+  "HookParameters": [
+    {
+      "HookParameter": {
+        "HookParameterName": "5F534900000208076163636F756E740205746F6B656E",
+        "HookParameterValue": "020306616D6F756E74020775706461746564"
+      }
+    },
+    {
+      "HookParameter": {
+        "HookParameterName": "5F5349000100",
+        "HookParameterValue": "011006706175736564"
+      }
+    }
+  ]
+  ```
+
+  A chain with no `#[state_interface(..)]` fields at all gets none of
+  this — again additive, never a change to the general rule.
 - `sethook.template.meta.json` is generation provenance, **not** part of
   the transaction to submit: `hook_hashes` map index to `HookHash`;
   `positions` records which indices are declared, which are gaps within
