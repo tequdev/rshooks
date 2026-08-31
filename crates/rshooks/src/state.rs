@@ -203,6 +203,43 @@ use crate::convert::{FromBytes, ToBytes};
 use crate::error::{HookError, Result, res};
 use crate::types::{STATE_KEY_LEN, StateKey};
 
+/// Forms a `&mut [u8]` view over `buf`'s storage without requiring it to be
+/// initialized first — lets [`state_get_encoded`]/[`state_foreign_get_encoded`]
+/// hand the `state`/`state_foreign` host calls a scratch buffer without
+/// zero-initializing it, since the host always fully determines which
+/// prefix of it [`decode_read`] ever reads (see that function's doc
+/// comment).
+///
+/// # Safety
+///
+/// The returned slice must only ever be read over the range a prior write
+/// into it actually covered — here, no further than [`decode_read`]'s own
+/// `n = res(code)?` prefix. The bound on `n` is enforced by `decode_read`
+/// itself, not by the raw host-call wrappers: `raw.get(..n).ok_or(HookError::TooSmall)?`
+/// errors rather than reading past the buffer if the host ever reports a
+/// larger `n` than the buffer holds. What remains is the FFI trust
+/// boundary common to this whole crate — the host must actually have
+/// written the `n` bytes it reports, since [`crate::api::state::state_raw_code`]/
+/// [`crate::api::state::state_foreign_raw_code`] are `unsafe` `extern` calls
+/// already fully trusted by every other line here.
+///
+/// No bit pattern is invalid for `u8`, so forming the `&mut [u8]` here is
+/// the standard pre-`BorrowedBuf` I/O shape over `MaybeUninit` storage —
+/// relied on throughout this crate rather than unconditionally guaranteed
+/// by the language. The host-writes-what-it-reports assumption above is the
+/// actual trust boundary.
+#[inline(always)]
+unsafe fn uninit_slice_mut<const N: usize>(buf: &mut core::mem::MaybeUninit<[u8; N]>) -> &mut [u8] {
+    // SAFETY: `buf` is `N` bytes of live, properly aligned storage (a
+    // `MaybeUninit<[u8; N]>` has the same size and alignment as `[u8; N]`).
+    // `u8` has no invalid bit patterns and no padding, so a `&mut [u8]` over
+    // that storage is well-formed the instant it is created, whether or not
+    // the storage has been written to yet — only reading through it before
+    // it is written would be unsound, and this function's own safety
+    // contract puts that burden on the caller.
+    unsafe { core::slice::from_raw_parts_mut(buf.as_mut_ptr().cast::<u8>(), N) }
+}
+
 /// Maximum byte length of any value [`state_get`]/[`state_set_loose`]/
 /// [`state_update_loose`] (and their `_foreign` twins) read or write.
 ///
@@ -280,6 +317,33 @@ impl EncodedStateKey {
     pub const fn new(buf: [u8; STATE_KEY_LEN], len: usize) -> Self {
         Self { buf, len }
     }
+
+    /// Builds an `EncodedStateKey` from a compile-time-sized short key,
+    /// usable in a `const` context — the const-evaluable counterpart to the
+    /// `[u8; N]` [`StateKeyEncode`] impl below, for callers (the `#[hooks]`
+    /// macro's literal `#[state(key = b"...")]` codegen) that need a
+    /// `'static`-promotable value rather than a value computed at runtime on
+    /// every call. `N` is checked at compile time to be `1..=`
+    /// [`crate::types::STATE_KEY_LEN`], the same bound that impl enforces.
+    #[inline(always)]
+    #[must_use]
+    #[allow(clippy::indexing_slicing)] // in-bounds by the assert above; const-evaluated only
+    pub const fn from_short<const N: usize>(key: &[u8; N]) -> Self {
+        const {
+            assert!(
+                N >= 1 && N <= STATE_KEY_LEN,
+                "rshooks::state: a short state key must be 1..=32 bytes \
+                 (the Hook API's own key-length bound)"
+            );
+        }
+        let mut buf = [0u8; STATE_KEY_LEN];
+        let mut i = 0;
+        while i < N {
+            buf[i] = key[i];
+            i = i.wrapping_add(1);
+        }
+        Self { buf, len: N }
+    }
 }
 
 impl AsRef<[u8]> for EncodedStateKey {
@@ -293,12 +357,14 @@ impl AsRef<[u8]> for EncodedStateKey {
 }
 
 /// Identity impl: an already-[`StateKeyEncode::encode`]d key passes through
-/// unchanged. Lets [`crate::decl`]'s `StateEntry`/`State::at`-bound
-/// accessors — which store a pre-encoded `EncodedStateKey` rather than a
-/// [`StateKeyEncode`] value — forward straight into this module's existing
-/// free functions (`state_get`, `state_set_loose`, `state_update_loose`,
-/// `state_delete`, `state_foreign_get`, `state_foreign_set_loose`, ...),
-/// which all take `&impl StateKeyEncode`.
+/// unchanged. Lets a generic `&impl StateKeyEncode` caller pass an
+/// `EncodedStateKey` it already holds straight to this module's public free
+/// functions (`state_get`, `state_set_loose`, `state_update_loose`,
+/// `state_delete`, `state_foreign_get`, `state_foreign_set_loose`, ...)
+/// without a separate encoding step. [`crate::decl`]'s `StateEntry`/
+/// `State::at`-bound accessors — which store a pre-encoded
+/// `EncodedStateKey` — skip even this identity copy by calling this
+/// module's `_encoded`-suffixed internal funnels directly.
 impl StateKeyEncode for EncodedStateKey {
     #[inline(always)]
     fn encode(&self) -> EncodedStateKey {
@@ -416,8 +482,15 @@ pub trait TypedStateKey: StateKeyEncode {
 ///
 /// Factored out of the two public functions so the mapping logic has one,
 /// directly testable, definition.
+///
+/// `raw` is only ever read over its `..n` prefix (`n = res(code)?`, the
+/// host's own reported write count) — so [`state_get_encoded`]/
+/// [`state_foreign_get_encoded`] pass a [`core::mem::MaybeUninit`] scratch
+/// buffer viewed through [`uninit_slice_mut`] here, never a zero-initialized
+/// one: nothing beyond that prefix is ever touched, so zeroing the rest
+/// first would be dead work the Hook API's guard checker still charges for.
 #[inline(always)]
-fn decode_read<T: FromBytes>(code: i64, raw: &[u8; MAX_TYPED_STATE_LEN]) -> Result<Option<T>> {
+fn decode_read<T: FromBytes>(code: i64, raw: &[u8]) -> Result<Option<T>> {
     if code == rshooks_core::DOESNT_EXIST {
         return Ok(None);
     }
@@ -448,15 +521,30 @@ fn encode_write<T: ToBytes>(value: &T) -> [u8; MAX_TYPED_STATE_LEN] {
     raw
 }
 
+/// Read this hook's own state entry for an already-[`EncodedStateKey`]d
+/// `key`, decoded as `T`.
+///
+/// Internal funnel behind [`state_get`]: a caller that already holds an
+/// `EncodedStateKey` (`crate::decl`'s `State`/`StateEntry` accessors) calls
+/// this directly, skipping the identity [`StateKeyEncode::encode`] copy
+/// [`state_get`] would otherwise perform.
+#[inline(always)]
+pub(crate) fn state_get_encoded<T: FromBytes>(key: &EncodedStateKey) -> Result<Option<T>> {
+    let mut storage = core::mem::MaybeUninit::<[u8; MAX_TYPED_STATE_LEN]>::uninit();
+    // SAFETY: see `uninit_slice_mut`'s doc comment; `state_raw_code` cannot
+    // report writing more bytes than the buffer it was handed, and
+    // `decode_read` only ever reads the `..n` prefix that count reports.
+    let buf = unsafe { uninit_slice_mut(&mut storage) };
+    let code = crate::api::state::state_raw_code(buf, key);
+    decode_read(code, buf)
+}
+
 /// Read this hook's own state entry for `key`, decoded as `T`.
 ///
 /// `Ok(None)` means no entry exists for `key` — see the module doc comment.
 #[inline(always)]
 pub fn state_get<T: FromBytes>(key: &impl StateKeyEncode) -> Result<Option<T>> {
-    let encoded = key.encode();
-    let mut raw = [0u8; MAX_TYPED_STATE_LEN];
-    let code = crate::api::state::state_raw_code(&mut raw, &encoded);
-    decode_read(code, &raw)
+    state_get_encoded(&key.encode())
 }
 
 /// Read this hook's own state entry for `key`, decoded as `key`'s own
@@ -468,14 +556,22 @@ pub fn state_get_typed<K: TypedStateKey>(key: &K) -> Result<Option<K::Value>> {
     state_get::<K::Value>(key)
 }
 
+/// Write this hook's own state entry for an already-[`EncodedStateKey`]d
+/// `key`, encoding `value` as `T`. Internal funnel behind
+/// [`state_set_loose`] — see [`state_get_encoded`]'s doc comment for why
+/// this exists.
+#[inline(always)]
+pub(crate) fn state_set_encoded<T: ToBytes>(key: &EncodedStateKey, value: &T) -> Result<usize> {
+    let raw = encode_write(value);
+    let src = raw.get(..T::MAX_LEN).ok_or(HookError::TooBig)?;
+    crate::api::state::state_set(src, key)
+}
+
 /// Write this hook's own state entry for `key`, encoding `value` as `T`.
 /// Returns the number of bytes written.
 #[inline(always)]
 pub fn state_set_loose<T: ToBytes>(key: &impl StateKeyEncode, value: &T) -> Result<usize> {
-    let encoded = key.encode();
-    let raw = encode_write(value);
-    let src = raw.get(..T::MAX_LEN).ok_or(HookError::TooBig)?;
-    crate::api::state::state_set(src, &encoded)
+    state_set_encoded(&key.encode(), value)
 }
 
 /// Write this hook's own state entry for `key`, encoding `value` as `key`'s
@@ -489,6 +585,20 @@ pub fn state_set_typed<K: TypedStateKey>(key: &K, value: &K::Value) -> Result<us
     state_set_loose(key, value)
 }
 
+/// Read-modify-write this hook's own state entry for an already-
+/// [`EncodedStateKey`]d `key`. Internal funnel behind [`state_update_loose`]
+/// — see [`state_get_encoded`]'s doc comment for why this exists.
+#[inline(always)]
+pub(crate) fn state_update_encoded<T, F>(key: &EncodedStateKey, f: F) -> Result<usize>
+where
+    T: FromBytes + ToBytes,
+    F: FnOnce(Option<T>) -> T,
+{
+    let current = state_get_encoded::<T>(key)?;
+    let next = f(current);
+    state_set_encoded(key, &next)
+}
+
 /// Read-modify-write this hook's own state entry for `key`: reads the
 /// current value (or `None` if absent), calls `f` to compute the next
 /// value, writes it back, and returns the number of bytes written.
@@ -498,9 +608,7 @@ where
     T: FromBytes + ToBytes,
     F: FnOnce(Option<T>) -> T,
 {
-    let current = state_get::<T>(key)?;
-    let next = f(current);
-    state_set_loose(key, &next)
+    state_update_encoded(&key.encode(), f)
 }
 
 /// Read-modify-write this hook's own state entry for `key`, using `key`'s
@@ -547,8 +655,15 @@ where
 /// a [`TypedStateKey`] pairing.
 #[inline(always)]
 pub fn state_delete(key: &impl StateKeyEncode) -> Result<()> {
-    let encoded = key.encode();
-    crate::api::state::state_set(&[], &encoded).map(|_| ())
+    state_delete_encoded(&key.encode())
+}
+
+/// Delete this hook's own state entry for an already-[`EncodedStateKey`]d
+/// `key`. Internal funnel behind [`state_delete`] — see
+/// [`state_get_encoded`]'s doc comment for why this exists.
+#[inline(always)]
+pub(crate) fn state_delete_encoded(key: &EncodedStateKey) -> Result<()> {
+    crate::api::state::state_set(&[], key).map(|_| ())
 }
 
 /// Read a state entry belonging to another namespace/account, decoded as
@@ -561,10 +676,26 @@ pub fn state_foreign_get<T: FromBytes>(
     namespace: Option<&[u8]>,
     account: Option<&[u8]>,
 ) -> Result<Option<T>> {
-    let encoded = key.encode();
-    let mut raw = [0u8; MAX_TYPED_STATE_LEN];
-    let code = crate::api::state::state_foreign_raw_code(&mut raw, &encoded, namespace, account);
-    decode_read(code, &raw)
+    state_foreign_get_encoded(&key.encode(), namespace, account)
+}
+
+/// Read a state entry belonging to another namespace/account for an
+/// already-[`EncodedStateKey`]d `key`. Internal funnel behind
+/// [`state_foreign_get`] — see [`state_get_encoded`]'s doc comment for why
+/// this exists.
+#[inline(always)]
+pub(crate) fn state_foreign_get_encoded<T: FromBytes>(
+    key: &EncodedStateKey,
+    namespace: Option<&[u8]>,
+    account: Option<&[u8]>,
+) -> Result<Option<T>> {
+    let mut storage = core::mem::MaybeUninit::<[u8; MAX_TYPED_STATE_LEN]>::uninit();
+    // SAFETY: see `uninit_slice_mut`'s doc comment; `state_foreign_raw_code`
+    // cannot report writing more bytes than the buffer it was handed, and
+    // `decode_read` only ever reads the `..n` prefix that count reports.
+    let buf = unsafe { uninit_slice_mut(&mut storage) };
+    let code = crate::api::state::state_foreign_raw_code(buf, key, namespace, account);
+    decode_read(code, buf)
 }
 
 /// Write a state entry belonging to another namespace/account, encoding
@@ -578,10 +709,23 @@ pub fn state_foreign_set_loose<T: ToBytes>(
     namespace: Option<&[u8]>,
     account: Option<&[u8]>,
 ) -> Result<usize> {
-    let encoded = key.encode();
+    state_foreign_set_encoded(&key.encode(), value, namespace, account)
+}
+
+/// Write a state entry belonging to another namespace/account for an
+/// already-[`EncodedStateKey`]d `key`. Internal funnel behind
+/// [`state_foreign_set_loose`] — see [`state_get_encoded`]'s doc comment for
+/// why this exists.
+#[inline(always)]
+pub(crate) fn state_foreign_set_encoded<T: ToBytes>(
+    key: &EncodedStateKey,
+    value: &T,
+    namespace: Option<&[u8]>,
+    account: Option<&[u8]>,
+) -> Result<usize> {
     let raw = encode_write(value);
     let src = raw.get(..T::MAX_LEN).ok_or(HookError::TooBig)?;
-    crate::api::state::state_foreign_set(src, &encoded, namespace, account)
+    crate::api::state::state_foreign_set(src, key, namespace, account)
 }
 
 /// Read-modify-write a state entry belonging to another namespace/account:
@@ -998,6 +1142,35 @@ mod tests {
         let encoded = key.encode();
         assert_eq!(encoded.as_ref(), &raw[..]);
         assert_eq!(encoded.as_ref().len(), STATE_KEY_LEN);
+    }
+
+    /// Asserts [`EncodedStateKey::from_short`] and `<[u8; N] as
+    /// StateKeyEncode>::encode` produce byte-identical results for the same
+    /// key — both the [`AsRef<[u8]>`] prefix a host call actually sees and
+    /// the full `buf`/`len` representation, since the `#[hooks]` macro's
+    /// literal `#[state(key = b"...")]` codegen picks `from_short` over
+    /// `encode` purely as a compile-time-vs-runtime optimization (see
+    /// `rshooks-macros::hooks_struct::is_byte_string_literal`'s doc
+    /// comment) and must never observe a different result from doing so.
+    fn assert_from_short_matches_array_encode<const N: usize>(key: &[u8; N]) {
+        let from_short = EncodedStateKey::from_short(key);
+        let encoded = key.encode();
+        assert_eq!(from_short.as_ref(), encoded.as_ref());
+        assert_eq!(from_short.buf, encoded.buf);
+        assert_eq!(from_short.len, encoded.len);
+    }
+
+    #[test]
+    fn from_short_matches_array_encode_byte_identical() {
+        assert_from_short_matches_array_encode(&[0xAAu8; 1]);
+        assert_from_short_matches_array_encode(&[0u8, 0xFF]);
+        assert_from_short_matches_array_encode(&[0u8, 1, 2, 3, 4, 5, 0]);
+        assert_from_short_matches_array_encode(&{
+            let mut key = [0xCDu8; STATE_KEY_LEN];
+            key[0] = 0;
+            key[STATE_KEY_LEN - 1] = 0;
+            key
+        });
     }
 
     #[test]

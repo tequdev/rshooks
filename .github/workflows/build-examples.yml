@@ -20,7 +20,11 @@ name: Build examples (reusable)
 #   testenv-parity     - continuous zero-wasm-impact probe (design doc §7)
 #   unit-tests-examples - off-chain unit tests (rshooks-testenv harness)
 #   build              - matrix job, one leg per example, fail-fast: false so one
-#                        example failing never blocks the others from completing
+#                        example failing never blocks the others from completing.
+#                        After build/check, each leg also asserts
+#                        examples/<dir>/metrics.json matches the just-built
+#                        WCE / size / nesting (scripts/record-example-metrics.py
+#                        --check --skip-build).
 #
 # mise.toml's `build-examples` task (the local equivalent) is intentionally
 # NOT generated from this same discovery logic — it's plain shell so it
@@ -205,6 +209,18 @@ jobs:
           for wasm in "${{ matrix.dir }}/out/current"/*.wasm; do
             bin/rshooks check "$wasm"
           done
+
+      # examples/<dir>/metrics.json is the recorded WCE / size / nesting
+      # snapshot for this crate. Refresh locally with
+      # `mise run record-example-metrics`; this step is the gate that a
+      # forgotten refresh cannot land.
+      - name: Check recorded WCE / size / nesting
+        run: |
+          set -euo pipefail
+          python3 scripts/record-example-metrics.py \
+            --check --skip-build \
+            --example "${{ matrix.name }}" \
+            --rshooks bin/rshooks
 
       # `*.wasm` for `copy-wasm.mjs`/`readHookBinaryHexFromNS`, plus this
       # example's own `sethook.template.json` for the (growing) set of e2e

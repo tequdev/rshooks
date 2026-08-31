@@ -1066,6 +1066,26 @@ fn marker_name(struct_name: &str, field_index: usize, field_name: &str) -> Strin
     )
 }
 
+/// `true` when `expr` is exactly one byte-string literal token
+/// (`b"..."`/`br"..."`) — the `KeySpec::Const` shape
+/// [`field_marker_and_impls`] promotes to a compile-time, `'static`
+/// `EncodedStateKey` via `EncodedStateKey::from_short` instead of
+/// re-encoding at runtime on every access. `false` for any other key
+/// expression (a non-literal expression, or a literal that isn't a byte
+/// string) — those keep the existing runtime `StateKeyEncode::encode` path
+/// via `StateSpec::with_key`'s default. Unlike
+/// [`crate::hooks_shared::parse_byte_string_value`], a mismatch here is not
+/// an error — a non-byte-string const key expression is a normal,
+/// supported shape.
+fn is_byte_string_literal(expr: &[TokenTree]) -> bool {
+    let [TokenTree::Literal(lit)] = expr else {
+        return false;
+    };
+    let mut stream = TokenStream::new();
+    stream.extend([TokenTree::Literal(lit.clone())]);
+    syn::parse::<syn::LitByteStr>(stream).is_ok()
+}
+
 /// The marker ZST declaration plus its `StateSpec`/`ParamSpec` (+
 /// `ParamDefault`/`ParamRequired`) impl(s) for one field.
 fn field_marker_and_impls(
@@ -1100,12 +1120,27 @@ fn field_marker_and_impls(
 
     match &f.decl {
         FieldDecl::State { key } => {
-            let (key_args, encode_body) = match key {
+            let (key_args, encode_body, with_key_override) = match key {
                 KeySpec::Const { expr } => {
                     let expr_text = tokens_to_string(expr);
+                    // A byte-string-literal key (the common case) is
+                    // promoted to a compile-time `'static` `EncodedStateKey`
+                    // via `with_key` below instead of re-encoding the same
+                    // literal at runtime on every access; any other const
+                    // expression (e.g. a `HookKey`-derived value) keeps the
+                    // runtime `encode_key` path via `with_key`'s default.
+                    let override_method = is_byte_string_literal(expr).then(|| {
+                        format!(
+                            "#[inline(always)]\n\
+                             fn with_key<__R>(_args: &Self::KeyArgs, f: impl ::core::ops::FnOnce(&::rshooks::state::EncodedStateKey) -> __R) -> __R {{\n\
+                                 f(const {{ &::rshooks::state::EncodedStateKey::from_short({expr_text}) }})\n\
+                             }}\n"
+                        )
+                    });
                     (
                         "()".to_string(),
                         format!("::rshooks::state::StateKeyEncode::encode({expr_text})"),
+                        override_method,
                     )
                 }
                 KeySpec::Keyed { ty } => {
@@ -1113,10 +1148,12 @@ fn field_marker_and_impls(
                     (
                         ty_text,
                         "::rshooks::state::StateKeyEncode::encode(args)".to_string(),
+                        None,
                     )
                 }
             };
             let args_pat = if key_args == "()" { "_args" } else { "args" };
+            let with_key_method = with_key_override.unwrap_or_default();
             out.push_str(&format!(
                 "#[automatically_derived]\n\
                  impl ::rshooks::decl::StateSpec for {marker} {{\n\
@@ -1126,6 +1163,7 @@ fn field_marker_and_impls(
                      fn encode_key({args_pat}: &Self::KeyArgs) -> ::rshooks::state::EncodedStateKey {{\n\
                          {encode_body}\n\
                      }}\n\
+                     {with_key_method}\
                  }}\n"
             ));
         }

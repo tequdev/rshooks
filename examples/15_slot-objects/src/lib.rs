@@ -78,8 +78,7 @@ fn check_balance_reads(account: &SlotObject<STObject>) -> i64 {
     let Ok(xfl) = account.get(sfBalance).and_then(|s| s.as_xfl()) else {
         return 0;
     };
-    let mut buf = [0u8; 8];
-    let Ok(_) = account.get(sfBalance).and_then(|s| s.raw(&mut buf)) else {
+    let Ok(buf) = account.get(sfBalance).and_then(|s| s.raw_exact::<8>()) else {
         return 0;
     };
     let raw = u64::from_be_bytes(buf);
@@ -262,15 +261,13 @@ fn check_cast_cleanup_loop(keylet: &Keylet) -> bool {
 /// `else { return false }`.
 #[inline(never)]
 fn check_iou_amount(holder: &AccountId) -> bool {
+    /// `USD` in the standard 20-byte currency encoding.
+    const USD: CurrencyCode = CurrencyCode::from_iso(b"USD");
+
     let Ok(Some(issuer)) = SlotObjects.otxn_param.iss.get() else {
         return false;
     };
-    let mut currency = [0u8; 20];
-    // Standard currency code: ASCII at offsets 12..15.
-    if let Some(dst) = currency.get_mut(12..15) {
-        dst.copy_from_slice(b"USD");
-    }
-    let Ok(keylet) = keylet_line(holder, &issuer, &CurrencyCode(currency)) else {
+    let Ok(keylet) = keylet_line(holder, &issuer, &USD) else {
         return false;
     };
     let Ok(line) = SlotObject::from_keylet(&keylet) else {

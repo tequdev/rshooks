@@ -102,13 +102,15 @@ The typed layer's convenience (no hand-written buffer/length-check/
 byte-order code) isn't free: `state_get_typed`/`state_set_typed` go
 through `crate::state`'s generic, 32-byte-scratch-buffer machinery
 (`MAX_TYPED_STATE_LEN`), rather than this hook reading/writing a plain
-8-byte buffer via the raw `state`/`state_set` calls directly. Measured
-(`rshooks build`/`check`): 251 worst-case instructions / 736 bytes,
-versus 58 / 349 for a hand-rolled-buffer version of this same hook. Still
-guard-clean at the source level — no `--auto-guard`/
-`--default-maxiter` needed. For a hook this simple (one `u64` counter,
-one key), the raw layer is the cheaper choice; this example uses the
-typed layer anyway because its purpose is to be the smallest possible
-tutorial for it — see `examples/12_typed-data` for the typed layer's
-actual selling point (a *composite*, multi-field key/value pair, where
-hand-packing would be far more error-prone than the cost shown here).
+8-byte buffer via the raw `state`/`state_set` calls directly. Current
+WCE and wasm size live in [`metrics.json`](./metrics.json) (refreshed by
+`mise run record-example-metrics`). A hand-rolled-buffer version of this
+same hook measured 58 worst-case instructions / 349 bytes — close to
+parity, not a dramatic gap. Still guard-clean at the source level — no
+`--auto-guard`/`--default-maxiter` needed. For a hook this simple (one
+`u64` counter, one key), the raw layer is the cheaper choice; this
+example uses the typed layer anyway because its purpose is to be the
+smallest possible tutorial for it — see `examples/12_typed-data` for the
+typed layer's actual selling point (a *composite*, multi-field key/value
+pair, where hand-packing would be far more error-prone than the cost
+shown here).
