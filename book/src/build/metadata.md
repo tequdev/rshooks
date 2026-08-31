@@ -278,7 +278,7 @@ Generation rules, precisely:
   per declared argument, in index order, each with
   `HookParameterValue = "00"` (the interface's own placeholder for "this
   parameter exists, at this index, with this type" — not an installed
-  value). For `examples/18_param-signature`'s `increment(account:
+  value). For `examples/19_param-signature`'s `increment(account:
   AccountID, count: UInt16)`:
 
   ```json

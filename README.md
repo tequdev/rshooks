@@ -63,6 +63,7 @@ Numbered in suggested reading order — see
 | 15 | [`slot-objects`](examples/15_slot-objects) | the typed slot layer's live acceptance harness: account-root walk, native-amount round-trip, parent-clear/child-read |
 | 16 | [`typed-results`](examples/16_typed-results) | typed entry returns (`HookResult`): an idiomatic `?`/`Ok` entry with a `hook_errors!` message clause, alongside a raw `accept!`/`rollback!`-style entry in the same chain |
 | 17 | [`sto-writer`](examples/17_sto-writer) | `rshooks::sto_writer::StoWriter`: a runtime-shaped Remit — a native `sfAmounts` entry always, an issued one when hook parameters supply it — built field-by-field and emitted via `prepare_for_emit()`/`Prepared::emit()` |
+| 18 | [`typed-views`](examples/18_typed-views) | `rshooks::views`: generated, type-checked read views — an incoming-IOU gate reading `tx::Payment`, then `ledger::RippleState`'s freeze flags and `ledger::AccountRoot`'s optional `sfTransferRate`, with a per-read cost table |
 | 80 | [`governance`](examples/80_governance) | a two-entry `#[hooks]` **chain** (`govern` + `reward`) porting xahaud's genesis governance hooks, sharing one state schema |
 
 ```sh

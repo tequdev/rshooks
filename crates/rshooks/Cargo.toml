@@ -32,6 +32,11 @@ panic-handler = []
 # from a `std` context — see the handler's doc comment in lib.rs.
 host-panic-handler = []
 trace = []
+# Restrict the generated surface to formats active on Xahau mainnet.
+active-amendments = []
+
+# Include dormant formats for custom networks.
+all-amendments = []
 # Enables the native mock-host bridge (`rshooks_core::backend`): wrapper
 # functions in `api/*` consult an installed `HostBackend` instead of the
 # host stubs, and `HookStatic::take` gains a per-invocation claim path.

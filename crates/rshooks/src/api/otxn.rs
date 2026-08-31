@@ -73,6 +73,64 @@ pub fn otxn_field_u64(field_id: impl Into<u32>) -> Result<u64> {
     res(unsafe { rshooks_core::otxn_field(0, 0, field_id) }).map(|v| v as u64)
 }
 
+/// Raw-code counterpart to [`otxn_field`], used to detect absence before
+/// decoding [`HookError`] (see `docs/DESIGN.md` §5.6).
+///
+/// Kept as a separate host-call wrapper because sharing the body changes
+/// `rshooks-build`'s nesting output even with `#[inline(always)]`.
+#[inline(always)]
+pub(crate) fn otxn_field_raw_code<B: AsMut<[u8]> + ?Sized>(out: &mut B, field_id: u32) -> i64 {
+    let out = out.as_mut();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.otxn_field(field_id)) {
+        return crate::testenv_bridge::write_bytes_code(out, r);
+    }
+    unsafe { rshooks_core::otxn_field(out.as_mut_ptr() as u32, out.len() as u32, field_id) }
+}
+
+/// [`otxn_field_raw_code`] for fixed-size reads into uninitialized scratch.
+/// Callers may treat only the prefix reported as written as initialized. Keeping the
+/// destination as `MaybeUninit` avoids both invalid `&mut [u8]` construction
+/// and guard-charged zeroing stores.
+#[inline(always)]
+pub(crate) fn otxn_field_raw_code_uninit(
+    out: &mut [core::mem::MaybeUninit<u8>],
+    field_id: u32,
+) -> i64 {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.otxn_field(field_id)) {
+        return crate::testenv_bridge::write_bytes_uninit_code(out, r);
+    }
+    unsafe {
+        rshooks_core::otxn_field(
+            out.as_mut_ptr().cast::<u8>() as u32,
+            out.len() as u32,
+            field_id,
+        )
+    }
+}
+
+/// Raw-code counterpart to [`otxn_field_u64`] (as-int64 mode).
+#[inline(always)]
+pub(crate) fn otxn_field_u64_raw_code(field_id: u32) -> i64 {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.otxn_field(field_id)) {
+        return crate::testenv_bridge::as_int64_code(r);
+    }
+    unsafe { rshooks_core::otxn_field(0, 0, field_id) }
+}
+
+/// The originating transaction's raw `tt*` code, avoiding the large
+/// [`TxType`] decode in generated view type checks.
+#[inline(always)]
+pub(crate) fn otxn_type_code() -> u16 {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.otxn_type()) {
+        return v as u16;
+    }
+    unsafe { rshooks_core::otxn_type() as u16 }
+}
+
 /// Read field `field_id` from the originating transaction, requiring it to
 /// be exactly `T`'s length — any [`crate::convert::FixedRead`] type, most
 /// commonly a `rshooks::types` newtype or a raw `[u8; N]`. A field longer
@@ -523,7 +581,7 @@ mod tests {
             Err(HookError::NotImplemented)
         );
         assert_eq!(
-            otxn_field_typed(crate::sfield::sfLockingChainIssue),
+            otxn_field_typed(crate::sfield::sfClaimCurrency),
             Err(HookError::NotImplemented)
         );
         assert_eq!(otxn_param(&mut buf, b"x"), Err(HookError::NotImplemented));

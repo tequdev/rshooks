@@ -143,14 +143,7 @@ jobs:
       - name: Build examples twice and diff wasm + WCE/size/nesting
         run: bash scripts/probe-testenv-parity.sh
 
-  # Off-chain unit tests (rshooks-testenv harness): plain `cargo test`, no
-  # wasm build, no node. Exercises both documented test layouts (see the
-  # book's "Testing hooks" chapter) — 02_state-counter's tests/ integration
-  # test and 10_emit-txn's in-crate #[cfg(test)] module — plus the harness
-  # crate's own test suite. 16_typed-results follows the tests/ integration
-  # layout too, and additionally covers the typed entry-return form's
-  # rollback path (a `hook_errors!` msg-clause message surfacing in
-  # `HookExit.msg` through `?`).
+  # Off-chain tests for the harness and examples that opt into its host wiring.
   unit-tests-examples:
     name: Off-chain unit tests (rshooks-testenv)
     runs-on: ubuntu-latest
@@ -166,7 +159,7 @@ jobs:
         run: cargo test -p rshooks-testenv
 
       - name: cargo test (examples workspace, testenv-wired examples)
-        run: cargo test --manifest-path examples/Cargo.toml -p state-counter -p emit-txn -p typed-results -p sto-writer
+        run: cargo test --manifest-path examples/Cargo.toml -p state-counter -p emit-txn -p typed-results -p sto-writer -p typed-views
 
   build:
     name: ${{ matrix.name }}

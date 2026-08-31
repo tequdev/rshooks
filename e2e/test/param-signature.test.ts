@@ -1,4 +1,4 @@
-// e2e for `examples/18_param-signature`: `increment(account: AccountID,
+// e2e for `examples/19_param-signature`: `increment(account: AccountID,
 // count: UInt16)`, the Hook Parameter Signature Interface draft's own
 // worked example (docs/PARAM_SIGNATURE_DESIGN.md). Unlike every other
 // suite here, this hook is installed using the *generated*
@@ -41,7 +41,7 @@ const repoRoot = dirname(e2eRoot)
 const templatePath = join(
   repoRoot,
   'examples',
-  '18_param-signature',
+  '19_param-signature',
   'out',
   'current',
   'sethook.template.json',

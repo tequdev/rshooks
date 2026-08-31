@@ -128,6 +128,47 @@ pub(crate) fn write_bytes_code(out: &mut [u8], r: BackendResult<Vec<u8>>) -> i64
     }
 }
 
+/// [`write_bytes`] into uninitialized storage. Each byte is initialized
+/// explicitly because the destination must not be reborrowed as `&mut [u8]`.
+#[inline(always)]
+pub(crate) fn write_bytes_uninit(
+    out: &mut [core::mem::MaybeUninit<u8>],
+    r: BackendResult<Vec<u8>>,
+) -> HookResult<usize> {
+    match r {
+        Ok(value) => match out.get_mut(..value.len()) {
+            Some(dst) => {
+                for (slot, byte) in dst.iter_mut().zip(value.iter()) {
+                    slot.write(*byte);
+                }
+                Ok(value.len())
+            }
+            None => Err(HookError::TooSmall),
+        },
+        Err(code) => res(code).map(|v| v as usize),
+    }
+}
+
+/// Raw-code counterpart to [`write_bytes_uninit`].
+#[inline(always)]
+pub(crate) fn write_bytes_uninit_code(
+    out: &mut [core::mem::MaybeUninit<u8>],
+    r: BackendResult<Vec<u8>>,
+) -> i64 {
+    match r {
+        Ok(value) => match out.get_mut(..value.len()) {
+            Some(dst) => {
+                for (slot, byte) in dst.iter_mut().zip(value.iter()) {
+                    slot.write(*byte);
+                }
+                value.len() as i64
+            }
+            None => rshooks_core::TOO_SMALL,
+        },
+        Err(code) => code,
+    }
+}
+
 /// A `state_foreign(_set)` target narrowed to the host's fixed widths:
 /// `(namespace, account)`, each `None` meaning "this hook's own".
 pub(crate) type ForeignTarget<'a> = (Option<&'a [u8; 32]>, Option<&'a [u8; 20]>);

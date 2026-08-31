@@ -31,11 +31,12 @@ with a digit, so only the directory is prefixed).
 | 14 | `account-id-macro` | `rshooks::account_id!`: compile-time r-address → `AccountId` decode, cross-checked against `hook_account`/`util_accid`/`util_raddr` | [Reading the Originating Transaction](../data/otxn.md) |
 | 15 | `slot-objects` | the typed slot layer's live acceptance harness: account-root walk, native-amount drops round-trip, parent-clear/child-read, and two 300-iteration loops proving `take_*` recycling and leak-free `slot_path!` failures | [Slots and Ledger Objects](../data/slots.md) |
 | 16 | `typed-results` | typed entry returns (`HookResult`): an idiomatic `?`/`Ok` entry with a `hook_errors!` message clause, alongside a raw `accept!`/`rollback!`-style entry in the same chain | [Accept, Rollback, and Errors](../concepts/errors.md#typed-entry-returns-hookresult) |
-| 18 | `param-signature` | the Hook Parameter Signature Interface: `#[hook(..)]` fn arguments (`increment(account: AccountID, count: UInt16)`) as declared, typed, machine-readable Hook parameters | [Hook and Transaction Parameters](../data/parameters.md#signature-parameters-fn-arguments) |
+| 19 | `param-signature` | the Hook Parameter Signature Interface: `#[hook(..)]` fn arguments (`increment(account: AccountID, count: UInt16)`) as declared, typed, machine-readable Hook parameters | [Hook and Transaction Parameters](../data/parameters.md#signature-parameters-fn-arguments) |
 
 There is no `11` in the numbering — the numbering follows the historical
 example order, with gaps where an example was retired. `17_sto-writer`
-exists in `examples/` (see its own README) but has no book chapter yet.
+and `18_typed-views` exist in `examples/` (see their own READMEs) but
+have no book chapter yet.
 
 ## 80+: production hooks in Rust
 

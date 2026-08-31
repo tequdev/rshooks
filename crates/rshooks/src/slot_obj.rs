@@ -57,7 +57,8 @@
 //! When a loop would otherwise burn through the 255-slot budget, the
 //! opt-in [`take_value`](SlotObject::take_value) /
 //! [`take_xfl`](SlotObject::take_xfl) /
-//! [`take_raw_exact`](SlotObject::take_raw_exact) family reads *and* clears,
+//! [`take_raw_exact`](SlotObject::take_raw_exact) /
+//! [`take_raw`](SlotObject::take_raw) family reads *and* clears,
 //! on both the success and the failure path. Budget math: one slot per
 //! `get`, 255 per execution; a 300-iteration loop that derives one child per
 //! iteration must use `take_*` (or clear explicitly) or it will run out.
@@ -94,15 +95,16 @@
 //! handed, and these reads only accept the result when it reports writing
 //! the buffer's *entire* length, so nothing here is ever read uninitialized.
 //! There is no zero-init to lower, so no `memset` risk at any `N` or
-//! optimization level. [`raw`](SlotObject::raw) writes into a buffer you
-//! supply, so any zero-init cost there is the caller's own to manage.
+//! optimization level. [`raw`](SlotObject::raw) and
+//! [`take_raw`](SlotObject::take_raw) write into a buffer you supply, so any
+//! zero-init cost there is the caller's own to manage.
 
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 
 use crate::api;
 use crate::convert::FixedRead;
-use crate::error::{HookError, Result};
+use crate::error::{HookError, Result, res};
 use crate::types::{
     AccountId, Amount, CurrencyCode, Hash, IouAmount, Issue, IssuedAsset, Keylet, NativeAmount,
     Opaque, SField, STArray, STObject,
@@ -381,6 +383,20 @@ impl<T> SlotObject<T> {
         <K as private::Resolve>::resolve(key, self.no).map(SlotObject::wrap)
     }
 
+    /// [`get`](Self::get) for an optional field. Absence is checked on the
+    /// raw host code to avoid the nesting cost of decoding [`HookError`].
+    #[inline(always)]
+    pub(crate) fn get_opt<U>(&self, field: SField<U>) -> Result<Option<SlotObject<U>>>
+    where
+        SField<U>: SlotKey<T>,
+    {
+        let code = api::slot::slot_subfield_raw_code(self.no, field.code(), 0);
+        if code == rshooks_core::DOESNT_EXIST {
+            return Ok(None);
+        }
+        res(code).map(|no| Some(SlotObject::wrap(no as u32)))
+    }
+
     /// Releases the slot, consuming the handle.
     ///
     /// The only way to give a slot back before the hook ends. Fallible
@@ -402,6 +418,16 @@ impl<T> SlotObject<T> {
     #[inline(always)]
     pub fn raw<B: AsMut<[u8]> + ?Sized>(self, buf: &mut B) -> Result<usize> {
         api::slot::slot(buf, self.no)
+    }
+
+    /// [`raw`](Self::raw), then best-effort clears the slot on every path.
+    /// The read result takes precedence over a clear failure.
+    #[inline(always)]
+    pub fn take_raw<B: AsMut<[u8]> + ?Sized>(self, buf: &mut B) -> Result<usize> {
+        let no = self.no;
+        let out = api::slot::slot(buf, no);
+        let _ = api::slot::slot_clear(no);
+        out
     }
 
     /// Reads exactly `N` bytes, erroring if the slot is not exactly that
@@ -476,57 +502,17 @@ impl<T> SlotObject<T> {
     }
 }
 
-/// Forms a `&mut [u8]` view over `buf`'s storage without requiring it to be
-/// initialized first.
-///
-/// [`read_exact_bytes`] hands a scratch buffer straight to
-/// [`api::slot::slot`], which always *completely overwrites* it on the only
-/// path its contents are read afterward (the exact-length check below).
-/// Zero-initializing that buffer first is dead work the Hook API's guard
-/// checker still charges for, because a zeroed buffer whose address escapes
-/// into an `extern` call is a store LLVM cannot prove dead across the FFI
-/// boundary.
-///
-/// # Safety
-///
-/// The caller must read the returned slice only over the range a prior write
-/// into it actually covered — never past what [`api::slot::slot`] itself
-/// reported writing. No bit pattern is invalid for `u8`, so forming the
-/// `&mut [u8]` here is the standard pre-`BorrowedBuf` I/O shape over
-/// `MaybeUninit` storage — relied on throughout this crate rather than
-/// unconditionally guaranteed by the language; the requirement is entirely
-/// about what the caller does with it afterward. [`api::slot::slot`] is
-/// itself an `unsafe` `extern` host call already fully trusted by every
-/// other line of this crate, so trusting its reported byte count is the
-/// same FFI trust boundary, not a new one.
-#[inline(always)]
-unsafe fn uninit_slice_mut<const N: usize>(buf: &mut MaybeUninit<[u8; N]>) -> &mut [u8] {
-    // SAFETY: `buf` is `N` bytes of live, properly aligned storage (a
-    // `MaybeUninit<[u8; N]>` has the same size and alignment as `[u8; N]`).
-    // `u8` has no invalid bit patterns and no padding, so a `&mut [u8]` over
-    // that storage is well-formed the instant it is created, whether or not
-    // the storage has been written to yet — only reading through it before
-    // it is written would be unsound, and that burden is on the caller.
-    unsafe { core::slice::from_raw_parts_mut(buf.as_mut_ptr().cast::<u8>(), N) }
-}
-
-/// Reads exactly `N` bytes out of `no`, erroring when the slot's size is not
-/// exactly `N`.
-///
-/// Factored out of [`SlotObject::raw_exact`]/[`SlotObject::take_raw_exact`]
-/// so the two share one definition of "exact".
+/// Reads exactly `N` bytes without zero-initializing the host-owned output
+/// buffer. The result is exposed only after the host reports writing all
+/// `N` bytes.
 #[inline(always)]
 fn read_exact_bytes<const N: usize>(no: u32) -> Result<[u8; N]> {
-    let mut buf = MaybeUninit::<[u8; N]>::uninit();
-    // SAFETY: the returned slice is read only via `assume_init` below, and
-    // only once `written == N` confirms the host call just wrote every byte
-    // of it — honoring `uninit_slice_mut`'s contract.
-    let written = api::slot::slot(unsafe { uninit_slice_mut(&mut buf) }, no)?;
+    let mut buf = [const { MaybeUninit::<u8>::uninit() }; N];
+    let written = api::slot::slot_uninit(&mut buf, no)?;
     if written == N {
-        // SAFETY: `written == N` means `api::slot::slot` reported writing
-        // all `N` bytes of `buf`'s storage, so `buf` is now fully
-        // initialized.
-        Ok(unsafe { buf.assume_init() })
+        // SAFETY: `written == N` proves every byte is initialized;
+        // `MaybeUninit<u8>` has the same layout as `u8`.
+        Ok(unsafe { core::mem::transmute_copy::<[MaybeUninit<u8>; N], [u8; N]>(&buf) })
     } else {
         Err(HookError::TooSmall)
     }

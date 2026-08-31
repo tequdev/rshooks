@@ -115,7 +115,7 @@ invocation reaching the body with both arguments already decoded.
 ## Build
 
 ```sh
-cargo run -p rshooks-build -- build --manifest-path examples/18_param-signature/Cargo.toml --out examples/18_param-signature/out
+cargo run -p rshooks-build -- build --manifest-path examples/19_param-signature/Cargo.toml --out examples/19_param-signature/out
 ```
 
 No extra flags — this hook has no compiler-generated loop at this

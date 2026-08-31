@@ -278,7 +278,7 @@ impl Increment {
 }
 ```
 
-(from `examples/18_param-signature`, the interface draft's own worked
+(from `examples/19_param-signature`, the interface draft's own worked
 example.) Every argument after `&self` on a `#[hook(..)]` fn declares one
 signature parameter, in declaration order — the argument's position (0-based)
 is its wire **index**, its identifier is its display **name**, and its type
@@ -346,7 +346,7 @@ immediately, with:
 - code = the argument's own 0-based index
 
 before the body ever runs, so the body never sees a partially-decoded
-invocation. See `examples/18_param-signature` for this rollback exercised
+invocation. See `examples/19_param-signature` for this rollback exercised
 end-to-end (both a hand-written unit test via
 `rshooks_testenv::TestEnv::invoke`, and e2e).
 
@@ -360,7 +360,7 @@ and your own body) become ambiguous by code alone: a caller inspecting
 `HookReturnCode` in isolation can no longer tell "argument 3 was malformed"
 from "my own error variant 3" without also checking the message. Every
 `rshooks` example that declares signature parameters and its own
-`hook_errors!` enum (currently just `examples/18_param-signature`) follows
+`hook_errors!` enum (currently just `examples/19_param-signature`) follows
 the same fix: number every hook-authored variant from `16`, one
 past the highest possible argument index, rather than the usual `1`. This
 is a convention, not something the macro enforces — `hook_errors!` accepts
