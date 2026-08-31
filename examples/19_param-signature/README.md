@@ -62,13 +62,13 @@ body, once per argument, in declaration order:
 
 ```rust,ignore
 let account: AccountId = match ::rshooks::sig::otxn_sig_param::<AccountId>(&const {
-    ::rshooks::sig::sig_param_name::<13>(0, 0x08, b"account")
+    ::rshooks::sig::sig_param_name::<14>(0, 0x08, b"account")
 }) {
     Ok(v) => v,
     Err(_) => rollback!(b"rshooks: bad sig param 'account'", 0i64),
 };
 let count: u16 = match ::rshooks::sig::otxn_sig_param::<u16>(&const {
-    ::rshooks::sig::sig_param_name::<11>(1, 0x01, b"count")
+    ::rshooks::sig::sig_param_name::<12>(1, 0x01, b"count")
 }) {
     Ok(v) => v,
     Err(_) => rollback!(b"rshooks: bad sig param 'count'", 1i64),
@@ -76,7 +76,7 @@ let count: u16 = match ::rshooks::sig::otxn_sig_param::<u16>(&const {
 ```
 
 `sig_param_name::<N>(index, type_byte, name)` builds the declared
-`HookParameterName` — `0x5F 0x5F | index | 0x5F | type_byte | 0x5F | name`
+`HookParameterName` — `0x5F 0x50 0x53 | 0x00 | index | type_byte | name.len() | name`
 — entirely at compile time (a `const` block), and every MUST of the wire
 format (index `<= 0x0F`, a supported type byte, the name's charset/length)
 is a `const`-evaluable assert, so a malformed declaration is a compile
@@ -101,7 +101,7 @@ use rshooks::sig_name;
 
 // Exactly the declared name `increment`'s prologue builds for `count`
 // (index 1, `u16`, `STI_UINT16`).
-const COUNT_NAME: [u8; 11] = sig_name!(1, u16, b"count");
+const COUNT_NAME: [u8; 12] = sig_name!(1, u16, b"count");
 
 let count: rshooks::error::Result<u16> = otxn_sig_param(&COUNT_NAME);
 ```
@@ -140,13 +140,13 @@ parameters (see `book/src/build/metadata.md`):
         "HookParameters": [
           {
             "HookParameter": {
-              "HookParameterName": "5F5F005F085F6163636F756E74",
+              "HookParameterName": "5F5053000008076163636F756E74",
               "HookParameterValue": "00"
             }
           },
           {
             "HookParameter": {
-              "HookParameterName": "5F5F015F015F636F756E74",
+              "HookParameterName": "5F505300010105636F756E74",
               "HookParameterValue": "00"
             }
           }
@@ -158,9 +158,9 @@ parameters (see `book/src/build/metadata.md`):
 ```
 
 These are **declaration** entries, not invocation values: `HookParameterName`
-is the full 7..=22-byte wire encoding (`account`'s is `0x5F 0x5F 0x00 0x5F
-0x08 0x5F` + `"account"` = 13 bytes; `count`'s is `0x5F 0x5F 0x01 0x5F 0x01
-0x5F` + `"count"` = 11 bytes), and `HookParameterValue` is always the
+is the full 8..=23-byte wire encoding (`account`'s is `0x5F 0x50 0x53 0x00
+0x00 0x08 0x07` + `"account"` = 14 bytes; `count`'s is `0x5F 0x50 0x53 0x00
+0x01 0x01 0x05` + `"count"` = 12 bytes), and `HookParameterValue` is always the
 literal placeholder byte `00` — the interface draft's own convention for
 declaring that a parameter exists, at this index, with this type, without
 installing any concrete value for it. Contrast an **invocation** entry,
@@ -175,13 +175,13 @@ per submitter:
   "HookParameters": [
     {
       "HookParameter": {
-        "HookParameterName": "5F5F005F085F6163636F756E74",
+        "HookParameterName": "5F5053000008076163636F756E74",
         "HookParameterValue": "AABBCCDDEEFF00112233445566778899AABBCCDD"
       }
     },
     {
       "HookParameter": {
-        "HookParameterName": "5F5F015F015F636F756E74",
+        "HookParameterName": "5F505300010105636F756E74",
         "HookParameterValue": "0007"
       }
     }

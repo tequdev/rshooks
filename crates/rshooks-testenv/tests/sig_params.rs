@@ -33,8 +33,8 @@ impl Increment {
     }
 }
 
-const ACCOUNT_NAME: [u8; 13] = sig_name!(0, AccountId, b"account");
-const COUNT_NAME: [u8; 11] = sig_name!(1, u16, b"count");
+const ACCOUNT_NAME: [u8; 14] = sig_name!(0, AccountId, b"account");
+const COUNT_NAME: [u8; 12] = sig_name!(1, u16, b"count");
 
 const SENDER: [u8; 20] = [9u8; 20];
 const TARGET_ACCOUNT: [u8; 20] = [7u8; 20];

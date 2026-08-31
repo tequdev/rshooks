@@ -11,15 +11,15 @@ Hook's parameters as a machine-readable, typed function signature.
 The wire convention (normative, from the interface draft):
 
 ```
-HookParameterName = 0x5F 0x5F            ; "__" reserved prefix
-                  | index  (1 byte, 0x00..=0x0F, raw binary)
-                  | 0x5F                  ; "_"
-                  | type   (1 byte, an STI_* code, raw binary)
-                  | 0x5F                  ; "_"
-                  | name   (1..=16 bytes, [A-Za-z][A-Za-z0-9]*)
+HookParameterName = 0x5F 0x50 0x53       ; "_PS" interface identifier
+                  | 0x00                  ; version
+                  | index    (1 byte, 0x00..=0x0F, raw binary)
+                  | type     (1 byte, an STI_* code, raw binary)
+                  | name_len (1 byte, 0x01..=0x10 = name.len())
+                  | name     (1..=16 bytes, [A-Za-z][A-Za-z0-9]*)
 ```
 
-Total 7..=22 octets. Declaration entries (on the `Hook`/`HookDefinition`
+Total 8..=23 octets. Declaration entries (on the `Hook`/`HookDefinition`
 object, i.e. in the SetHook JSON) carry `HookParameterValue = 0x00`.
 Invocation entries (transaction common `HookParameters`) carry the typed
 argument value, read inside the hook via `otxn_param` with the full declared
@@ -145,7 +145,7 @@ counterpart. `crates/rshooks/src/sig.rs` exports:
 /// wire format (name charset/length, supported type byte, index <= 0x0F).
 pub const fn sig_param_name<const N: usize>(index: u8, type_byte: u8, name: &[u8]) -> [u8; N];
 
-/// `sig_name!(0, u16, b"count")` → `[u8; 11]` const, usable directly with
+/// `sig_name!(0, u16, b"count")` → `[u8; 12]` const, usable directly with
 /// `otxn_param_exact` / `hook_param_exact`.
 macro_rules! sig_name { .. }
 ```
@@ -165,7 +165,7 @@ sig_params: Vec<SigParamDecl>,
 // SigParamDecl { field: String, type_byte: u8, name_hex: String }
 ```
 
-`name_hex` is the full resolved declared name (7..=22 bytes) as uppercase
+`name_hex` is the full resolved declared name (8..=23 bytes) as uppercase
 hex — resolved at macro time so the build tool never re-derives it. Index
 is the vec position. Both `encode_*_json` in the macro crate and
 `carriers.rs` change together (`deny_unknown_fields` +

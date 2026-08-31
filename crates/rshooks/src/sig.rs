@@ -6,15 +6,15 @@
 //! declared parameters into a machine-readable, typed function signature:
 //!
 //! ```text
-//! HookParameterName = 0x5F 0x5F            ; "__" reserved prefix
-//!                   | index  (1 byte, 0x00..=0x0F, raw binary)
-//!                   | 0x5F                  ; "_"
-//!                   | type   (1 byte, an STI_* code, raw binary)
-//!                   | 0x5F                  ; "_"
-//!                   | name   (1..=16 bytes, [A-Za-z][A-Za-z0-9]*)
+//! HookParameterName = 0x5F 0x50 0x53        ; "_PS" interface identifier
+//!                   | 0x00                  ; version
+//!                   | index    (1 byte, 0x00..=0x0F, raw binary)
+//!                   | type     (1 byte, an STI_* code, raw binary)
+//!                   | name_len (1 byte, 0x01..=0x10 = name.len())
+//!                   | name     (1..=16 bytes, [A-Za-z][A-Za-z0-9]*)
 //! ```
 //!
-//! Total 7..=22 octets — well under [`crate::convert::PARAM_NAME_MAX_LEN`]
+//! Total 8..=23 octets — well under [`crate::convert::PARAM_NAME_MAX_LEN`]
 //! (32), so no separate bound check against that constant is needed here;
 //! it falls out of the `index`/`name` bounds this module already enforces.
 //!
@@ -70,10 +70,10 @@ use crate::types::{ACC_ID_LEN, AccountId, CURRENCY_CODE_LEN, CurrencyCode, Hash,
 // Wire-format constants and the const-fn name builder
 // ---------------------------------------------------------------------------
 
-/// The five fixed bytes plus the `index`/`type` octets every declared name
-/// carries, before the variable-length display name: `0x5F 0x5F | index |
-/// 0x5F | type | 0x5F` is 6 bytes.
-const FIXED_LEN: usize = 6;
+/// The identifier, version, `index`/`type` octets, and name-length byte
+/// every declared name carries, before the variable-length display name:
+/// `0x5F 0x50 0x53 | 0x00 | index | type | name_len` is 7 bytes.
+const FIXED_LEN: usize = 7;
 
 /// The twelve `STI_*` type bytes [`SigParamType`] has an impl for — see
 /// `docs/PARAM_SIGNATURE_DESIGN.md` §2's table.
@@ -122,9 +122,9 @@ const fn is_valid_name(name: &[u8]) -> bool {
 }
 
 /// Builds one declared `HookParameterName` at compile time:
-/// `0x5F 0x5F | index | 0x5F | type_byte | 0x5F | name`.
+/// `0x5F 0x50 0x53 | 0x00 | index | type_byte | name.len() | name`.
 ///
-/// `N` must equal `6 + name.len()` — [`sig_name!`](crate::sig_name)
+/// `N` must equal `7 + name.len()` — [`sig_name!`](crate::sig_name)
 /// computes it for you; called directly, get `N` right or hit the assert.
 /// Every MUST of the wire format is a `const`-evaluable `assert!`, so any
 /// violation is a compile error at the call site, never a runtime panic or
@@ -133,7 +133,7 @@ const fn is_valid_name(name: &[u8]) -> bool {
 /// - `index <= 0x0F`
 /// - `type_byte` is one of the twelve codes [`SigParamType`] implements
 /// - `name` is 1..=16 bytes matching `[A-Za-z][A-Za-z0-9]*`
-/// - `N == 6 + name.len()`
+/// - `N == 7 + name.len()`
 ///
 /// # Examples
 ///
@@ -141,33 +141,33 @@ const fn is_valid_name(name: &[u8]) -> bool {
 /// use rshooks::sig::sig_param_name;
 ///
 /// // account(0): index 0, STI_ACCOUNT (0x08), name b"account" (7 bytes).
-/// const ACCOUNT: [u8; 13] = sig_param_name::<13>(0, 0x08, b"account");
+/// const ACCOUNT: [u8; 14] = sig_param_name::<14>(0, 0x08, b"account");
 /// assert_eq!(
 ///     ACCOUNT,
-///     [0x5F, 0x5F, 0x00, 0x5F, 0x08, 0x5F, b'a', b'c', b'c', b'o', b'u', b'n', b't']
+///     [0x5F, 0x50, 0x53, 0x00, 0x00, 0x08, 0x07, b'a', b'c', b'c', b'o', b'u', b'n', b't']
 /// );
 ///
 /// // count(1): index 1, STI_UINT16 (0x01), name b"count" (5 bytes).
-/// const COUNT: [u8; 11] = sig_param_name::<11>(1, 0x01, b"count");
+/// const COUNT: [u8; 12] = sig_param_name::<12>(1, 0x01, b"count");
 /// assert_eq!(
 ///     COUNT,
-///     [0x5F, 0x5F, 0x01, 0x5F, 0x01, 0x5F, b'c', b'o', b'u', b'n', b't']
+///     [0x5F, 0x50, 0x53, 0x00, 0x01, 0x01, 0x05, b'c', b'o', b'u', b'n', b't']
 /// );
 /// ```
 ///
 /// An index above `0x0F` fails to compile:
 /// ```compile_fail
-/// const _BAD: [u8; 11] = rshooks::sig::sig_param_name::<11>(16, 0x01, b"count");
+/// const _BAD: [u8; 12] = rshooks::sig::sig_param_name::<12>(16, 0x01, b"count");
 /// ```
 ///
 /// An unsupported type byte fails to compile:
 /// ```compile_fail
-/// const _BAD: [u8; 11] = rshooks::sig::sig_param_name::<11>(0, 0x09, b"count");
+/// const _BAD: [u8; 12] = rshooks::sig::sig_param_name::<12>(0, 0x09, b"count");
 /// ```
 ///
 /// A name containing `_` fails to compile (not `[A-Za-z][A-Za-z0-9]*`):
 /// ```compile_fail
-/// const _BAD: [u8; 12] = rshooks::sig::sig_param_name::<12>(0, 0x01, b"my_count");
+/// const _BAD: [u8; 15] = rshooks::sig::sig_param_name::<15>(0, 0x01, b"my_count");
 /// ```
 #[allow(clippy::indexing_slicing)] // in-bounds by the `N == name.len() + FIXED_LEN` assert, const-evaluated only
 #[must_use]
@@ -183,16 +183,17 @@ pub const fn sig_param_name<const N: usize>(index: u8, type_byte: u8, name: &[u8
     );
     assert!(
         N == name.len().wrapping_add(FIXED_LEN),
-        "rshooks::sig: N must equal 6 + name.len()"
+        "rshooks::sig: N must equal 7 + name.len()"
     );
 
     let mut out = [0u8; N];
     out[0] = 0x5F;
-    out[1] = 0x5F;
-    out[2] = index;
-    out[3] = 0x5F;
-    out[4] = type_byte;
-    out[5] = 0x5F;
+    out[1] = 0x50;
+    out[2] = 0x53;
+    out[3] = 0x00;
+    out[4] = index;
+    out[5] = type_byte;
+    out[6] = name.len() as u8;
     let mut i = 0;
     while i < name.len() {
         out[FIXED_LEN.wrapping_add(i)] = name[i];
@@ -203,7 +204,7 @@ pub const fn sig_param_name<const N: usize>(index: u8, type_byte: u8, name: &[u8
 
 /// Builds a declared `HookParameterName` as a `const` `[u8; N]`, resolving
 /// `N` and the type byte for you: `sig_name!(0, u16, b"count")` expands to
-/// [`sig_param_name`] called with `N = 6 + b"count".len()` and
+/// [`sig_param_name`] called with `N = 7 + b"count".len()` and
 /// `type_byte = <u16 as SigParamType>::TYPE_BYTE`. The result is a `[u8; N]`
 /// value, usable directly with [`crate::api::otxn::otxn_param_exact`]/
 /// [`crate::api::hook_ctx::hook_param_exact`], or as the argument to
@@ -214,17 +215,17 @@ pub const fn sig_param_name<const N: usize>(index: u8, type_byte: u8, name: &[u8
 /// ```
 /// use rshooks::sig_name;
 ///
-/// const COUNT: [u8; 11] = sig_name!(1, u16, b"count");
+/// const COUNT: [u8; 12] = sig_name!(1, u16, b"count");
 /// assert_eq!(
 ///     COUNT,
-///     [0x5F, 0x5F, 0x01, 0x5F, 0x01, 0x5F, b'c', b'o', b'u', b'n', b't']
+///     [0x5F, 0x50, 0x53, 0x00, 0x01, 0x01, 0x05, b'c', b'o', b'u', b'n', b't']
 /// );
 /// ```
 #[macro_export]
 macro_rules! sig_name {
     ($index:expr, $ty:ty, $name:expr) => {
         const {
-            $crate::sig::sig_param_name::<{ 6 + $name.len() }>(
+            $crate::sig::sig_param_name::<{ 7 + $name.len() }>(
                 $index,
                 <$ty as $crate::sig::SigParamType>::TYPE_BYTE,
                 $name,
@@ -699,44 +700,56 @@ mod tests {
 
     #[test]
     fn name_vector_account() {
-        const NAME: [u8; 13] = sig_param_name::<13>(0, 0x08, b"account");
+        const NAME: [u8; 14] = sig_param_name::<14>(0, 0x08, b"account");
         assert_eq!(
             NAME,
             [
-                0x5F, 0x5F, 0x00, 0x5F, 0x08, 0x5F, b'a', b'c', b'c', b'o', b'u', b'n', b't'
+                0x5F, 0x50, 0x53, 0x00, 0x00, 0x08, 0x07, b'a', b'c', b'c', b'o', b'u', b'n', b't'
             ]
         );
     }
 
     #[test]
     fn name_vector_count() {
-        const NAME: [u8; 11] = sig_param_name::<11>(1, 0x01, b"count");
+        const NAME: [u8; 12] = sig_param_name::<12>(1, 0x01, b"count");
         assert_eq!(
             NAME,
             [
-                0x5F, 0x5F, 0x01, 0x5F, 0x01, 0x5F, b'c', b'o', b'u', b'n', b't'
+                0x5F, 0x50, 0x53, 0x00, 0x01, 0x01, 0x05, b'c', b'o', b'u', b'n', b't'
             ]
         );
     }
 
     #[test]
     fn sig_name_macro_matches_direct_call() {
-        const VIA_MACRO: [u8; 11] = sig_name!(1, u16, b"count");
-        const VIA_FN: [u8; 11] = sig_param_name::<11>(1, 0x01, b"count");
+        const VIA_MACRO: [u8; 12] = sig_name!(1, u16, b"count");
+        const VIA_FN: [u8; 12] = sig_param_name::<12>(1, 0x01, b"count");
         assert_eq!(VIA_MACRO, VIA_FN);
     }
 
     #[test]
     fn name_sixteen_byte_name_at_max_index() {
-        const NAME: [u8; 22] = sig_param_name::<22>(0x0F, 0x10, b"abcdefghijklmnop");
-        let mut expected = [0x5Fu8; 22];
+        const NAME: [u8; 23] = sig_param_name::<23>(0x0F, 0x10, b"abcdefghijklmnop");
+        let mut expected = [0u8; 23];
+        if let Some(dst) = expected.get_mut(0) {
+            *dst = 0x5F;
+        }
+        if let Some(dst) = expected.get_mut(1) {
+            *dst = 0x50;
+        }
         if let Some(dst) = expected.get_mut(2) {
-            *dst = 0x0F;
+            *dst = 0x53;
         }
         if let Some(dst) = expected.get_mut(4) {
+            *dst = 0x0F;
+        }
+        if let Some(dst) = expected.get_mut(5) {
             *dst = 0x10;
         }
-        if let Some(dst) = expected.get_mut(6..) {
+        if let Some(dst) = expected.get_mut(6) {
+            *dst = 0x10;
+        }
+        if let Some(dst) = expected.get_mut(7..) {
             dst.copy_from_slice(b"abcdefghijklmnop");
         }
         assert_eq!(NAME, expected);
@@ -995,7 +1008,7 @@ mod tests {
 
     #[test]
     fn smoke_not_implemented_on_host() {
-        const NAME: [u8; 11] = sig_name!(0, u16, b"count");
+        const NAME: [u8; 12] = sig_name!(0, u16, b"count");
         assert_eq!(otxn_sig_param::<u16>(&NAME), Err(HookError::NotImplemented));
         assert_eq!(hook_sig_param::<u16>(&NAME), Err(HookError::NotImplemented));
         assert_eq!(

@@ -285,13 +285,13 @@ Generation rules, precisely:
   "HookParameters": [
     {
       "HookParameter": {
-        "HookParameterName": "5F5F005F085F6163636F756E74",
+        "HookParameterName": "5F5053000008076163636F756E74",
         "HookParameterValue": "00"
       }
     },
     {
       "HookParameter": {
-        "HookParameterName": "5F5F015F015F636F756E74",
+        "HookParameterName": "5F505300010105636F756E74",
         "HookParameterValue": "00"
       }
     }

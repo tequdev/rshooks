@@ -725,7 +725,7 @@ mod tests {
     fn entry_decl_round_trips_sig_params() {
         let on = r#"{"form":"omitted","HookOn":null,"HookOnIncoming":null,"HookOnOutgoing":null}"#;
         let hooks = format!(
-            r#"{{"schema":"rshooks-hooks-v2","impl":"Vault","entries":[{{"index":0,"hook_fn":"increment","cbak_fn":null,"HookName":null,"on":{on},"HookCanEmit":null,"description":null,"sig_params":[{{"field":"account","type_byte":8,"name_hex":"5F5F005F085F6163636F756E74"}},{{"field":"count","type_byte":1,"name_hex":"5F5F015F015F636F756E74"}}]}}]}}"#
+            r#"{{"schema":"rshooks-hooks-v2","impl":"Vault","entries":[{{"index":0,"hook_fn":"increment","cbak_fn":null,"HookName":null,"on":{on},"HookCanEmit":null,"description":null,"sig_params":[{{"field":"account","type_byte":8,"name_hex":"5F5053000008076163636F756E74"}},{{"field":"count","type_byte":1,"name_hex":"5F505300010105636F756E74"}}]}}]}}"#
         );
         let wasm = wasm_with_carriers(CHAIN_JSON, &hooks);
         let carriers = extract_chain_carriers(&wasm, "vault").expect("extraction succeeds");
@@ -733,7 +733,7 @@ mod tests {
         assert_eq!(sig_params.len(), 2);
         assert_eq!(sig_params[0].field, "account");
         assert_eq!(sig_params[0].type_byte, 8);
-        assert_eq!(sig_params[0].name_hex, "5F5F005F085F6163636F756E74");
+        assert_eq!(sig_params[0].name_hex, "5F5053000008076163636F756E74");
         assert_eq!(sig_params[1].field, "count");
         assert_eq!(sig_params[1].type_byte, 1);
     }
