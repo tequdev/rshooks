@@ -147,7 +147,7 @@ impl LedgerEntryType {
     /// unknown.
     #[inline(always)]
     #[must_use]
-    pub fn code(&self) -> u16 {
+    pub const fn code(&self) -> u16 {
         match *self {
             LedgerEntryType::NFTokenOffer => rshooks_core::ltNFTOKEN_OFFER,
             LedgerEntryType::Cron => rshooks_core::ltCRON,
@@ -196,6 +196,7 @@ mod tests {
 
     #[test]
     fn round_trips_known_codes() {
+        const _: u16 = LedgerEntryType::Unknown(0).code();
         let known: &[u16] = &[
             0x0037, 0x0041, 0x0043, 0x0044, 0x0045, 0x0048, 0x0049, 0x004e, 0x0050, 0x0052, 0x0053,
             0x0054, 0x0055, 0x0061, 0x0064, 0x0066, 0x0068, 0x0069, 0x006f, 0x0070, 0x0071, 0x0072,
