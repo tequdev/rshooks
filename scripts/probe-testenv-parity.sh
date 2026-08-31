@@ -1,23 +1,12 @@
 #!/usr/bin/env bash
-# Continuous same-commit wasm-parity probe (design doc §7's "Continuous
-# CI" check, as opposed to the one-time A/B/C adoption probe whose results
-# are recorded in .claude/design/TESTENV_DESIGN.md).
+# Same-commit wasm-parity probe: builds every examples/* crate twice through
+# the real `rshooks build` pipeline — (i) as-committed, (ii) a temp copy with
+# off-chain-test wiring stripped by strip-testenv-wiring.py — and asserts the
+# .wasm, WCE (hook/cbak), size, and max nesting depth match for each. Any
+# difference means test machinery leaked into the shipped wasm artifact.
 #
-# At the current commit, builds every examples/* crate through the real
-# `rshooks build` pipeline TWICE:
-#   (i)  as-committed  — the repo tree, untouched.
-#   (ii) stripped       — a temp copy with all off-chain-unit-test wiring
-#        (tests/ dirs, the rshooks-testenv dev-dependency, the extra
-#        "rlib" crate-type, the std-under-test cfg_attr) mechanically
-#        removed by strip-testenv-wiring.py.
-#
-# and asserts every produced .wasm is byte-identical between the two arms,
-# plus the WCE (hook/cbak instruction cost), file size and max block/loop/if
-# nesting depth `rshooks check` reports for each. Any difference means test
-# machinery leaked into the shipped wasm artifact and fails the build.
-#
-# Never touches the repo's own examples/*/out — both arms build into a
-# temp root.
+# Never touches the repo's own examples/*/out — both arms build into a temp
+# root.
 
 set -euo pipefail
 
@@ -34,7 +23,7 @@ STRIPPED_OUT="$TMP/stripped"
 echo "== probe:testenv-parity =="
 echo "workdir: $TMP"
 
-# --- Build the rshooks-build binary once; both arms share it. ---------
+# Build the rshooks-build binary once; both arms share it.
 echo "-- building rshooks-build (release) --"
 cargo build -p rshooks-build --release --manifest-path "$ROOT/Cargo.toml" >/dev/null
 BIN="$ROOT/target/release/rshooks"
@@ -43,21 +32,19 @@ if [[ ! -x "$BIN" ]]; then
   exit 1
 fi
 
-# --- Discover examples the same way build-examples.yml does: one entry
-# per examples/*/Cargo.toml, so a newly added example needs no probe edit.
+# Discover examples the same way build-examples.yml does: one entry per
+# examples/*/Cargo.toml, so a newly added example needs no probe edit.
 mapfile -t EXAMPLES < <(for m in "$ROOT"/examples/*/Cargo.toml; do basename "$(dirname "$m")"; done | sort)
 echo "examples: ${EXAMPLES[*]}"
 
-# --- Prepare the stripped source tree. ---------------------------------
-# Copy only examples/ (excluding its own build cache and prior output),
-# and symlink crates/ back to the real directory so examples/*/Cargo.toml's
+# Copy only examples/ (excluding its build cache and prior output), and
+# symlink crates/ back to the real directory so examples/*/Cargo.toml's
 # `path = "../../crates/..."` dependencies keep resolving. Cargo does NOT
-# resolve the symlink when walking up from crates/rshooks/Cargo.toml to
-# find the enclosing workspace (it walks the given path textually, not
-# canonicalized) — so the root Cargo.toml (declaring `members = ["crates/*"]`,
-# which is what crates/rshooks's `.workspace = true` fields resolve
-# through) must also be present at $STRIPPED_SRC/Cargo.toml, one level
-# above the crates/ symlink, exactly mirroring the real repo layout.
+# resolve the symlink when walking up from crates/rshooks/Cargo.toml to find
+# the enclosing workspace (it walks the given path textually, not
+# canonicalized) — so the root Cargo.toml (declaring `members = ["crates/*"]`)
+# must also be present at $STRIPPED_SRC/Cargo.toml, one level above the
+# crates/ symlink, exactly mirroring the real repo layout.
 echo "-- preparing stripped tree --"
 mkdir -p "$STRIPPED_SRC"
 rsync -a \
@@ -70,7 +57,6 @@ ln -s "$ROOT/Cargo.lock" "$STRIPPED_SRC/Cargo.lock"
 
 python3 "$ROOT/scripts/strip-testenv-wiring.py" "$STRIPPED_SRC/examples"
 
-# --- Build both arms. ----------------------------------------------------
 build_arm() {
   local manifest_root="$1" out_root="$2"
   local dir
@@ -88,7 +74,6 @@ build_arm "$ROOT" "$AS_COMMITTED_OUT"
 echo "-- building stripped arm --"
 build_arm "$STRIPPED_SRC" "$STRIPPED_OUT"
 
-# --- Compare. --------------------------------------------------------------
 sha256_of() {
   # macOS has no coreutils sha256sum by default in all environments; shasum
   # -a 256 is the portable choice, sha256sum used first if present.

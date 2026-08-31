@@ -119,10 +119,10 @@ pub(crate) struct World {
     /// The normalized keys of every entry seeded via
     /// [`crate::TestEnv::state_entry`] (own account, own namespace at
     /// *some* point — not necessarily the current one). [`Self::rekey_own_seeds`]
-    /// consults this set to know which `state` entries a later
+    /// uses this set to know which `state` entries a later
     /// `hook_account`/`own_namespace` builder call must follow to their new
     /// address; a `foreign_state_entry` seed is never added here, so it is
-    /// never re-keyed even if it happens to land at the same address.
+    /// never re-keyed even at the same address.
     pub(crate) own_seeded_keys: HashSet<[u8; 32]>,
     pub(crate) grants: HashMap<([u8; 20], [u8; 32]), Vec<Grant>>,
     pub(crate) ledger_seq: u32,
@@ -142,40 +142,34 @@ pub(crate) struct World {
 
     // -- Phase 2 (`.claude/design/TESTENV_PHASE2_DESIGN.md` §3) --
     //
-    // Plain data plumbing as of P2-A, landing per-family in P2-B..P2-E:
-    // `ledger_objects` is read by `ledger_keylet` as of P2-C (below); the
-    // remaining fields are still seeded/read only by the builders and
-    // accessors below — no `crate::backend::Backend` method reads or writes
-    // them yet, so their own `HostBackend` methods still fall through to
-    // the trait default.
+    // `ledger_objects` backs `ledger_keylet` and `slot_set`; `otxn_meta`
+    // backs `meta_slot`; `xpop` backs `xpop_slot` — see
+    // `crate::backend::Backend`'s slot_* overrides.
     /// Seeded ledger objects, keyed by their 34-byte keylet — backs
-    /// `slot_set` (P2-D, not yet landed: only this map's *keys* are read so
-    /// far) and `ledger_keylet` (P2-C, landed — `crate::backend::Backend::
-    /// ledger_keylet` searches these keys directly). Builder:
-    /// [`crate::TestEnv::ledger_object`].
+    /// `slot_set` (`crate::backend::Backend::slot_set` looks up the keylet
+    /// here) and `ledger_keylet` (`crate::backend::Backend::ledger_keylet`
+    /// searches these keys directly). Builder: [`crate::TestEnv::ledger_object`].
     pub(crate) ledger_objects: HashMap<[u8; 34], Vec<u8>>,
-    /// The current transaction's metadata, if seeded — backs `meta_slot`
-    /// (P2-D). Builder: [`crate::TestEnv::otxn_meta`].
-    #[allow(dead_code)] // scaffolding (P2-A): read once meta_slot lands (P2-D)
+    /// The current transaction's metadata, if seeded — backs `meta_slot`.
+    /// Builder: [`crate::TestEnv::otxn_meta`].
+    #[allow(dead_code)]
     pub(crate) otxn_meta: Option<Vec<u8>>,
     /// An XPOP's `(transaction, metadata)` pair, if seeded — backs
-    /// `xpop_slot` (P2-D). Builder: [`crate::TestEnv::xpop`].
-    #[allow(dead_code)] // scaffolding (P2-A): read once xpop_slot lands (P2-D)
+    /// `xpop_slot`. Builder: [`crate::TestEnv::xpop`].
+    #[allow(dead_code)]
     pub(crate) xpop: Option<(Vec<u8>, Vec<u8>)>,
     /// Parameters written by `hook_param_set` during a *previous*,
     /// already-`accept!`ed invocation — `(hook_hash, name) -> value` — read
     /// back by `hook_param` when the currently invoked position's hash
-    /// matches (P2-E; design §4 "control leftovers"). Committed the same
-    /// way state is: only on `accept!` — `crate::env::TestEnv`'s
-    /// `run_entry` helper merges `InvocationContext::pending_param_overrides`
-    /// in on that arm; see `crate::host::control`'s module doc comment for
-    /// the upstream citation behind the commit gate.
+    /// matches (P2-E; design §4 "control leftovers"). Committed only on
+    /// `accept!`: `crate::env::TestEnv::run_entry` merges
+    /// `InvocationContext::pending_param_overrides` in on that arm (see
+    /// `crate::host::control`'s module doc for the upstream citation).
     pub(crate) hook_param_overrides: HashMap<([u8; 32], Vec<u8>), Vec<u8>>,
     /// Whether the most recently **accepted** invocation called `hook_again`
-    /// (design §4; see `crate::host::control`'s module doc comment for why
-    /// this harness ties the commit to `accept!` — a documented
-    /// simplification of upstream's own, more involved commit path). Read
-    /// by `TestEnv::hook_again_requested()` (P2-E).
+    /// (design §4; commit tied to `accept!` — see `crate::host::control`'s
+    /// module doc for the upstream-vs-harness commit-path simplification).
+    /// Read by `TestEnv::hook_again_requested()` (P2-E).
     pub(crate) hook_again_requested: bool,
     /// Every `hook_skip(hash, flags)` directive from every **accepted**
     /// invocation so far, verbatim, in call order (design §4: "recorded
@@ -243,16 +237,13 @@ impl World {
     /// Snapshot of every field a rolled-back/restored invocation must undo:
     /// the state map, the committed-emission list, and (P2-E) the three
     /// control-leftover commit targets (`hook_param_overrides`/
-    /// `hook_again_requested`/`skip_directives`) — under the current
-    /// stage-then-merge implementation (`crate::env::TestEnv::run_entry`
-    /// only ever writes these three on the `ExitType::Accept` arm, never
-    /// speculatively) a rolled-back invocation never actually mutates them
-    /// in the first place, so restoring is a defensive no-op rather than an
-    /// undo; captured anyway so that invariant does not have to be
-    /// re-verified by hand at every future call site (design §3, deliverable
-    /// 3: "rollback must not leak them"). Everything else (params, otxn,
-    /// ledger fields, grants) is not writable by a hook invocation, so it
-    /// needs no snapshot/restore.
+    /// `hook_again_requested`/`skip_directives`) — design §3 deliverable 3,
+    /// "rollback must not leak them". `crate::env::TestEnv::run_entry` only
+    /// writes those three on the `ExitType::Accept` arm, so today a
+    /// rollback never actually mutates them and restoring is a defensive
+    /// no-op, kept so the invariant holds without re-verifying at each call
+    /// site. Everything else (params, otxn, ledger fields, grants) is not
+    /// writable by a hook invocation and needs no snapshot/restore.
     pub(crate) fn snapshot(&self) -> WorldSnapshot {
         WorldSnapshot {
             state: self.state.clone(),

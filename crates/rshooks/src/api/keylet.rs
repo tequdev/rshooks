@@ -10,40 +10,37 @@
 //! [`util_keylet`](crate::api::util::util_keylet)/[`util_keylet_buf`] take
 //! `a`..`f` as bare `u32`s — some are raw values (a sequence number, a
 //! quality component), others are **pointers** into this hook's own linear
-//! memory (an account ID, a hash, a currency code), and *which* is which,
-//! how many of the six are actually used, and what they mean all depend
-//! silently on `keylet_type`. Nothing at the type level stops passing an
-//! account pointer where a sequence number was expected, or omitting a
-//! component a given type actually requires — a mismatch is either a
-//! `NO_SUCH_KEYLET`/`INVALID_ARGUMENT` at runtime or, worse, a keylet that
-//! silently resolves to the wrong ledger entry.
+//! memory (an account ID, a hash, a currency code), and which is which, how
+//! many of the six are used, and what they mean all depend silently on
+//! `keylet_type`. Nothing at the type level stops passing an account
+//! pointer where a sequence number was expected, or omitting a component a
+//! given type requires. Get it wrong and the host either fails loudly
+//! (`NO_SUCH_KEYLET`/`INVALID_ARGUMENT`) or, worse, silently resolves to
+//! the wrong ledger entry — the typed helpers below exist to make that
+//! mistake unrepresentable.
 //!
 //! Every function below instead takes exactly the fixed-size
-//! `rshooks::types` newtype(s) and/or plain integer(s) its own keylet
-//! type actually needs — [`keylet_account`] takes an `&AccountId` and
-//! nothing else, [`keylet_line`] takes two `&AccountId`s and a
-//! `&CurrencyCode`, [`keylet_offer`] takes an `&AccountId` and a `u32`
-//! sequence — encoding each type's own argument shape as its function
-//! signature instead of six same-typed slots meaning something different
-//! per call. Every one is a thin, `#[inline(always)]` pass-through to
-//! [`util_keylet_buf`] (computing each pointer/length pair via `.as_ptr()`/
-//! `.len()` on the newtype argument, `0` for every unused `a`..`f` slot),
-//! so none of this costs anything beyond the raw host call itself — see
+//! `rshooks::types` newtype(s) and/or plain integer(s) its own keylet type
+//! needs — [`keylet_account`] takes an `&AccountId` and nothing else,
+//! [`keylet_line`] takes two `&AccountId`s and a `&CurrencyCode`,
+//! [`keylet_offer`] takes an `&AccountId` and a `u32` sequence. Every one is
+//! a thin, `#[inline(always)]` pass-through to [`util_keylet_buf`]
+//! (computing each pointer/length pair via `.as_ptr()`/`.len()` on the
+//! newtype argument, `0` for every unused `a`..`f` slot), so none of this
+//! costs anything beyond the raw host call itself. See
 //! [`util_keylet_buf`]'s own doc comment for a toolchain note every caller
-//! of *any* function in this module needs (a 34-byte `Keylet` scratch
-//! buffer needs `--auto-guard --default-maxiter 34` to build past the
-//! guard checker at `opt-level = "z"`/`"s"` — not at `opt-level =
-//! 1`/`2`/`3`, where 34 bytes already builds clean; see `docs/DESIGN.md`'s
-//! §2 C6).
+//! of any function in this module needs: a 34-byte `Keylet` scratch buffer
+//! needs `--auto-guard --default-maxiter 34` to build past the guard
+//! checker at `opt-level = "z"`/`"s"` (not at `opt-level = 1`/`2`/`3`,
+//! where 34 bytes already builds clean; see `docs/DESIGN.md`'s §2 C6).
 //!
 //! # Source of truth
 //!
 //! Every `KEYLET_*` constant this module covers comes from
-//! [`rshooks_core::consts`] (itself generated from the vendored
-//! `hook/hookapi.h` — see `rshooks-core`'s own module doc comment), and every
-//! function below is named `keylet_xxx` for the constant `KEYLET_XXX` it
-//! wraps. [`keylet_emitted`] is the corresponding helper for
-//! `KEYLET_EMITTED`.
+//! [`rshooks_core::consts`] (generated from the vendored `hook/hookapi.h` —
+//! see `rshooks-core`'s own module doc comment), and every function below
+//! is named `keylet_xxx` for the constant `KEYLET_XXX` it wraps.
+//! [`keylet_emitted`] is the corresponding helper for `KEYLET_EMITTED`.
 
 use crate::api::util::util_keylet_buf;
 use crate::error::Result;
@@ -59,17 +56,13 @@ use rshooks_core::consts::{
 #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
 use rshooks_core::backend::KeyletArg;
 
-/// Testenv interception shared by every typed helper below: each of them
-/// still constitutes its own "direct raw call site" for bridging purposes
-/// (see `crates/rshooks/testenv-call-sites.txt`'s header and
-/// [`rshooks_core::backend::KeyletArg`]'s doc comment for why — unlike an
+/// Testenv interception shared by every typed helper below. Unlike an
 /// `_exact`/`_typed` composing helper elsewhere in this crate,
 /// `util_keylet_buf` no longer has real slices by the time a typed helper
-/// calls it, so interception has to happen here, one level up, where
-/// `account`/`hash`/... are still real references). This is purely the
-/// interception-side plumbing (mirrors `api::state`'s private `opt_in`/
-/// `foreign_target` helpers) — the wasm/no-backend fallback in every typed
-/// helper below still calls `util_keylet_buf` unchanged.
+/// calls it, so interception happens here, one level up, where
+/// `account`/`hash`/... are still real references (mirrors `api::state`'s
+/// private `opt_in`/`foreign_target` helpers). The wasm/no-backend fallback
+/// in every typed helper below still calls `util_keylet_buf` unchanged.
 #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
 #[inline(always)]
 fn testenv_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Option<Result<Keylet>> {
@@ -439,20 +432,13 @@ pub fn keylet_emitted_dir() -> Result<Keylet> {
 ///
 /// # Known host limitation
 ///
-/// Live e2e testing (`examples/13_keylets`, standalone `xahaud
-/// 2026.6.21-release+3350`) found this specific call reliably fails at
-/// runtime — `util_keylet` returns an error for `KEYLET_TICKET` regardless
-/// of `ticket_seq`'s value, even though the identical `account`/
-/// `ticket_seq` shape is accepted by that same node's `ledger_entry` RPC
-/// (which computes the same index via a different code path) and every
+/// On standalone `xahaud 2026.6.21-release+3350`, `util_keylet` returns an
+/// error for `KEYLET_TICKET` regardless of `ticket_seq`, even though the
+/// identical shape is accepted by that node's `ledger_entry` RPC and every
 /// structurally similar type (`KEYLET_OFFER`/`KEYLET_ESCROW`/
-/// `KEYLET_CHECK`/`KEYLET_SIGNERS`, isolated the same way) succeeds. This
-/// looks like a host-side gap in that specific `util_keylet`
-/// implementation, not a bug in this wrapper's argument marshaling — kept
-/// here (rather than removed) since the wrapper itself is correct per the
-/// documented argument shape, and a future/different host build may
-/// support it. `examples/13_keylets` does not exercise this call for that
-/// reason — see its README's "e2e verification scope" section.
+/// `KEYLET_CHECK`/`KEYLET_SIGNERS`) succeeds — a host-side gap, not a bug in
+/// this wrapper's argument marshaling. `examples/13_keylets` does not
+/// exercise this call; see its README's "e2e verification scope" section.
 #[inline(always)]
 pub fn keylet_ticket(account: &AccountId, ticket_seq: u32) -> Result<Keylet> {
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]

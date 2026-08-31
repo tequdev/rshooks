@@ -25,7 +25,6 @@ const STUB: HookError = HookError::NotImplemented;
 
 #[test]
 fn surface() {
-    // constructors
     assert_eq!(SlotObject::from_otxn().err(), Some(STUB));
     assert_eq!(SlotObject::from_meta().err(), Some(STUB));
     let k = Keylet::default();
@@ -33,7 +32,6 @@ fn surface() {
     let h = Hash::default();
     assert_eq!(SlotObject::from_txn_hash(&h).err(), Some(STUB));
 
-    // typed field constants
     let _: SField<u32> = sfSequence;
     let _: SField<AccountId> = sfAccount;
     let _: SField<Amount> = sfBalance;
@@ -48,8 +46,8 @@ fn surface() {
     let _: SField<Opaque> = sfSigningPubKey;
     let _: SField<Opaque> = sfTakerPaysCurrency;
 
-    // Field codes compare across type parameters, which is what makes an
-    // erased `field_code()` result usable against the constants.
+    // Field codes compare across type parameters, so an erased
+    // `field_code()` result can match against the typed constants.
     assert!(sfAccount == sfAccount);
     assert!(sfSigningPubKey != sfAccount);
 
@@ -107,7 +105,6 @@ fn navigation_types() {
         let mut b = [0u8; 8];
         let _n = root.get(sfSequence)?.raw(&mut b)?;
         let _: [u8; 32] = root.get(sfLedgerHash)?.raw_exact::<32>()?;
-        // casts
         let _: SlotObject<STObject> = root.get(sfMemo)?.try_cast::<STObject>()?;
         let _: SlotObject<u32> = root.get(sfSigningPubKey)?.assume_type::<u32>();
         Ok(())
@@ -217,10 +214,8 @@ fn a_dormant_constant_is_nameable_under_all_amendments() {
 fn slot_path_evaluates_its_root_once() {
     use core::cell::Cell;
 
-    // The counter has to be ticked by an expression the macro *itself*
-    // evaluates — the parenthesized-root form — or this proves nothing about
-    // the macro at all. `slot_path!((expr)[..])` binds that expression once;
-    // a naive expansion that re-emitted `$root` per hop would tick twice.
+    // `slot_path!((expr)[..])` must bind the parenthesized root once; a
+    // naive expansion that re-emitted `$root` per hop would tick this twice.
     let calls = Cell::new(0u32);
     let make = || {
         calls.set(calls.get().wrapping_add(1));

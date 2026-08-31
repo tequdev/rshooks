@@ -3,9 +3,8 @@
 //! [`rshooks_build::validate_guards_native`] against small hand-authored
 //! fixtures covering accept/reject/exception.
 //!
-//! Test code is exempt from the workspace's panic-freedom lints (per
-//! `docs/DESIGN.md` §8): `unwrap`/`expect` on a known-good fixture is the
-//! normal, idiomatic way to assert behavior in a test.
+//! Test code is exempt from the workspace's panic-freedom lints (`docs/DESIGN.md`
+//! §8): `unwrap`/`expect` on a known-good fixture is idiomatic here.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -15,12 +14,11 @@
 
 use rshooks_build::{NativeGuardError, Options, clean, validate_guards_native};
 
-/// Drift tripwire against `vendor/xahaud/SHA256SUMS` (the single source of
-/// truth for the vendored hashes, regenerated only by
-/// `scripts/sync-vendor.sh`): an accidental local edit to the vendored,
-/// supposedly byte-identical upstream headers (or a corrupted re-download)
-/// fails a test loudly, instead of silently diverging from what a real
-/// xahaud node runs.
+/// Drift tripwire against `vendor/xahaud/SHA256SUMS` (the source of truth for
+/// the vendored hashes, regenerated only by `scripts/sync-vendor.sh`): an
+/// accidental edit to the vendored upstream headers, or a corrupted
+/// re-download, fails loudly instead of silently diverging from a real
+/// xahaud node.
 #[test]
 fn vendored_files_match_recorded_sha256() {
     use sha2::{Digest, Sha256};
@@ -64,10 +62,9 @@ fn vendored_files_match_recorded_sha256() {
 }
 
 /// A minimal but structurally realistic Guard-type hook: it imports `_g` and
-/// actually calls it in a correctly-guarded loop (so the import survives the
-/// cleaner's reachability GC — a bare `import "env" "_g"` that is never
-/// called gets garbage-collected, which is itself a real divergence; see
-/// the end-to-end report). Padded with a data segment past the checker's
+/// actually calls it in a correctly-guarded loop, so the import survives the
+/// cleaner's reachability GC (a bare `import "env" "_g"` that is never called
+/// gets garbage-collected). Padded with a data segment past the checker's
 /// 63-byte minimum.
 const VALID_GUARDED_HOOK: &str = r#"
 (module
@@ -96,8 +93,8 @@ fn native_checker_accepts_valid_guarded_hook() {
     let w = cleaned(VALID_GUARDED_HOOK);
     assert!(w.len() >= 63, "fixture must clear the checker's size floor");
     let verdict = validate_guards_native(&w).expect("checker should accept a valid guarded hook");
-    // The loop's guard prologue is `i32.const 1; i32.const 10; call $_g`, so
-    // the checker's own worst-case count must be nonzero and finite.
+    // Guard prologue `i32.const 1; i32.const 10; call $_g` means the checker's
+    // worst-case count must be nonzero and finite.
     assert!(
         verdict.hook_cost > 0,
         "hook cost should be nonzero: {verdict:?}"
@@ -110,9 +107,8 @@ fn native_checker_accepts_valid_guarded_hook() {
 
 #[test]
 fn native_checker_rejects_unguarded_loop() {
-    // A second loop with no guard prologue at all, alongside a correctly
-    // guarded one (so `_g` still survives cleaning) — isolates the
-    // "unguarded loop" rejection from the "no `_g` import at all" rejection.
+    // An unguarded loop alongside a correctly guarded one (so `_g` survives
+    // cleaning) isolates "unguarded loop" rejection from "no `_g` import".
     let src = r#"
     (module
       (import "env" "_g" (func $g (param i32 i32) (result i32)))
@@ -171,9 +167,9 @@ fn native_checker_rejects_non_whitelisted_import() {
 
 /// `validateGuards` is documented upstream as "may throw overflow_error,
 /// length_error" on malformed LEB128 input. This exercises the shim's
-/// exception path (status 2), not just the ordinary invalid path (status
-/// 1): a type-section length field encoded with enough continuation bytes
-/// to overflow the 64-bit accumulator in `parseLeb128`.
+/// exception path (status 2), not the ordinary invalid path (status 1): a
+/// type-section length field with enough continuation bytes to overflow the
+/// 64-bit accumulator in `parseLeb128`.
 #[test]
 fn native_checker_reports_exception_not_ub_on_malformed_leb128() {
     let mut w: Vec<u8> = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00]; // magic + version

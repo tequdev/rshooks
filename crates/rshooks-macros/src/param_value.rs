@@ -3,42 +3,33 @@
 //! Turns a plain, fixed-size, named-field struct into a fixed-offset,
 //! zero-cost `rshooks::convert::FromBytes`/`FixedRead` pair — the
 //! **read-back** half of a Hook API parameter, decoded by
-//! `hook_param_typed`/`otxn_param_typed` once the parameter's *name* (a separate
-//! concept — see [`crate::param_name`]) has located it. See
-//! `rshooks::ParamValue`'s doc comment (the public-facing re-export
-//! site) for the full user-facing writeup, grammar, and worked/
-//! compile-fail examples — this module only implements the codegen.
+//! `hook_param_typed`/`otxn_param_typed` once the parameter's *name* (a
+//! separate concept — see [`crate::param_name`]) has located it. See
+//! `rshooks::ParamValue`'s doc comment for the full user-facing writeup,
+//! grammar, and worked/compile-fail examples — this module only implements
+//! the codegen.
 //!
 //! # Why a separate derive, not `#[derive(HookData)]`?
 //!
 //! A Hook API parameter value and a hook-state value share the same
-//! "fixed-offset struct" shape, but a parameter value is only ever
-//! **read** by this hook — never written back (there is no "write my own
-//! `hook_param`" operation the way there is for hook state, so nothing
-//! here ever needs `ToBytes` on the type as a whole). `ParamValue`
-//! reflects that: it generates only `FromBytes`/`FixedRead` — no
-//! `ToBytes`, no inherent `LEN` const. Every field must still itself
-//! implement `ToBytes` (each field's own `MAX_LEN`/`write` is what the
-//! generated code sums/calls internally to compute offsets and decode),
-//! but `Self` — the parameter-value struct as a whole — is never required
-//! to implement `ToBytes` itself, and doesn't. Trying to write a
-//! `#[derive(ParamValue)]` type back out (e.g. as a `HookKey`/`HookData`
-//! field, or anywhere else `ToBytes` is required) fails to compile with
-//! an ordinary rustc trait-bound error naming the missing trait.
-//!
-//! See `rshooks::HookData`'s/`rshooks::ParamName`'s doc comments for
-//! the reciprocal notes (use `HookKey`/`HookData` for hook-state
-//! keys/values, `ParamName` for a parameter *name*, `ParamValue` for its
-//! value).
+//! fixed-offset struct shape, but a parameter value is only ever **read**
+//! by this hook — there is no "write my own `hook_param`" operation, so
+//! nothing here ever needs `ToBytes` on the type as a whole. `ParamValue`
+//! generates only `FromBytes`/`FixedRead` — no `ToBytes`, no inherent
+//! `LEN` const. Every field must still itself implement `ToBytes` (each
+//! field's own `MAX_LEN`/`write` is what the generated code sums/calls
+//! internally), but `Self` is never required to. Trying to write a
+//! `#[derive(ParamValue)]` type back out fails to compile with an ordinary
+//! rustc trait-bound error naming the missing trait.
 //!
 //! # Why hand-rolled, not `syn`/`quote`; codegen strategy
 //!
-//! Identical rationale to [`crate::hook_data`] (see that module's doc
-//! comment) — struct-shape parsing is shared via [`crate::shape`]. The
-//! per-field offset chain is the same shape as `HookData`'s, except every
-//! offset expression here is computed **inline**, from each field's own
-//! `<FieldType as ToBytes>::MAX_LEN`, rather than through `<Self as
-//! ToBytes>::MAX_LEN` — since `Self` has no `ToBytes` impl to reference.
+//! Identical rationale to [`crate::hook_data`] — struct-shape parsing is
+//! shared via [`crate::shape`]. The per-field offset chain is the same
+//! shape as `HookData`'s, except every offset expression here is computed
+//! inline, from each field's own `<FieldType as ToBytes>::MAX_LEN`, rather
+//! than through `<Self as ToBytes>::MAX_LEN` — since `Self` has no
+//! `ToBytes` impl to reference.
 
 use crate::err;
 use crate::shape::{StructShape, parse_struct};
@@ -58,10 +49,9 @@ pub fn derive(input: TokenStream) -> TokenStream {
 pub(crate) fn generate(shape: &StructShape) -> TokenStream {
     let name = &shape.name;
 
-    // Referenced wherever `HookData`'s codegen would use `<Self as
-    // ToBytes>::MAX_LEN` — `Self` has no `ToBytes` impl here, so this sum
-    // over each field's own `MAX_LEN` is inlined at every use site instead
-    // (a plain compile-time constant expression either way).
+    // `Self` has no `ToBytes` impl here, so this sum over each field's own
+    // `MAX_LEN` is inlined at every use site instead of referenced via
+    // `<Self as ToBytes>::MAX_LEN`.
     let mut total_len_expr = String::from("0usize");
     for f in &shape.fields {
         total_len_expr.push_str(&format!(

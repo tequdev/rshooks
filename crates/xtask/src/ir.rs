@@ -2,18 +2,13 @@
 //!
 //! [`build`] parses the vendored xahaud `hook/*.h` headers (via
 //! [`crate::parse`]) exactly once into a single serializable [`HookApiSpec`]
-//! tree. `gen_core` then round-trips that tree through JSON — serializing it
-//! to `crates/rshooks-core/hook_api.json`, then deserializing it back — before
-//! handing it to the per-file generators in [`crate::codegen`]. Those
-//! generators therefore never touch header text or [`crate::parse`] types
-//! directly; they consume only this IR, so `hook_api.json` is the true
-//! intermediate artifact of the pipeline (`scripts/sync-vendor.sh` -> parse
-//! -> `hook_api.json` -> per-file codegen -> `rustfmt`), not just a
-//! documentation side-effect of it.
-//!
-//! This is a data-shape change only: every generator's rendering logic is
-//! unchanged, so `crates/rshooks-core/src/*.rs` stays byte-for-byte identical
-//! (`cargo xtask gen-core --check`, `docs/DESIGN.md` §4).
+//! tree. `gen_core` round-trips that tree through JSON — serializing it to
+//! `crates/rshooks-core/hook_api.json`, then deserializing it back — before
+//! handing it to the per-file generators in [`crate::codegen`], which never
+//! touch header text or [`crate::parse`] types directly: `hook_api.json` is
+//! the pipeline's real intermediate artifact
+//! (`scripts/sync-vendor.sh` -> parse -> `hook_api.json` -> per-file codegen
+//! -> `rustfmt`), not a documentation side-effect of it.
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -135,8 +130,7 @@ fn function_spec(f: &ExternFn) -> FunctionSpec {
             .collect(),
         ret_c_type: f.ret_c_ty.clone(),
         doc: c_prototype_text(f),
-        // All vendored `extern.h` functions are HookApiVersion 0 today; see
-        // `FunctionSpec::hook_api_version`.
+        // All vendored `extern.h` functions are HookApiVersion 0 today.
         hook_api_version: 0,
     }
 }

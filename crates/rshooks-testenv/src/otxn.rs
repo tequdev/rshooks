@@ -98,16 +98,13 @@ const STI_VL: u32 = 7;
 const STI_ACCOUNT: u32 = 8;
 
 /// Builds the canonical serialized field sequence [`crate::host::slots::otxn_slot`]
-/// loads into a root slot (P2-D — `.claude/design/TESTENV_PHASE2_DESIGN.md`
+/// loads into a root slot (P2-D, `.claude/design/TESTENV_PHASE2_DESIGN.md`
 /// §4 "slot family"): every seeded field in `otxn.fields`, plus a
-/// synthesized `sfTransactionType` derived from `otxn.tx_type` (unless the
-/// field map already has an explicit override — the `field_raw` escape
-/// hatch can set one directly), in canonical `(type, field)` order with
-/// correct wire framing — a VL length-prefix is added for `STI_VL`(7)/
-/// `STI_ACCOUNT`(8) fields, since [`Otxn::fields`] stores value-only bytes
-/// (this struct's own doc comment); every other type is written as-is
-/// (self-describing `Amount`, or a plain fixed-width value). No wrapping
-/// header or terminator — a root object's own shape (see
+/// synthesized `sfTransactionType` from `otxn.tx_type` unless `field_raw`
+/// already set an override, in canonical `(type, field)` order. A VL
+/// length-prefix is added for `STI_VL`(7)/`STI_ACCOUNT`(8) fields since
+/// [`Otxn::fields`] stores value-only bytes; every other type is written
+/// as-is. No wrapping header or terminator (a root object's own shape, see
 /// `crate::host::slots`' module doc comment). [`deserialize`] is the
 /// inverse.
 pub(crate) fn serialize(otxn: &Otxn) -> Vec<u8> {
@@ -125,12 +122,11 @@ pub(crate) fn serialize(otxn: &Otxn) -> Vec<u8> {
     out
 }
 
-/// Writes one field's header (see `rshooks::txn::codec::field_header`'s
-/// documented 4-case grammar, duplicated here since that function requires
-/// a typed `SField<T>` and this serializer works from raw stored codes)
-/// plus its wire value. `pub(crate)`: also reused by
-/// `crate::backend::Backend::prepare` (P2-D) to build the fully-formed
-/// field bytes `crate::host::sto::sto_emplace` needs for `Sequence`/
+/// Writes one field's header (mirrors `rshooks::txn::codec::field_header`'s
+/// 4-case grammar; duplicated here because that function needs a typed
+/// `SField<T>` and this serializer works from raw stored codes) plus its
+/// wire value. Also reused by `crate::backend::Backend::prepare` (P2-D) to
+/// build field bytes `crate::host::sto::sto_emplace` needs for `Sequence`/
 /// `SigningPubKey`/`Account`/`FirstLedgerSequence`/`LastLedgerSequence`/
 /// `Fee`.
 pub(crate) fn write_field(out: &mut Vec<u8>, code: u32, value: &[u8]) {
@@ -175,10 +171,9 @@ fn write_vl_len(out: &mut Vec<u8>, len: usize) {
 /// Parses a canonical root field sequence (as [`serialize`] produces, or
 /// any other well-formed root slot's content) back into a field map — the
 /// inverse of [`serialize`]. `None` on any parse failure. `pub(crate)`
-/// rather than a `crate::otxn::Otxn` constructor: P2-E's `cbak` harness
-/// (design §4 "cbak execution") is this function's only planned caller,
-/// reconstructing an `Otxn`-shaped field map for the emitted transaction
-/// passed into a callback.
+/// rather than an `Otxn` constructor: P2-E's `cbak` harness (design §4
+/// "cbak execution") reconstructs an `Otxn`-shaped field map for the
+/// emitted transaction passed into a callback.
 pub(crate) fn deserialize(bytes: &[u8]) -> Option<std::collections::HashMap<u32, Vec<u8>>> {
     let fields = crate::emit_walk::walk_top_level_fields(bytes).ok()?;
     let mut map = std::collections::HashMap::new();
@@ -191,34 +186,31 @@ pub(crate) fn deserialize(bytes: &[u8]) -> Option<std::collections::HashMap<u32,
 }
 
 /// Reconstructs the originating-transaction view a `#[cbak]` execution sees
-/// (P2-E — design §4 "cbak execution"): `blob` (an emitted transaction —
-/// already validated by the emission walker before it ever became an
+/// (P2-E, design §4 "cbak execution"): `blob` (an emitted transaction,
+/// already validated by the emission walker before becoming an
 /// [`crate::world::EmittedTxn`]) becomes the callback's otxn, and its
 /// `EmitDetails.EmitGeneration`/`EmitBurden` fields become the
 /// `(burden, generation)` pair `crate::env::TestEnv::invoke_cbak` seeds
-/// `World::otxn_emitted` with — matching `HookAPI::otxn_burden`/
-/// `HookAPI::otxn_generation` (`Xahau/xahaud`, branch `dev`,
-/// `src/xrpld/app/hook/detail/HookAPI.cpp:1465-1520`, fetched for this
-/// stage), which read those two `EmitDetails` fields directly off
-/// `hookCtx.applyCtx.tx` — the transaction currently being applied, which
-/// during `Transactor::doHookCallback` (`src/xrpld/app/tx/detail/Transactor.cpp:1483-1614`)
+/// `World::otxn_emitted` with. This matches `HookAPI::otxn_burden`/
+/// `HookAPI::otxn_generation` (`Xahau/xahaud` `dev`,
+/// `src/xrpld/app/hook/detail/HookAPI.cpp:1465-1520`), which read those two
+/// `EmitDetails` fields directly off `hookCtx.applyCtx.tx` — during
+/// `Transactor::doHookCallback` (`src/xrpld/app/tx/detail/Transactor.cpp:1483-1614`)
 /// *is* the emitted transaction itself — rather than incrementing anything,
 /// unlike `etxn_burden`/`etxn_generation`'s own `× reserved`/`+ 1`
 /// derivation for the *next* emission (`crate::backend::Backend::compute_etxn_burden`/
 /// `compute_etxn_generation`, unchanged by this function).
 ///
-/// `id(hash)` is set to `hash` (the emit-returned hash) — `otxn_id` during a
-/// real callback returns `getTransactionID()` by default (`HookAPI.cpp:1545-1551`),
-/// i.e. the emitted transaction's own real hash, exactly what `emit`
-/// returned for it.
+/// `id(hash)` is set to `hash` (the emit-returned hash): a real callback's
+/// `otxn_id` returns `getTransactionID()` by default (`HookAPI.cpp:1545-1551`)
+/// — the emitted transaction's own hash, exactly what `emit` returned.
 ///
 /// `None` on any parse failure (malformed field sequence, missing
 /// `TransactionType`, missing/malformed `EmitDetails` or its
-/// `EmitGeneration`/`EmitBurden` sub-fields) — a caller maps that to a clear
-/// panic; it should not occur for any blob obtained from
-/// `crate::TestEnv::emitted()`, since every one of those already passed the
-/// emission walker's own `EmitDetails` well-formedness checks
-/// ([`crate::emit_walk::validate_emit_blob`]).
+/// `EmitGeneration`/`EmitBurden` sub-fields); a caller maps that to a clear
+/// panic. Should not occur for any blob from `crate::TestEnv::emitted()`,
+/// since those already passed the emission walker's own `EmitDetails`
+/// well-formedness checks ([`crate::emit_walk::validate_emit_blob`]).
 pub(crate) fn from_emitted(blob: &[u8], hash: [u8; 32]) -> Option<(Otxn, u64, u32)> {
     let map = deserialize(blob)?;
 

@@ -35,16 +35,13 @@ const MAX_EXPONENT: i64 = 80;
 const SIGN_SHIFT: u32 = 62;
 
 /// Whether raw bits `bits` are a canonical XFL encoding — the Hook API's own
-/// `RETURN_IF_INVALID_FLOAT` gate (`applyHook.cpp`), reproduced as a pure,
-/// loop-free local bit test rather than a host round trip: the canonical
-/// mantissa/exponent ranges are fixed protocol constants, not host state, so
-/// a `float_*` call could not tell this anything the bits don't already
-/// encode. `bits < 0` is never a valid float (that channel is reserved for
-/// Hook API error codes, e.g. [`crate::error::HookError::NotImplemented`]'s
-/// `-14`); `bits == 0` is always canonical zero; otherwise both the mantissa
-/// and exponent fields must fall within their canonical ranges (the sign bit
-/// itself is unconstrained — both signs are canonical for an in-range
-/// nonzero mantissa/exponent pair).
+/// `RETURN_IF_INVALID_FLOAT` gate (`applyHook.cpp`), reproduced as a local
+/// bit test since the canonical ranges are fixed protocol constants, not
+/// host state. `bits < 0` is never valid (that channel is reserved for host
+/// error codes, e.g. [`crate::error::HookError::NotImplemented`]'s `-14`);
+/// `bits == 0` is canonical zero; otherwise the mantissa and exponent fields
+/// must both fall within their canonical ranges (the sign bit is
+/// unconstrained either way).
 #[inline(always)]
 fn is_canonical(bits: i64) -> bool {
     if bits < 0 {
@@ -67,50 +64,30 @@ fn is_canonical(bits: i64) -> bool {
 /// A Xahau XFL value: an opaque wrapper over the raw bit pattern the Hook
 /// API's `float_*` functions operate on.
 ///
-/// The inner field is deliberately private: XFL host calls return negative
-/// values as error codes sharing the same `i64` channel as valid floats, so
-/// a public field would let a caller smuggle a raw error code in as if it
-/// were a value. [`XFL::from_raw_bits`] / [`XFL::raw_bits`] are the explicit,
-/// documented escape hatches for unchecked representation access — both
-/// still speak `i64` at the public boundary, matching the Hook API's FFI
-/// convention (every `float_*` extern function takes/returns `i64`) and the
-/// existing persisted-state encoding (`convert.rs`'s `ToBytes`/`FromBytes`
-/// impls for `XFL` round-trip through `i64`'s own).
+/// The inner field is private: XFL host calls return negative values as
+/// error codes on the same `i64` channel as valid floats, so a public field
+/// would let a caller smuggle a raw error code in as if it were a value.
+/// [`XFL::from_raw_bits`] / [`XFL::raw_bits`] are the explicit escape
+/// hatches for unchecked representation access, both speaking `i64` to
+/// match the Hook API's FFI convention and the persisted-state encoding
+/// (`convert.rs`'s `ToBytes`/`FromBytes` impls for `XFL`).
 ///
-/// **Internally stored as `u64`, not `i64`**, unlike the FFI boundary and
-/// unlike [`crate::xfl_unchecked::XFLUnchecked`] (which deliberately keeps
-/// `i64`, since it exists specifically to hold values that *might* be
-/// negative error codes — see its module doc comment). Every `XFL` obtained
-/// through the validated API (i.e. everything except [`XFL::from_raw_bits`])
-/// is guaranteed by the host to have bit 63 clear (see the module doc
-/// comment's bit layout) — always non-negative when read back as `i64` — so
-/// `u64` mirrors that invariant and matches how Rust conventionally
-/// represents an opaque bit pattern rather than a signed quantity (compare
-/// `f64::to_bits() -> u64`, not `-> i64`): the `i64` FFI type is an
-/// implementation detail of the Hook API's C ABI (which multiplexes error
-/// codes onto XFL's own return channel), not a property of what an XFL
-/// bit pattern actually *is*. This is a documentation/domain-modeling
-/// choice, not an enforced safety property: [`XFL::from_raw_bits`] still
-/// accepts an arbitrary `i64` (including a negative one), bit-cast as-is
-/// into the `u64` field — see its own doc comment. `impl From<XFL> for
-/// u64` exposes that native `u64` shape directly (`u64::from(xfl)`/
-/// `xfl.into()`) alongside `raw_bits`'s `i64` shape — pick whichever the
-/// call site actually needs; there is no corresponding `From<u64> for
-/// XFL` in the other direction, only [`XFL::from_raw_bits`] (`i64`), to
-/// keep exactly one documented construction path. Both directions
-/// (`XFL` → `u64` here, [`crate::xfl_unchecked::XFLUnchecked`] → `i64`)
-/// are bare bit-pattern reinterpretations, not validity checks — exactly
-/// as honest as [`XFL::raw_bits`]/[`XFL::from_raw_bits`] already are, and
-/// no more claim-laden: reading the bits back out never asserted they
-/// were valid to begin with, so there is nothing here for a fallible
-/// conversion to usefully guard.
+/// **Internally stored as `u64`, not `i64`** — unlike the FFI boundary and
+/// unlike [`crate::xfl_unchecked::XFLUnchecked`], which keeps `i64` since it
+/// exists to hold values that might be negative error codes. Every `XFL`
+/// obtained through the validated API (i.e. everything except
+/// [`XFL::from_raw_bits`]) has bit 63 clear, so `u64` mirrors that
+/// invariant (compare `f64::to_bits() -> u64`). [`XFL::from_raw_bits`]
+/// still accepts and bit-casts an arbitrary `i64`, including a negative
+/// one, with no validation. `impl From<XFL> for u64` exposes this native
+/// `u64` shape directly (`u64::from(xfl)`/`xfl.into()`); there is no
+/// `From<u64> for XFL` in the other direction, only `from_raw_bits`, to
+/// keep a single documented construction path.
 ///
-/// `PartialEq`/`PartialOrd` are implemented, backed by the fallible
-/// `float_compare` host call, with a `false`/`None` fallback on failure
-/// (see the module doc comment's "Comparison: both methods and operators,
-/// both via `float_compare`" section for why, and for when to use
-/// [`XFL::eq`]/[`XFL::lt`]/[`XFL::gt`]/[`XFL::compare`] — all of which
-/// return `Result<bool>` — instead of `==`/`<`/`>`).
+/// `PartialEq`/`PartialOrd` are implemented via the fallible
+/// `float_compare` host call, falling back to `false`/`None` on failure —
+/// use [`XFL::eq`]/[`XFL::lt`]/[`XFL::gt`]/[`XFL::compare`] directly for the
+/// real `Result<bool>`.
 ///
 /// # Examples
 ///
@@ -126,10 +103,9 @@ pub struct XFL(u64);
 impl XFL {
     /// Wrap a raw XFL bit pattern with no validation. Escape hatch for
     /// interop with values obtained outside the typed API (e.g. persisted
-    /// state). `bits` is bit-cast as-is into `XFL`'s internal `u64` storage
-    /// (see the type doc comment) — a negative `bits` (e.g. a smuggled-in
-    /// error code) becomes a large `u64`, not an error, since this
-    /// constructor performs no validation either way.
+    /// state). `bits` is bit-cast as-is into the internal `u64` storage — a
+    /// negative `bits` (e.g. a smuggled-in error code) becomes a large
+    /// `u64`, not an error.
     ///
     /// `const fn` so [`crate::XFL!`](crate) — which expands to
     /// `XFL::from_raw_bits(<bits>i64)` — can populate a `const`/`static`
@@ -142,13 +118,10 @@ impl XFL {
 
     /// The raw XFL bit pattern. Escape hatch for interop; does not validate
     /// that `self` is actually a valid (non-error-code) XFL. Bit-cast back
-    /// to `i64` from the internal `u64` storage (see the type doc comment)
-    /// — lossless and exactly reverses [`XFL::from_raw_bits`] for every
-    /// input, including a negative one.
+    /// to `i64` from the internal `u64` storage — lossless, exactly
+    /// reversing [`XFL::from_raw_bits`] for every input.
     ///
-    /// `const fn` for the same reason as [`XFL::from_raw_bits`] — lets a
-    /// `const`/`static` XFL's raw bits be read back out in another const
-    /// context.
+    /// `const fn` for the same reason as [`XFL::from_raw_bits`].
     #[inline(always)]
     #[must_use]
     pub const fn raw_bits(self) -> i64 {
@@ -232,15 +205,12 @@ impl XFL {
     #[inline(always)]
     pub fn exponent(self) -> Result<i64> {
         let field = (self.0 >> EXPONENT_SHIFT) & EXPONENT_MASK;
-        // `field` is masked to 0..=0xFF, well within i64's range, so this
-        // cast is lossless; `EXPONENT_BIAS` is the fixed constant 97, so
-        // the `wrapping_sub` below never actually wraps — used anyway
-        // (rather than a plain `-`) to sidestep `clippy::
-        // arithmetic_side_effects` without needing a blanket `#[allow]`.
-        // The subtraction has to happen in a *signed* type: a stored field
-        // below 97 needs to decode to a negative unbiased exponent (e.g.
-        // field `1` -> `-96`), which a `u64` subtraction could never
-        // produce (it would wrap to a huge positive value instead).
+        // Lossless cast (field is masked to 0..=0xFF). The subtraction must
+        // happen in a signed type -- a field below 97 decodes to a negative
+        // exponent (e.g. field `1` -> `-96`), which `u64` subtraction would
+        // wrap instead of producing. `wrapping_sub` (not `-`) sidesteps
+        // `clippy::arithmetic_side_effects`; `EXPONENT_BIAS` is the fixed
+        // constant 97, so it never actually wraps.
         let field = field as i64;
         Ok(field.wrapping_sub(EXPONENT_BIAS))
     }
@@ -248,15 +218,12 @@ impl XFL {
     /// Whether `self` is the canonical XFL zero.
     ///
     /// Pure bit test, no host call, infallible: zero has exactly one
-    /// canonical encoding (raw bits `0` — see the module doc comment's bit
-    /// layout), so equality against that one pattern is exact for every
-    /// constructible `XFL`. This holds even for a value obtained through
-    /// [`XFL::from_raw_bits`] with an otherwise invalid or non-canonical
-    /// bit pattern: such a value simply is not the zero encoding, so
-    /// `is_zero` correctly reports `false` for it without first needing to
-    /// classify it as valid or invalid — unlike
-    /// [`XFL::is_strictly_positive`]/[`XFL::is_strictly_negative`], which
-    /// do need that classification (see their doc comments for why).
+    /// canonical encoding (raw bits `0`), so this is exact even for a value
+    /// obtained through [`XFL::from_raw_bits`] with an invalid or
+    /// non-canonical bit pattern — such a value simply isn't the zero
+    /// encoding. Unlike [`XFL::is_strictly_positive`]/
+    /// [`XFL::is_strictly_negative`], no canonical-encoding check is needed
+    /// first.
     ///
     /// # Examples
     ///
@@ -276,22 +243,18 @@ impl XFL {
     /// Whether `self` is strictly greater than zero.
     ///
     /// Fallible, unlike [`XFL::is_zero`]: classifying a sign first requires
-    /// confirming `self` is a canonical XFL encoding at all. A value
-    /// obtained through [`XFL::from_raw_bits`] can hold an out-of-range
-    /// mantissa/exponent, or a negative bit pattern reserved for a Hook API
-    /// error code, neither of which has a numeric sign to report — reading
-    /// the sign bit anyway would silently misclassify that garbage as a
-    /// signed number. This returns
-    /// `Err(`[`crate::error::HookError::InvalidFloat`]`)` for such a value
-    /// instead, mirroring what the Hook API's own `RETURN_IF_INVALID_FLOAT`
-    /// gate would report for the same bits (see [`is_canonical`]).
+    /// confirming `self` is a canonical encoding at all. A value from
+    /// [`XFL::from_raw_bits`] can hold an out-of-range mantissa/exponent, or
+    /// a negative bit pattern reserved for a Hook API error code — neither
+    /// has a numeric sign, so this returns
+    /// `Err(`[`crate::error::HookError::InvalidFloat`]`)` instead of
+    /// misreading the sign bit, mirroring the host's own
+    /// `RETURN_IF_INVALID_FLOAT` gate (see [`is_canonical`]).
     ///
-    /// Implemented as a local, loop-free bit test (mantissa/exponent range,
-    /// then the sign bit), not a `float_sign`/`float_compare` host round
-    /// trip — the canonical-range rule and the sign-bit convention are both
-    /// fixed protocol constants, so a host call would add nothing but
-    /// overhead. `self.is_zero()` is neither strictly positive nor strictly
-    /// negative.
+    /// Implemented as a local bit test, not a `float_sign`/`float_compare`
+    /// host round trip, since the canonical-range rule and sign convention
+    /// are fixed protocol constants. `self.is_zero()` is neither strictly
+    /// positive nor strictly negative.
     ///
     /// # Examples
     ///
@@ -333,10 +296,9 @@ impl XFL {
     /// Whether `self` is strictly less than zero.
     ///
     /// Mirror image of [`XFL::is_strictly_positive`] — see its doc comment
-    /// for the fallibility rationale, the canonical-encoding gate, and an
-    /// application-side error-mapping example; this differs only in reading
-    /// the sign bit clear (rather than set) on a canonical nonzero value.
-    /// `self.is_zero()` is neither strictly positive nor strictly negative.
+    /// for the fallibility rationale and canonical-encoding gate; this
+    /// differs only in reading the sign bit clear (not set) on a canonical
+    /// nonzero value.
     ///
     /// # Examples
     ///
@@ -472,11 +434,9 @@ impl IouAmount {
     /// [`XFL::sto_set`] (`float_sto_set`).
     ///
     /// Hands the host exactly the 8-byte value component, never the full
-    /// 48 bytes and never a local bit-reinterpret: the wire value
-    /// component sets an always-on "not native" flag bit a real XFL never
-    /// sets, so treating those 8 bytes as an XFL bit pattern directly (or
-    /// passing all 48 bytes to `float_sto_set`, which only strips a header
-    /// past 8 bytes) both produce wrong results — see
+    /// 48 bytes and never a local bit-reinterpret: the wire value component
+    /// sets an always-on "not native" flag bit a real XFL never sets, so
+    /// either shortcut produces a wrong result — see
     /// [`api::float::float_sto_set`]'s doc comment.
     #[inline(always)]
     pub fn xfl(&self) -> Result<XFL> {
@@ -486,13 +446,11 @@ impl IouAmount {
 }
 
 impl From<XFL> for u64 {
-    /// The internal `u64` bit pattern (see the type doc comment) — the same
-    /// value [`XFL::raw_bits`] returns, just as `u64` (`XFL`'s own native
-    /// storage shape) rather than `i64` (the FFI-boundary shape
-    /// `raw_bits`/`from_raw_bits` deliberately keep, for interop with the
-    /// Hook API and persisted-state encodings that speak `i64`). Lets a
-    /// caller who wants the `u64` write `u64::from(xfl)`/`xfl.into()`
-    /// instead of `xfl.raw_bits() as u64`.
+    /// The internal `u64` bit pattern — the same value [`XFL::raw_bits`]
+    /// returns, just as `u64` (`XFL`'s native storage shape) rather than
+    /// `i64` (the FFI-boundary shape `raw_bits`/`from_raw_bits` keep for
+    /// interop). Lets a caller write `u64::from(xfl)`/`xfl.into()` instead
+    /// of `xfl.raw_bits() as u64`.
     #[inline(always)]
     fn from(value: XFL) -> u64 {
         value.0
@@ -542,11 +500,10 @@ impl core::ops::Sub for XFL {
     /// negation failure (e.g. `rhs` already invalid) as this call's own
     /// error, rather than feeding a poisoned value into `float_sum`.
     #[inline(always)]
-    // `self + (-rhs)?` dispatches to this module's own `Add`/`Neg` impls
-    // above (both fallible host round trips), not raw integer arithmetic —
-    // `clippy::arithmetic_side_effects` can't see past the operator syntax
-    // to tell the difference, so it flags this unconditionally; there is no
-    // overflow/panic risk here to warn about.
+    // Dispatches to this module's own fallible `Add`/`Neg` impls, not raw
+    // integer arithmetic -- `clippy::arithmetic_side_effects` can't tell
+    // the difference from the operator syntax alone, so it flags this
+    // unconditionally with no real overflow/panic risk.
     #[allow(clippy::arithmetic_side_effects)]
     fn sub(self, rhs: XFL) -> Result<XFL> {
         self + (-rhs)?
@@ -590,9 +547,7 @@ impl core::ops::Div for XFL {
 impl PartialEq for XFL {
     /// `self == other`, forwarding to [`XFL::eq`] (`float_compare` under
     /// `COMPARE_EQUAL`). Falls back to `false` on a `float_compare`
-    /// failure — see the module doc comment's "Comparison: both methods
-    /// and operators, both via `float_compare`" section for why, and for
-    /// when to call [`XFL::eq`] directly instead.
+    /// failure; call [`XFL::eq`] directly for the real `Result<bool>`.
     #[inline(always)]
     fn eq(&self, other: &XFL) -> bool {
         XFL::eq(*self, *other).unwrap_or(false)
@@ -601,12 +556,11 @@ impl PartialEq for XFL {
 
 impl PartialOrd for XFL {
     /// `self.partial_cmp(other)`, via up to two `float_compare` host calls
-    /// (`COMPARE_LESS`, then — only if that came back `false` — `COMPARE_
-    /// GREATER`; a `false` result for both means `Ordering::Equal`).
-    /// Falls back to `None` on a `float_compare` failure at either step —
-    /// see the module doc comment's "Comparison: both methods and
-    /// operators, both via `float_compare`" section for why, and for when
-    /// to call [`XFL::lt`]/[`XFL::gt`]/[`XFL::compare`] directly instead.
+    /// (`COMPARE_LESS`, then — only if that came back `false` —
+    /// `COMPARE_GREATER`; `false` for both means `Ordering::Equal`). Falls
+    /// back to `None` on a `float_compare` failure at either step; call
+    /// [`XFL::lt`]/[`XFL::gt`]/[`XFL::compare`] directly for the real
+    /// `Result<bool>`.
     #[inline(always)]
     fn partial_cmp(&self, other: &XFL) -> Option<core::cmp::Ordering> {
         match XFL::lt(*self, *other) {
@@ -622,13 +576,12 @@ impl PartialOrd for XFL {
 }
 
 // Generates `impl $Trait<XFL> for Result<XFL, HookError>` and
-// `impl $Trait<Result<XFL, HookError>> for XFL` for each listed
-// `$Trait::$method`, so a chain of `+`/`-`/`*`/`/` that alternates a plain
-// `XFL` in on one side at each step (`((a + b) + c) + d`, ...) short-
-// circuits on the first error without an explicit `?` between steps.
+// `impl $Trait<Result<XFL, HookError>> for XFL` for each `$Trait::$method`,
+// so a chain like `((a + b) + c) + d` short-circuits on the first error
+// without an explicit `?` between steps.
 //
-// Rust's orphan rules do not allow an operator implementation with `Result`
-// on both sides. Combine independently fallible values with `?` first.
+// Rust's orphan rules disallow `Result` on both sides of an operator impl —
+// combine independently fallible values with `?` first.
 macro_rules! xfl_result_chain_ops {
     ($( $Trait:ident :: $method:ident ),+ $(,)?) => {
         $(
@@ -669,9 +622,8 @@ mod tests {
 
     #[test]
     fn into_u64_matches_raw_bits_bit_pattern() {
-        // `u64::from(xfl)`/`xfl.into()` and `xfl.raw_bits() as u64` must
-        // agree exactly -- same underlying bits, just `u64` (the native
-        // storage shape) instead of `i64` (the FFI-boundary shape).
+        // Must agree exactly with `xfl.raw_bits() as u64` -- same bits, just
+        // `u64` (native storage) instead of `i64` (FFI-boundary shape).
         for bits in [0i64, 1, -1, i64::MAX, i64::MIN, 42, -42] {
             let xfl = XFL::from_raw_bits(bits);
             let via_into: u64 = xfl.into();
@@ -683,18 +635,9 @@ mod tests {
 
     #[test]
     fn smoke_not_implemented_on_host() {
-        // `matches!`, not `assert_eq!`, for every `Result<XFL, _>` here —
-        // every assertion below only ever needs to distinguish `Err(...)`
-        // from `Ok(...)` (never compares two `Ok(XFL)`s against each
-        // other), so plain `assert_eq!` against an `Err(...)` pattern
-        // would actually work today (`Result`'s derived `PartialEq`
-        // short-circuits on the `Ok`/`Err` discriminant before ever
-        // calling `XFL::eq`) — but `matches!` is used consistently
-        // throughout this file regardless, so no assertion here
-        // accidentally depends on `XFL`'s `PartialEq` impl (which forwards
-        // to the fallible `float_compare`-backed `XFL::eq` and falls back
-        // to `false` on failure — see the module doc comment — a real
-        // trap for an `assert_eq!` that *does* compare two `Ok(XFL)`s).
+        // `matches!`, not `assert_eq!`: `XFL`'s `PartialEq` forwards to the
+        // fallible `float_compare`-backed `eq` and falls back to `false` on
+        // failure, so `assert_eq!` comparing two `Ok(XFL)`s would be a trap.
         let one = XFL::one();
         assert!(matches!(XFL::new(0, 1), Err(HookError::NotImplemented)));
         assert!(matches!(one + one, Err(HookError::NotImplemented)));
@@ -725,12 +668,9 @@ mod tests {
 
     #[test]
     fn result_chain_short_circuits_on_first_error() {
-        // `Result<XFL> op XFL` and `XFL op Result<XFL>` both type-check
-        // and, given an `Err` input, never reach the host stub (host builds
-        // have no way to observe that directly, but a mismatched-code
-        // assertion here would fail if the wrong error propagated).
-        // `matches!`, not `assert_eq!`, for the same reason as
-        // `smoke_not_implemented_on_host` above.
+        // Given an `Err` input, the chained op never reaches the host stub;
+        // a mismatched-code assertion here would fail if the wrong error
+        // propagated. `matches!`, not `assert_eq!`, as above.
         let one = XFL::one();
         let err: Result<XFL> = Err(HookError::DoesntExist);
         assert!(matches!(err + one, Err(HookError::DoesntExist)));
@@ -744,22 +684,16 @@ mod tests {
     }
 
     #[test]
-    // `one == one`/`one < one`/`one > one` below are all `false` given the
-    // host stub (checked via a bound variable + `assert!`, not
-    // `assert_eq!(..., false)` — `clippy::bool_assert_comparison` wants
-    // `assert!(!(...))`  for that, but `clippy::neg_cmp_op_on_partial_ord`
-    // simultaneously objects to negating `<`/`>` directly, since the
-    // operands could genuinely be incomparable; binding first sidesteps
-    // both).
+    // Bound to a variable rather than asserted inline: `clippy::
+    // bool_assert_comparison` wants `assert!(!(...))`, but `clippy::
+    // neg_cmp_op_on_partial_ord` objects to negating `<`/`>` directly since
+    // the operands could be incomparable.
     fn comparison_operators_fall_back_like_f64_nan_on_host() {
-        // `float_compare`'s host stub is deterministic `NOT_IMPLEMENTED`
-        // (an `Err`) regardless of operands, so every `PartialEq`/
-        // `PartialOrd` call here exercises the `false`/`None` fallback —
-        // and, crucially, returns promptly rather than hanging: rolling
-        // the hook back on a `float_compare` failure from inside these
-        // trait impls (instead of falling back to `false`/`None`) would
-        // loop forever right here, since `rollback` never returns on a
-        // host target.
+        // `float_compare`'s host stub deterministically errors, so every
+        // `PartialEq`/`PartialOrd` call here exercises the `false`/`None`
+        // fallback rather than rolling back -- `rollback` never returns on
+        // a host target, so falling back instead is what lets this test
+        // return at all.
         let one = XFL::one();
         let is_eq = one == one;
         let is_lt = one < one;
@@ -801,12 +735,12 @@ mod tests {
         bits as i64
     }
 
-    // `XFL!` cannot be used from inside this crate's own tests -- it always
-    // expands to a `rshooks::`-prefixed path, resolvable only from an
-    // external crate that depends on `rshooks` by that name (exactly how
-    // every doctest above uses it). These are the same reference vectors
-    // `tests/ui/pass/xfl_const.rs` pins for `XFL!(1)`/`XFL!(-1)`/`XFL!(0.1)`;
-    // `NEG_TENTH_BITS` is `TENTH_BITS` with only the sign bit (62) flipped.
+    // `XFL!` always expands to a `rshooks::`-prefixed path, so it can't be
+    // used from inside this crate's own tests (only from an external
+    // dependent crate, as every doctest above does). These are the same
+    // reference vectors `tests/ui/pass/xfl_const.rs` pins for
+    // `XFL!(1)`/`XFL!(-1)`/`XFL!(0.1)`; `NEG_TENTH_BITS` is `TENTH_BITS`
+    // with only the sign bit (62) flipped.
     const ONE_BITS: i64 = 6_089_866_696_204_910_592;
     const NEG_ONE_BITS: i64 = 1_478_180_677_777_522_688;
     const TENTH_BITS: i64 = 6_071_852_297_695_428_608;

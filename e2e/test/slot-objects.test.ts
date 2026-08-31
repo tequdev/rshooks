@@ -203,7 +203,6 @@ describe('slot-objects (typed slot layer)', () => {
   })
 
   it('keeps a child slot readable after its parent is cleared', () => {
-    // Child slots must remain valid after their parent is cleared.
     expect(checks & BIT_PARENT_CLEAR).toBe(BIT_PARENT_CLEAR)
   })
 

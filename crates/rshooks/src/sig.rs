@@ -1,10 +1,9 @@
 //! The Hook Parameter Signature Interface: [`SigParamType`] and the
 //! low-level name-building escape hatch.
 //!
-//! See `docs/PARAM_SIGNATURE_DESIGN.md` for the full design. In short, the
-//! interface draft defines a `HookParameterName` wire convention that turns
-//! a Hook's declared parameters into a machine-readable, typed function
-//! signature:
+//! See `docs/PARAM_SIGNATURE_DESIGN.md` for the full design. The interface
+//! draft defines a `HookParameterName` wire convention that turns a Hook's
+//! declared parameters into a machine-readable, typed function signature:
 //!
 //! ```text
 //! HookParameterName = 0x5F 0x5F            ; "__" reserved prefix
@@ -19,54 +18,43 @@
 //! (32), so no separate bound check against that constant is needed here;
 //! it falls out of the `index`/`name` bounds this module already enforces.
 //!
-//! This module ships two independent layers:
+//! Two independent layers:
 //!
-//! - [`SigParamType`]: the trait pairing a Rust type with its `STI_*` type
-//!   byte and invocation-value decode, mirroring
-//!   [`crate::convert::FixedRead`]'s closure-based shape but with its own
-//!   contract (integers are **big-endian**, unlike this crate's
-//!   hook-private `FromBytes` little-endian convention — see the "Why
-//!   big-endian" section below).
-//! - [`sig_param_name`]/[`sig_name!`](crate::sig_name): the raw escape
-//!   hatch every macro surface in this crate keeps (`docs/TODO.md`'s
-//!   standing rule) — builds a declared name at compile time, with every
-//!   MUST of the wire format checked as a `const`-evaluable assert, so a
-//!   malformed name is a compile error rather than a wrong runtime read.
+//! - [`SigParamType`]: pairs a Rust type with its `STI_*` type byte and
+//!   invocation-value decode, mirroring [`crate::convert::FixedRead`]'s
+//!   closure-based shape but decoding integers **big-endian** (see "Why
+//!   big-endian" below), unlike this crate's hook-private little-endian
+//!   `FromBytes` convention.
+//! - [`sig_param_name`]/[`sig_name!`](crate::sig_name): builds a declared
+//!   name at compile time, with every MUST of the wire format checked as a
+//!   `const`-evaluable assert, so a malformed name is a compile error
+//!   rather than a wrong runtime read.
 //!
 //! # Why big-endian
 //!
 //! A signature parameter's value crosses the same protocol boundary a raw
 //! `otxn_field`/`otxn_param` read does — see DESIGN.md §5.6 ("Endianness
-//! conventions"): Xahau Binary integers are big-endian, and this crate's
-//! own [`crate::convert::FromBytes`] little-endian convention is a
-//! *hook-private* choice for state/param values this crate's own typed
-//! layer wrote, a completely different domain. [`SigParamType`]'s integer
-//! impls decode big-endian for the same reason
-//! [`crate::api::otxn::otxn_field_typed`]'s `u64` impl does: the value on
-//! the wire (here, the invocation `HookParameterValue`) was put there by
-//! something outside this crate's control (the transaction submitter), so
-//! it is Xahau Binary, not this crate's own little-endian convention.
+//! conventions"): Xahau Binary integers are big-endian. This crate's own
+//! [`crate::convert::FromBytes`] little-endian convention only applies to
+//! state/param values this crate's own typed layer wrote — a different
+//! domain. [`SigParamType`]'s integer impls decode big-endian for the same
+//! reason [`crate::api::otxn::otxn_field_typed`]'s `u64` impl does: the
+//! invocation `HookParameterValue` was put on the wire by something outside
+//! this crate's control (the transaction submitter), so it is Xahau Binary.
 //!
 //! # `SigName<V>`: read helpers, not a [`crate::convert::TypedParamName`] impl
 //!
 //! [`crate::convert::TypedParamName::Value`] requires
-//! [`crate::convert::FixedRead`], but [`SigParamType`] decoding uses its
-//! own [`SigParamType::read_sig`] — plain `u8`/`u16`/`u32`/`u64` (three of
-//! the twelve `SigParamType` impls) have no `FixedRead` impl at all (they
-//! are hook-private little-endian types there; [`SigParamType`]'s
-//! big-endian decode is a different contract entirely), so `SigName<V>`
-//! cannot honestly implement `TypedParamName<Value = V>` for every `V:
-//! SigParamType`. Rather than widen `TypedParamName` or split
-//! `SigParamType` to accommodate an impl that would not type-check for a
-//! third of its own table, [`SigName`] carries its prebuilt name bytes and
-//! exposes [`SigName::otxn_read`]/[`SigName::hook_read`] directly — the
-//! same "resolve the value type from the name" ergonomics
-//! `otxn_param_typed`/`hook_param_typed` give a `TypedParamName`, without
-//! requiring the trait itself. [`otxn_sig_param`]/[`hook_sig_param`] are
-//! the plain, name-as-`&[u8]` counterparts (mirroring
-//! [`crate::api::otxn::otxn_param_exact`]/
-//! [`crate::api::hook_ctx::hook_param_exact`]) for a caller that would
-//! rather not build a `SigName` at all.
+//! [`crate::convert::FixedRead`], but [`SigParamType`] decoding uses its own
+//! [`SigParamType::read_sig`] — `u8`/`u16`/`u32`/`u64` have no `FixedRead`
+//! impl at all (they're hook-private little-endian types there), so
+//! `SigName<V>` cannot honestly implement `TypedParamName<Value = V>` for
+//! every `V: SigParamType`. Instead [`SigName`] carries its prebuilt name
+//! bytes and exposes [`SigName::otxn_read`]/[`SigName::hook_read`] directly
+//! — the same "resolve the value type from the name" ergonomics without
+//! requiring the trait. [`otxn_sig_param`]/[`hook_sig_param`] are the
+//! plain, name-as-`&[u8]` counterparts for a caller that would rather not
+//! build a `SigName` at all.
 
 use core::marker::PhantomData;
 
@@ -88,9 +76,7 @@ use crate::types::{ACC_ID_LEN, AccountId, CURRENCY_CODE_LEN, CurrencyCode, Hash,
 const FIXED_LEN: usize = 6;
 
 /// The twelve `STI_*` type bytes [`SigParamType`] has an impl for — see
-/// `docs/PARAM_SIGNATURE_DESIGN.md` §2's table. [`is_supported_type_byte`]
-/// checks membership with a `matches!` (not a loop over this list) so the
-/// const-eval path stays a single branch, not table indexing.
+/// `docs/PARAM_SIGNATURE_DESIGN.md` §2's table.
 #[inline(always)]
 const fn is_supported_type_byte(b: u8) -> bool {
     matches!(
@@ -111,12 +97,9 @@ const fn is_supported_type_byte(b: u8) -> bool {
 }
 
 /// Whether `name` matches the interface draft's charset:
-/// `[A-Za-z][A-Za-z0-9]*`, 1..=16 bytes. Loop-free is not attempted here
-/// (unlike [`crate::buf_eq`]'s fixed-width comparisons) — `name.len()` is
-/// itself a `const`-time-only quantity in every caller
-/// ([`sig_param_name`]'s only caller is `const { .. }`-evaluated), so this
-/// never compiles into hook wasm; it only ever runs during `rustc`'s own
-/// const evaluator.
+/// `[A-Za-z][A-Za-z0-9]*`, 1..=16 bytes. Every caller is `const { .. }`
+/// -evaluated, so this never compiles into hook wasm — it only runs during
+/// `rustc`'s own const evaluator.
 #[allow(clippy::indexing_slicing)] // in-bounds by the `i < name.len()` loop condition, const-evaluated only
 const fn is_valid_name(name: &[u8]) -> bool {
     if name.is_empty() || name.len() > 16 {
@@ -141,12 +124,11 @@ const fn is_valid_name(name: &[u8]) -> bool {
 /// Builds one declared `HookParameterName` at compile time:
 /// `0x5F 0x5F | index | 0x5F | type_byte | 0x5F | name`.
 ///
-/// `N` must equal `6 + name.len()` — the macro layer (`docs/TODO.md`'s
-/// escape-hatch rule: [`sig_name!`](crate::sig_name) below) computes it for
-/// you; called directly, get `N` right or hit the assert. Every MUST of the
-/// wire format is a `const`-evaluable `assert!`, so any violation is a
-/// compile error at the call site, never a runtime panic or a
-/// silently-malformed name:
+/// `N` must equal `6 + name.len()` — [`sig_name!`](crate::sig_name)
+/// computes it for you; called directly, get `N` right or hit the assert.
+/// Every MUST of the wire format is a `const`-evaluable `assert!`, so any
+/// violation is a compile error at the call site, never a runtime panic or
+/// a silently-malformed name:
 ///
 /// - `index <= 0x0F`
 /// - `type_byte` is one of the twelve codes [`SigParamType`] implements
@@ -222,9 +204,8 @@ pub const fn sig_param_name<const N: usize>(index: u8, type_byte: u8, name: &[u8
 /// Builds a declared `HookParameterName` as a `const` `[u8; N]`, resolving
 /// `N` and the type byte for you: `sig_name!(0, u16, b"count")` expands to
 /// [`sig_param_name`] called with `N = 6 + b"count".len()` and
-/// `type_byte = <u16 as SigParamType>::TYPE_BYTE`, inside a `const { .. }`
-/// block. The result is a `[u8; N]` value, usable directly with
-/// [`crate::api::otxn::otxn_param_exact`]/
+/// `type_byte = <u16 as SigParamType>::TYPE_BYTE`. The result is a `[u8; N]`
+/// value, usable directly with [`crate::api::otxn::otxn_param_exact`]/
 /// [`crate::api::hook_ctx::hook_param_exact`], or as the argument to
 /// [`SigName::new`].
 ///
@@ -262,9 +243,8 @@ macro_rules! sig_name {
 /// `otxn_param`/`hook_param`'s own "bytes written" return, exactly like
 /// [`crate::convert::FixedRead::read_exact`]'s `read` closure).
 ///
-/// See the module doc comment's "Why big-endian" section for why this
-/// trait's integer impls decode big-endian, unlike
-/// [`crate::convert::FromBytes`].
+/// See the module doc's "Why big-endian" section for why this trait's
+/// integer impls decode big-endian, unlike [`crate::convert::FromBytes`].
 pub trait SigParamType: Sized {
     /// The `STI_*` type byte advertised in the declared name (see
     /// `docs/PARAM_SIGNATURE_DESIGN.md` §2's table).
@@ -326,10 +306,8 @@ be_int_sig!(u64, 8, 0x03); // STI_UINT64
 
 /// Generates a [`SigParamType`] impl for a type that already implements
 /// [`crate::convert::FixedRead`] with the exact same "exactly N bytes or
-/// `TooSmall`" contract [`SigParamType::read_sig`] needs — every
-/// fixed-length impl below (`[u8; 16]`, `[u8; 32]`, `[u8; 20]`, [`Hash`],
-/// [`AccountId`], [`CurrencyCode`]) reuses [`FixedRead::read_exact`]
-/// verbatim rather than re-deriving the same buffer-and-length-check logic.
+/// `TooSmall`" contract [`SigParamType::read_sig`] needs, by reusing
+/// [`FixedRead::read_exact`] directly.
 macro_rules! fixed_read_sig {
     ($ty:ty, $type_byte:literal) => {
         impl SigParamType for $ty {
@@ -377,20 +355,15 @@ impl SigParamType for AmountBytes {
 /// # Why `N` bounds detection rather than silent truncation
 ///
 /// [`SigParamType::read_sig`] hands `read` a buffer of exactly `N` bytes.
-/// Unlike [`crate::api::hook_ctx::hook_param`] (which xahaud's host
-/// implements via `WRITE_WASM_MEMORY_AND_RETURN`, writing
-/// `min(src_len, dst_len)` and reporting the truncated length — see
-/// [`crate::testenv_bridge::write_bytes_truncate`]'s doc comment for the
-/// documented asymmetry), `otxn_param` — the call [`Blob`] is read through,
-/// per `docs/PARAM_SIGNATURE_DESIGN.md` §1's "read inside the hook via
-/// `otxn_param`" — checks the destination length *first* and returns
-/// `TOO_SMALL` instead of truncating (the same contract
-/// [`crate::testenv_bridge::write_bytes`] documents and every other
-/// byte-returning call in this crate relies on). A `Blob<N>` too small for
-/// the actual invocation value therefore surfaces as
-/// [`HookError::TooSmall`] from the host call itself, never as a
-/// silently-truncated read — no separate overflow check is needed in
-/// [`Blob`]'s own decode.
+/// Unlike [`crate::api::hook_ctx::hook_param`] (whose host call writes
+/// `min(src_len, dst_len)` and reports the truncated length — see
+/// [`crate::testenv_bridge::write_bytes_truncate`]), `otxn_param` — the
+/// call [`Blob`] reads through — checks the destination length *first* and
+/// returns `TOO_SMALL` instead of truncating (the contract
+/// [`crate::testenv_bridge::write_bytes`] documents). A `Blob<N>` too small
+/// for the actual invocation value therefore surfaces as
+/// [`HookError::TooSmall`] from the host call itself, never a
+/// silently-truncated read — no separate overflow check is needed here.
 ///
 /// `N` is capped at 256 (`docs/PARAM_SIGNATURE_DESIGN.md` §2's `STI_VL`
 /// row: `1..=min(N, 256)`), checked at monomorphization time.
@@ -441,8 +414,7 @@ impl<const N: usize> SigParamType for Blob<N> {
         let written = read(&mut bytes)?;
         if written == 0 {
             // Cannot occur via `otxn_param`/`hook_param` (empty means
-            // absent) — see the doc comment — but decode still guards
-            // 1..=N rather than assuming it.
+            // absent), but decode still guards 1..=N rather than assuming it.
             return Err(HookError::TooSmall);
         }
         Ok(Blob {
@@ -459,21 +431,17 @@ impl<const N: usize> SigParamType for Blob<N> {
 /// A serialized `Issue` signature parameter value (`STI_ISSUE`): native (20
 /// all-zero bytes) or an issued asset (40 bytes: currency then issuer).
 ///
-/// Distinct from [`crate::slot_obj::IssueData`] — that type classifies a
-/// serialized `Issue` purely by *length* (20 vs. 40 bytes), matching how a
-/// slot-read `Issue` field is decoded elsewhere in this crate. Per the
+/// Distinct from [`crate::slot_obj::IssueData`], which classifies a
+/// serialized `Issue` purely by *length* (20 vs. 40 bytes): per the
 /// interface draft, a signature parameter's 20-byte form is native **only**
-/// if every byte is zero; 20 non-zero bytes is malformed (there is no
-/// other 20-byte `Issue` shape) and reported as
-/// [`HookError::ParseError`], not silently accepted the way
-/// `IssueData::Native` would. [`SigParamType::read_sig`]'s read buffer is
-/// sized to 44 bytes (an MPT issue's own length, `ISSUE_MAX_READ_LEN` in
-/// `crate::slot_obj`), not just the 40 an IOU issue needs, so a
-/// 44-byte MPT-shaped value is *read* and rejected as `ParseError` by this
-/// type's own length match rather than surfacing as a host-call
-/// [`HookError::TooSmall`] — the identical rationale
-/// `crate::slot_obj::decode_issue`'s doc comment gives for the slot-read
-/// path this mirrors.
+/// if every byte is zero — 20 non-zero bytes is malformed (there is no
+/// other 20-byte `Issue` shape) and reported as [`HookError::ParseError`],
+/// not silently accepted the way `IssueData::Native` would.
+/// [`SigParamType::read_sig`]'s read buffer is sized to 44 bytes (an MPT
+/// issue's own length, `ISSUE_MAX_READ_LEN` in `crate::slot_obj`), not just
+/// the 40 an IOU issue needs, so a 44-byte MPT-shaped value is *read* and
+/// rejected as `ParseError` by this type's own length match rather than
+/// surfacing as a host-call [`HookError::TooSmall`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IssueBytes {
     /// A 20-byte all-zero native issue.
@@ -489,13 +457,8 @@ impl SigParamType for IssueBytes {
     #[inline(always)]
     fn read_sig(read: impl FnOnce(&mut [u8]) -> Result<usize>) -> Result<Self> {
         const IOU_LEN: usize = CURRENCY_CODE_LEN + ACC_ID_LEN;
-        // The buffer is `ISSUE_MAX_READ_LEN` (44) bytes, not the 40 an IOU
-        // issue needs, so that a 44-byte MPT-shaped value is *read* (and
-        // rejected by the `_` arm below as `ParseError`, the documented
-        // answer for an out-of-scope encoding) rather than rejected by the
-        // host call itself as `TooSmall` — the identical rationale
-        // `crate::slot_obj::decode_issue`'s doc comment gives for the
-        // slot-read path this mirrors.
+        // Buffer is `ISSUE_MAX_READ_LEN` (44), not the 40 an IOU issue
+        // needs — see the doc comment above.
         let mut buf = [0u8; ISSUE_MAX_READ_LEN];
         let written = read(&mut buf)?;
         match written {
@@ -562,13 +525,11 @@ pub fn otxn_sig_param<T: SigParamType>(name: &[u8]) -> Result<T> {
 /// Reads this hook's own parameter as a declared signature value — the
 /// `SigParamType` counterpart to
 /// [`crate::api::hook_ctx::hook_param_exact`], mirroring
-/// [`otxn_sig_param`]'s shape exactly, against `hook_param` instead of
-/// `otxn_param`.
+/// [`otxn_sig_param`]'s shape against `hook_param` instead of `otxn_param`.
 ///
 /// # Errors
 ///
-/// See [`otxn_sig_param`]'s doc comment — identical contract, against
-/// `hook_param`.
+/// See [`otxn_sig_param`]'s doc comment.
 ///
 /// # Examples
 ///
@@ -587,14 +548,13 @@ pub fn hook_sig_param<T: SigParamType>(name: &[u8]) -> Result<T> {
 /// Reads a Hook parameter attached to the originating transaction as a
 /// declared signature value, distinguishing "parameter is absent" from
 /// every other outcome — the `SigParamType` counterpart to
-/// [`crate::api::otxn::otxn_param_opt`], following its identical
-/// absence-vs-decode-failure contract: `Ok(None)` only for
+/// [`crate::api::otxn::otxn_param_opt`]: `Ok(None)` only for
 /// `DOESNT_EXIST`, `Err` for a present-but-undecodable value.
 ///
 /// # Errors
 ///
 /// See [`crate::api::otxn::otxn_param_opt`]'s doc comment for the full
-/// absence/error contract this mirrors.
+/// absence/error contract.
 ///
 /// # Examples
 ///
@@ -625,19 +585,13 @@ pub fn otxn_sig_param_opt<T: SigParamType>(name: &[u8]) -> Result<Option<T>> {
 /// Reads this hook's own parameter as a declared signature value,
 /// distinguishing "parameter is absent" from every other outcome — the
 /// `SigParamType` counterpart to [`crate::api::hook_ctx::hook_param_opt`],
-/// mirroring [`otxn_sig_param_opt`]'s shape exactly (identical
-/// absence-vs-decode-failure contract: `Ok(None)` only for `DOESNT_EXIST`,
-/// `Err` for a present-but-undecodable value), against `hook_param` instead
-/// of `otxn_param`. Restores the same four-function parity
-/// `otxn_param`/`hook_param`/`otxn_param_opt`/`hook_param_opt` have at the
-/// raw layer — see this module's doc comment's "`SigName<V>`" section for
-/// why [`SigName`] itself still only exposes two read methods
-/// (`otxn_read`/`hook_read`), not four.
+/// mirroring [`otxn_sig_param_opt`]'s shape against `hook_param` instead of
+/// `otxn_param`.
 ///
 /// # Errors
 ///
 /// See [`crate::api::hook_ctx::hook_param_opt`]'s doc comment for the full
-/// absence/error contract this mirrors.
+/// absence/error contract.
 ///
 /// # Examples
 ///
@@ -673,8 +627,8 @@ pub fn hook_sig_param_opt<T: SigParamType>(name: &[u8]) -> Result<Option<T>> {
 /// reads as — carries the prebuilt `'static` name bytes (typically a
 /// [`sig_name!`](crate::sig_name)-built `const`) so a call site names the
 /// parameter once and reads it with [`SigName::otxn_read`]/
-/// [`SigName::hook_read`], no repeated name argument. See the module doc
-/// comment's "`SigName<V>`" section for why this does not implement
+/// [`SigName::hook_read`], no repeated name argument. See the module doc's
+/// "`SigName<V>`" section for why this does not implement
 /// [`crate::convert::TypedParamName`].
 pub struct SigName<V: SigParamType> {
     bytes: &'static [u8],
@@ -682,12 +636,9 @@ pub struct SigName<V: SigParamType> {
 }
 
 // Hand-written rather than derived: `#[derive(Clone, Copy)]` on a generic
-// struct adds a `V: Clone`/`V: Copy` bound, which would make e.g.
-// `SigName<IssueBytes>` (whose `IssueBytes` is `Copy`, so this particular
-// case would still work) needlessly fragile against a future
-// `SigParamType` impl for a non-`Copy` type — the phantom carries no `V`
-// value, so `SigName<V>` should stay `Clone`/`Copy` unconditionally, the
-// same reasoning `types.rs`'s `SField<T>` doc comment gives.
+// struct adds a `V: Clone`/`V: Copy` bound, but the phantom carries no `V`
+// value, so `SigName<V>` should stay `Clone`/`Copy` unconditionally — same
+// reasoning `types.rs`'s `SField<T>` doc comment gives.
 impl<V: SigParamType> Clone for SigName<V> {
     #[inline(always)]
     fn clone(&self) -> Self {
@@ -979,13 +930,8 @@ mod tests {
 
     #[test]
     fn issue_bytes_read_buffer_is_forty_four_bytes_so_mpt_shaped_values_are_read_and_rejected() {
-        // 44 bytes (an MPT issue's own length, `ISSUE_MAX_READ_LEN`)
-        // doesn't match either the 20-byte native or 40-byte IOU length,
-        // so it's rejected as `ParseError` by this type's own match here —
-        // proving the read buffer is actually 44 bytes wide, not just the
-        // 40 an IOU issue needs (with a 40-byte buffer, a real 44-byte
-        // host value would instead surface as `HookError::TooSmall` from
-        // the host call itself, before ever reaching this match).
+        // Confirms the read buffer is 44 bytes wide (not just the 40 an IOU
+        // issue needs) — see `IssueBytes`'s doc comment.
         let v: Result<IssueBytes> = IssueBytes::read_sig(|buf| {
             assert_eq!(buf.len(), 44);
             buf.fill(0xCC);
@@ -1070,8 +1016,4 @@ mod tests {
 
 // Const-assert failure cases (bad charset, index > 0x0F, unsupported type
 // byte, wrong `N`) cannot be exercised as runtime `#[test]`s — each is a
-// `compile_fail` doctest above instead. A later trybuild-based phase
-// (`docs/PARAM_SIGNATURE_DESIGN.md` §6, the macro-time fixtures for
-// `#[hooks]`'s generated prologue) should add pinned `.stderr` fixtures
-// covering the same failure modes for the macro surface built on top of
-// this module.
+// `compile_fail` doctest above instead.

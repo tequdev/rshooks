@@ -2,12 +2,10 @@
 //! decoded r-address's base58check checksum.
 //!
 //! Not a `sha2` dependency: `rshooks-macros` is a mandatory build-time
-//! dependency of every Hook crate (see this crate's top-of-file doc
-//! comment for the same reasoning applied to `syn`/`quote`), so any
-//! dependency added here is paid on every `cargo build`/`cargo check` of
-//! every Hook — for a ~100-line, single-shot digest function with no
-//! streaming/incremental requirements, a hand-rolled implementation is
-//! cheaper than the dependency.
+//! dependency of every Hook crate, so any dependency added here is paid on
+//! every `cargo build`/`cargo check` of every Hook — for a ~100-line,
+//! single-shot digest function with no streaming requirements, a
+//! hand-rolled implementation is cheaper than the dependency.
 
 /// Round constants: the first 32 bits of the fractional parts of the cube
 /// roots of the first 64 primes (FIPS 180-4 §4.2.2).

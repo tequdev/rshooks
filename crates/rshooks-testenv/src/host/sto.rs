@@ -1,19 +1,19 @@
 //! `sto_*` semantics (P2-D — `.claude/design/TESTENV_PHASE2_DESIGN.md` §4
 //! "sto_*", stage plan §7): pure byte-level STObject surgery over caller
 //! buffers, extending `crate::emit_walk`'s canonical field walker to expose
-//! offsets rather than forking it — see that module's own doc comment for
-//! the shared [`crate::emit_walk::FieldSpan`]/[`crate::emit_walk::field_value_payload`]
+//! offsets rather than forking it — see that module's doc comment for the
+//! shared [`crate::emit_walk::FieldSpan`]/[`crate::emit_walk::field_value_payload`]
 //! primitives every function here reuses.
 //!
 //! Ported against `Xahau/xahaud`, branch `dev`,
-//! `src/xrpld/app/hook/detail/HookAPI.cpp` (fetched and read directly for
-//! this stage). All five functions share one upstream helper,
-//! `HookAPI::get_stobject_length` (`HookAPI.cpp:2888-3179`) — a hand-rolled,
-//! non-STObject-constructing single-field parser this module's own
-//! `crate::emit_walk` walker already independently reimplements the same
-//! grammar for (canonical field-header/VL decoding, per-STI payload-length
-//! rules, recursive nested-object/array length computation stopping at the
-//! matching `0xE1`/`0xF1` terminator) — hence "extend, don't fork".
+//! `src/xrpld/app/hook/detail/HookAPI.cpp`. All five functions share one
+//! upstream helper, `HookAPI::get_stobject_length` (`HookAPI.cpp:2888-3179`)
+//! — a hand-rolled, non-STObject-constructing single-field parser this
+//! module's `crate::emit_walk` walker already independently reimplements the
+//! same grammar for (canonical field-header/VL decoding, per-STI
+//! payload-length rules, recursive nested-object/array length computation
+//! stopping at the matching `0xE1`/`0xF1` terminator) — hence "extend, don't
+//! fork".
 //!
 //! # `sto_subfield`'s offset/length convention
 //!
@@ -31,7 +31,7 @@
 //! excluded too for `STI_VL`(7)/`STI_ACCOUNT`(8), since
 //! `get_stobject_length`'s `payload_start`/`payload_length` are computed
 //! *after* decoding a VL type's own length prefix). This module's
-//! [`sto_subfield`] mirrors that split exactly: `field.range` (full,
+//! [`sto_subfield`] mirrors that split: `field.range` (full,
 //! header-included) for `STI_ARRAY`, [`crate::emit_walk::field_value_payload`]
 //! (VL-stripped payload) for everything else. Packed into the `int64_t`
 //! return value as `(offset << 32) | length` (`applyHook.cpp:2940`,
@@ -41,16 +41,16 @@
 //!
 //! `HookAPI::sto_subarray` (`HookAPI.cpp:158-234`) always returns elements
 //! **fully formed** (header + value + `0xE1`, `HookAPI.cpp:225`) — matching
-//! `crate::emit_walk::walk_array_elements`'s own element-span convention
-//! directly, no extra stripping needed. Upstream *optionally* strips a
-//! leading `0xF...` array-type header from the input buffer by blindly
-//! trimming bytes positionally, without verifying the trailing terminator
-//! it assumes is there (`HookAPI.cpp:174-193`); this module keeps the same
-//! optional header-stripping but — deliberately more strict, and documented
-//! as a departure — verifies the remaining bytes actually end in `0xF1` via
-//! [`crate::emit_walk::walk_array_elements`] rather than trusting position
-//! alone. It also assumes `fixHookAPI20251128`'s corrected 2-byte-header
-//! handling is always active (this harness does not model amendments).
+//! `crate::emit_walk::walk_array_elements`'s element-span convention; no
+//! extra stripping needed. Upstream *optionally* strips a leading `0xF...`
+//! array-type header from the input buffer by blindly trimming bytes
+//! positionally, without verifying the trailing terminator it assumes is
+//! there (`HookAPI.cpp:174-193`); this module keeps the same optional
+//! header-stripping but diverges by verifying the remaining bytes actually
+//! end in `0xF1` via [`crate::emit_walk::walk_array_elements`] rather than
+//! trusting position alone. It also assumes `fixHookAPI20251128`'s
+//! corrected 2-byte-header handling is always active (this harness does not
+//! model amendments).
 //!
 //! # `sto_validate`
 //!
@@ -58,22 +58,21 @@
 //! well-formedness + full-consumption check (no field-ordering or
 //! duplicate-field check, even though nested objects/arrays are internally
 //! bounded by their own terminators) — exactly
-//! [`crate::emit_walk::walk_top_level_fields`]'s own contract, reused
-//! as-is.
+//! [`crate::emit_walk::walk_top_level_fields`]'s contract, reused as-is.
 //!
 //! # `sto_emplace`/`sto_erase`
 //!
 //! `HookAPI::sto_emplace` (`HookAPI.cpp:236-376`): the `field` argument is
 //! **fully formed and wrapped** (header included, not just payload —
-//! `applyHook.cpp:3094-3099`'s own comment), spliced in verbatim
-//! (`HookAPI.cpp:359-364`) at the canonical position found by scanning
-//! source fields for the first `code > field_id` (`HookAPI.cpp:310-337`).
-//! This module always applies the `field_id`-vs-injected-header
-//! cross-check upstream gates behind `fixHookAPI20251128`
-//! (`HookAPI.cpp:262-286`) — again, no amendment model, so the corrected
-//! behavior is the only behavior. `sto_erase` (`applyHook.cpp:3184-3216`)
-//! is `sto_emplace` with an empty field, `DOESNT_EXIST` substituted when
-//! the output size equals the input size (nothing was removed).
+//! `applyHook.cpp:3094-3099`), spliced in verbatim (`HookAPI.cpp:359-364`)
+//! at the canonical position found by scanning source fields for the first
+//! `code > field_id` (`HookAPI.cpp:310-337`). This module always applies
+//! the `field_id`-vs-injected-header cross-check upstream gates behind
+//! `fixHookAPI20251128` (`HookAPI.cpp:262-286`) — no amendment model, so the
+//! corrected behavior is the only behavior. `sto_erase`
+//! (`applyHook.cpp:3184-3216`) is `sto_emplace` with an empty field,
+//! `DOESNT_EXIST` substituted when the output size equals the input size
+//! (nothing was removed).
 //!
 //! Size limits (`HookAPI.cpp:243-259`): source `2..=16384` bytes, field (if
 //! present) `2..=4096` bytes. `MEM_OVERLAP` (a wasm-linear-memory
@@ -180,10 +179,9 @@ pub(crate) fn sto_emplace(source: &[u8], field: &[u8], field_id: u32) -> Result<
         if field.len() < 2 {
             return Err(TOO_SMALL);
         }
-        // `fixHookAPI20251128`'s field_id/injected-header cross-check,
-        // always applied (see module doc comment): `field` must itself
-        // parse as exactly one fully-formed top-level field, whose own
-        // header code matches `field_id`.
+        // `fixHookAPI20251128`'s field_id/injected-header cross-check:
+        // `field` must parse as exactly one fully-formed top-level field
+        // whose header code matches `field_id`.
         let injected = emit_walk::walk_top_level_fields(field).map_err(|()| PARSE_ERROR)?;
         let [only] = injected.as_slice() else {
             return Err(PARSE_ERROR);
@@ -217,11 +215,9 @@ pub(crate) fn sto_emplace(source: &[u8], field: &[u8], field_id: u32) -> Result<
     Ok(out)
 }
 
-/// `sto_erase` — `sto_emplace` with an empty field
-/// (`applyHook.cpp:3196-3216`); `DOESNT_EXIST` when nothing shrank (the
-/// field was never present — an insert-only `sto_emplace` with an empty
-/// field never grows the output, so equal length unambiguously means "not
-/// found").
+/// `DOESNT_EXIST` when nothing shrank (`applyHook.cpp:3196-3216`): an
+/// insert-only `sto_emplace` with an empty field never grows the output, so
+/// equal length unambiguously means "not found".
 pub(crate) fn sto_erase(source: &[u8], field_id: u32) -> Result<Vec<u8>, i64> {
     let out = sto_emplace(source, &[], field_id)?;
     if out.len() == source.len() {

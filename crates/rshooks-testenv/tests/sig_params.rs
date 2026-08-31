@@ -1,15 +1,13 @@
 //! End-to-end: a `#[hooks]` entry declaring signature parameters
 //! (`docs/PARAM_SIGNATURE_DESIGN.md` §1) — `increment(account: AccountId,
-//! count: u16)`, the interface draft's own worked example — driven through
-//! `TestEnv::invoke` with the originating transaction seeded via
-//! `Otxn::param`, using [`rshooks::sig_name!`] to build each declared
-//! `HookParameterName`.
+//! count: u16)` — driven through `TestEnv::invoke` with the originating
+//! transaction seeded via `Otxn::param`, using [`rshooks::sig_name!`] to
+//! build each declared `HookParameterName`.
 //!
-//! Proves the three outcomes the generated prologue documents (§1's
-//! "Generated prologue"): a correctly-seeded invocation reaches the body
-//! with both arguments already decoded, a missing parameter rolls back with
-//! the documented message and the argument's own index as the code, and a
-//! wrong-length value does too.
+//! Covers the generated prologue's outcomes: a correctly-seeded invocation
+//! reaches the body with both arguments already decoded; a missing or
+//! wrong-length parameter rolls back with the argument's own index as the
+//! code.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, missing_docs)]
 
@@ -94,8 +92,7 @@ fn wrong_length_value_rolls_back_the_same_way_as_absence() {
 
 #[test]
 fn wrong_length_account_value_rolls_back_with_index_zero() {
-    // `account` is present but only 4 bytes (it decodes as `AccountId`, 20
-    // bytes).
+    // `account` is present but only 4 bytes (it decodes as `AccountId`, 20 bytes).
     let env = env_with_params(&[
         (&ACCOUNT_NAME, &[1, 2, 3, 4]),
         (&COUNT_NAME, &7u16.to_be_bytes()),

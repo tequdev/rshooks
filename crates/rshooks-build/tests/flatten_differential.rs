@@ -1,22 +1,20 @@
 //! Differential tests for the flatten pass (`docs/DESIGN.md` §6.2b): every
-//! fixture is executed both *before* and *after* flattening, in a real wasm
-//! interpreter (`wasmi`, a dev-dependency — never linked into the actual
-//! `rshooks-build` binary), with the same stubbed `env` import. An inlining
-//! bug must fail these tests, not silently change hook semantics.
+//! fixture runs both *before* and *after* flattening in a real wasm
+//! interpreter (`wasmi`, dev-only — never linked into `rshooks-build`
+//! itself), against the same stubbed `env` import. An inlining bug must fail
+//! these tests, not silently change hook semantics.
 //!
-//! Every fixture imports exactly one `env` function, `obs` (`(i32,i32) ->
-//! i32`), which the host stub records every call to (as `(a, b)` pairs, in
-//! order) and answers with the *pure, deterministic* function
-//! `a.wrapping_mul(1000).wrapping_add(b)`. Because it is deterministic and
-//! pure, comparing the recorded call sequence plus the two runs' return
-//! values is a complete behavioral comparison — this is the "scripted
-//! response" `docs/DESIGN.md` §6.2b asks for, just scripted as a formula of
-//! the (varying, per call site) arguments rather than a hand-authored
-//! sequence, which would be equivalent but more code for the same coverage.
+//! Every fixture imports one `env` function, `obs` (`(i32,i32) -> i32`),
+//! which the host stub logs every call to it (as `(a, b)` pairs, in order)
+//! and answers with the pure, deterministic
+//! `a.wrapping_mul(1000).wrapping_add(b)`.
+//! Comparing the recorded call sequence plus both runs' return values is
+//! therefore a complete behavioral comparison — the "scripted response"
+//! `docs/DESIGN.md` §6.2b asks for, scripted as a formula of the (varying)
+//! call-site arguments rather than a hand-authored sequence.
 //!
-//! Test code is exempt from the workspace's panic-freedom lints (per
-//! `docs/DESIGN.md` §8): `unwrap`/`expect` on a known-good fixture is the
-//! normal, idiomatic way to assert behavior in a test.
+//! Test code is exempt from the workspace's panic-freedom lints (`docs/DESIGN.md`
+//! §8): `unwrap`/`expect` on a known-good fixture is idiomatic here.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -54,13 +52,11 @@ fn run(wasm: &[u8], export: &str, param: i32) -> (i64, Vec<(i32, i32)>) {
             },
         )
         .expect("define env::obs");
-    // The flatten pass unconditionally ensures `_g` is imported (R1,
-    // `docs/DESIGN.md` §6.2b) in its *output*, even though these fixtures
-    // never call it (flatten only inserts the import, not guard calls —
-    // that is the separate, later guard pass). The pre-flatten fixture
-    // never imports `_g` at all; defining it in the linker regardless is
-    // harmless (an unused linker definition is not an error), and lets the
-    // same `run()` helper instantiate both the pre- and post-flatten bytes.
+    // Flatten unconditionally ensures `_g` is imported in its output (R1,
+    // `docs/DESIGN.md` §6.2b), even though these fixtures never call it —
+    // flatten only inserts the import, not guard calls (the separate, later
+    // guard pass does that). Defining `_g` here regardless is harmless and
+    // lets one `run()` helper instantiate both pre- and post-flatten bytes.
     linker
         .func_wrap(
             "env",
@@ -110,8 +106,8 @@ fn assert_differential(
     (post, report)
 }
 
-/// Counts the number of defined functions in `wasm` (i.e. entries in the
-/// function section).
+/// Number of defined functions in `wasm` (function-section entries, not
+/// counting imports).
 fn defined_func_count(wasm: &[u8]) -> u32 {
     for payload in wasmparser::Parser::new(0).parse_all(wasm) {
         if let wasmparser::Payload::FunctionSection(r) = payload.expect("valid wasm") {
@@ -122,11 +118,10 @@ fn defined_func_count(wasm: &[u8]) -> u32 {
 }
 
 /// Whether any defined function body in `wasm` contains a `block` or `br`
-/// instruction. Used to confirm the `docs/DESIGN.md` §6.2b final-paragraph
-/// improvement: a callee with no `return` (or whose only `return` is the
-/// trailing instruction) is spliced bare, with no wrapper `block`/`br` at
-/// all — since the fixtures below contain no `block`/`br` of their own, any
-/// survivor would have to come from `emit_inlined`'s wrapper path.
+/// instruction. Confirms `docs/DESIGN.md` §6.2b: a callee with no `return`
+/// (or whose only `return` is the trailing instruction) is spliced bare, no
+/// wrapper `block`/`br` — since the fixtures below contain no `block`/`br`
+/// of their own, any survivor must come from `emit_inlined`'s wrapper path.
 fn contains_block_or_br(wasm: &[u8]) -> bool {
     for payload in wasmparser::Parser::new(0).parse_all(wasm) {
         if let wasmparser::Payload::CodeSectionEntry(body) = payload.expect("valid wasm") {
@@ -144,10 +139,7 @@ fn contains_block_or_br(wasm: &[u8]) -> bool {
     false
 }
 
-// ---------------------------------------------------------------------
 // Fixture 1: a callee with params + a result, used at 2 call sites.
-// ---------------------------------------------------------------------
-
 const TWO_CALL_SITES: &str = r#"
 (module
   (import "env" "obs" (func $obs (param i32 i32) (result i32)))
@@ -175,21 +167,17 @@ fn two_call_sites_duplicate_and_match() {
         "expected a duplication note for the 2-call-site helper: {:?}",
         report.notes
     );
-    // `$helper` has no `return` at all, so both inlined copies should be
-    // spliced bare (`docs/DESIGN.md` §6.2b final paragraph) — no wrapper
-    // `block`/`br` should appear even though the body is duplicated.
+    // `$helper` has no `return`, so both inlined copies splice bare
+    // (`docs/DESIGN.md` §6.2b) — no wrapper `block`/`br` despite duplication.
     assert!(
         !contains_block_or_br(&post),
         "return-free callee should splice bare, even when duplicated across call sites"
     );
 }
 
-// ---------------------------------------------------------------------
-// Fixture 2: a callee with its own locals and an internal block/br (no
-// `return` — this isolates "internal branch depths are left alone" from
-// the `return`-rewriting fixture below).
-// ---------------------------------------------------------------------
-
+// Fixture 2: a callee with its own locals and an internal block/br, no
+// `return` — isolates "internal branch depths are left alone" from the
+// `return`-rewriting fixture below.
 const INTERNAL_BLOCK_BR: &str = r#"
 (module
   (import "env" "obs" (func $obs (param i32 i32) (result i32)))
@@ -213,12 +201,9 @@ fn internal_block_br_both_branches() {
     assert_differential(INTERNAL_BLOCK_BR, &[("hook", 0), ("hook", 5)]);
 }
 
-// ---------------------------------------------------------------------
-// Fixture 3: a callee with `return` from inside nested blocks — the
-// critical depth-rewrite case. `return` sits 2 blocks deep; the correct
-// rewrite is `br 2` (skip both original blocks, then the wrapper).
-// ---------------------------------------------------------------------
-
+// Fixture 3: a callee with `return` from inside nested blocks — the critical
+// depth-rewrite case. `return` sits 2 blocks deep; the correct rewrite is
+// `br 2` (skip both original blocks, then the wrapper).
 const RETURN_FROM_NESTED_BLOCKS: &str = r#"
 (module
   (import "env" "obs" (func $obs (param i32 i32) (result i32)))
@@ -236,20 +221,16 @@ const RETURN_FROM_NESTED_BLOCKS: &str = r#"
 
 #[test]
 fn return_from_nested_blocks_rewrites_depth_correctly() {
-    // x == 0: `br_if` fires, `return` is skipped entirely -> both later
-    // `obs` calls happen, function falls through to the last one's result.
-    // x != 0: `return` fires from 2 blocks deep -> only the first `obs`
-    // call happens, and its result is what the (now-inlined) block yields.
+    // x == 0: `br_if` fires, `return` is skipped -> both later `obs` calls
+    // happen, falling through to the last one's result. x != 0: `return`
+    // fires from 2 blocks deep -> only the first `obs` call happens.
     assert_differential(
         RETURN_FROM_NESTED_BLOCKS,
         &[("hook", 0), ("hook", 7), ("hook", -3)],
     );
 }
 
-// ---------------------------------------------------------------------
 // Fixture 4: a callee containing a loop.
-// ---------------------------------------------------------------------
-
 const CALLEE_WITH_LOOP: &str = r#"
 (module
   (import "env" "obs" (func $obs (param i32 i32) (result i32)))
@@ -274,12 +255,9 @@ fn callee_with_loop_matches() {
     assert_differential(CALLEE_WITH_LOOP, &[("hook", 0), ("hook", 1), ("hook", 4)]);
 }
 
-// ---------------------------------------------------------------------
-// Fixture 5: chained calls A -> B -> C (exercises reverse-topological
+// Fixture 5: chained calls A -> B -> C, exercising reverse-topological
 // processing order: C must be fully flattened before it is inlined into B,
-// and B before it is inlined into A).
-// ---------------------------------------------------------------------
-
+// and B before it is inlined into A.
 const CHAINED_CALLS: &str = r#"
 (module
   (import "env" "obs" (func $obs (param i32 i32) (result i32)))
@@ -303,10 +281,7 @@ fn chained_calls_flatten_in_topological_order() {
     );
 }
 
-// ---------------------------------------------------------------------
 // Fixture 6: a void-result callee.
-// ---------------------------------------------------------------------
-
 const VOID_RESULT_CALLEE: &str = r#"
 (module
   (import "env" "obs" (func $obs (param i32 i32) (result i32)))
@@ -328,13 +303,9 @@ fn void_result_callee_matches() {
     );
 }
 
-// ---------------------------------------------------------------------
 // Fixture 6b: a callee whose *only* `return` is the trailing instruction at
-// depth 0 — `docs/DESIGN.md` §6.2b's final paragraph says this should also
-// splice bare (drop the `return`, let the value fall through), same as a
-// return-free body.
-// ---------------------------------------------------------------------
-
+// depth 0 — `docs/DESIGN.md` §6.2b says this should also splice bare (drop
+// the `return`, let the value fall through), same as a return-free body.
 const TRAILING_RETURN_ONLY: &str = r#"
 (module
   (import "env" "obs" (func $obs (param i32 i32) (result i32)))
@@ -355,12 +326,9 @@ fn trailing_return_only_splices_bare() {
     );
 }
 
-// ---------------------------------------------------------------------
 // Fixture 7: an entry that keeps working when another defined function is
 // dropped, and two entries (hook, cbak) sharing one helper (each call site
 // gets its own duplicated copy).
-// ---------------------------------------------------------------------
-
 const SHARED_HELPER_TWO_ENTRIES: &str = r#"
 (module
   (import "env" "obs" (func $obs (param i32 i32) (result i32)))
@@ -389,14 +357,12 @@ fn shared_helper_across_two_entries() {
     );
 }
 
-// ---------------------------------------------------------------------
-// A callee that exits through a `br` targeting its implicit function-level
-// label (`return` semantics) instead of `return`. A bare splice would leave
-// the branch's depth unchanged and retarget it at the caller's enclosing
-// block — skipping the addition below while still producing valid wasm —
-// so this callee must be spliced under a wrapper block.
-// ---------------------------------------------------------------------
-
+// Fixture 8: a callee that exits through a `br` targeting its implicit
+// function-level label (`return` semantics) instead of `return`. A bare
+// splice would leave the branch's depth unchanged and retarget it at the
+// caller's enclosing block — skipping the addition below while still
+// producing valid wasm — so this callee must be spliced under a wrapper
+// block.
 const FUNCTION_LEVEL_BRANCH_CALLEE: &str = r#"
 (module
   (import "env" "obs" (func $obs (param i32 i32) (result i32)))

@@ -2,12 +2,11 @@
 //! formats in `protocol_formats.json` (`crates/xtask/src/protocol_ir.rs`),
 //! which come from the vendored `ledger_entries.macro`.
 //!
-//! The raw-`u16`-constants counterpart of [`super::tts`]: where `tts.rs`
-//! mirrors `tts.h`'s `tt*` transaction type codes, this mirrors the `lt*`
-//! ledger entry type codes, which upstream declares only inside the
-//! `LEDGER_ENTRY` macro invocations rather than in a header of their own.
-//! [`super::ledger_entry_type`] renders the typed mirror one layer up, the
-//! way [`super::tx_type`] does for `tts.rs`.
+//! Raw-`u16` counterpart of [`super::tts`]: mirrors the `lt*` ledger entry
+//! type codes, declared only inside `LEDGER_ENTRY` macro invocations
+//! upstream rather than in a header of their own. [`super::ledger_entry_type`]
+//! renders the typed mirror one layer up, as [`super::tx_type`] does for
+//! `tts.rs`.
 
 use anyhow::Result;
 

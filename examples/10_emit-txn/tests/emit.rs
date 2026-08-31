@@ -34,14 +34,12 @@ fn each_invocation_emits_its_own_payment() {
     assert_eq!(env.emitted().len(), 2);
 }
 
-// -- invoke_cbak (P2-E — `.claude/design/TESTENV_PHASE2_DESIGN.md` §4 "cbak
-// execution"). `EmitTxn`'s `#[cbak(0)]` body (`src/lib.rs`) is
-// `fn cbak(&self) -> HookResult { Ok(Accept::from_code(0)) }` — it unconditionally accepts,
-// reading neither the wasm argument nor the callback otxn. Its real
-// behavior to assert is exactly that: `invoke_cbak` reaches `Accept`
-// regardless of `CbakOutcome::Success`/`Failure`, and leaves the
-// surrounding `TestEnv` usable afterward (the callback's otxn swap is
-// invocation-scoped and must not leak into a later `invoke`).
+// `EmitTxn`'s `#[cbak(0)]` body unconditionally accepts, reading neither
+// the wasm argument nor the callback otxn. These tests verify exactly
+// that: `invoke_cbak` reaches `Accept` regardless of
+// `CbakOutcome::Success`/`Failure`, and leaves the surrounding `TestEnv`
+// usable afterward — the callback's otxn swap is invocation-scoped and
+// must not leak into a later `invoke`.
 
 #[test]
 fn invoke_cbak_success_reaches_the_real_accept_path() {

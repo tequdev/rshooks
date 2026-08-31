@@ -1,40 +1,32 @@
 //! Boundary conversion traits: [`ToBytes`]/[`FromBytes`].
 //!
-//! These traits fix exactly how a small, fixed-size Rust value crosses the
-//! boundary into/out of a protocol byte buffer (a hook state entry, a
-//! `state_keys!`-encoded key payload, ...). They generalize the "little-
-//! endian, fixed layout" convention this crate already documents for
-//! [`crate::api::state::state_u64`]'s *underlying state entries* (as
-//! opposed to that function's own big-endian "as-int64" wire encoding —
-//! see its doc comment) so the typed storage layer (`crate::state`'s
-//! `state_get`/`state_set_loose`/`state_update_loose`) can encode/decode
+//! These traits fix how a small, fixed-size Rust value crosses into/out of a
+//! protocol byte buffer (a hook state entry, a `state_keys!`-encoded key
+//! payload, ...), using the same little-endian, fixed-layout convention
+//! [`crate::api::state::state_u64`] documents for its underlying state
+//! entries (as opposed to that function's own big-endian "as-int64" wire
+//! encoding). This lets the typed storage layer (`crate::state`'s
+//! `state_get`/`state_set_loose`/`state_update_loose`) encode/decode
 //! arbitrary fixed-size types without repeating that logic per call site.
 //!
 //! # Implementor's contract
 //!
-//! Every impl of [`ToBytes`]/[`FromBytes`] — the ones in this module, the
-//! newtype impls in `types.rs`, and any a hook crate adds for its own
-//! types — must stay panic-free, loop-free, and heap-free, the same
-//! constraints as every other rshooks wrapper (DESIGN.md §2 C2/C7):
+//! Every impl — here, in `types.rs`, or in a hook crate — must stay
+//! panic-free, loop-free, and heap-free (DESIGN.md §2 C2/C7):
 //! `wasm32v1-none` hook binaries have no allocator, and an unguarded loop
-//! fails the Hook API's guard checker. Concretely:
+//! fails the Hook API's guard checker.
 //!
-//! - Never index with `buf[i]` (this crate denies `clippy::indexing_slicing`
-//!   crate-wide) — use `.get()`/`.get_mut()` over a range whose bounds are
-//!   compile-time constants, then `copy_from_slice`. Keeping the range
-//!   compile-time-constant (never a runtime-computed length) is what keeps
-//!   the copy a handful of inlined loads/stores instead of a lowering to a
-//!   `memcpy`/`memcmp` call with a runtime length — exactly the std idiom
-//!   DESIGN.md warns produces unguardable loops in a Hook binary.
-//! - [`ToBytes::MAX_LEN`] must be a compile-time constant equal to the
-//!   exact number of bytes a successful [`ToBytes::write`] produces.
+//! - Never index with `buf[i]` (`clippy::indexing_slicing` is denied
+//!   crate-wide) — use `.get()`/`.get_mut()` over a compile-time-constant
+//!   range, then `copy_from_slice`. A compile-time-constant range keeps the
+//!   copy a handful of inlined loads/stores instead of lowering to a
+//!   `memcpy`/`memcmp` call with a runtime length.
+//! - [`ToBytes::MAX_LEN`] must equal the exact number of bytes a successful
+//!   [`ToBytes::write`] produces.
 //! - [`ToBytes::write`] must not panic if `buf` is shorter than `MAX_LEN`:
-//!   write nothing and return `0` instead (mirrors this crate's other
-//!   caller-buffer wrappers, which rely on the host's own bounds checking
-//!   rather than panicking locally).
+//!   write nothing and return `0` instead.
 //!
-//! See DESIGN.md §5.6 ("Endianness conventions") for the full two-world
-//! rule this module's little-endian convention is one half of.
+//! See DESIGN.md §5.6 ("Endianness conventions") for the full two-world rule.
 
 use crate::error::{HookError, Result};
 
@@ -42,8 +34,7 @@ use crate::error::{HookError, Result};
 ///
 /// Mirrors this crate's caller-buffer convention (`state`, `hook_account`,
 /// ...): implementations never allocate and never panic. See the module
-/// doc comment for the loop-free/panic-free contract every impl must
-/// uphold.
+/// doc comment for the full contract.
 pub trait ToBytes {
     /// The exact number of bytes a successful [`ToBytes::write`] produces.
     const MAX_LEN: usize;
@@ -210,13 +201,9 @@ impl FromBytes for crate::xfl::XFL {
     }
 }
 
-/// Reuses `<[u8; 8] as FixedRead>::read_exact`'s exact-length machinery,
-/// then decodes the 8 bytes as the same little-endian raw `i64` bit
-/// pattern [`ToBytes`]/[`FromBytes`] above already use — so an `XFL`
-/// parameter (e.g. `examples/81_govern`'s `IRR`/`IRD`) reads exactly the
-/// bytes a raw `hook_param_exact::<[u8; 8]>` + `i64::from_le_bytes` +
-/// `XFL::from_raw_bits` call chain would, with the identical "must be
-/// exactly 8 bytes or `TooSmall`" contract.
+/// Decodes the 8 bytes as the same little-endian raw `i64` bit pattern
+/// [`ToBytes`]/[`FromBytes`] above use, with the same "exactly 8 bytes or
+/// `TooSmall`" contract as `<[u8; 8]>::read_exact`.
 impl FixedRead for crate::xfl::XFL {
     #[inline(always)]
     fn read_exact(read: impl FnOnce(&mut [u8]) -> Result<usize>) -> Result<Self> {
@@ -259,28 +246,24 @@ impl<const N: usize> FromBytes for [u8; N] {
 ///
 /// Implemented here for `[u8; N]` (any `N`), and — via the
 /// `fixed_bytes_type!` macro — in `types.rs` for every `rshooks::types`
-/// newtype. Each impl knows its *own* exact length, so
+/// newtype. Each impl knows its own exact length, so
 /// `otxn_field_exact::<AccountId>(sfAccount)` reads exactly `ACC_ID_LEN`
-/// bytes without a caller-supplied `N`; with the return type inferred from
-/// a `let` binding's type annotation instead of a turbofish
-/// (`let sender: AccountId = otxn_field_exact(sfAccount)?;`), no turbofish
-/// is needed at all. A binding with no inferable type (no annotation, no
-/// other usage that pins the type down) is a compile error, same as any
-/// other unconstrained generic return type — annotate the binding.
+/// bytes without a caller-supplied `N`; inferring the return type from a
+/// `let` binding's annotation (`let sender: AccountId =
+/// otxn_field_exact(sfAccount)?;`) avoids a turbofish entirely — an
+/// unannotated binding is a compile error, same as any unconstrained
+/// generic return type.
 ///
 /// # Why `read_exact` takes a closure, not a length
 ///
 /// A single generic function can't allocate `[0u8; T::SOME_ASSOCIATED_LEN]`
 /// — using an associated constant as an array length needs
-/// `generic_const_exprs`, unstable on this crate's pinned stable toolchain.
-/// `read_exact` sidesteps that by moving the actual `[0u8; N]`/newtype
-/// buffer allocation into *this trait method's own implementation*, one
-/// per concrete `Self`, where the length is a literal the `impl` block
-/// already knows — never a generic parameter's associated constant. The
-/// caller-buffer wrapper function itself (`otxn_field`, `state`, ...) is
-/// passed in as a closure, so each `*_exact` function stays a single
-/// generic function (one per Hook API call), not one monomorphized-away
-/// non-generic function per concrete `T` written by hand.
+/// `generic_const_exprs`, unstable on this toolchain. `read_exact` moves
+/// that allocation into each concrete `impl`, where the length is a
+/// literal; the caller-buffer wrapper (`otxn_field`, `state`, ...) is
+/// passed in as a closure, so each `*_exact` function stays one generic
+/// function per Hook API call rather than a hand-written non-generic
+/// function per `T`.
 pub trait FixedRead: Sized {
     /// Allocates this type's own fixed-size buffer, calls `read` with it,
     /// and returns `Self` if `read` reports writing exactly that many
@@ -315,99 +298,72 @@ impl<const N: usize> FixedRead for [u8; N] {
 /// parameter (`hook_api.h`: `TOO_BIG` above 32 bytes, `TOO_SMALL` below 1).
 ///
 /// A parameter name is **not** a fixed-32-byte, zero-padded key the way a
-/// [`crate::types::StateKey`] is (see [`crate::state::StateKeyEncode`]) —
-/// it is matched at its own *natural* length: `"MIN"` (3 bytes) and a
-/// hypothetical zero-padded 32-byte version of the same three bytes name
-/// two different parameters, not one. [`crate::ParamName`]'s encoding
-/// reflects that: a name's wire bytes are exactly its
-/// [`ToBytes::MAX_LEN`], never padded up to this constant — this constant
-/// is only an upper (and, at `1`, a lower) bound the encoded length must
-/// satisfy.
+/// [`crate::types::StateKey`] is — it is matched at its own *natural*
+/// length: `"MIN"` (3 bytes) and a zero-padded 32-byte version of the same
+/// bytes name two different parameters, not one. [`crate::ParamName`]'s
+/// encoding reflects that: a name's wire bytes are exactly its
+/// [`ToBytes::MAX_LEN`], never padded — this constant is only the bound
+/// (`1..=32`) the encoded length must satisfy.
 pub const PARAM_NAME_MAX_LEN: usize = 32;
 
 /// Pairs a Hook API parameter **name** type with the one **value** type
 /// it's read as — this module's counterpart to
-/// [`crate::state::TypedStateKey`], deliberately shaped the same way:
-/// implement it for a name type, then call
+/// [`crate::state::TypedStateKey`]: implement it for a name type, then call
 /// [`crate::api::hook_ctx::hook_param_typed`]/[`crate::api::otxn::otxn_param_typed`]
-/// with **a reference to a name value** — the accessor resolves
-/// [`Value`](Self::Value) from the name argument itself, exactly like
-/// [`crate::state::state_get_typed`] resolves `K::Value` from the key
-/// argument. [`crate::api::hook_ctx::hook_param_exact`]/
+/// with a reference to a name value — the accessor resolves
+/// [`Value`](Self::Value) from the name argument itself.
+/// [`crate::api::hook_ctx::hook_param_exact`]/
 /// [`crate::api::otxn::otxn_param_exact`] take a raw `&[u8]` name and the
-/// value type `T` as two *independent* arguments instead — nothing stops
+/// value type `T` as independent arguments instead, so nothing stops
 /// calling `otxn_param_exact::<WrongType>(b"INS")` for a name/type pairing
-/// that was never intended, as long as `WrongType: FixedRead` (true of
-/// nearly every fixed-size type this crate provides); `TypedParamName`
-/// closes that gap the same way [`crate::state::TypedStateKey`] closes it
-/// for state keys.
+/// that was never intended; `TypedParamName` closes that gap.
 ///
-/// Named `TypedParamName`, not `ParamName` — a name that would collide
-/// with [`crate::ParamName`], the *derive macro* that gives a composite
-/// name struct its [`ToBytes`] impl (this trait's supertrait). Keeping the
-/// two apart avoids the misleading suggestion that `#[derive(ParamName)]`
-/// implements this trait itself — it doesn't; the derive only provides the
-/// `ToBytes` encoding a hand-written `TypedParamName` impl then builds on. See
-/// [`crate::ParamName`]'s and [`crate::ParamValue`]'s doc comments for the
-/// two derives backing the "name" (`Self`) and "value" (`Self::Value`)
-/// sides of this trait, respectively.
+/// Named `TypedParamName`, not `ParamName`, to avoid colliding with
+/// [`crate::ParamName`] — the derive macro that gives a composite name
+/// struct its [`ToBytes`] impl (this trait's supertrait) but does not
+/// itself implement `TypedParamName`. See [`crate::ParamName`]'s and
+/// [`crate::ParamValue`]'s doc comments for the two derives backing the
+/// "name" (`Self`) and "value" (`Self::Value`) sides of this trait.
 ///
 /// A Hook API parameter name is a genuine **variable-length key of up to
-/// [`PARAM_NAME_MAX_LEN`] (32) bytes** — the same shape as a hook state key
-/// (see [`crate::state::StateKeyEncode`]) — so `Self` may be any
-/// [`ToBytes`] type, not just a plain marker: a whole composite
-/// [`crate::ParamName`]-derived struct works exactly like a composite
-/// state key, with the one difference that a parameter name is encoded at
-/// its own **natural** length, never zero-padded to a fixed size.
+/// [`PARAM_NAME_MAX_LEN`] (32) bytes** — the same shape as a hook state
+/// key — so `Self` may be any [`ToBytes`] type, not just a plain marker: a
+/// whole composite [`crate::ParamName`]-derived struct works like a
+/// composite state key, with the one difference that a parameter name is
+/// encoded at its own **natural** length, never zero-padded.
 ///
-/// # Zero-cost for the (overwhelmingly common) plain-byte-string case
+/// # Cost
 ///
-/// Encoding an arbitrary `ToBytes` value into bytes is, in general, a real
-/// (if small) runtime computation — [`with_name_bytes`](Self::with_name_bytes)'s
-/// default body runs `self.write(..)` once per call (Rust has no stable
-/// way to run a trait method at compile time yet). But a **plain
-/// byte-string name** has nothing to compute: its wire encoding *is* its
-/// in-memory representation. A hand-written `TypedParamName` impl for a
-/// plain byte-string name overrides `with_name_bytes` to hand the literal
-/// straight to the closure: no copy, no buffer, nothing to encode, skipping
-/// the default body entirely.
-/// Plain byte-string names use the same direct host-call path as
-/// `hook_param_exact` and `otxn_param_exact`.
-///
-/// # Near-zero-cost for the composite (struct-shaped) case too
-///
-/// A **composite** name (a [`crate::ParamName`]-derived struct with more
-/// than one field, or a newtype whose inner type isn't itself a plain byte
-/// string) can't skip encoding entirely: something has to lay its fields
-/// out into contiguous bytes. But it doesn't need [`PARAM_NAME_MAX_LEN`]
-/// (32) bytes of stack scratch to do it, zero-initialized fresh on every
-/// call, only to use the first handful — a hand-written `TypedParamName`
-/// impl for a composite name can override `with_name_bytes` to allocate
-/// exactly
-/// [`Self::MAX_LEN`](ToBytes::MAX_LEN) bytes instead: a compile-time
-/// literal at that impl's own (concrete, non-generic) definition site, so
-/// `[0u8; Self::MAX_LEN]` is ordinary stable Rust there, even though the
-/// *default* implementation below (generic over any `Self: ToBytes`, with
-/// no way to use an associated const as an array length in generic code —
-/// the same restriction [`FixedRead::read_exact`]'s doc comment describes)
-/// cannot do the same and falls back to the full [`PARAM_NAME_MAX_LEN`]
-/// scratch buffer. See `examples/12_typed-data`'s README for a measured
-/// example — a right-sized buffer compiles to the same cost as the raw,
-/// un-abstracted host call this typed layer replaces.
+/// [`with_name_bytes`](Self::with_name_bytes)'s default body runs
+/// `self.write(..)` into a [`PARAM_NAME_MAX_LEN`]-byte scratch buffer on
+/// every call (there's no stable way to run a trait method at compile
+/// time). A **plain byte-string** name has nothing to compute — its wire
+/// encoding *is* its in-memory representation — so a hand-written
+/// `TypedParamName` impl can override `with_name_bytes` to hand the
+/// `'static` literal straight to the closure, using the same direct
+/// host-call path as `hook_param_exact`/`otxn_param_exact`. A
+/// **composite** name (more than one field, or an inner type that isn't
+/// itself a plain byte string) can't skip encoding, but a hand-written
+/// override still doesn't need the full 32-byte scratch buffer: in a
+/// concrete, non-generic `impl`, `[0u8; Self::MAX_LEN]` is ordinary stable
+/// Rust (unlike in the generic default below, which lacks
+/// `generic_const_exprs` — the same restriction
+/// [`FixedRead::read_exact`]'s doc comment describes), so the override can
+/// allocate exactly [`Self::MAX_LEN`](ToBytes::MAX_LEN) bytes. See
+/// `examples/12_typed-data`'s README for a measured example — a
+/// right-sized buffer compiles to the same cost as the raw, un-abstracted
+/// host call this typed layer replaces.
 ///
 /// # Relationship to the hook-state typed layer
 ///
-/// `TypedParamName` deliberately mirrors [`crate::state::TypedStateKey`]
-/// (see its doc comment for the full comparison table): implement the
-/// pairing once (a hand-written `TypedParamName` impl here, a hand-written
-/// `TypedStateKey` impl there), then call an accessor that takes **a
-/// reference to a name/key value** and resolves the paired type from it
-/// (`hook_param_typed`/
-/// `otxn_param_typed` here, `state_get_typed`/`state_set_typed`/`state_update_typed`
-/// there) — no turbofish, no chance of a mismatch. The one difference: a
-/// parameter is read-only from the reading hook's own perspective, so
-/// there is no `hook_param`/`otxn_param` counterpart to `state_set_typed`/
-/// `state_update_typed`.
+/// Mirrors [`crate::state::TypedStateKey`] (see its doc comment for the
+/// full comparison): implement the pairing once, then call an accessor
+/// that takes a reference to a name/key value and resolves the paired type
+/// (`hook_param_typed`/`otxn_param_typed` here,
+/// `state_get_typed`/`state_set_typed`/`state_update_typed` there) — no
+/// turbofish, no chance of a mismatch. The one difference: a parameter is
+/// read-only from the reading hook's own perspective, so there is no
+/// `state_set_typed`/`state_update_typed` counterpart here.
 pub trait TypedParamName: ToBytes {
     /// The one value type this name is paired with.
     type Value: FixedRead;
@@ -415,36 +371,21 @@ pub trait TypedParamName: ToBytes {
     /// Encodes `self`'s parameter-name bytes and hands the result to `f`,
     /// returning whatever `f` returns.
     ///
-    /// A closure, not a returned `&[u8]`/an out-buffer parameter, so each
-    /// implementation is free to choose *where* the encoded bytes live —
-    /// a `'static` literal (the zero-copy plain-byte-string case), or a
-    /// stack buffer sized exactly to `Self`'s own encoded length (the
-    /// composite case) — without the trait method's signature pinning
-    /// that choice to one fixed-size buffer shape. See this trait's
-    /// "Zero-cost"/"Near-zero-cost" doc sections for both cases in detail.
+    /// A closure rather than a returned `&[u8]` lets each implementation
+    /// choose where the encoded bytes live (a `'static` literal, a
+    /// right-sized stack buffer, ...) without the signature pinning one
+    /// fixed buffer shape — see this trait's "Cost" section.
     ///
-    /// The default implementation runs `self.write(..)` into a
-    /// [`PARAM_NAME_MAX_LEN`]-byte scratch buffer (the only option
-    /// available to code that is generic over an arbitrary [`ToBytes`]
-    /// `Self` — using [`Self::MAX_LEN`](ToBytes::MAX_LEN) as an array
-    /// length isn't legal in a *generic* default trait method on stable
-    /// Rust, only inside a concrete, non-generic `impl` — see
-    /// [`FixedRead::read_exact`]'s doc comment for the identical
-    /// restriction). A hand-written `TypedParamName` impl is free to
-    /// override this default: a plain-byte-string name can hand `f` the
-    /// `'static` literal directly (no buffer at all); a composite name can
-    /// allocate a `[u8; Self::MAX_LEN]` buffer sized exactly to itself, in
-    /// its own concrete `impl` — see this trait's doc comment.
+    /// The default runs `self.write(..)` into a [`PARAM_NAME_MAX_LEN`]-byte
+    /// scratch buffer — the only option generic over an arbitrary
+    /// [`ToBytes`] `Self`. A hand-written override is free to do better;
+    /// see this trait's doc comment.
     ///
     /// A compile-time check (monomorphized per `Self`) rejects a `Self`
     /// whose [`ToBytes::MAX_LEN`] falls outside `1..=`[`PARAM_NAME_MAX_LEN`]
-    /// — the Hook API's own bound on a parameter name's length.
-    ///
-    /// An override **replaces** that check along with the body, so any
-    /// override must carry its own copy of the same assertion if it wants
-    /// the same guarantee — without it, a name encoding to 0 bytes
-    /// (rejected by the host at runtime) or to a multi-kilobyte scratch
-    /// buffer would compile with no complaint at all.
+    /// — the Hook API's own bound on a parameter name's length. An
+    /// override **replaces** that check along with the body, so it must
+    /// carry its own copy to keep the same guarantee.
     #[inline(always)]
     fn with_name_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
         const {

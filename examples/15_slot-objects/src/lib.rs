@@ -59,11 +59,9 @@ fn check_account_walk(account: &SlotObject<STObject>, sender: &AccountId) -> boo
     buf_eq_20(&acc, sender) && seq > 0
 }
 
-/// Two facts about reading `sfBalance`, checked together because they are
-/// the same read seen two ways — and because each extra `#[inline(never)]`
-/// frame costs this hook block nesting it cannot spare (see the note below).
-///
-/// Returns the bits it earned.
+/// Reads `sfBalance` two ways, both checked in this one
+/// `#[inline(never)]` frame since the hook's guard nesting budget can't
+/// spare an extra frame per check. Returns the bits earned.
 ///
 /// 1. `as_xfl()` on a native amount yields **XAH units**, so
 ///    `to_int(6, false)` must recover the drop count the raw wire bytes
@@ -92,17 +90,8 @@ fn check_balance_reads(account: &SlotObject<STObject>) -> i64 {
     if (scaled as u64) == (raw & 0x3FFF_FFFF_FFFF_FFFF) {
         bits |= BIT_DROPS_ROUNDTRIP;
     }
-    // `value()` on a `u64` handle must reproduce those same bytes.
-    //
-    // On the *shape* of this check: a native amount's top two bits are
-    // `0b01` — bit 63 clear means "not an IOU", bit 62 set means positive —
-    // so this field does not itself exercise the bit-63 boundary that made
-    // `u64::value()` read wire bytes instead of using as-int64 mode. The
-    // fields that do (`sfExchangeRate`) live on offers and directories, not
-    // on an account root. What this pins is that the two paths agree on a
-    // real serialized value, with bit 62 asserted so a run against an
-    // all-zero read cannot pass by accident; the typing of the bit-63 path
-    // itself is pinned in `tests/ui/pass/slot_typed_api.rs`.
+    // `value()` on a `u64` handle must reproduce those same bytes; bit 62
+    // (asserted below) rules out an all-zero read passing by accident.
     let typed = account
         .get(sfBalance)
         .map(|s| s.assume_type::<u64>())
@@ -132,14 +121,13 @@ fn check_parent_clear(keylet: &Keylet) -> bool {
 ///
 /// Hops 1 and 2 — `sfSignerEntries`, then element 0 — allocate two *owned*
 /// intermediates before hop 3 asks a SignerEntry for a `sfBalance` it does
-/// not have. That is what makes this a cleanup test: the ladder clears each
-/// intermediate unconditionally, before inspecting the result, so 260
-/// failures must leak nothing. With a leak the 255-slot budget runs out
-/// partway through and the tail fails for a different reason.
+/// not have. The ladder clears each intermediate unconditionally, before
+/// inspecting the result, so 260 failures must leak nothing; with a leak
+/// the 255-slot budget runs out partway through and the tail fails for a
+/// different reason.
 ///
 /// The root is loaded **once** and borrowed by every walk — `slot_path!`
-/// never clears its root, and reloading it per iteration would both cost a
-/// `slot_set` and obscure what is being recycled.
+/// never clears its root.
 #[inline(never)]
 fn check_midhop_loop(signers: &Keylet) -> bool {
     let Ok(root) = SlotObject::from_keylet(signers) else {
@@ -161,14 +149,11 @@ fn check_midhop_loop(signers: &Keylet) -> bool {
 /// 260 *successful* three-hop walks, each reading its leaf with
 /// `take_value()`.
 ///
-/// This one loop proves both success-path contracts at once, which is why
-/// there is no separate simple-`take_*` loop: each iteration derives three
-/// slots — two intermediates the ladder clears, plus a leaf `take_value()`
-/// releases — so 260 iterations move 780 slots through a 255-slot budget.
-/// A failure to recycle in *either* mechanism exhausts it well before the
-/// end. (The instruction ceiling is 65,535 and the guard checker sums every
-/// loop in the module, so folding these together is also what makes room
-/// for the failure-path loops below.)
+/// This one loop proves both success-path contracts at once: each
+/// iteration derives three slots — two intermediates the ladder clears,
+/// plus a leaf `take_value()` releases — so 260 iterations move 780 slots
+/// through a 255-slot budget. A failure to recycle in *either* mechanism
+/// exhausts it well before the end.
 #[inline(never)]
 fn check_deep_loop(signers: &Keylet) -> bool {
     let Ok(root) = SlotObject::from_keylet(signers) else {
@@ -254,11 +239,6 @@ fn check_cast_cleanup_loop(keylet: &Keylet) -> bool {
 /// `RippleState` object's balance is signed relative to whichever of the two
 /// accounts sorts low, which is an ordering this hook has no business
 /// depending on; the magnitude is the fact being checked.
-///
-/// `SlotObjects.otxn_param.iss.get()` distinguishes absence from decode
-/// failure, but this check treats them alike: either case just means "this
-/// check group's precondition isn't met," so both fall through the same
-/// `else { return false }`.
 #[inline(never)]
 fn check_iou_amount(holder: &AccountId) -> bool {
     /// `USD` in the standard 20-byte currency encoding.
@@ -276,8 +256,7 @@ fn check_iou_amount(holder: &AccountId) -> bool {
     let Ok(balance) = line.get(sfBalance) else {
         return false;
     };
-    // Borrowing pre-check, then the consuming read — the composition
-    // `is_native` takes `&self` for.
+    // `is_native` borrows; `as_xfl` consumes.
     let Ok(native) = balance.is_native() else {
         return false;
     };
@@ -310,11 +289,9 @@ fn check_root_cast() -> bool {
     };
     let id = code.code() >> 16;
     let is_root_code = (10001..=10004).contains(&id);
-    // The cast must accept it...
     let Ok(cast) = root.try_cast::<STObject>() else {
         return false;
     };
-    // ...and a wrong target on the same slot must not.
     let rejected = cast.try_cast::<STArray>().is_err();
     is_root_code && rejected
 }
@@ -322,12 +299,11 @@ fn check_root_cast() -> bool {
 /// Which group of checks one invocation runs, read from the `CHK` parameter
 /// on the originating transaction.
 ///
-/// **Why the split.** Each recycling loop runs more than 255 iterations —
-/// that is the whole point, since 255 is the per-execution slot budget — and
-/// a single execution running all five would need ~130,000 instructions
-/// against the Hook API's 65,535 limit. So the e2e drives one group per
-/// `Invoke` and ORs the accept codes together. Group 0 is everything cheap
-/// enough to share an execution.
+/// Each recycling loop runs more than 255 iterations — the per-execution
+/// slot budget — so a single execution running all five would need
+/// ~130,000 instructions against the Hook API's 65,535 limit. The e2e
+/// drives one group per `Invoke` and ORs the accept codes together. Group 0
+/// is everything cheap enough to share an execution.
 const CHK_CHEAP: u8 = 0;
 /// Group 1: the successful `slot_path!` walk, whose leaf `take_value()`
 /// makes it the `take_*` success proof too.

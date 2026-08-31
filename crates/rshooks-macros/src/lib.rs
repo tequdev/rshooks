@@ -85,12 +85,9 @@ fn dispatch_hooks_target(item: &TokenStream) -> HooksTarget {
 
 /// Derives `rshooks::convert::ToBytes` plus an explicit
 /// `rshooks::state::StateKeyEncode` impl for a fixed-size, named-field
-/// struct used as a **composite hook-state key** — see
-/// `rshooks::HookKey`'s doc comment (the public-facing re-export hook
-/// authors actually use) for the full writeup. Implemented in
-/// [`hook_key`]; kept as a thin `#[proc_macro_derive]` entry point here,
-/// mirroring [`hook`]/[`cbak`]'s split between the `#[proc_macro...]`
-/// entry point and its implementation.
+/// struct used as a **composite hook-state key** — see `rshooks::HookKey`'s
+/// doc comment for the full writeup. Implemented in [`hook_key`]; kept as a
+/// thin `#[proc_macro_derive]` entry point here.
 #[proc_macro_derive(HookKey)]
 pub fn derive_hook_key(input: TokenStream) -> TokenStream {
     hook_key::derive(input)
@@ -98,11 +95,8 @@ pub fn derive_hook_key(input: TokenStream) -> TokenStream {
 
 /// Derives `rshooks::convert::ToBytes`/`FromBytes`/`FixedRead` for a
 /// fixed-size, named-field struct used as a **hook-state value** — see
-/// `rshooks::HookData`'s doc comment (the public-facing re-export hook
-/// authors actually use) for the full writeup. Implemented in
-/// [`hook_data`]; kept as a thin `#[proc_macro_derive]` entry point here,
-/// mirroring [`hook`]/[`cbak`]'s split between the `#[proc_macro...]`
-/// entry point and its implementation.
+/// `rshooks::HookData`'s doc comment for the full writeup. Implemented in
+/// [`hook_data`]; kept as a thin `#[proc_macro_derive]` entry point here.
 #[proc_macro_derive(HookData)]
 pub fn derive_hook_data(input: TokenStream) -> TokenStream {
     hook_data::derive(input)
@@ -110,11 +104,9 @@ pub fn derive_hook_data(input: TokenStream) -> TokenStream {
 
 /// Derives `rshooks::convert::ToBytes` (only — no `FromBytes`/`FixedRead`)
 /// for a fixed-size, named-field struct used as a **composite Hook API
-/// parameter name** — see `rshooks::ParamName`'s doc comment (the
-/// public-facing re-export hook authors actually use) for the full
+/// parameter name** — see `rshooks::ParamName`'s doc comment for the full
 /// writeup. Implemented in [`param_name`]; kept as a thin
-/// `#[proc_macro_derive]` entry point here, mirroring [`macro@HookData`]'s
-/// split between the `#[proc_macro...]` entry point and its implementation.
+/// `#[proc_macro_derive]` entry point here.
 #[proc_macro_derive(ParamName)]
 pub fn derive_param_name(input: TokenStream) -> TokenStream {
     param_name::derive(input)
@@ -122,11 +114,9 @@ pub fn derive_param_name(input: TokenStream) -> TokenStream {
 
 /// Derives `rshooks::convert::FromBytes`/`FixedRead` (only — no
 /// `ToBytes`) for a fixed-size, named-field struct used as a **Hook API
-/// parameter value** — see `rshooks::ParamValue`'s doc comment (the
-/// public-facing re-export hook authors actually use) for the full
+/// parameter value** — see `rshooks::ParamValue`'s doc comment for the full
 /// writeup. Implemented in [`param_value`]; kept as a thin
-/// `#[proc_macro_derive]` entry point here, mirroring [`macro@HookData`]'s
-/// split between the `#[proc_macro...]` entry point and its implementation.
+/// `#[proc_macro_derive]` entry point here.
 #[proc_macro_derive(ParamValue)]
 pub fn derive_param_value(input: TokenStream) -> TokenStream {
     param_value::derive(input)
@@ -134,13 +124,11 @@ pub fn derive_param_value(input: TokenStream) -> TokenStream {
 
 /// Decodes a classic XRPL/Xahau r-address (base58check string literal,
 /// e.g. `account_id!("rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh")`) into an
-/// `::rshooks::types::AccountId` literal, entirely at compile time (host
-/// side, inside this macro — see [`base58::decode`]/[`sha256::sha256`]).
+/// `::rshooks::types::AccountId` literal, entirely at compile time (see
+/// [`base58::decode`]/[`sha256::sha256`]).
 ///
 /// The full usage docs — worked examples, known-address pairs, and the
-/// `compile_fail` cases — live at `rshooks::account_id`'s doc comment
-/// (this crate's re-export point), since that's what Hook authors actually
-/// depend on and read docs for.
+/// `compile_fail` cases — live at `rshooks::account_id`'s doc comment.
 ///
 /// Expects exactly one token: a string literal. Anything else (missing,
 /// extra tokens, a non-string literal) or a string that fails to decode is
@@ -211,9 +199,7 @@ pub fn account_id(input: TokenStream) -> TokenStream {
 /// since exactness is the whole point).
 ///
 /// The full usage docs -- bit layout, worked examples, and the
-/// `compile_fail` cases -- live at `rshooks::XFL`'s doc comment (this
-/// crate's re-export point), since that's what Hook authors actually
-/// depend on and read docs for.
+/// `compile_fail` cases -- live at `rshooks::XFL`'s doc comment.
 ///
 /// Input grammar: an optional leading `-` token, then exactly one numeric
 /// literal token (integer or decimal, with an optional exponent,
@@ -259,16 +245,14 @@ pub(crate) fn err(span: Span, msg: &str) -> TokenStream {
 }
 
 /// Identifier-concatenation macro backing `rshooks::txn_template!`'s
-/// `set_<field>` setter names on stable Rust (replaces the nightly
-/// `${concat(set_, $field)}` metavariable expression).
+/// `set_<field>` setter names on stable Rust.
 ///
 /// Scans its input for bracket groups shaped like `[< tok tok .. >]` (first
 /// inner token `<`, last inner token `>`, both plain `Punct`s) and replaces
 /// each with a single new identifier formed by concatenating the string
 /// form of every `Ident` token strictly between them. Recurses into every
 /// other group unchanged, so this can wrap an arbitrarily large token
-/// stream (an entire `impl` block, in `txn_template!`'s case) and only the
-/// marked splice points are touched.
+/// stream and only the marked splice points are touched.
 ///
 /// Only ever invoked internally, from `txn_template!`'s own expansion
 /// (`$crate::__paste! { .. }`) — not part of the public API.
@@ -307,16 +291,12 @@ fn rewrite_tree(tt: TokenTree) -> TokenTree {
 /// token spelled `<`/`>`), returns the concatenated identifier. Returns
 /// `None` for anything else (including a marker whose interior contains a
 /// non-`Ident` token) — such a group is left as ordinary bracketed tokens,
-/// which is never valid `rshooks` usage but is not this macro's problem
-/// to diagnose.
+/// which is not this macro's problem to diagnose.
 ///
-/// Concatenating only `Ident` tokens (never arbitrary token text) is what
-/// guarantees the result is itself always a valid identifier: every `Ident`
-/// token's text already satisfies Rust's identifier grammar, and
-/// concatenating any number of valid identifiers end-to-end yields another
-/// valid identifier (an identifier's continuation characters are a superset
-/// of its allowed starting characters). So `Ident::new` below can never
-/// panic on the text this function builds.
+/// Concatenating only `Ident` tokens guarantees the result is itself always
+/// a valid identifier (an identifier's continuation characters are a
+/// superset of its allowed starting characters), so `Ident::new` below can
+/// never panic on the text this function builds.
 fn try_concat_marker(stream: TokenStream) -> Option<Ident> {
     let tokens: Vec<TokenTree> = stream.into_iter().collect();
     if tokens.len() < 3 {

@@ -311,14 +311,11 @@ pub(crate) struct BodyRefs {
     pub has_call_indirect: bool,
 }
 
-/// Scans a function body for direct `call` targets and `global.get`/
-/// `global.set` targets.
 /// Rejects operators from the exception-handling proposal. They open (or
 /// interact with) control frames that the flatten/unnest transforms do not
 /// model — letting one through would corrupt frame matching and branch
-/// depths silently, so the ban is enforced where those passes first
-/// collect a body's operators (the final MVP validation would reject the
-/// module anyway, but only after a transform had already mangled it).
+/// depths silently, so the ban is enforced where those passes first collect
+/// a body's operators, before a transform can mangle it.
 pub(crate) fn reject_eh_operator(op: &wasmparser::Operator, func_idx: u32) -> Result<()> {
     use wasmparser::Operator as Op;
     if matches!(
@@ -552,14 +549,13 @@ pub(crate) fn find_call_cycle(m: &ParsedModule) -> Option<Vec<u32>> {
 }
 
 /// Tracks `block`/`loop`/`if` nesting depth across a stream of operators fed
-/// one at a time via [`DepthTracker::step`]. This is the one place that
-/// counts nesting depth the way the vendored upstream checker does
-/// (`Guard.h` `NESTING_LIMIT` / `GuardRuleDepth32` — see `docs/DESIGN.md`
-/// §6.2c/§6.4): depth starts at 0 at the function's top level and
-/// increments on every `block`/`loop`/`if` entered, decrementing on the
-/// matching `end` (`else` does not change depth — it stays inside the same
-/// `if` frame). [`max_nesting_depth`] drives it from a `FunctionBody`
-/// reader; the unnest pass drives it from an in-memory `Vec<Operator>` via
+/// one at a time via [`DepthTracker::step`]. Counts depth the way the
+/// vendored upstream checker does (`Guard.h` `NESTING_LIMIT` /
+/// `GuardRuleDepth32` — see `docs/DESIGN.md` §6.2c/§6.4): starts at 0,
+/// increments on every `block`/`loop`/`if` entered, decrements on the
+/// matching `end` (`else` doesn't change depth — same `if` frame).
+/// [`max_nesting_depth`] drives it from a `FunctionBody` reader; the unnest
+/// pass drives it from an in-memory `Vec<Operator>` via
 /// [`DepthTracker::of_slice`].
 #[derive(Default)]
 pub(crate) struct DepthTracker {

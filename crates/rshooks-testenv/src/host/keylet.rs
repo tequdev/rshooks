@@ -1,48 +1,43 @@
 //! `util_keylet` semantics — all 26 keylet types (P2-C —
 //! `.claude/design/TESTENV_PHASE2_DESIGN.md` §4 "util_* + ledger_keylet",
 //! stage plan §7). Consumes [`rshooks_core::backend::KeyletArg`]'s
-//! already-resolved `Value`/`Bytes` slots — see that type's doc comment and
-//! `crates/rshooks/testenv-call-sites.txt`'s header for why the six
-//! arguments arrive pre-resolved rather than as raw pointers.
+//! already-resolved `Value`/`Bytes` slots — see that type's doc comment for
+//! why the six arguments arrive pre-resolved rather than as raw pointers.
 //!
-//! Every keylet's byte layout below is a direct port of xahaud's own
-//! implementation (`Xahau/xahaud`, branch `dev`), not the `hook-api`
-//! skill's prose summary — sources consulted:
+//! Every keylet's byte layout is a direct port of xahaud's own
+//! implementation (`Xahau/xahaud`, branch `dev`), sourced from:
 //!
 //! - `src/libxrpl/protocol/Indexes.cpp` (`ripple::keylet::*`) — each type's
-//!   own hash formula (which fields, in which order, canonical account
-//!   ordering for `line`, the non-hashed `child`/`unchecked` pass-throughs,
-//!   `quality`'s direct byte overwrite, `page`'s `index == 0` short-circuit,
-//!   `cron`'s bespoke namespaced-prefix layout).
+//!   hash formula (fields, order, and quirks such as `line`'s canonical
+//!   account ordering, `child`/`unchecked`'s non-hashed pass-through,
+//!   `quality`'s direct byte overwrite, `page`'s `index == 0`
+//!   short-circuit, and `cron`'s bespoke namespaced-prefix layout — each
+//!   documented again at its own match arm below).
 //! - `src/xrpld/app/hook/detail/applyHook.cpp`'s `util_keylet`
-//!   `DEFINE_HOOK_FUNCTION` — exactly which of the six `a..f` slots each
-//!   `keylet_type` consumes, in what shape (this is also independently
-//!   cross-checked against `rshooks::api::keylet`'s 26 typed wrappers, which
-//!   construct `KeyletArg`s in the identical shape — see each `match` arm's
-//!   comment for the corresponding typed helper). Confirms `KEYLET_TICKET`
-//!   (13) has **no case at all** in the real `switch` — every call for it
-//!   falls through to the same `return INVALID_ARGUMENT;` an unrecognized
-//!   `keylet_type` gets, matching `examples/13_keylets`' README-documented
-//!   live finding (not a gap in this port).
+//!   `DEFINE_HOOK_FUNCTION` — which of the six `a..f` slots each
+//!   `keylet_type` consumes and in what shape, cross-checked against
+//!   `rshooks::api::keylet`'s 26 typed wrappers (see each match arm's
+//!   comment for the corresponding helper). `KEYLET_TICKET` (13) has **no
+//!   case at all** in the real `switch` — every call falls through to the
+//!   same `INVALID_ARGUMENT` an unrecognized `keylet_type` gets, matching
+//!   `examples/13_keylets`' README-documented live finding (not a gap in
+//!   this port).
 //! - `include/xrpl/protocol/detail/ledger_entries.macro` /
-//!   `include/xrpl/protocol/LedgerFormats.h` — each type's own 2-byte
-//!   `ltXXX` ledger-entry-type code, which is **not always** the same byte
-//!   as its `LedgerNameSpace` hash-space character (the `examples/13_keylets`
-//!   README's documented quirk for `Cron`/`OwnerDir`/`Fees`, generalized here
-//!   to every directory-shaped type: `Quality`/`EmittedDir`/`Page`/
-//!   `HookStateDir`/`OwnerDir` all serialize as `ltDIR_NODE` (`0x0064`)
-//!   regardless of their own distinct hash-space character, and `NftOffer`'s
-//!   hash space (`'q'`) differs from its type code (`0x0037`) the same way —
-//!   confirmed from source, not assumed, since only 13 of the 26 types were
-//!   independently e2e-verified (see the README's "e2e verification scope").
+//!   `include/xrpl/protocol/LedgerFormats.h` — each type's 2-byte `ltXXX`
+//!   code, which is **not always** the same byte as its `LedgerNameSpace`
+//!   hash-space character: every directory-shaped type (`Quality`/
+//!   `EmittedDir`/`Page`/`HookStateDir`/`OwnerDir`) serializes as
+//!   `ltDIR_NODE` (`0x0064`) regardless of its own hash-space character,
+//!   and `NftOffer`'s hash space (`'q'`) differs from its type code
+//!   (`0x0037`) the same way — confirmed from source; only 13 of the 26
+//!   types are independently e2e-verified (see the README's "e2e
+//!   verification scope").
 //!
-//! Per-type test vectors below reuse `examples/13_keylets`' own fixed test
+//! Per-type test vectors below reuse `examples/13_keylets`' fixed test
 //! inputs (`TEST_HASH`/`TEST_STATE_KEY`/`TEST_NAMESPACE`/`TEST_CURRENCY`/the
 //! `*_SEQ` constants) and, for the 13 types independently verified in
-//! `e2e/test/keylets.test.ts`, that file's own expected-hex vectors
-//! (computed there via the `xahau` npm package's hash helpers or the same
-//! `sha512Half(ledgerSpace ++ args)` pattern) — lifted verbatim as the test
-//! oracle per this stage's task brief.
+//! `e2e/test/keylets.test.ts`, that file's own expected-hex vectors as the
+//! test oracle.
 
 use std::vec::Vec;
 
@@ -121,10 +116,7 @@ mod lt {
 /// order. Reuses [`sha512_half`] (`super::util`) — the same primitive
 /// `util_sha512h` exposes directly.
 fn index_hash(space: u16, parts: &[&[u8]]) -> [u8; 32] {
-    // `Vec::new()`, not a precomputed `with_capacity`: every part here is a
-    // small (<= 34-byte) keylet argument, so the capacity hint isn't worth
-    // the `+`/`.sum()` arithmetic (and the `clippy::arithmetic_side_effects`
-    // it would need justifying).
+    // Parts are small (<= 34 bytes each); not worth a `with_capacity` sum.
     let mut buf = Vec::new();
     buf.extend_from_slice(&space.to_be_bytes());
     for p in parts {
@@ -143,12 +135,11 @@ fn keylet(ty: u16, key: [u8; 32]) -> [u8; 34] {
 }
 
 /// A `KeyletArg::Bytes` slot of exactly `len` bytes, or `INVALID_ARGUMENT` —
-/// mirrors `applyHook.cpp`'s own `read_len != N -> INVALID_ARGUMENT` checks
-/// (a `KeyletArg::Value`/`Unused` here means the typed wrapper never
-/// resolved real bytes for this slot, e.g. it arrived through the untyped
-/// `util_keylet`/`util_keylet_buf` path — see that function's own doc
-/// comment for why testenv fidelity is only guaranteed through a typed
-/// helper).
+/// mirrors `applyHook.cpp`'s own `read_len != N -> INVALID_ARGUMENT` check.
+/// A `KeyletArg::Value`/`Unused` here means the typed wrapper never resolved
+/// real bytes for this slot, e.g. it arrived through the untyped
+/// `util_keylet`/`util_keylet_buf` path, which doesn't guarantee testenv
+/// fidelity.
 fn bytes_exact<'a>(arg: &KeyletArg<'a>, len: usize) -> Result<&'a [u8], i64> {
     match *arg {
         KeyletArg::Bytes(b) if b.len() == len => Ok(b),
@@ -178,9 +169,8 @@ fn require_unused(arg: &KeyletArg<'_>) -> Result<(), i64> {
 /// take for their sequence component: a bare `u32` (hashed as 4 big-endian
 /// bytes) or a 32-byte hash (hashed verbatim). Every typed wrapper in
 /// `rshooks::api::keylet` only ever constructs the `u32` form (`seq: u32`
-/// in each of their signatures) — the `Bytes(32)` arm exists for
-/// completeness against the documented argument shape, but has no typed
-/// caller and so no independent test vector.
+/// in each signature); the `Bytes(32)` arm has no typed caller and so no
+/// independent test vector.
 fn seq_or_hash_bytes(arg: &KeyletArg<'_>) -> Result<Vec<u8>, i64> {
     match *arg {
         KeyletArg::Value(v) => Ok(v.to_be_bytes().to_vec()),
@@ -190,12 +180,10 @@ fn seq_or_hash_bytes(arg: &KeyletArg<'_>) -> Result<Vec<u8>, i64> {
 }
 
 /// `HookAPI::util_keylet` dispatch (`applyHook.cpp`'s `util_keylet`
-/// `DEFINE_HOOK_FUNCTION`, decoupled from wasm-memory concerns since `args`
-/// already carries resolved bytes/values — see [`KeyletArg`]'s doc
-/// comment). One match arm per `rshooks_core::consts::KEYLET_*` constant,
-/// in the same numeric order as that module and `rshooks::api::keylet`'s 26
-/// typed wrappers, each annotated with the typed helper whose `KeyletArg`
-/// shape it expects.
+/// `DEFINE_HOOK_FUNCTION`), decoupled from wasm-memory concerns since `args`
+/// already carries resolved bytes/values. One match arm per
+/// `rshooks_core::consts::KEYLET_*` constant, in the same numeric order as
+/// that module and `rshooks::api::keylet`'s 26 typed wrappers.
 #[allow(clippy::too_many_lines)]
 // one mechanical arm per KEYLET_* type, each already factored to a single index_hash/keylet call — splitting further would only relocate, not reduce, the switch
 #[allow(clippy::indexing_slicing)] // the only indexing/slicing in this function is `dir[0]`/`dir[1]`/`&dir[2..34]` in the QUALITY arm, reached only after `bytes_exact(&args[0], 34)?` has already established `dir.len() == 34`
@@ -463,13 +451,10 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
 
         // `keylet_paychan`: [Bytes(src:20), Bytes(dst:20), Value(seq), Unused x3].
         // Upstream (`applyHook.cpp:2512`, the `PAYCHAN` switch arm) rejects
-        // a zero `e` (the raw seq slot) unconditionally, before even
-        // branching on whether it's a scalar or a 32-byte-hash pointer —
-        // reproduced here for the scalar form, the only one any typed
-        // `rshooks::api::keylet` caller ever constructs (see
-        // `seq_or_hash_bytes`'s own doc comment). `OFFER`/`CHECK`/`ESCROW`/
-        // `NFT_OFFER` below have no such check in their own upstream arms —
-        // a zero seq is legal there, so this rejection is PAYCHAN-specific.
+        // a zero `e` (the raw seq slot) unconditionally — reproduced here
+        // for the scalar form. `OFFER`/`CHECK`/`ESCROW`/`NFT_OFFER` below
+        // have no such check in their own upstream arms; a zero seq is
+        // legal there, so this rejection is PAYCHAN-specific.
         KEYLET_PAYCHAN => {
             let src = bytes_exact(&args[0], 20)?;
             let dst = bytes_exact(&args[1], 20)?;
@@ -538,10 +523,10 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
         }
 
         // `keylet_cron`: [Bytes(account:20), Value(start_time), Unused x4].
-        // Not `indexHash`-based end to end: first 8 bytes of the key are the
-        // first 8 bytes of `indexHash(CRON)` (no args); next 4 are
-        // `start_time` big-endian; last 20 are the first 20 bytes of
-        // `indexHash(CRON, start_time, account)` (`keylet::cron`).
+        // Not `indexHash`-based end to end (`keylet::cron`): key = first 8
+        // bytes of `indexHash(CRON)` (no args) ++ `start_time` big-endian
+        // (4 bytes) ++ first 20 bytes of `indexHash(CRON, start_time,
+        // account)`.
         KEYLET_CRON => {
             let account = bytes_exact(&args[0], 20)?;
             let start_time = require_value(&args[1])?;
@@ -581,11 +566,9 @@ mod tests {
         out
     }
 
-    // Same fixed test inputs as `examples/13_keylets` (that example's own
-    // `owner`/`dest` come from the invoking transaction at e2e time; a fixed
-    // byte pattern here exercises the identical formula independent of any
-    // one e2e run's account, per the module doc comment's "cross-checked
-    // against the documented ledger-space/type-code formula directly" note).
+    // Same fixed test inputs as `examples/13_keylets`; a fixed byte pattern
+    // here exercises the identical formula independent of any one e2e run's
+    // account.
     const OWNER: [u8; 20] = [0x11u8; 20];
     const TEST_HASH: [u8; 32] = [0xABu8; 32];
     const OFFER_SEQ: u32 = 1;
@@ -1218,9 +1201,8 @@ mod tests {
             buf.extend_from_slice(&seq.to_be_bytes());
             buf
         });
-        // `ltNFTOKEN_OFFER` (0x0037) happens to differ from hash-space 'q'
-        // only in numeric value, not in kind (both are single bytes here),
-        // but pinned explicitly per this module's own doc comment.
+        // `ltNFTOKEN_OFFER` (0x0037) differs from hash-space 'q' — pinned
+        // explicitly.
         assert_eq!(got, expect(0x0037, expected_index));
     }
 

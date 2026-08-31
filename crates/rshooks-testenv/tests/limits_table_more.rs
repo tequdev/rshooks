@@ -1,8 +1,6 @@
 //! More boundary tests for design §5's fidelity rules — split from
 //! `limits_table.rs` because `#[hooks]` generates crate-global symbols per
-//! entry index, so two independent chains need two independent test
-//! binaries (`cargo test` already compiles each `tests/*.rs` file as its
-//! own crate).
+//! entry index, so two independent chains need separate test binaries.
 
 #![allow(
     clippy::unwrap_used,

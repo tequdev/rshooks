@@ -73,14 +73,11 @@ pub fn hook_param<B: AsMut<[u8]> + ?Sized>(out: &mut B, name: &[u8]) -> Result<u
 
 /// Read this hook's own parameter `name`, requiring it to be exactly `T`'s
 /// length — any [`crate::convert::FixedRead`] type. A parameter longer than
-/// that already fails as [`crate::error::HookError::TooSmall`] from the
-/// underlying host call; a parameter shorter is caught by `T::read_exact`
-/// itself and mapped to the same variant — see `state_exact` (`state.rs`)
-/// for the identical pattern and rationale. No loop, no panic.
+/// `T` fails as [`crate::error::HookError::TooSmall`] from the underlying
+/// host call; a parameter shorter is caught by `T::read_exact` itself and
+/// mapped to the same variant. No loop, no panic.
 ///
-/// `T` is inferred from context, not a turbofish — see
-/// [`crate::api::otxn::otxn_field_exact`]'s doc comment for the full
-/// story.
+/// `T` is inferred from context, not a turbofish.
 ///
 /// # Examples
 ///
@@ -96,21 +93,15 @@ pub fn hook_param_exact<T: FixedRead>(name: &[u8]) -> Result<T> {
     T::read_exact(|buf| hook_param(buf, name))
 }
 
-/// Read this hook's own parameter, named by `name` itself — see
-/// [`crate::convert::TypedParamName`]'s doc comment for why this is the
-/// safer alternative to [`hook_param_exact`] when a parameter is always
-/// meant to decode as `name`'s one paired value type: there is no separate
-/// `name` argument spelled independently of the type that could name a
-/// *different* parameter than the one actually intended. `N::Value` (the
-/// return type) is inferred from `name`'s own type — no turbofish.
+/// Read this hook's own parameter, named by `name` itself, so the name and
+/// its paired value type can't drift apart into naming a *different*
+/// parameter than intended. `N::Value` (the return type) is inferred from
+/// `name`'s own type — no turbofish.
 ///
-/// Costs nothing beyond [`hook_param_exact`] for the common
-/// plain-byte-string-name case (e.g. a hand-written
-/// [`crate::convert::TypedParamName`] impl overriding `with_name_bytes` to
-/// hand back a `'static` literal) — see
-/// [`crate::convert::TypedParamName`]'s "Zero-cost" section. A
-/// **composite, struct-shaped** name costs a small, genuine runtime encode
-/// instead (unavoidable for an arbitrary type) — see the same doc comment.
+/// Costs nothing beyond [`hook_param_exact`] for a plain byte-string name
+/// (a hand-written [`crate::convert::TypedParamName`] overriding
+/// `with_name_bytes` to hand back a `'static` literal); a composite,
+/// struct-shaped name costs a small runtime encode instead.
 ///
 /// # Examples
 ///
@@ -150,15 +141,12 @@ pub fn hook_param_typed<N: TypedParamName>(name: &N) -> Result<N::Value> {
 
 /// Calls the host `hook_param` function directly and returns its
 /// **undecoded** `i64` result — no [`res`] applied, so no
-/// [`crate::error::HookError`] is ever constructed here.
-/// `#[inline(always)]` and `pub(crate)`: an internal fast path for
-/// [`hook_param_opt`], which must compare the raw code against
-/// [`rshooks_core::DOESNT_EXIST`] *before* deciding whether to decode at
-/// all — see [`crate::api::state::state_raw_code`]'s doc comment for the
-/// identical pattern (including why this deliberately duplicates
-/// [`hook_param`]'s own call rather than routing through it: doing so would
-/// change the compiled block nesting of unrelated call sites elsewhere in a
-/// hook, per the measurement noted there).
+/// [`crate::error::HookError`] is ever constructed here. `pub(crate)` fast
+/// path for [`hook_param_opt`], which must compare the raw code against
+/// [`rshooks_core::DOESNT_EXIST`] before deciding whether to decode at all.
+/// Duplicates [`hook_param`]'s own call rather than routing through it,
+/// since doing so changes the compiled block nesting of unrelated call
+/// sites elsewhere in a hook.
 #[inline(always)]
 pub(crate) fn hook_param_raw_code(buf: &mut [u8], name: &[u8]) -> i64 {
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]

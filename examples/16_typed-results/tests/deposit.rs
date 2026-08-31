@@ -2,9 +2,7 @@
 //! `TestEnv::invoke` against the real `TypedResults` chain — no wasm build,
 //! no node. Covers both entries: the typed `deposit` (`Ok`/`?`-rollback
 //! paths, and that the msg-clause message from `DepositError` reaches
-//! `HookExit.msg` byte-for-byte) and the raw-style `reset`. See
-//! `book/src/testing/unit-tests.md` for the general walkthrough this file
-//! follows.
+//! `HookExit.msg` byte-for-byte) and the raw-style `reset`.
 
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, missing_docs)]
 

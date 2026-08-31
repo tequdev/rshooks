@@ -15,9 +15,9 @@ pub enum ExitType {
     Rollback,
     /// A plain `return code` from the entry function. **Provisional**: no
     /// live-node evidence pins the real on-chain commit semantics of a bare
-    /// return yet (design §4), so this harness conservatively treats it
-    /// like [`ExitType::Rollback`] (state snapshot restored) with
-    /// [`HookExit::is_success`] `== false`.
+    /// return (design §4), so this harness treats it like
+    /// [`ExitType::Rollback`] (state snapshot restored,
+    /// [`HookExit::is_success`] `== false`).
     Return,
 }
 
@@ -45,10 +45,9 @@ impl HookExit {
 }
 
 /// Internal unwind payload `panic::panic_any` carries from the mock
-/// backend's `accept`/`rollback` up to `TestEnv::invoke`'s `catch_unwind` —
-/// see design §2.2. Never exposed to a test author directly; `invoke` always
-/// downcasts it into a [`HookExit`] (or, for any other panic payload,
-/// resumes the unwind unchanged).
+/// backend's `accept`/`rollback` up to `TestEnv::invoke`'s `catch_unwind`
+/// (design §2.2). Never exposed to a test author; `invoke` always downcasts
+/// it into a [`HookExit`], or resumes the unwind for any other panic payload.
 pub(crate) struct HookExitSignal(pub(crate) HookExit);
 
 #[cfg(test)]

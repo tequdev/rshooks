@@ -10,9 +10,7 @@
 //! usable *inside* a typed entry's body — both diverge (`-> !`), so they
 //! coerce to `HookResult` at any point in the body, and they stay the
 //! escape hatch for computed (non-`'static`) messages or WCE-critical raw
-//! bodies. See `docs/DESIGN.md`'s "Typed entry return values" section and
-//! `.claude/design/TYPED_ENTRY_RESULTS_DESIGN.md` for the design rationale
-//! and the probe numbers behind this shape (§1/§5/§7 D6).
+//! bodies.
 
 use crate::api::control::{accept, rollback};
 
@@ -69,13 +67,11 @@ impl Accept {
 /// [`Rollback::new`] / `Err(Rollback::from_code(code))` explicitly.
 ///
 /// **Deliberately no `From<HookError> for Rollback`.** [`HookError::code`]
-/// is a 46-arm re-encode match, and measurement
-/// (`.claude/design/TYPED_ENTRY_RESULTS_DESIGN.md` §5, probe P5) showed a
-/// `?`-propagated two-hop `HookError` → `Rollback` conversion costs 3.1x the
-/// worst-case instruction count and +67% size versus a raw-code-check twin
-/// — exactly the class of regression `docs/TODO.md` item 2 flagged as this
-/// feature's biggest risk. Convert explicitly at the call site instead,
-/// discarding the decoded `HookError` and keeping only "some call failed":
+/// is a 46-arm re-encode match, and a `?`-propagated two-hop `HookError` →
+/// `Rollback` conversion measurably costs more (worst-case instructions and
+/// size) than a raw-code-check twin. Convert explicitly at the call site
+/// instead, discarding the decoded `HookError` and keeping only "some call
+/// failed":
 ///
 /// ```rust,ignore
 /// let value = some_hook_api_call().map_err(|_| MyError::SomeCallFailed)?;
@@ -143,14 +139,13 @@ impl private::Sealed for HookResult {}
 /// The `#[hooks]` macro's generated entry body calls this unconditionally,
 /// wrapping the entry's own call expression:
 /// `::rshooks::exit::EntryReturn::finish(<Struct>::<fn>(&<Struct>))`. There
-/// is exactly one call site per entry (design §1.3), so the conversion cost
-/// is a single 2-arm `match`, never duplicated per `?`.
+/// is exactly one call site per entry, so the conversion cost is a single
+/// 2-arm `match`, never duplicated per `?`.
 ///
 /// **Sealed** — implemented for exactly [`HookResult`]. An entry returning
 /// any other type (including `i64`) fails to compile with an ordinary
 /// trait-bound diagnostic naming this trait (see
-/// `tests/ui/fail/hooks_entry_return_not_entryreturn.rs`, which also pins
-/// the `-> i64` migration case).
+/// `tests/ui/fail/hooks_entry_return_not_entryreturn.rs`).
 ///
 /// `#[doc(hidden)]`: a hook author never names this trait directly — only
 /// generated code calls it, at the fully qualified path

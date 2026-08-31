@@ -1,6 +1,6 @@
 //! Boundary tests for the design §4 `InvocationContext` limits table and
 //! the §5 fidelity rules, driven through a real `#[hooks]` chain and
-//! `TestEnv::invoke` (not through the crate's private internals).
+//! `TestEnv::invoke`.
 
 #![allow(
     clippy::unwrap_used,
@@ -193,10 +193,9 @@ fn emit_beyond_reserve_is_too_many_emitted_txn() {
 
 #[test]
 fn burden_overflow_is_fee_too_large() {
-    // `otxn_emitted` validates its burden fits in an i64 (the Hook API's
-    // `otxn_burden` return type), so the largest legal seed is `i64::MAX` —
-    // reserved(2) still multiplies it past `i64::MAX`, so `etxn_burden()`
-    // must still report `FEE_TOO_LARGE`.
+    // `otxn_emitted` validates its burden fits in an i64, so the largest
+    // legal seed is `i64::MAX` — `reserve(2)` still multiplies it past
+    // `i64::MAX`, so `etxn_burden()` must report `FEE_TOO_LARGE`.
     let env = TestEnv::new().otxn_emitted(i64::MAX as u64, 0);
     let exit = env.invoke::<Limits>(5);
     assert_eq!(exit.code, rshooks_core::FEE_TOO_LARGE);

@@ -27,8 +27,9 @@ const MAX_NAMESPACES: usize = 256;
 const MAX_NONCES: u32 = 256;
 // `max_slots` (xahau `Enum.h`) = 255: numbered slots `1..=255` — index `0`
 // of `InvocationContext::slots` is never assigned (slot number `0` means
-// "auto-assign" to the Hook API, not a real slot). No named constant yet:
-// nothing enforces this budget until `slot_*` semantics land in P2-D.
+// "auto-assign" to the Hook API, not a real slot). No named constant: the
+// `1..=255` range is enforced directly in `resolve_slot`
+// (`NO_FREE_SLOTS`/`INVALID_ARGUMENT`).
 
 /// The kind of content held in a numbered slot (design §3/§4 "slot
 /// family", landed P2-D). Governs which `slot_*` operations a slot accepts:
@@ -37,12 +38,11 @@ const MAX_NONCES: u32 = 256;
 /// `slot_float`/`slot_type(no, 1)` need [`Amount`](SlotKind::Amount).
 /// `slot`/`slot_size`/`slot_type(no, 0)`/`slot_clear` work on every kind.
 ///
-/// This mirrors xahaud's own distinction between the STBase entry a slot
-/// points at (whose runtime `getSType()` decides `slot_type`/`slot_count`/
-/// `slot_subarray`/`slot_subfield`'s behavior, per `HookAPI.cpp`'s
-/// `slot_type`/`slot_count`/`slot_subarray`/`slot_subfield`/`slot_float`
-/// implementations — see `crate::host::slots`' module doc comment) and a
-/// synthesized root/field code for `slot_type(no, 0)`, tracked here as
+/// Mirrors xahaud's own distinction between the STBase entry a slot points
+/// at (whose runtime `getSType()` decides `slot_type`/`slot_count`/
+/// `slot_subarray`/`slot_subfield`'s behavior — see `HookAPI.cpp`'s
+/// implementations, and `crate::host::slots`' module doc) and a synthesized
+/// root/field code for `slot_type(no, 0)`, tracked as
 /// [`SlotEntry::reported_code`] rather than recomputed from the bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SlotKind {
@@ -69,27 +69,26 @@ pub(crate) enum SlotKind {
 
 /// One numbered slot's content: the serialized field/object bytes the
 /// numbered slot APIs (`slot`, `slot_subfield`, `slot_subarray`, ...) read
-/// (design §3), an owned, independent copy — deriving a child slot via
+/// (design §3), an owned, independent copy. Deriving a child slot via
 /// `slot_subfield`/`slot_subarray` copies bytes out of the parent rather
-/// than aliasing it, so clearing the parent afterward cannot affect a child
-/// (the PR #27 read-contract fact `examples/15_slot-objects`' `check_parent_clear`
-/// pins, and `rshooks::slot_path!`'s own doc comment relies on: "the host
-/// copies the parent's storage into the child slot").
+/// than aliasing it, so clearing the parent afterward cannot affect a
+/// child — the read contract `examples/15_slot-objects`' `check_parent_clear`
+/// pins, and `rshooks::slot_path!`'s doc comment relies on: "the host
+/// copies the parent's storage into the child slot".
 #[derive(Debug, Clone)]
 pub(crate) struct SlotEntry {
     pub(crate) bytes: Vec<u8>,
     pub(crate) kind: SlotKind,
     /// The value `slot_type(no, 0)` reports: an ordinary field code
     /// (`(sti << 16) | field`, matching `rshooks::sfield::sfXxx.code()`'s
-    /// own encoding) for anything from `slot_subfield`/`slot_subarray`, or
-    /// a synthesized root object code for a root slot — `crate::host::slots`'
+    /// encoding) for anything from `slot_subfield`/`slot_subarray`, or a
+    /// synthesized root object code for a root slot — `crate::host::slots`'
     /// `ROOT_TRANSACTION`/`ROOT_LEDGER_ENTRY`/`ROOT_METADATA` constants,
     /// whose high 16 bits are rippled's real `STI_TRANSACTION`(10001)/
     /// `STI_LEDGERENTRY`(10002)/`STI_METADATA`(10004) (`XRPLF/rippled`,
-    /// `include/xrpl/protocol/SField.h`), matching
-    /// `rshooks::slot_obj`'s `ROOT_OBJECT_CODE_MIN..=ROOT_OBJECT_CODE_MAX`
-    /// (10001..=10004) contract that `examples/15_slot-objects`'
-    /// `check_root_cast` pins.
+    /// `include/xrpl/protocol/SField.h`), matching `rshooks::slot_obj`'s
+    /// `ROOT_OBJECT_CODE_MIN..=ROOT_OBJECT_CODE_MAX` (10001..=10004)
+    /// contract `examples/15_slot-objects`' `check_root_cast` pins.
     pub(crate) reported_code: u32,
 }
 
@@ -122,40 +121,39 @@ pub(crate) struct InvocationContext {
 
     // -- Phase 2 (`.claude/design/TESTENV_PHASE2_DESIGN.md` §3) --
     //
-    // Plain data plumbing as of P2-A — see `world.rs`'s matching Phase 2
-    // block for why nothing here is populated or read yet.
-    /// Numbered slots `1..=255` (index `0` unused — slot number `0` means
-    /// "auto-assign" to the Hook API, not a real slot; xahau's `max_slots`
-    /// is 255). Invocation-scoped: a fresh, all-`None` array every `invoke` call,
+    // Populated and read by `crate::host::slots`'s `slot_*` functions via
+    // `resolve_slot`/`set_slot`/`clear_slot` below.
+    /// Numbered slots `1..=255` (index `0` unused — slot `0` means
+    /// "auto-assign", not a real slot; xahau's `max_slots` is 255).
+    /// Invocation-scoped: a fresh, all-`None` array every `invoke` call,
     /// matching a fresh wasm instance on-chain (design §3). Boxed so a
-    /// 256-element array of `Option<SlotEntry>` doesn't bloat every
+    /// 256-element `Option<SlotEntry>` array doesn't bloat every
     /// `InvocationContext` (most invocations use zero or a handful of
     /// slots).
     pub(crate) slots: std::boxed::Box<[Option<SlotEntry>; 256]>,
     /// Whether `hook_again` was called this invocation (design §4:
-    /// `ALREADY_SET` on a second call within the same invocation). Merged
-    /// into [`crate::world::World::hook_again_requested`] by
-    /// `crate::env::TestEnv`'s `run_entry` helper only on `accept!` (P2-E —
-    /// mirrors `pending_emissions`/`committed_emissions`'s stage-then-merge
-    /// pattern, not a live world write).
+    /// `ALREADY_SET` on a second call in the same invocation). Merged into
+    /// [`crate::world::World::hook_again_requested`] by
+    /// `crate::env::TestEnv::run_entry` only on `accept!` (P2-E — same
+    /// stage-then-merge pattern as `pending_emissions`/`committed_emissions`,
+    /// not a live world write).
     pub(crate) hook_again_called: bool,
     /// `hook_skip` directives recorded this invocation, in call order,
     /// **only the ones that succeeded** (upstream never records a rejected
-    /// call — `HookAPI::hook_skip`, `Xahau/xahaud` branch `dev`,
+    /// call — `HookAPI::hook_skip`, `Xahau/xahaud` `dev`,
     /// `src/xrpld/app/hook/detail/HookAPI.cpp:1745-1782`, only mutates
-    /// `hookCtx.result.hookSkips` on a code path that returns success).
-    /// Extended onto [`crate::world::World::skip_directives`] on `accept!`
-    /// (P2-E — same stage-then-merge pattern as `hook_again_called` above).
+    /// `hookCtx.result.hookSkips` on success). Extended onto
+    /// [`crate::world::World::skip_directives`] on `accept!` (P2-E, same
+    /// stage-then-merge pattern as `hook_again_called`).
     pub(crate) skip_directives: Vec<([u8; 32], u32)>,
     /// This invocation's own `hook_param_set` writes — `(hook_hash, name)
     /// -> value` — merged into
     /// [`crate::world::World::hook_param_overrides`] on `accept!` (P2-E;
     /// design §4 "control leftovers": "committed only on accept, like
-    /// state"). A `HashMap`, not a `Vec` of calls: later calls in the same
-    /// invocation overwrite earlier ones for the same `(hash, name)` key,
-    /// matching upstream's own `overrides[hash][name] = value` assignment
-    /// (`HookAPI.cpp:1713-1744`) — there is no "undo" of an in-invocation
-    /// overwrite, only the final value per key survives to merge.
+    /// state"). A `HashMap`, not a `Vec`: later calls overwrite earlier
+    /// ones for the same `(hash, name)` key, matching upstream's
+    /// `overrides[hash][name] = value` assignment (`HookAPI.cpp:1713-1744`)
+    /// — only the final value per key survives to merge.
     pub(crate) pending_param_overrides: HashMap<([u8; 32], Vec<u8>), Vec<u8>>,
     /// `hook_param_set`'s own per-invocation call budget (`overrideCount`,
     /// `HookAPI.cpp:1727-1728`) — counts every *call* (not distinct keys),
@@ -294,11 +292,10 @@ impl InvocationContext {
         Ok(hash_counters(self.invocation_id, call))
     }
 
-    /// A nonce for a purpose that must not consume the shared
-    /// `etxn_nonce`/`ledger_nonce` budget above — used for `EmitDetails`'s
-    /// `EmitNonce` field, which xahaud derives independently (see
-    /// `crates/rshooks-testenv/src/details.rs`'s module doc comment for why
-    /// this is a documented simplification rather than a pinned protocol
+    /// A nonce that must not consume the shared `etxn_nonce`/`ledger_nonce`
+    /// budget above — used for `EmitDetails`'s `EmitNonce` field, which
+    /// xahaud derives independently (see `details.rs`'s module doc comment
+    /// for why this is a documented simplification, not a pinned protocol
     /// derivation).
     pub(crate) fn next_details_nonce(&mut self) -> [u8; 32] {
         let call = self.call_counter;
@@ -334,10 +331,9 @@ impl InvocationContext {
 
     /// Occupies slot `no` with `entry`. A no-op if `no` is out of range —
     /// unreachable via any real caller, since every `host::slots` call site
-    /// only ever passes a number [`Self::resolve_slot`] itself returned
-    /// (`.get_mut`, not direct indexing, so that invariant doesn't have to
-    /// be re-proven to the panic-freedom lints at each of the eight write
-    /// sites).
+    /// only passes a number [`Self::resolve_slot`] returned (`.get_mut`,
+    /// not direct indexing, so panic-freedom holds without re-proving it
+    /// at each write site).
     pub(crate) fn set_slot(&mut self, no: usize, entry: SlotEntry) {
         if let Some(slot) = self.slots.get_mut(no) {
             *slot = Some(entry);
@@ -345,9 +341,9 @@ impl InvocationContext {
     }
 
     /// Frees slot `no` unconditionally (no `DOESNT_EXIST` reporting — that
-    /// belongs to `host::slots::slot_clear`, the hook-facing entry point;
-    /// this is the same `.get_mut`-based write [`Self::set_slot`] uses,
-    /// for a cleanup path that doesn't care whether the slot was occupied).
+    /// belongs to `host::slots::slot_clear`, the hook-facing entry point).
+    /// Same `.get_mut`-based write as [`Self::set_slot`], for a cleanup
+    /// path that doesn't care whether the slot was occupied.
     pub(crate) fn clear_slot(&mut self, no: usize) {
         if let Some(slot) = self.slots.get_mut(no) {
             *slot = None;
@@ -357,10 +353,10 @@ impl InvocationContext {
     /// Resolves a `slot_into`/`new_slot` argument to a concrete slot
     /// number: the design's own simplification of xahaud's FIFO-then-
     /// monotonic-counter allocator (`.claude/design/TESTENV_PHASE2_DESIGN.md`
-    /// §4 "slot family"; upstream's actual `HookAPI::get_free_slot`
-    /// algorithm — a freed-slot FIFO queue, falling back to a
-    /// never-rewinding counter that permanently exhausts once it passes
-    /// `max_slots` — is ported nowhere in this harness): `0` picks the
+    /// §4 "slot family"; upstream's `HookAPI::get_free_slot` — a freed-slot
+    /// FIFO queue falling back to a never-rewinding counter that
+    /// permanently exhausts past `max_slots` — is ported nowhere in this
+    /// harness): `0` picks the
     /// lowest-numbered free slot in `1..=255` (`NO_FREE_SLOTS` if none are
     /// free); an explicit `1..=255` is returned as-is, silently overwriting
     /// whatever previously occupied it (matching xahaud's own unconditional

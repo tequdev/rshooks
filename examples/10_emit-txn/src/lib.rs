@@ -100,11 +100,9 @@ impl EmitTxn {
 
 // In-crate off-chain unit test, driven through `TestEnv::invoke` against
 // the entry declared above — no wasm build, no node. Only reachable via
-// `cargo test` (`--test` implies `cfg(test)`, which is what switches off
-// `no_std` above); never part of the shipped wasm artifact. See
-// `tests/emit.rs` for the equivalent integration-test-style layout, and
-// `book/src/testing/unit-tests.md` for both layouts documented side by
-// side.
+// `cargo test` (which is what switches off `no_std` above); never part of
+// the shipped wasm artifact. See `tests/emit.rs` for the equivalent
+// integration-test-style layout.
 #[cfg(test)]
 mod tests {
     use rshooks_testenv::prelude::*;

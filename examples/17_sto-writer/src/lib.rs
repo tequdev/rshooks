@@ -131,14 +131,11 @@ impl StoWriterRemit {
 
 // In-crate off-chain unit test, driven through `TestEnv::invoke` against
 // the entry declared above — no wasm build, no node. See `tests/remit.rs`
-// for the equivalent integration-test-style layout, and
-// `book/src/testing/unit-tests.md` for both layouts documented side by
-// side.
+// for the equivalent integration-test-style layout.
 //
-// `build_remit`/`prepare_for_emit` are additionally exercised directly
-// (not through `TestEnv::invoke`) via a small local `HostBackend`, for
-// byte-level assertions on the prepared blob that `build_remit` being
-// private keeps out of reach of `tests/remit.rs`'s integration-test form.
+// `build_remit`/`prepare_for_emit` are additionally exercised directly via
+// a small local `HostBackend`, for byte-level assertions on the prepared
+// blob — `build_remit` is private, so only reachable from in-crate tests.
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -260,10 +257,9 @@ mod tests {
 
     #[test]
     fn iou_amount_write_reaches_the_issued_branch() {
-        // Proves `build_remit` actually calls `iou_amount` (not silently
-        // skipping it) even without a mock backend installed: the host
-        // stub's deterministic `NOT_IMPLEMENTED` surfaces from exactly
-        // that call.
+        // Proves `build_remit` actually calls `iou_amount`: without a mock
+        // backend installed, the host stub's deterministic
+        // `NOT_IMPLEMENTED` surfaces from exactly that call.
         let mut buf = [0u8; super::BUF_LEN];
         let dest = AccountId([9u8; 20]);
         let issued = (CurrencyCode::default(), AccountId([7u8; 20]));

@@ -107,8 +107,7 @@ impl Serialize for EntrySidecarDocument {
         )?;
         map.serialize_entry("HookName", &self.entry.hook_name.as_deref().map(utf8_hex))?;
         // Declared signature parameters (`docs/PARAM_SIGNATURE_DESIGN.md`
-        // §1/§4), carried verbatim from the carrier — empty for an entry
-        // with no `#[hook(..)]` fn arguments.
+        // §1/§4), carried verbatim from the carrier.
         map.serialize_entry("sig_params", &self.entry.sig_params)?;
         map.serialize_entry("HookHash", &self.hook_hash)?;
         map.serialize_entry("WCE", &self.wce)?;

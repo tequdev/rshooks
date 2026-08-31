@@ -5,12 +5,10 @@
 //! # Why there is no library-owned `PaymentTemplate` here
 //!
 //! `rshooks` does not hard-code a `PaymentTemplate` (or any other
-//! hand-written transaction-shaped type): any new field or transaction type
-//! a hook author wanted would require a `rshooks` release. Instead,
-//! mirroring xahaud's
-//! own C "Tx Builder" split (template bytes pasted into the *hook's own
-//! source*, with only generic helpers like `SET_UINT32`/`SET_NATIVE_AMOUNT`/
-//! `COPY_20` shared):
+//! hand-written transaction-shaped type) — mirroring xahaud's own C "Tx
+//! Builder" split (template bytes pasted into the *hook's own source*, with
+//! only generic helpers like `SET_UINT32`/`SET_NATIVE_AMOUNT`/`COPY_20`
+//! shared):
 //!
 //! 1. [`codec`] — generic, panic-free encoding primitives: STObject
 //!    field-header derivation from an `sfXxx` constant, native-amount encoding
@@ -24,40 +22,24 @@
 //!    (so the whole template lands in a wasm data segment via
 //!    [`crate::static_cell::HookStatic`]), and generates typed setters.
 //!
-//! The host-only fields of a *specific* transaction shape (its
-//! `FirstLedgerSequence`/`LastLedgerSequence`, `Account`, `Fee`,
-//! `EmitDetails`) no longer need a hand-written function: declaring them
-//! with the dedicated role kinds (`fls`, `lls`, `fee`, `hook_account`,
-//! `emit_details` — see [`txn_template!`]'s grammar section) makes the
-//! macro generate `prepare_for_emit()` itself, replicating xahaud's C
-//! `PREPARE_TXN()`/`PREPARE_PAYMENT_SIMPLE` semantics exactly — see
+//! The macro recognizes the emit-plumbing fields (`FirstLedgerSequence`/
+//! `LastLedgerSequence`, `Account`, `Fee`) by their `sfXxx` code value
+//! among the uniform field kinds; `EmitDetails` is instead a structural
+//! marker tracked separately (see [`txn_template!`]'s grammar section).
+//! The macro generates `prepare_for_emit()` itself, replicating xahaud's C
+//! `PREPARE_TXN()`/`PREPARE_PAYMENT_SIMPLE` semantics — see
 //! `examples/10_emit-txn` for the worked example.
 //!
-//! ## What [`crate::views`] changed about that argument, and what it did not
-//!
-//! The release-lag premise above — "any new field or transaction type would
-//! require a `rshooks` release" — is true of a *hand-maintained* shape and
-//! false of a **generated** one. [`crate::views`] therefore does ship
-//! library-owned per-transaction and per-ledger-entry shapes: they are
-//! rendered from xahaud's own vendored format macros, so an amendment that
-//! adds a field is picked up by `scripts/sync-vendor.sh` plus `cargo xtask
-//! gen-core`, and `cargo xtask gen-core --check` fails CI when the
-//! checked-in output has drifted. Nobody hand-writes or hand-maintains
-//! them.
-//!
-//! Everything else this section says still holds, unchanged:
-//!
-//! - **Hand-written shape-specific code remains banned in this crate.** The
-//!   exemption is for generated shapes only, and only because generation
-//!   removes the maintenance cost that motivated the ban.
-//! - **The split of responsibilities is unchanged.** [`codec`]'s primitives
-//!   stay transaction-shape-agnostic, and [`txn_template!`] stays the way a
-//!   hook author declares the emitted-transaction layout they want.
-//! - **[`crate::views`] is read-only.** It does not emit, and it does not
-//!   own emit plumbing: `sfEmitDetails` and the host-only fields are still
-//!   written by `prepare_for_emit`/[`crate::sto_writer`], which upstream's
-//!   format macros say nothing about. A future generated *builder* layer
-//!   would compose with that machinery rather than replace it.
+//! [`crate::views`] ships library-owned per-transaction and per-ledger-entry
+//! shapes despite the above, because they are *generated* from xahaud's
+//! vendored format macros (`scripts/sync-vendor.sh` + `cargo xtask
+//! gen-core`, checked by `cargo xtask gen-core --check` in CI) rather than
+//! hand-maintained. Hand-written shape-specific code otherwise remains
+//! banned; [`codec`]/[`txn_template!`]'s split of responsibilities is
+//! unaffected; and [`crate::views`] is read-only — `sfEmitDetails` and the
+//! other host-only fields are still written by
+//! `prepare_for_emit`/[`crate::sto_writer`], which upstream's format macros
+//! say nothing about.
 
 /// Generic, panic-free STObject field-header and value-encoding primitives.
 ///
@@ -76,10 +58,9 @@ pub mod codec {
     /// Derives the STObject field-id prefix bytes for a field.
     ///
     /// Takes the typed [`SField`] constant itself (`sfAccount`, `sfFee`,
-    /// ...), not a raw code, and is the only signature this takes: `SField`
-    /// is a `u32` at runtime, so passing one costs nothing, and since
-    /// `SField`'s constructor is crate-private a raw-`u32` overload would be
-    /// the one way to build a header for a code no generated constant names.
+    /// ...), not a raw code — `SField`'s constructor is crate-private, so a
+    /// raw-`u32` overload would be the only way to build a header for a code
+    /// no generated constant names.
     ///
     /// A field's code encodes `type = code >> 16` and
     /// `field = code & 0xFFFF`. Returns the prefix bytes (only the first `N`
@@ -375,16 +356,15 @@ pub mod codec {
 
         use super::*;
 
-        /// `(sfcode, expected header bytes)`, transcribed from the
-        /// known-good wire patterns in the task brief (real `sfcodes` from
-        /// `rshooks_core::sfcodes`), plus `sfCloseResolution`/`sfTickSize`
-        /// (real `type >= 16` codes) to exercise the two- and three-byte
-        /// forms.
+        /// `(sfcode, expected header bytes)`: real `sfcodes` from
+        /// `rshooks_core::sfcodes` with known-good wire bytes, plus
+        /// `sfCloseResolution`/`sfTickSize` (`type >= 16`) to exercise the
+        /// two- and three-byte forms.
         ///
-        /// Raw codes, wrapped in an erased `SField` where they are passed:
-        /// the table stays spelled as `(type, field)` arithmetic so it is an
-        /// independent transcription of the wire format rather than a
-        /// re-read of the generated constants.
+        /// Raw codes, wrapped in an erased `SField` where passed: the table
+        /// stays spelled as `(type, field)` arithmetic, an independent
+        /// transcription of the wire format rather than a re-read of the
+        /// generated constants.
         #[rustfmt::skip]
         const KNOWN_HEADERS: &[(u32, &[u8])] = &[
             ((1 << 16) + 2, &[0x12]),           // TransactionType (1,2)
@@ -535,19 +515,16 @@ pub trait TemplateBytes {
 ///
 /// # Why a borrow, not an owned typestate
 ///
-/// `txn_template!`-generated structs typically live in a `static` behind
+/// `txn_template!`-generated structs typically live behind
 /// [`crate::static_cell::HookStatic`], whose
-/// [`take`](crate::static_cell::HookStatic::take) only ever hands out a
-/// `&'static mut T` — never an owned `T` — so an owning `Prepared<T>` would
-/// force every `prepare_for_emit` call to `core::mem::replace` a fresh
-/// dummy value back into the static, for no benefit. Borrowing `&mut T`
-/// gives the same guarantee this design calls for: while a `Prepared<'_,
-/// T>` is alive, the borrow checker forbids using the original `&mut T`
-/// directly (so code can't keep mutating through a stale handle while
-/// believing it still reflects an unprepared buffer), and setters remain
-/// reachable through [`core::ops::Deref`]/[`core::ops::DerefMut`] —
-/// re-adjusting a field and calling `prepare_for_emit` again is legitimate,
-/// and this type does not try to prevent that.
+/// [`take`](crate::static_cell::HookStatic::take) only ever hands out
+/// `&'static mut T`, never an owned `T`. Borrowing `&mut T` here matches
+/// that: while a `Prepared<'_, T>` is alive, the borrow checker forbids
+/// using the original `&mut T` directly, so code can't keep mutating
+/// through a stale handle while believing it still reflects an unprepared
+/// buffer. Setters remain reachable through
+/// [`core::ops::Deref`]/[`core::ops::DerefMut`], so re-adjusting a field and
+/// calling `prepare_for_emit` again is fine.
 ///
 /// Obtained only from a generated `prepare_for_emit()`; [`Self::new`] is
 /// `#[doc(hidden)]` and crate-external code has no other way to produce a
@@ -1000,11 +977,10 @@ macro_rules! txn_template {
 ///   accumulator).
 ///
 /// There is a single, unconditional base case (`fields = []`): every field
-/// kind is uniform now (no per-field "role" arms, no duplicate-detection
-/// trick to speak of — a duplicated field is instead caught by the
-/// existing canonical-order assert, since two equal `sfcode`s violate
-/// strictly-increasing order), so `prepare_for_emit()` and `$Name::FIELDS`
-/// are always generated. Whether the crate actually compiles comes down to
+/// kind is uniform (no per-field "role" arms), so `prepare_for_emit()` and
+/// `$Name::FIELDS` are always generated. A duplicated field is caught by the
+/// canonical-order assert, since two equal `sfcode`s violate
+/// strictly-increasing order. Whether the crate actually compiles comes down to
 /// thirteen independent `const _: () = assert!(...)` items generated in
 /// that same base case: six required-field *presence* checks and six
 /// *kind-agreement* checks (via [`crate::txn::codec::field_present`] /
@@ -1297,31 +1273,24 @@ macro_rules! __txn_template_step {
             /// [`crate::txn::codec::FieldEntry`].
             const FIELDS: &'static [$crate::txn::codec::FieldEntry] = &[$($table)*];
 
-            /// Fills every required emit-plumbing field (`Sequence` is
-            /// left untouched — it's baked `0` and that's already correct;
-            /// `FirstLedgerSequence`, `LastLedgerSequence`, `Account`,
-            /// `EmitDetails`, `Fee`) and returns a
+            /// Fills the emit-plumbing fields (`FirstLedgerSequence`,
+            /// `LastLedgerSequence`, `Account`, `EmitDetails`, `Fee` —
+            /// `Sequence` is left at its baked `0` default) and returns a
             /// [`Prepared`](crate::txn::Prepared) handle wrapping `self`
-            /// together with the actual serialized length of the resulting
-            /// transaction — sized to `EmitDetails`'s *actual* returned
-            /// length, not [`Self::LEN`] (the reserved region's max
-            /// capacity). See
+            /// together with the transaction's real serialized length
+            /// (sized to `EmitDetails`'s actual returned length, not
+            /// [`Self::LEN`]'s reserved capacity). See
             /// [`Prepared::as_bytes`](crate::txn::Prepared::as_bytes)/
-            /// [`Prepared::emit`](crate::txn::Prepared::emit) — there is no
-            /// way to obtain emit-ready bytes, or call `emit`, without going
-            /// through this method first. Generated unconditionally: the
-            /// six required fields plus `emit_details` are mandatory for
-            /// this declaration to have compiled at all — see
-            /// `docs/DESIGN.md` §5.5 and the `txn_template!` grammar docs.
-            /// Mirrors xahaud's C `PREPARE_TXN()`: `EmitDetails` is filled
-            /// before `Fee`, since `etxn_fee_base` needs the
-            /// `EmitDetails`-sized transaction blob to size the fee.
-            /// **Overwrites** whatever `FirstLedgerSequence`,
-            /// `LastLedgerSequence`, `Fee`, and `Account` were previously
-            /// set to via their generated setters. Precondition: the
-            /// caller must have already reserved an emission slot via
-            /// [`crate::api::etxn::etxn_reserve`] — this method does not
-            /// call it.
+            /// [`Prepared::emit`](crate::txn::Prepared::emit) — this is the
+            /// only way to obtain emit-ready bytes or call `emit`. Mirrors
+            /// xahaud's C `PREPARE_TXN()`: `EmitDetails` is filled before
+            /// `Fee`, since `etxn_fee_base` needs the `EmitDetails`-sized
+            /// blob to size the fee. **Overwrites** whatever
+            /// `FirstLedgerSequence`, `LastLedgerSequence`, `Fee`, and
+            /// `Account` were previously set to via their generated
+            /// setters. Precondition: the caller must have already reserved
+            /// an emission slot via [`crate::api::etxn::etxn_reserve`] —
+            /// this method does not call it.
             ///
             /// # Errors
             ///
@@ -1492,11 +1461,7 @@ mod tests {
     };
 
     crate::txn_template! {
-        /// Defines a payment template used to verify serialized field order.
-        /// The six required fields (`Sequence`,
-        /// `FirstLedgerSequence`, `LastLedgerSequence`, `Fee`,
-        /// `SigningPubKey`, `Account`) plus `emit_details` are detected by
-        /// `sfcode` value, not by any special syntax — see
+        /// Payment template used to verify serialized field order; see
         /// `EXPECTED_FIXED_PREFIX` below for the byte-compat proof.
         struct TestPayment {
             transaction_type = ttPAYMENT,
@@ -1561,10 +1526,8 @@ mod tests {
 
     #[test]
     fn remaining_u32_and_native_amount_setters_write_at_the_same_offsets_as_before() {
-        // Setters are generated uniformly for every `u32_field`/
-        // `native_amount`/`account_id` field, including the required ones
-        // — `prepare_for_emit` overwrites these at emit time, but the
-        // setters themselves still exist and still work.
+        // Setters exist even for the required fields; `prepare_for_emit`
+        // overwrites them at emit time, but they still work standalone.
         let mut tpl = TestPayment::new();
         tpl.set_flags(0x1234_5678);
         tpl.set_source_tag(1);
@@ -1630,9 +1593,7 @@ mod tests {
         // `NOT_IMPLEMENTED` stub (see rshooks-core), so `prepare_for_emit`
         // must fail on its very first host call (`ledger_seq`) and
         // propagate that error rather than panicking or silently
-        // succeeding. `prepare_for_emit` is unconditional (the six
-        // required fields plus `emit_details` are mandatory for
-        // `TestPayment` to compile at all).
+        // succeeding.
         let mut tpl = TestPayment::new();
         // `Prepared` (the `Ok` variant) doesn't implement `PartialEq` — only
         // the error path is ever compared here — so pull the `Err` out with
@@ -1644,12 +1605,10 @@ mod tests {
         );
     }
 
-    // Used only by `QualifiedPathAccount` below, to declare `sfAccount`
-    // under a different name than the unqualified `sfAccount` used
-    // everywhere else in this file — proving required-field detection is
-    // genuinely value-based: it must not matter how the constant was
-    // spelled at the declaration site. Still an `SField`, since the macro
-    // calls `.code()` on it.
+    // Declares `sfAccount` under a different name for `QualifiedPathAccount`
+    // below, to prove required-field detection is genuinely value-based —
+    // it must not matter how the constant was spelled at the declaration
+    // site. Still an `SField`, since the macro calls `.code()` on it.
     use crate::sfield::sfAccount as raw_sf_account;
 
     crate::txn_template! {
@@ -1669,13 +1628,11 @@ mod tests {
 
     #[test]
     fn required_field_detection_is_robust_to_qualified_paths() {
-        // The mere fact that this compiles (`account_id(raw_sf_account)`
-        // above) is most of the proof — `sfAccount`'s presence/kind checks
-        // passed even though it was never spelled `sfAccount` in the
-        // template. Exercise every generated method too (both for dead-code
-        // hygiene and as a smoke test of the full generated surface),
-        // ending with `prepare_for_emit`, which still fails on the host
-        // stub, but from the correct first call.
+        // Compiling with `account_id(raw_sf_account)` above is most of the
+        // proof. Exercise every generated method too (dead-code hygiene and
+        // a smoke test of the full generated surface), ending with
+        // `prepare_for_emit`, which still fails on the host stub but from
+        // the correct first call.
         let mut tpl = QualifiedPathAccount::new();
         tpl.set_sequence(0);
         tpl.set_first_ledger_sequence(0);

@@ -26,15 +26,12 @@ pub struct TypedResults {
     amount: OtxnParam<[u8; 8]>,
 }
 
-// Two `?`-called helpers, each `#[inline(always)]` (the D4 convention from
-// `.claude/design/TYPED_ENTRY_RESULTS_DESIGN.md` §5 — probe p2fix measured
-// that *without* forcing the inline, the extra call boundary a plain
-// `Result`-returning helper introduces costs a small but real WCE delta at
-// this call density; force-inlined, the typed form measured *below* the
-// hand-written `accept!`/`rollback!` baseline). Both convert their failure
-// with `.map_err(..)`, never `?` on the raw `HookError` a Hook API call
-// returns directly — see [`rshooks::exit::Rollback`]'s doc comment (D3):
-// `HookError::code()` is a 46-arm re-encode match that measurably does not
+// Two `?`-called helpers, each `#[inline(always)]`: without forcing the
+// inline, the extra call boundary a plain `Result`-returning helper
+// introduces costs a real WCE delta at this call density. Both convert
+// their failure with `.map_err(..)`, never `?` on the raw `HookError` a
+// Hook API call returns directly — see [`rshooks::exit::Rollback`]'s doc
+// comment: `HookError::code()` is a 46-arm re-encode match that does not
 // optimize away through a two-hop `?`.
 #[inline(always)]
 fn read_amount(t: &TypedResults) -> Result<u64, DepositError> {

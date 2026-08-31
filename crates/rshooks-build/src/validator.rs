@@ -38,14 +38,13 @@ pub struct ValidationReport {
     /// The worst-case instruction counts reported by the vendored upstream
     /// guard checker (`docs/DESIGN.md` §6.5), when it ran and accepted the
     /// module. Only ever set for API version 0, by
-    /// [`crate::verify`]/[`crate::run_pipeline`] — [`validate`] itself
-    /// (the pure-Rust pass) never populates this field.
+    /// [`crate::verify`]/[`crate::run_pipeline`] — [`validate`] itself never
+    /// populates this field.
     pub guard_verdict: Option<crate::GuardVerdict>,
     /// The maximum `block`/`loop`/`if` nesting depth reached by any defined
-    /// function in the module (0 if the module defines no such construct).
-    /// Computed for every api version so `build`/`check` can always print
-    /// it; only api-version 0 hard-errors/warns on it (`docs/DESIGN.md`
-    /// §6.2c/§6.4).
+    /// function (0 if none). Computed for every api version so
+    /// `build`/`check` can always print it; only api-version 0
+    /// hard-errors/warns on it (`docs/DESIGN.md` §6.2c/§6.4).
     pub max_nesting_depth: u32,
 }
 
@@ -79,11 +78,11 @@ pub fn validate(wasm: &[u8], opts: &Options) -> Result<ValidationReport> {
         ));
     }
 
-    // --- Generic WASM validity, restricted to the MVP feature set. This
-    // catches float *types* (not just opcodes), any post-MVP encoding
-    // (bulk-memory, sign-extension, reference-types, SIMD, multi-value,
-    // multi-memory, tail-call, exceptions, GC, component-model, ...), and
-    // general structural soundness (e.g. a `start` function with the wrong
+    // --- Generic WASM validity, restricted to the MVP feature set: catches
+    // float *types* (not just opcodes), any post-MVP encoding (bulk-memory,
+    // sign-extension, reference-types, SIMD, multi-value, multi-memory,
+    // tail-call, exceptions, GC, component-model, ...), and general
+    // structural soundness (e.g. a `start` function with the wrong
     // signature). ---
     if let Err(e) = wasmparser::Validator::new_with_features(mvp_features()).validate_all(wasm) {
         errors.push(format!("wasm is not valid under the MVP feature set: {e}"));
@@ -192,9 +191,8 @@ pub fn validate(wasm: &[u8], opts: &Options) -> Result<ValidationReport> {
     }
 
     // --- Element segments: only the MVP active/function-index form is
-    // tolerated to exist at all (the cleaner always drops the table and
-    // every element segment, so any survivor here is either external input
-    // or beyond the cleaner's scope). ---
+    // tolerated (the cleaner drops the table and every element segment, so
+    // any survivor is external input or beyond the cleaner's scope). ---
     for (i, el) in m.elements.iter().enumerate() {
         let ok = matches!(
             (&el.kind, &el.items),
@@ -287,10 +285,8 @@ pub fn validate(wasm: &[u8], opts: &Options) -> Result<ValidationReport> {
     if opts.api_version == ApiVersion::V0 {
         let g_index = find_g_index(&m);
 
-        // R1: every api-version-0 module must import `_g`, even if it has no
-        // loop at all — the vendored upstream checker enforces this
-        // unconditionally (discovered running it against phase-4 artifacts
-        // that the pure-Rust validator had wrongly accepted).
+        // R1: every api-version-0 module must import `_g`, even without any
+        // loop — the vendored upstream checker enforces this unconditionally.
         if g_index.is_none() {
             errors.push(
                 "module does not import `_g` (env::_g, type (i32,i32)->i32) — required for \
@@ -303,8 +299,8 @@ pub fn validate(wasm: &[u8], opts: &Options) -> Result<ValidationReport> {
         // `(i32) -> i64` entry-point type. A defined helper function with any
         // other signature (notably compiler_builtins memset/memcpy/bcmp,
         // `(i32,i32,i32) -> i32`) makes the whole module invalid to the
-        // upstream checker; the flatten pass (§6.2b) is what makes this hold
-        // for api-version-0 modules built through `rshooks-build`.
+        // upstream checker; the flatten pass (§6.2b) enforces this for
+        // api-version-0 modules built through `rshooks-build`.
         let entry_ty = (
             [wasmparser::ValType::I32].as_slice(),
             [wasmparser::ValType::I64].as_slice(),
@@ -360,8 +356,8 @@ pub fn validate(wasm: &[u8], opts: &Options) -> Result<ValidationReport> {
     // --- Nesting depth: computed for every defined function, for every api
     // version (so `build`/`check` can always print the module's overall
     // max), but only api-version 0 hard-errors/warns on it — `Guard.h`
-    // `NESTING_LIMIT` under `GuardRuleDepth32` is specifically a guard-type
-    // (api-version 0) rule; see `docs/DESIGN.md` §6.2c/§6.4. ---
+    // `NESTING_LIMIT`/`GuardRuleDepth32` is guard-type only; see
+    // `docs/DESIGN.md` §6.2c/§6.4. ---
     let mut max_overall_depth: u32 = 0;
     for (i, body) in m.code.iter().enumerate() {
         let func_idx = m.num_imported_funcs() + i as u32;
@@ -590,9 +586,9 @@ mod tests {
     #[test]
     fn data_count_section_errors() {
         // Build a module with an explicit data-count section (id 12) via
-        // wasm_encoder: `bulk-memory` is not among the wat-encoded
-        // fixtures elsewhere in this crate, so it's easiest to assemble the
-        // raw section directly rather than depend on wat emitting one.
+        // wasm_encoder: no wat-authored fixture in this crate uses
+        // bulk-memory (which is what would emit one), so hand-assembling
+        // the raw section directly is simplest.
         let mut module = wasm_encoder::Module::new();
         let mut types = wasm_encoder::TypeSection::new();
         types
@@ -662,10 +658,9 @@ mod tests {
         let mut exports = wasm_encoder::ExportSection::new();
         exports.export("hook", wasm_encoder::ExportKind::Func, 1);
         module.section(&exports);
-        // Element sections are positioned after export (id 9, following the
-        // spec's fixed section order), and passive/declared kinds need a
-        // table to make any semantic sense, but `ir::parse`/`validate` don't
-        // require one to exist — only the MVP-shape check under test does.
+        // Element sections follow export (id 9, per the spec's fixed section
+        // order); `ir::parse`/`validate` don't require a table to exist even
+        // for a passive segment — only the MVP-shape check under test does.
         let mut elems = wasm_encoder::ElementSection::new();
         elems.segment(wasm_encoder::ElementSegment {
             mode: wasm_encoder::ElementMode::Passive,

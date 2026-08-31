@@ -3,17 +3,15 @@
 
 Used only by scripts/probe-testenv-parity.sh, which builds the same commit
 twice — once as-committed, once through this stripper — and diffs the wasm
-output. The stripper removes exactly what Stage 5 added to test-wired
-example crates (tests/ dirs, the dev-dependency on rshooks/rshooks-testenv,
-the extra "rlib" crate-type, and the `#![cfg_attr(not(test), no_std)]`
-std-under-test escape hatch) so the "stripped" tree is what those crates
-looked like before test wiring existed.
+output. Removes exactly what test wiring added to test-wired example crates
+(tests/ dirs, the rshooks-testenv dev-dependency, the extra "rlib"
+crate-type, and the std-under-test cfg_attr) so the "stripped" tree matches
+what those crates looked like before test wiring existed.
 
-Deliberately per-example, not generic: a crate this script doesn't know
-about that still references rshooks-testenv means a future change added
-test wiring without updating the stripper, which would silently make the
-"stripped" arm identical to "as-committed" and blind the parity probe. That
-must fail the probe, not pass it quietly — see the final scan below.
+Deliberately per-example, not generic: an unrecognized crate that still
+references rshooks-testenv means the stripper is out of date, which must
+fail loudly (see the final scan below) rather than silently blind the
+parity probe.
 
 Usage: strip-testenv-wiring.py <path-to-copied-examples-dir>
 """

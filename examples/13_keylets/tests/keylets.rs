@@ -3,23 +3,18 @@
 //! node.
 //!
 //! The hook itself (`src/lib.rs`) does no independent verification of its
-//! own — it calls each `keylet_xxx` typed helper and stores the raw 34-byte
-//! result, rolling back with code `100 + KEYLET_*` only if a call itself
-//! fails. So the primary fidelity assertion here, per this stage's task
-//! brief, is that the hook completes with `accept!`/code `0` at all: every
-//! one of the 25 exercised `keylet_xxx` calls succeeded through
-//! `rshooks-testenv`'s `util_keylet` host implementation with the exact
-//! argument shapes `rshooks::api::keylet`'s typed wrappers construct (see
-//! `crates/rshooks-testenv/src/host/keylet.rs`'s own module doc comment and
-//! its unit tests for the per-type byte-layout vectors this backs).
+//! own — it calls each `keylet_xxx` typed helper and stores the raw
+//! 34-byte result, rolling back with code `100 + KEYLET_*` only if a call
+//! itself fails. So the primary fidelity assertion here is that the hook
+//! completes with `accept!`/code `0` at all: every one of the 25 exercised
+//! `keylet_xxx` calls succeeded through `rshooks-testenv`'s host
+//! implementation with the exact argument shapes `rshooks::api::keylet`'s
+//! typed wrappers construct.
 //!
 //! On top of that baseline, several of the 25 stored keylets are also
 //! independently recomputed here — the same `sha512Half(ledgerSpace ++
-//! args)` formula `e2e/test/keylets.test.ts` uses (and
-//! `crates/rshooks-testenv/src/host/keylet.rs`'s own tests cross-check
-//! against `Indexes.cpp`) — and compared byte-for-byte against what the
-//! hook actually wrote to state, the same two-tier scope that file's README
-//! documents ("e2e verification scope").
+//! args)` formula `e2e/test/keylets.test.ts` uses — and compared
+//! byte-for-byte against what the hook actually wrote to state.
 
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, missing_docs)]
 
@@ -39,10 +34,10 @@ const CHECK_SEQ: u32 = 3;
 const PAYCHAN_SEQ: u32 = 5;
 const CRON_START_TIME: u32 = 1_700_000_000;
 
-/// The 32-byte-index-only half of `crates/rshooks-testenv/src/host/keylet.rs`'s
-/// `index_hash` — reimplemented independently here (not imported: that
-/// module is crate-private to `rshooks-testenv`) so this test is a genuine
-/// second computation, not a tautology against the code under test.
+/// The 32-byte-index-only half of `rshooks-testenv`'s own `index_hash`,
+/// reimplemented independently here (not imported: that module is
+/// crate-private) so this test is a genuine second computation, not a
+/// tautology against the code under test.
 fn index_hash(space: u16, parts: &[&[u8]]) -> [u8; 32] {
     let mut buf = Vec::new();
     buf.extend_from_slice(&space.to_be_bytes());

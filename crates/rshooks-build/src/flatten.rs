@@ -145,13 +145,12 @@ pub fn flatten(wasm: &[u8]) -> Result<(Vec<u8>, FlattenReport)> {
         );
     }
 
-    // --- Reverse topological order: callees before their callers, so that
-    // by the time a function F is processed (its own call sites inlined),
-    // every defined function F calls has *already* been processed and thus
-    // contains no more calls to defined functions itself. Standard DFS
-    // post-order over a DAG has exactly this property (for every edge
-    // u -> v, v finishes before u), which is why the recursion check above
-    // runs first. ---
+    // --- Reverse topological order: callees before callers, so that by the
+    // time function F is processed, every defined function it calls has
+    // already been processed and contains no more calls to defined
+    // functions. Standard DFS post-order over a DAG has this property (for
+    // every edge u -> v, v finishes before u), hence the recursion check
+    // above. ---
     let post_order = topo_post_order(&m, n_imp_funcs, total_funcs);
 
     let mut dup_counts: HashMap<u32, u32> = HashMap::new();
@@ -469,12 +468,11 @@ fn emit_inlined<'a>(
                         out.push(op.clone());
                     }
                     wasmparser::Operator::End => {
-                        // The callee body's own trailing `end` (the one that
-                        // would otherwise close its function-level implicit
-                        // block) closes our synthetic wrapper `block`
-                        // instead — no extra `end` is ever appended for the
-                        // wrapper. Depth bottoms out at 0 exactly on that
-                        // final operator.
+                        // The callee body's own trailing `end` closes the
+                        // synthetic wrapper `block` instead of its original
+                        // function-level scope — no extra `end` is appended
+                        // for the wrapper. Depth bottoms out at 0 exactly on
+                        // that final operator.
                         depth = depth.saturating_sub(1);
                         out.push(wasmparser::Operator::End);
                     }
@@ -552,10 +550,9 @@ fn encode_function(f: &FlatFunc) -> Result<wasm_encoder::Function> {
 /// Computes a reverse topological order (callees before callers) over the
 /// direct-call graph restricted to defined functions (imports are leaves
 /// and never appear in the result). Standard iterative DFS post-order: for
-/// a DAG, every edge `u -> v` has `v` finish before `u`, which is exactly
-/// the property the flatten pass's single-pass processing loop relies on.
-/// Assumes the graph is already known to be acyclic (checked by the caller
-/// via [`ir::find_call_cycle`] beforehand).
+/// a DAG, every edge `u -> v` has `v` finish before `u`. Assumes the graph
+/// is already known to be acyclic (checked by the caller via
+/// [`ir::find_call_cycle`] beforehand).
 fn topo_post_order(m: &ir::ParsedModule, n_imp_funcs: u32, total_funcs: u32) -> Vec<u32> {
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum State {

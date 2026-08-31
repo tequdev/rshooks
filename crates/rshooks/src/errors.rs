@@ -1,48 +1,42 @@
 //! User-defined Hook error enums that map to `i64` rollback/accept codes.
 //!
 //! [`hook_errors!`] expands a C-like enum declaration into a `#[repr(i64)]`
-//! enum plus the small amount of boilerplate needed to use it as an exit
-//! code: `impl From<Enum> for i64`, an inherent `code(self) -> i64` method,
-//! and `impl From<Enum> for `[`Rollback`](crate::exit::Rollback) (so `?`
+//! enum, `impl From<Enum> for i64`, an inherent `code(self) -> i64`, and
+//! `impl From<Enum> for `[`Rollback`](crate::exit::Rollback) — so `?`
 //! propagates a variant straight into a typed `#[hook]`/`#[cbak]` entry's
-//! [`HookResult`](crate::exit::HookResult) — see [`crate::exit`]'s module
-//! doc comment). Paired with [`exit_on_err!`] and the `i64::from`-based
-//! `code`/`msg` argument of [`rollback!`](crate::rollback) /
-//! [`accept!`](crate::accept), this gives a small `Result`-based idiom for
-//! hook logic — write ordinary helper functions returning
-//! `Result<T, YourErrorEnum>`, and convert to `rollback` only at the point a
-//! hook actually needs to exit — without introducing a full error-type
-//! hierarchy on top of [`crate::error::HookError`] (which remains the type
-//! for *Hook API* failures; user-defined error enums are a separate,
-//! unrelated concept that happens to also bottom out in an `i64`).
+//! [`HookResult`](crate::exit::HookResult) (see [`crate::exit`]). Paired
+//! with [`exit_on_err!`], this supports a `Result`-based idiom: helper
+//! functions return `Result<T, YourErrorEnum>` and convert to `rollback`
+//! only where a hook actually needs to exit.
+//!
+//! Distinct from [`crate::error::HookError`], which decodes *Hook API*
+//! failures — user-defined error enums are a separate, unrelated concept
+//! that happens to also bottom out in an `i64`.
 
 /// Define an enum of user error codes for use as `rollback!`/`accept!` exit
 /// codes.
 ///
-/// Each variant requires an explicit `i64`-valued discriminant — the
-/// macro's grammar itself enforces this, there is no separate check — and
-/// an optional trailing `=> b"message"` clause, e.g.
-/// `BlockedAccount = 1 => b"firewall: blocked"`. The clause is per-variant
-/// (some variants may carry one and others not, in the same enum) and feeds
-/// only the `From<EnumName> for Rollback` impl below — every other output
-/// (the enum itself, `code()`, `From<EnumName> for i64`) is unaffected by
-/// whether any variant declares one. The macro expands to:
+/// Each variant requires an explicit `i64`-valued discriminant, enforced by
+/// the macro's grammar, and an optional trailing `=> b"message"` clause,
+/// e.g. `BlockedAccount = 1 => b"firewall: blocked"`. The clause is
+/// per-variant (some variants may carry one and others not, in the same
+/// enum) and feeds only the `From<EnumName> for Rollback` impl below —
+/// every other output is unaffected by whether any variant declares one.
+/// The macro expands to:
 ///
 /// - a `#[repr(i64)]`, `Debug + Clone + Copy + PartialEq + Eq` enum with the
-///   given variants and discriminants (doc comments on the enum and on each
-///   variant are passed through verbatim, so `missing_docs` is satisfied
-///   the same way it would be for a hand-written enum);
+///   given variants and discriminants (doc comments pass through verbatim,
+///   satisfying `missing_docs` as for a hand-written enum);
 /// - `impl From<EnumName> for i64`;
 /// - an inherent `fn code(self) -> i64` — the same conversion, as a method,
 ///   for call sites that prefer `err.code()` over `i64::from(err)`;
-/// - `impl From<EnumName> for `[`rshooks::exit::Rollback`](crate::exit::Rollback)
-///   — the code side is always `self as i64` (a free cast — the same
-///   conversion `code()`/`From<EnumName> for i64` already use); the message
-///   is the variant's `=> b"msg"` clause where declared, or an empty slice
-///   otherwise. Generated unconditionally so `?` propagates any
-///   `hook_errors!` enum into a [`HookResult`](crate::exit::HookResult).
-///   When no variant declares a clause, this is [`Rollback::from_code`]
-///   (no match); otherwise a match picks the slice.
+/// - `impl From<EnumName> for `[`rshooks::exit::Rollback`](crate::exit::Rollback),
+///   generated unconditionally so `?` propagates any `hook_errors!` enum
+///   into a [`HookResult`](crate::exit::HookResult). The code side is
+///   always `self as i64`; the message is the variant's `=> b"msg"` clause
+///   where declared, or an empty slice otherwise. When no variant declares
+///   a clause, this is [`Rollback::from_code`] (no match); otherwise a
+///   match picks the slice.
 ///
 /// [`Rollback::from_code`]: crate::exit::Rollback::from_code
 ///
@@ -325,8 +319,8 @@ mod tests {
 
     #[test]
     fn clause_less_enum_still_converts_to_rollback_with_empty_msg() {
-        // Backward compatibility (D2): an enum with no `=> b"msg"` clause
-        // anywhere still gets `From<Enum> for Rollback`, msg always empty.
+        // An enum with no `=> b"msg"` clause anywhere still gets
+        // `From<Enum> for Rollback`, msg always empty.
         let r: Rollback = SampleError::First.into();
         assert_eq!(r, Rollback::from_code(1));
         let r: Rollback = NegativeError::Second.into();

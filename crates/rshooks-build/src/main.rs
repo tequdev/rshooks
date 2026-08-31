@@ -44,8 +44,8 @@ enum Cmd {
         #[arg(long, default_value_t = 16)]
         default_maxiter: u32,
         /// Output ROOT directory (default: `<target>/rshooks/<crate-name>`).
-        /// Generations are published under `<root>/gen-<n>`, with `<root>/current`
-        /// pointing at the latest.
+        /// Generations are published under `<root>/gen-<n>`, with
+        /// `<root>/current` pointing at the latest.
         #[arg(long)]
         out: Option<PathBuf>,
         /// Write per-entry output even if it exceeds the 65,535-byte

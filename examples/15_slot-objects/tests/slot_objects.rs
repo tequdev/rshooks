@@ -1,18 +1,14 @@
 //! Off-chain unit tests for the `slot-objects` example, driven through
-//! `TestEnv::invoke` against the real `SlotObjects` chain — no wasm build,
-//! no node. This is the heavyweight acceptance harness for `rshooks-testenv`'s
-//! P2-D slot family (`.claude/design/TESTENV_PHASE2_DESIGN.md` §4/§7): every
-//! check group `src/lib.rs` implements is driven through its real entry,
-//! seeding the ledger objects/trust line it navigates.
+//! `TestEnv::invoke` against the real `SlotObjects` hook — no wasm build,
+//! no node. Every check group `src/lib.rs` implements is driven through
+//! its real entry, seeding the ledger objects/trust line it navigates.
 //!
-//! Keylets are computed independently here (not by calling into
-//! `rshooks-testenv`'s crate-private `host::keylet`, and not through
-//! `rshooks::api::keylet` either — those need a live backend installed,
-//! which isn't the case while building the seed data *before*
-//! `TestEnv::invoke` runs) — same two-tier verification pattern
-//! `examples/13_keylets/tests/keylets.rs` uses: `sha512Half(ledgerSpace ++
-//! args)`, cross-checked against `crates/rshooks-testenv/src/host/keylet.rs`'s
-//! own vectors.
+//! Keylets are computed independently here (not through `rshooks-testenv`'s
+//! or `rshooks::api::keylet`'s helpers, which need a live backend — not yet
+//! installed when this seed data is built, before `TestEnv::invoke` runs)
+//! via `sha512Half(ledgerSpace ++ args)`,
+//! cross-checked against `crates/rshooks-testenv/src/host/keylet.rs`'s own
+//! vectors — same pattern `examples/13_keylets/tests/keylets.rs` uses.
 
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, missing_docs)]
 
@@ -77,11 +73,10 @@ fn native_amount(drops: u64) -> [u8; 8] {
     amt
 }
 
-/// A minimal IOU `Amount` (48 bytes, no header): the sign/native flags,
-/// biased exponent, and 54-bit mantissa laid out exactly as
-/// `crate::host::float::float_sto`/`slot_amount_to_xfl` document (verified
-/// independently by `rshooks-testenv`'s own unit tests) — currency/issuer
-/// bytes are left zeroed since `SlotObject<Amount>` never reads them.
+/// A minimal IOU `Amount` (48 bytes, no header): sign/native flags, biased
+/// exponent, and 54-bit mantissa laid out per the STO Amount format —
+/// currency/issuer bytes are left zeroed since `SlotObject<Amount>` never
+/// reads them.
 fn iou_amount(mantissa: u64, exponent: i32, negative: bool) -> [u8; 48] {
     let mut out = [0u8; 48];
     let exp_biased = (exponent + 97) as u8;
@@ -98,8 +93,7 @@ fn iou_amount(mantissa: u64, exponent: i32, negative: bool) -> [u8; 48] {
 
 /// `sfSequence`(2,4) + `sfBalance`(6,2, native) + `sfAccount`(8,1) — a bare
 /// field sequence (root shape, no header/footer), matching what
-/// `slot_set`/`World::ledger_objects` expects a seeded ledger object's
-/// bytes to look like.
+/// `slot_set` expects a seeded ledger object's bytes to look like.
 fn account_root_bytes(seq: u32, drops: u64, account: [u8; 20]) -> Vec<u8> {
     let mut out = Vec::new();
     out.push(0x24);
@@ -177,9 +171,8 @@ fn currency_usd() -> [u8; 20] {
     currency
 }
 
-// Bit constants, mirrored from `src/lib.rs` (not exported by the hook
-// crate — re-derived here so this file states its own expectations rather
-// than importing the thing under test).
+// Bit/group constants, mirrored from `src/lib.rs` (not exported by the
+// hook crate).
 const BIT_ACCOUNT_WALK: i64 = 1;
 const BIT_DROPS_ROUNDTRIP: i64 = 2;
 const BIT_PARENT_CLEAR: i64 = 4;

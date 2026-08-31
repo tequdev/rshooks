@@ -44,16 +44,15 @@ const GENERATED_FILES: &[&str] = &[
 ];
 
 /// The set of `rshooks/src/`-relative `.rs` files this generator owns —
-/// disjoint from [`GENERATED_FILES`] (which are all `rshooks-core/src/`-
-/// relative): [`codegen::tx_type`]'s typed `TxType` enum,
+/// disjoint from [`GENERATED_FILES`] (all `rshooks-core/src/`-relative):
+/// [`codegen::tx_type`]'s typed `TxType` enum,
 /// [`codegen::ledger_entry_type`]'s typed `LedgerEntryType` enum,
-/// [`codegen::sfield`]'s typed `SField` constants and [`codegen::views`]'s
-/// three view modules are the generated files that land in `rshooks`
-/// instead of `rshooks-core`.
+/// [`codegen::sfield`]'s typed `SField` constants, and [`codegen::views`]'s
+/// three view modules.
 ///
 /// The three `views/` entries are the only paths here with a directory
 /// component; `views/mod.rs` and `views/source.rs` are hand-written and
-/// deliberately absent, exactly as `rshooks-core`'s `lib.rs` is absent from
+/// deliberately absent, as `rshooks-core`'s `lib.rs` is absent from
 /// [`GENERATED_FILES`].
 const GENERATED_FILES_HOOKS_LIB: &[&str] = &[
     "sfield.rs",
@@ -75,10 +74,10 @@ const HOOK_API_JSON: &str = "hook_api.json";
 const PROTOCOL_FORMATS_JSON: &str = "protocol_formats.json";
 
 /// The curated availability classification checked in beside
-/// [`PROTOCOL_FORMATS_JSON`]: which formats a hook may actually use on
-/// Xahau (module docs on [`crate::availability`]). Unlike every other file
-/// this module writes, it is **not** derived — `gen-core` only ever appends
-/// newly declared formats to it as `dormant`, and a human curates the rest.
+/// [`PROTOCOL_FORMATS_JSON`]: which formats a hook may actually use on Xahau
+/// (module docs on [`crate::availability`]). Unlike every other file this
+/// module writes, it is **not** derived — `gen-core` only appends newly
+/// declared formats as `dormant`; a human curates the rest.
 const FORMAT_AVAILABILITY_JSON: &str = "format_availability.json";
 
 /// Repo root, resolved from this crate's own manifest directory
@@ -159,13 +158,13 @@ fn build_hook_api_json() -> Result<String> {
 ///
 /// `hook_api_json` is the text [`build_hook_api_json`] just produced: the
 /// `sfcodes.h` constants are read back out of it so
-/// [`protocol_ir::build`]'s cross-validation gate compares the parsed
-/// `sfields.macro` against the very constants `rshooks-core` ships, not
-/// against a second interpretation of the header.
+/// [`protocol_ir::build`]'s cross-validation gate compares against the
+/// constants `rshooks-core` actually ships, not a second interpretation of
+/// the header.
 ///
 /// The result is deserialized back into a [`ProtocolFormats`] and
-/// re-serialized here, so the round trip a later renderer depends on is
-/// exercised by every `gen-core` run rather than only by tests.
+/// re-serialized here, so every `gen-core` run exercises the round trip a
+/// later renderer depends on, not only tests.
 fn build_protocol_formats_json(hook_api_json: &str) -> Result<String> {
     let vendor = protocol_vendor_dir();
     let sfields_macro = read(&vendor.join("sfields.macro"))?;
@@ -224,8 +223,8 @@ fn render_format_availability(a: &FormatAvailability) -> Result<String> {
 /// (or checked against) `crates/rshooks-core/hook_api.json` and
 /// `crates/rshooks-core/protocol_formats.json`. Both are deserialized back
 /// here (rather than reusing the in-memory values that produced them) so
-/// every generator genuinely consumes the intermediate representation, not
-/// the parser's output directly.
+/// every generator consumes the intermediate representation, not the
+/// parser's output directly.
 fn generate_rust_files(
     hook_api_json: &str,
     protocol_formats_json: &str,
@@ -280,11 +279,9 @@ fn generate_rshooks_files(
         .context("deserializing protocol_formats.json")?;
 
     let mut out = BTreeMap::new();
-    // `sfield.rs` is the ergonomic typed layer, so it follows availability:
-    // a constant whose every format is dormant is not rendered, and one whose
-    // best format is pending is rendered behind the feature. The raw
-    // `sfcodes.rs` table above stays a complete 1:1 mirror — see
-    // `codegen::sfield`'s module docs for where that line is drawn and why.
+    // `sfield.rs` follows availability (a dormant constant isn't rendered, a
+    // pending one is feature-gated); `sfcodes.rs` stays a complete 1:1
+    // mirror — see `codegen::sfield`'s module docs for why.
     out.insert(
         "sfield.rs",
         codegen::sfield::generate(&spec.sfcodes, &availability.field_tiers(&formats))?,
@@ -341,17 +338,16 @@ impl FmtScratch {
     /// `rustfmt` on it in place, returning the formatted text.
     ///
     /// The scratch dir is flat: a `filename` carrying a directory component
-    /// (`views/tx.rs`) is flattened to `views_tx.rs` rather than creating
-    /// the directory, since `rustfmt` cares only about the extension and
-    /// the `--edition` flag. Flattening keeps names unique because the
-    /// target lists are themselves unique paths.
+    /// (`views/tx.rs`) is flattened to `views_tx.rs` instead of creating the
+    /// directory, since `rustfmt` cares only about the extension and the
+    /// `--edition` flag; flattening keeps names unique since the target
+    /// lists are themselves unique paths.
     fn format(&self, filename: &str, content: &str) -> Result<String> {
         let path = self.0.join(filename.replace('/', "_"));
         fs::write(&path, content).with_context(|| format!("writing {}", path.display()))?;
 
-        // `unsafe extern "C" { ... }` (used in api.rs) requires 2024-edition
-        // parsing; `rustfmt` run standalone (not via `cargo fmt`) doesn't
-        // infer that from a Cargo.toml, so it's passed explicitly.
+        // `unsafe extern "C" { ... }` (in api.rs) requires 2024-edition
+        // parsing; standalone `rustfmt` can't infer that from a Cargo.toml.
         let status = Command::new("rustfmt")
             .args(["--edition", "2024"])
             .arg(&path)
@@ -391,9 +387,8 @@ pub fn run_update() -> Result<()> {
     let hook_api_json = build_hook_api_json()?;
     let protocol_formats_json = build_protocol_formats_json(&hook_api_json)?;
 
-    // The one automatic edit this file ever gets: a format the artifact
-    // declares and nobody has classified is appended as `dormant`, so a
-    // newly vendored format is unusable until a human says otherwise.
+    // The one automatic edit this file gets: an unclassified format is
+    // appended as `dormant` (see `crate::availability` module docs).
     let formats: ProtocolFormats = serde_json::from_str(&protocol_formats_json)
         .context("deserializing protocol_formats.json")?;
     let mut availability = read_format_availability()?;
@@ -470,10 +465,8 @@ pub fn run_check() -> Result<()> {
     let hook_api_json = build_hook_api_json()?;
     let protocol_formats_json = build_protocol_formats_json(&hook_api_json)?;
 
-    // Unlike the derived artifacts, a stale classification is an *error*
-    // rather than a diff to regenerate: only a human can decide a tier, so
-    // the message points at `gen-core` (which appends the missing ones as
-    // `dormant`) instead of silently rendering as if they were.
+    // Unlike the derived artifacts, a stale classification is an *error*,
+    // not a diff to regenerate: only a human can decide a tier.
     let formats: ProtocolFormats = serde_json::from_str(&protocol_formats_json)
         .context("deserializing protocol_formats.json")?;
     let mut availability = read_format_availability()?;
@@ -496,10 +489,8 @@ pub fn run_check() -> Result<()> {
 
     // `unwrap_or_default` makes a missing artifact a mismatch, not an I/O
     // error: "not generated yet" and "generated but stale" are the same
-    // failure to a CI job.
-    // Formatting drift in the curated file (someone hand-edited it into a
-    // different shape) is a plain staleness mismatch, since `gen-core`
-    // rewrites it canonically.
+    // failure to a CI job. Formatting drift in the curated file counts the
+    // same way, since `gen-core` rewrites it canonically.
     let availability_on_disk =
         read(&crate_dir().join(FORMAT_AVAILABILITY_JSON)).unwrap_or_default();
     if availability_json != availability_on_disk {

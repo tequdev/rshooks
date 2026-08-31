@@ -1,7 +1,7 @@
-//! Integration tests for `TestEnv::invoke_cbak` (P2-E — design §4 "cbak
+//! Integration tests for `TestEnv::invoke_cbak` (design §4 "cbak
 //! execution"): the callback otxn/burden/generation swap, and its
 //! invocation-scoped restoration afterward. Hand-rolled `NativeEntry`
-//! tables, matching `control_leftovers.rs`'s pattern in this same directory.
+//! tables.
 
 #![allow(
     clippy::unwrap_used,
@@ -14,12 +14,11 @@ use rshooks::decl::{HookChainEntries, NativeEntry};
 use rshooks_testenv::prelude::*;
 
 /// Reserves one emission slot, `prepare`s a minimal `ttPAYMENT` template
-/// (`TransactionType = 0` -> wire bytes `[0x12, 0x00, 0x00]`, mirroring
-/// `crates/rshooks-testenv/src/backend.rs`'s own `minimal_template()` test
-/// helper), and emits it — then, *before* accepting, records this
-/// invocation's own `otxn_burden`/`otxn_generation` into state (`main_*`),
-/// so a test can prove they read back to the same values both before and
-/// after an intervening `invoke_cbak` call.
+/// (`TransactionType = 0` -> wire bytes `[0x12, 0x00, 0x00]`), and emits
+/// it — then, *before* accepting, records this invocation's own
+/// `otxn_burden`/`otxn_generation` into state (`main_*`), so a test can
+/// prove they read back to the same values both before and after an
+/// intervening `invoke_cbak` call.
 fn emit_minimal_payment(_r: u32) -> i64 {
     let _ = rshooks::api::etxn::etxn_reserve(1);
     let template: [u8; 3] = [0x12, 0x00, 0x00];
@@ -93,11 +92,10 @@ fn cbak_sees_the_emitted_transaction_as_its_own_otxn() {
     assert_eq!(cbak_exit.exit, ExitType::Accept, "{cbak_exit:?}");
 
     assert_eq!(env.state(b"cbak_otxn_id"), Some(txn.hash().to_vec()));
-    // A non-emitted originating otxn's default burden/generation is (1, 0)
-    // (`Backend::otxn_burden`/`otxn_generation`'s own `None` fallback), so
-    // `etxn_burden`/`etxn_generation` for this hook's one emission were
-    // `1 * 1 = 1` / `0 + 1 = 1` — the callback's otxn_burden/otxn_generation
-    // read those same `EmitDetails` values directly, unincremented.
+    // A non-emitted originating otxn's default burden/generation is (1, 0),
+    // so this hook's one emission has burden `1 * 1 = 1` and generation
+    // `0 + 1 = 1` — the callback reads those same `EmitDetails` values
+    // directly, unincremented.
     assert_eq!(env.state(b"cbak_burden"), Some(1u64.to_be_bytes().to_vec()));
     assert_eq!(
         env.state(b"cbak_generation"),

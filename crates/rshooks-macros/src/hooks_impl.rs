@@ -59,11 +59,10 @@ const ENTRY_MISSING_SELF_MSG: &str = "hook entry functions take `&self` — the 
                                        declaration is passed by shared reference (it is \
                                        zero-sized)";
 /// HOOKS_SELF_RECEIVER_DESIGN.md §3.3 diagnostic for `#[cfg]`/`#[cfg_attr]`
-/// on a `self` receiver — same rationale as the entry-level cfg ban in
-/// [`parse_impl_body`] (a conditional shape would diverge from what
-/// actually compiles), applied here because the receiver's class (and, for
-/// an entry, the has_self-driven discovery/selected wrapper it feeds) is
-/// decided once at macro-expansion time, before `cfg` resolves.
+/// on a `self` receiver — the receiver's class is decided once at
+/// macro-expansion time, before `cfg` resolves, so a conditional shape
+/// would diverge from what actually compiles (same rationale as the
+/// entry-level cfg ban in [`parse_impl_body`]).
 const RECEIVER_CFG_MSG: &str =
     "#[hooks]: `#[cfg]`/`#[cfg_attr]` are not allowed on a `self` receiver";
 
@@ -240,8 +239,7 @@ struct HookEntry {
     return_span: Span,
     /// Extra `ident: Type` arguments after `&self` — declared signature
     /// parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §1), in declaration
-    /// (= wire index) order. Empty for an ordinary no-arg entry, in which
-    /// case codegen is byte-identical to before this feature existed.
+    /// (= wire index) order. Empty for an ordinary no-arg entry.
     sig_args: Vec<SigArg>,
 }
 
@@ -608,12 +606,10 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
                     ));
                 }
                 // Extra arguments after `&self` declare signature
-                // parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §1) — but
-                // only on `#[hook(..)]`. A `#[cbak(..)]`'s originating
+                // parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §1), but
+                // only on `#[hook(..)]`: a `#[cbak(..)]`'s originating
                 // transaction is the emitted transaction, not the
-                // invocation, so the interface doesn't apply there; it
-                // keeps the original "no arguments other than `&self`"
-                // rejection.
+                // invocation, so the interface doesn't apply there.
                 if !scanned.extra_args.is_empty() && cbak_attr.is_some() {
                     let bad_span = scanned
                         .extra_args
@@ -637,16 +633,12 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
                 }
                 // The return type itself is deliberately unchecked here: an
                 // entry must return a type implementing
-                // `::rshooks::exit::EntryReturn` (currently sealed to
-                // `HookResult` only — see
+                // `::rshooks::exit::EntryReturn` (sealed to `HookResult` —
                 // `.claude/design/TYPED_ENTRY_RESULTS_DESIGN.md` §1.3/§3/§7).
                 // The generated body wraps the call in
-                // `EntryReturn::finish(..)` (see
-                // `render_entry_body_and_wrappers`), so a return type that
-                // implements neither fails to compile there with an
-                // ordinary trait-bound diagnostic naming `EntryReturn` —
-                // there is no separate check to keep in sync with that
-                // trait's impl set.
+                // `EntryReturn::finish(..)` (`render_entry_body_and_wrappers`),
+                // so a non-implementing type fails to compile there with an
+                // ordinary trait-bound diagnostic — no separate check needed.
             } else {
                 // Non-attributed helper (§3.3): `&self` passes through
                 // untouched, `&mut self`/other self shapes are rejected with
@@ -804,11 +796,9 @@ fn qualifier_token_kind(tt: &TokenTree) -> &'static str {
 /// `fn`).
 ///
 /// Delegates the actual decision to [`classify_fn_qualifiers`], which is
-/// `TokenTree`-free purely for unit-testability — see
-/// [`crate::hooks_struct::ChainFieldJson`]'s doc comment for why this
-/// boundary pattern is used throughout this crate (every `proc_macro` type,
+/// `TokenTree`-free purely for unit-testability: every `proc_macro` type,
 /// `Span` included, panics outside a live macro invocation, so the tested
-/// core here works over plain `&str` "kind" tags instead).
+/// core works over plain `&str` "kind" tags instead.
 fn scan_fn_qualifiers(tokens: &[TokenTree], start: usize) -> Option<FnQualifiers> {
     // At most 5 tokens are ever consulted: `const`/`async`, `unsafe`,
     // `extern`, its optional ABI literal, `fn`.
@@ -951,16 +941,12 @@ fn scan_fn_item(tokens: &[TokenTree], start: usize) -> Result<ScannedFn, TokenSt
         }
     }
 
-    // The return type's own tokens are re-emitted verbatim but otherwise
-    // unexamined here — see the entry-fn shape check's comment in
-    // `parse_impl_body` for why: only a type implementing
-    // `::rshooks::exit::EntryReturn` (sealed to `HookResult`) is accepted,
-    // and the macro leaves enforcing that to the generated body's own trait
-    // bound. They are
-    // *captured* (`return_tokens`/`return_span` below), though — not to
-    // examine, but so [`build_entry_return_assertion`] can re-emit them
-    // with their original spans intact, for a diagnostic that lands on the
-    // caller's own `-> Ty` instead of the `#[hooks]` attribute.
+    // Return-type tokens are re-emitted verbatim but otherwise unexamined:
+    // only a type implementing `::rshooks::exit::EntryReturn` (sealed to
+    // `HookResult`) is accepted, enforced by the generated body's own trait
+    // bound. They're captured (`return_tokens`/`return_span` below) so
+    // `build_entry_return_assertion` can re-emit them with original spans,
+    // landing a diagnostic on the caller's `-> Ty` instead of `#[hooks]`.
     let mut return_tokens: Vec<TokenTree> = Vec::new();
     let mut return_span = name.span();
     if matches!(tokens.get(i), Some(tt) if is_punct(tt, '-'))
@@ -1033,10 +1019,9 @@ enum ReceiverClass {
 }
 
 /// Classifies one token relevant to receiver-shape detection, for
-/// [`classify_receiver_kinds`]'s `TokenTree`-free pure core — see
-/// [`qualifier_token_kind`]'s doc comment for the rationale (this crate's
-/// standard "kind tag" boundary pattern for unit-testability without a live
-/// `proc_macro` context).
+/// [`classify_receiver_kinds`]'s `TokenTree`-free pure core — the same
+/// "kind tag" pattern as [`qualifier_token_kind`], for unit-testability
+/// without a live `proc_macro` context.
 fn receiver_token_kind(tt: &TokenTree) -> &'static str {
     match tt {
         TokenTree::Ident(id) => match id.to_string().as_str() {
@@ -1099,11 +1084,8 @@ fn classify_receiver_kinds(kinds: &[&str]) -> Option<(usize, ReceiverClass)> {
 /// attribute "kinds" — one `"attr"` or `"cfg_attr"` tag per `#[...]` pair,
 /// as built by [`detect_receiver`] — before classifying the self-shape
 /// that follows. HOOKS_SELF_RECEIVER_DESIGN.md §3.3: `#[allow(unused)]
-/// &self` must classify exactly like bare `&self` (R1 of the self-receiver
-/// review — the old code classified from token 0 unconditionally, so an
-/// attributed receiver on an entry read as "no receiver" at all, and on a
-/// helper it silently bypassed the `&mut self` rejection). Returns the
-/// number of leading attribute kinds skipped, whether any of them was
+/// &self` must classify exactly like bare `&self`. Returns the number of
+/// leading attribute kinds skipped, whether any of them was
 /// `"cfg_attr"`, and the self-shape classification of what followed —
 /// `None` in the third slot means no receiver shape follows the attributes
 /// (including the no-attributes case, which behaves exactly like
@@ -1152,8 +1134,7 @@ fn detect_receiver(
         let group = match tokens.get(raw.wrapping_add(1)) {
             Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Bracket => g,
             // Not a well-formed `#[...]` attribute — leave it for the
-            // ordinary parameter/receiver classification below to report,
-            // exactly as before this attribute-skipping lookahead existed.
+            // ordinary parameter/receiver classification below to report.
             _ => break,
         };
         let inner: Vec<TokenTree> = group.stream().into_iter().collect();
@@ -1444,9 +1425,8 @@ fn parse_hook_attr(
 /// `None` when the list has no such violation, `[]` included.
 ///
 /// Operates on a plain "is this position a comma" view rather than
-/// `&[TokenTree]` purely for unit-testability — see
-/// [`crate::hooks_struct::ChainFieldJson`]'s doc comment for why this
-/// boundary pattern is used throughout this crate.
+/// `&[TokenTree]` purely for unit-testability (this crate's standard
+/// `TokenTree`-free boundary pattern).
 fn first_empty_tx_entry(is_comma: &[bool]) -> Option<usize> {
     if is_comma.first().copied() == Some(true) {
         return Some(0);
@@ -1625,14 +1605,12 @@ fn generate(
     };
     out.extend(mod_ts);
 
-    // Span-carrying `EntryReturn` diagnostic assertions (TYPED_ENTRY_RESULTS
-    // follow-up): one per declared entry fn, built directly from the
-    // captured `-> Ty` tokens and spliced into `out` as real `TokenTree`s.
-    // They must land here, in the macro's *token* output, rather than in
-    // `mod_src` above — that string is `format!`-assembled and reparsed via
-    // `TokenStream::parse`, which only ever produces call-site spans, so
-    // anything built from it can't point a diagnostic at the caller's own
-    // source line. See `build_entry_return_assertion`'s doc comment.
+    // Span-carrying `EntryReturn` diagnostic assertions: one per declared
+    // entry fn, built from the captured `-> Ty` tokens and spliced into
+    // `out` as real `TokenTree`s. They must land here, not in `mod_src`
+    // above — that string is reparsed via `TokenStream::parse`, which only
+    // ever produces call-site spans, so anything built from it can't point
+    // a diagnostic at the caller's own source line.
     for h in &hooks {
         out.extend(build_entry_return_assertion(
             &h.return_tokens,
@@ -1780,9 +1758,7 @@ impl EntrySource<'_> {
 }
 
 /// A `proc_macro`-free (plain-`String`) view of one entry's carrier JSON
-/// entry — see [`crate::hooks_struct::ChainFieldJson`]'s doc comment for why
-/// this boundary exists (unit-testability without a live `proc_macro`
-/// context).
+/// entry — unit-testable without a live `proc_macro` context.
 struct EntryJson {
     index: u8,
     hook_fn: String,
@@ -1925,9 +1901,7 @@ fn render_entries_module(
 /// (`export_name = "__rshooks_hook_{i}"`/`"__rshooks_cbak_{i}"`) wrappers
 /// are one-line forwards to it. Operates on the Span-free [`EntryJson`]
 /// view (plain strings only), so unit tests can pin the exact generated
-/// text without a live macro invocation — see
-/// [`crate::hooks_struct::ChainFieldJson`]'s doc comment for why this
-/// boundary pattern is used throughout this crate.
+/// text without a live macro invocation.
 fn render_entry_body_and_wrappers(
     struct_name: &str,
     entry: &EntryJson,
@@ -1936,22 +1910,19 @@ fn render_entry_body_and_wrappers(
     let i = entry.index;
     // `&{struct_name}` works identically for both struct forms
     // (HOOKS_SELF_RECEIVER_DESIGN.md §3.2): a named-field struct's
-    // generated same-named static, or a unit struct's constructor value —
-    // no extra static is ever needed.
+    // generated same-named static, or a unit struct's constructor value.
     //
     // Declared signature parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §1)
-    // are decoded into locals *before* the call, one `otxn_sig_param` read
-    // per argument, then passed through in declaration order — empty
-    // `sig_params` (every entry before this feature, and every no-arg entry
-    // since) makes `prologue` the empty string and `call_args` exactly
-    // `&{struct_name}`, so this is byte-identical to the pre-signature-params
-    // codegen in that case.
+    // decode into locals before the call, one `otxn_sig_param` read per
+    // argument, passed through in declaration order; empty `sig_params`
+    // makes `prologue` empty and `call_args` exactly `&{struct_name}`.
     //
-    // The call is wrapped in `EntryReturn::finish` unconditionally
-    // (TYPED_ENTRY_RESULTS_DESIGN.md §1.3/§7): it is what makes a
-    // `HookResult` return type legal here at all, and a diverging body
-    // (every call ends in `accept!`/`rollback!`) makes the match dead code
-    // once inlined (this body fn is itself `#[inline(always)]`).
+    // The call is always wrapped in `EntryReturn::finish`
+    // (TYPED_ENTRY_RESULTS_DESIGN.md §1.3/§7), itself `#[inline(always)]`
+    // — it's what makes a `HookResult` return type legal here. When the
+    // entry body itself diverges (`accept!`/`rollback!` return `!`), that
+    // divergence makes `finish`'s `Ok`/`Err` match dead code once inlined,
+    // rather than leaving it as an unreachable-but-compiled match arm.
     let prologue = render_sig_param_prologue(&entry.sig_params);
     let call_args: String = std::iter::once(format!("&{struct_name}"))
         .chain(
@@ -2002,9 +1973,7 @@ fn render_entry_body_and_wrappers(
 
 /// Renders the per-argument decode prologue for one entry's declared
 /// signature parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §1), in
-/// declaration (= wire index) order. Empty input yields the empty string —
-/// see [`render_entry_body_and_wrappers`]'s doc comment for why that keeps
-/// a no-arg entry's generated code byte-identical to before this feature.
+/// declaration (= wire index) order. Empty input yields the empty string.
 ///
 /// Per argument:
 ///

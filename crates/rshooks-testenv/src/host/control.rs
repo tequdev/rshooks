@@ -1,16 +1,14 @@
 //! `hook_again`/`hook_skip`/`hook_param_set` semantics (P2-E —
 //! `.claude/design/TESTENV_PHASE2_DESIGN.md` §4 "control leftovers", stage
-//! plan §7). `etxn::prepare` and `trace_float` (also listed under "control
-//! leftovers" in the design's stage plan) are pure/otxn-adjacent rather
+//! plan §7). `etxn::prepare` and `trace_float` are pure/otxn-adjacent rather
 //! than control-flow, and live in `crate::backend`'s own `impl HostBackend
 //! for Backend` block directly, not here.
 //!
-//! Every function here is ported against `Xahau/xahaud`, branch `dev`,
-//! `src/xrpld/app/hook/detail/HookAPI.cpp` (fetched and read directly for
-//! this stage; exact line numbers cited per function below) plus
-//! `src/xrpld/app/hook/detail/applyHook.cpp`'s wasm-facing wrappers (the
-//! fixed-length checks a caller's raw hash/name buffers must satisfy before
-//! `HookAPI` itself is even called).
+//! Ported against `Xahau/xahaud`, branch `dev`,
+//! `src/xrpld/app/hook/detail/HookAPI.cpp` (line numbers cited per function
+//! below) plus `src/xrpld/app/hook/detail/applyHook.cpp`'s wasm-facing
+//! wrappers (the fixed-length checks a caller's raw hash/name buffers must
+//! satisfy before `HookAPI` itself is even called).
 //!
 //! # Commit timing: staged in [`InvocationContext`], merged into [`crate::world::World`] only on `accept!`
 //!
@@ -18,18 +16,18 @@
 //! directly into `World` — `crate::env::TestEnv`'s `run_entry` helper is the
 //! only place that merges those fields into the persistent `World`, and
 //! only in the `ExitType::Accept` arm (mirroring `pending_emissions` /
-//! `committed_emissions`'s existing stage-then-merge pattern). This matches
+//! `committed_emissions`'s stage-then-merge pattern). This matches
 //! upstream's own commit gate: `Transactor::executeHookChain`
-//! (`src/xrpld/app/tx/detail/Transactor.cpp:1425-1468`, fetched for this
-//! stage) only reaches its "gather skips" / "gather overrides" step when
-//! `hookResult.exitType == hook_api::ExitType::ACCEPT`; a hook that calls
-//! `hook_skip`/`hook_param_set` and then rolls back never has those calls
-//! take effect. `hook_again`'s real commit path is more involved (its
+//! (`src/xrpld/app/tx/detail/Transactor.cpp:1425-1468`) only reaches its
+//! "gather skips" / "gather overrides" step when `hookResult.exitType ==
+//! hook_api::ExitType::ACCEPT`; a hook that calls `hook_skip`/
+//! `hook_param_set` and then rolls back never has those calls take effect.
+//! `hook_again`'s real commit path is more involved (its
 //! `executeAgainAsWeak` flag is gathered by the outer `Transactor::operator()`
 //! irrespective of the *individual* hook's own exit type — `Transactor.cpp:2020-2030`
 //! — since it drives a genuinely separate later weak re-execution this
 //! harness does not model at all); tying it to the same accept-only commit
-//! as `hook_skip`/`hook_param_set` here is a documented simplification for
+//! as `hook_skip`/`hook_param_set` here is a deliberate simplification for
 //! the explicit-invocation model (no chain, no weak re-execution), chosen
 //! for consistency with the other two and with `TestEnv::hook_again_requested()`'s
 //! own "accessor reads the last **committed** invocation's flag" contract.
@@ -56,12 +54,11 @@ use crate::invocation::{InvocationContext, MAX_PARAM_OVERRIDES};
 ///
 /// The `isStrong` branch is not reproducible here — this harness has no
 /// notion of strong-vs-weak execution (`invoke` always runs a direct,
-/// explicit entry call, design §2.4) — so, per this stage's "state the
-/// assumption" policy, every invocation is treated as the `isStrong` case:
-/// `hook_again` succeeds the first time it is called in an invocation and
-/// reports `ALREADY_SET` on a second call in the *same* invocation. The
-/// `PREREQUISITE_NOT_MET` (weak-execution) branch is unreachable in this
-/// model and never returned.
+/// explicit entry call, design §2.4) — so every invocation is treated as
+/// the `isStrong` case: `hook_again` succeeds the first time it is called
+/// in an invocation and reports `ALREADY_SET` on a second call in the
+/// *same* invocation. The `PREREQUISITE_NOT_MET` (weak-execution) branch
+/// is unreachable in this model and never returned.
 pub(crate) fn hook_again(ctx: &mut InvocationContext) -> i64 {
     if ctx.hook_again_called {
         return rshooks_core::ALREADY_SET;
@@ -81,10 +78,10 @@ pub(crate) fn hook_again(ctx: &mut InvocationContext) -> i64 {
 /// removes a hash **this same invocation** already added — `DOESNT_EXIST`
 /// if it was never added this invocation (upstream's `hookCtx.result.hookSkips`
 /// is fresh per hook execution, `HookAPI.h`'s `HookResult`, so a delete can
-/// only ever target *this invocation's own* earlier adds — there is no
-/// persistent "already skipped from a prior invocation" set to consult,
-/// consistent with this harness having no chain model at all). `flags == 0`
-/// (add): a hash already added this invocation is a no-op success (upstream:
+/// only ever target *this invocation's own* earlier adds — no persistent
+/// "already skipped from a prior invocation" set exists, consistent with
+/// this harness's no-chain model). `flags == 0` (add): a hash already added
+/// this invocation is a no-op success (upstream:
 /// `if (skips.find(hash) != skips.end()) return 1;`, without re-adding or
 /// re-checking chain membership); otherwise the chain-membership check
 /// (`HookAPI.cpp:1762-1777`) is skipped per this module's doc comment — the
@@ -107,19 +104,16 @@ pub(crate) fn hook_skip(ctx: &mut InvocationContext, hash: &[u8], flags: u32) ->
         return 1;
     }
 
-    // flags == 0 (add): already-active is a no-op success (upstream never
-    // re-adds or re-checks chain membership in that case), but the call
-    // itself still succeeded, so it is still recorded verbatim per this
-    // function's own doc comment.
+    // flags == 0 (add): already-active is a no-op success but is still
+    // recorded verbatim (see doc comment above).
     ctx.skip_directives.push((hash32, 0));
     1
 }
 
-/// Whether `hash` is currently in this invocation's own working skip set,
-/// derived by replaying `directives` (every successful call so far this
-/// invocation, in order) rather than tracking a separate `HashSet` — the
-/// last directive touching `hash` (if any) decides: `flags == 0` means
-/// currently skipped, `flags == 1` (or no directive at all) means not.
+/// Whether `hash` is currently in this invocation's skip set, derived by
+/// replaying `directives` rather than tracking a separate `HashSet` — the
+/// last directive touching `hash` decides: `flags == 0` means currently
+/// skipped, `flags == 1` (or no directive at all) means not.
 fn skip_currently_active(directives: &[([u8; 32], u32)], hash: &[u8; 32]) -> bool {
     directives
         .iter()
@@ -130,12 +124,11 @@ fn skip_currently_active(directives: &[([u8; 32], u32)], hash: &[u8; 32]) -> boo
 
 /// `hook_param_set(hash, name, value)`: ported from `HookAPI::hook_param_set`
 /// (`HookAPI.cpp:1712-1744`) plus its wasm wrapper's own redundant checks
-/// (`applyHook.cpp:3844-3858`, "those checks are also done in the HookAPI
-/// but we need to check them here too for backwards compatibility" —
-/// including `hread_len != 32` -> `INVALID_ARGUMENT`, reproduced here for
-/// the same reason as [`hook_skip`]'s fixed-length gate above). The wrapper's
-/// own check order (reproduced exactly here, `hook_hash` length checked
-/// after the name checks but *before* the value-size check):
+/// (`applyHook.cpp:3844-3858`, including `hread_len != 32` ->
+/// `INVALID_ARGUMENT`, reproduced here for the same reason as
+/// [`hook_skip`]'s fixed-length gate above). The wrapper's check order is
+/// reproduced exactly (`hook_hash` length checked after the name checks
+/// but *before* the value-size check):
 ///
 /// - `name` empty -> `TOO_SMALL`; `name.len() > 32` (`hook::maxHookParameterKeySize()`,
 ///   vendored `Enum.h:60-64`) -> `TOO_BIG`.
@@ -143,19 +136,18 @@ fn skip_currently_active(directives: &[([u8; 32], u32)], hash: &[u8; 32]) -> boo
 /// - `value.len() > 256` (`hook::maxHookParameterValueSize()`, vendored
 ///   `Enum.h:66-70`) -> `TOO_BIG`. An empty `value` is **not** special-cased
 ///   at write time — it is stored as-is (upstream: `overrides[hash][name] =
-///   value` unconditionally); `Backend::hook_param`'s read side is what
-///   treats a stored empty override as "deleted" (`DOESNT_EXIST`), matching
+///   value` unconditionally); `Backend::hook_param`'s read side treats a
+///   stored empty override as "deleted" (`DOESNT_EXIST`), matching
 ///   `HookAPI::hook_param`'s own `if (param.size() == 0) return
-///   Unexpected(DOESNT_EXIST);` (`HookAPI.cpp:1685-1687`) — see that
-///   method's own doc comment in `crate::backend`.
+///   Unexpected(DOESNT_EXIST);` (`HookAPI.cpp:1685-1687`).
 /// - `overrideCount >= hook_api::max_params` (16, vendored `Enum.h:401`) ->
 ///   `TOO_MANY_PARAMS`, counted per call (not per distinct key), fresh each
 ///   invocation.
 ///
 /// Later calls in the same invocation for the same `(hash, name)` key
 /// overwrite earlier ones (`InvocationContext::pending_param_overrides` is a
-/// `HashMap`) — matches upstream's own `overrides[hash][name] = value`
-/// assignment semantics exactly.
+/// `HashMap`) — matches upstream's `overrides[hash][name] = value`
+/// assignment exactly.
 pub(crate) fn hook_param_set(
     ctx: &mut InvocationContext,
     value: &[u8],
@@ -270,9 +262,8 @@ mod tests {
 
     #[test]
     fn hook_param_set_checks_hash_length_before_value_size() {
-        // A bad-length hash with an over-limit value (normal-sized name):
-        // upstream (`applyHook.cpp:3844-3858`) checks `hread_len != 32`
-        // before the value-size check, so this reports `INVALID_ARGUMENT`,
+        // Bad-length hash + over-limit value: upstream checks `hread_len
+        // != 32` before the value-size check, so this is `INVALID_ARGUMENT`,
         // not `TOO_BIG`.
         let mut c = ctx();
         let long_value = vec![b'v'; 257];

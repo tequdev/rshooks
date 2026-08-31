@@ -2,11 +2,10 @@
 //! fees/nonces, and emitting transactions.
 //!
 //! Burden and fee values are naturally unsigned magnitudes even though the
-//! Hook API wire type is `i64` — fallible calls return them as `u64` (the
-//! non-negative payload cast with `as`, safe because
-//! [`crate::error::res`] already rejected negative values), while calls
-//! that never return an error code (`etxn_generation`) are exposed as
-//! plain values.
+//! Hook API wire type is `i64` — fallible calls return `u64` (cast from the
+//! non-negative payload; safe because [`crate::error::res`] already
+//! rejected negative values), while calls with no error code
+//! (`etxn_generation`) return plain values.
 
 use crate::error::{Result, res};
 use crate::types::{Hash, Nonce};
