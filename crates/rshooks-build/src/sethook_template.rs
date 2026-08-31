@@ -641,8 +641,8 @@ mod tests {
     fn entry_with_sig_params_emits_hook_parameters_in_index_order_with_zero_value() {
         let mut e = entry(0, "increment", omitted_on(), None);
         e.sig_params = vec![
-            sig_param("account", 0x08, "5F5F005F085F6163636F756E74"),
-            sig_param("count", 0x01, "5F5F015F015F636F756E74"),
+            sig_param("account", 0x08, "5F5053000008076163636F756E74"),
+            sig_param("count", 0x01, "5F505300010105636F756E74"),
         ];
         let wasm = b"AA".as_slice();
         let declared: Vec<TemplateInput<'_>> = vec![(0, &e, wasm)];
@@ -654,12 +654,12 @@ mod tests {
         assert_eq!(params.len(), 2);
         assert_eq!(
             params[0]["HookParameter"]["HookParameterName"],
-            "5F5F005F085F6163636F756E74"
+            "5F5053000008076163636F756E74"
         );
         assert_eq!(params[0]["HookParameter"]["HookParameterValue"], "00");
         assert_eq!(
             params[1]["HookParameter"]["HookParameterName"],
-            "5F5F015F015F636F756E74"
+            "5F505300010105636F756E74"
         );
         assert_eq!(params[1]["HookParameter"]["HookParameterValue"], "00");
     }
@@ -667,7 +667,7 @@ mod tests {
     #[test]
     fn hook_parameters_key_sits_between_hook_api_version_and_hook_name() {
         let mut e = entry(0, "increment", omitted_on(), Some("inc"));
-        e.sig_params = vec![sig_param("count", 0x01, "5F5F015F015F636F756E74")];
+        e.sig_params = vec![sig_param("count", 0x01, "5F505300010105636F756E74")];
         let wasm = b"AA".as_slice();
         let declared: Vec<TemplateInput<'_>> = vec![(0, &e, wasm)];
         let bytes = build_template_json(&declared, None, None, false).expect("template builds");
@@ -690,7 +690,7 @@ mod tests {
         // gain `HookParameters` just because a sibling entry has one.
         let e0 = entry(0, "deposit", omitted_on(), None);
         let mut e2 = entry(2, "increment", omitted_on(), None);
-        e2.sig_params = vec![sig_param("count", 0x01, "5F5F015F015F636F756E74")];
+        e2.sig_params = vec![sig_param("count", 0x01, "5F505300010105636F756E74")];
         let wasm = b"AA".as_slice();
         let declared: Vec<TemplateInput<'_>> = vec![(0, &e0, wasm), (2, &e2, wasm)];
         let bytes = build_template_json(&declared, None, None, false).expect("template builds");

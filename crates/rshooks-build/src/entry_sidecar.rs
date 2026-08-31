@@ -249,12 +249,12 @@ mod tests {
             SigParamDecl {
                 field: "account".to_string(),
                 type_byte: 0x08,
-                name_hex: "5F5F005F085F6163636F756E74".to_string(),
+                name_hex: "5F5053000008076163636F756E74".to_string(),
             },
             SigParamDecl {
                 field: "count".to_string(),
                 type_byte: 0x01,
-                name_hex: "5F5F015F015F636F756E74".to_string(),
+                name_hex: "5F505300010105636F756E74".to_string(),
             },
         ];
         let report = ValidationReport::default();
@@ -266,7 +266,7 @@ mod tests {
         assert_eq!(sig_params.len(), 2);
         assert_eq!(sig_params[0]["field"], "account");
         assert_eq!(sig_params[0]["type_byte"], 8);
-        assert_eq!(sig_params[0]["name_hex"], "5F5F005F085F6163636F756E74");
+        assert_eq!(sig_params[0]["name_hex"], "5F5053000008076163636F756E74");
         assert_eq!(sig_params[1]["field"], "count");
         assert_eq!(sig_params[1]["type_byte"], 1);
     }

@@ -289,15 +289,15 @@ not the invocation, so the interface doesn't apply there.
 ### The wire name
 
 Each declared parameter's `HookParameterName` is a fixed-layout byte string,
-7 to 22 bytes total:
+8 to 23 bytes total:
 
 | bytes | meaning |
 |---|---|
-| `0x5F 0x5F` | reserved `"__"` prefix |
+| `0x5F 0x50 0x53` | `"_PS"` interface identifier |
+| `0x00` | version |
 | 1 byte | index, `0x00..=0x0F` (so at most 16 arguments per entry) |
-| `0x5F` | `"_"` separator |
 | 1 byte | the `STI_*` type byte (see the type table below) |
-| `0x5F` | `"_"` separator |
+| 1 byte | name length, `0x01..=0x10` |
 | 1 to 16 bytes | the display name, `[A-Za-z][A-Za-z0-9]*` (no `_`) |
 
 `rshooks` builds this name entirely at macro/compile time — never at
@@ -378,7 +378,7 @@ directly, for a hand-rolled read outside the entry-fn-argument surface:
 use rshooks::sig::otxn_sig_param;
 use rshooks::sig_name;
 
-const COUNT_NAME: [u8; 11] = sig_name!(1, u16, b"count");
+const COUNT_NAME: [u8; 12] = sig_name!(1, u16, b"count");
 let count: rshooks::error::Result<u16> = otxn_sig_param(&COUNT_NAME);
 ```
 

@@ -468,7 +468,7 @@ fn parse_sig_args(extra_args: &[TokenTree], entry_span: Span) -> Result<Vec<SigA
 /// Mirrors [`crate::sig::sig_param_name`] (the rshooks crate's runtime/const
 /// builder) exactly, over plain bytes instead of a `const`-generic array.
 fn sig_param_name_hex(index: u8, type_byte: u8, name: &str) -> String {
-    let mut bytes = vec![0x5Fu8, 0x5F, index, 0x5F, type_byte, 0x5F];
+    let mut bytes = vec![0x5Fu8, 0x50, 0x53, 0x00, index, type_byte, name.len() as u8];
     bytes.extend_from_slice(name.as_bytes());
     hex_upper(&bytes)
 }
@@ -1994,7 +1994,7 @@ fn render_entry_body_and_wrappers(
 fn render_sig_param_prologue(sig_params: &[SigParamJson]) -> String {
     let mut out = String::new();
     for (idx, p) in sig_params.iter().enumerate() {
-        let total_len = 6usize.wrapping_add(p.field.len());
+        let total_len = 7usize.wrapping_add(p.field.len());
         out.push_str(&format!(
             "const _: () = {{ assert!(<{ty} as ::rshooks::sig::SigParamType>::TYPE_BYTE == \
              {type_byte}u8, \"rshooks: signature parameter '{field}' resolves to a different \
@@ -2695,12 +2695,12 @@ mod tests {
         // account(0), STI_ACCOUNT (0x08), 7-byte name.
         assert_eq!(
             sig_param_name_hex(0, 0x08, "account"),
-            "5F5F005F085F6163636F756E74"
+            "5F5053000008076163636F756E74"
         );
         // count(1), STI_UINT16 (0x01), 5-byte name.
         assert_eq!(
             sig_param_name_hex(1, 0x01, "count"),
-            "5F5F015F015F636F756E74"
+            "5F505300010105636F756E74"
         );
     }
 
@@ -2728,7 +2728,7 @@ mod tests {
         assert_eq!(sig_params.len(), 2);
         assert_eq!(sig_params[0]["field"], "account");
         assert_eq!(sig_params[0]["type_byte"], 0x08);
-        assert_eq!(sig_params[0]["name_hex"], "5F5F005F085F6163636F756E74");
+        assert_eq!(sig_params[0]["name_hex"], "5F5053000008076163636F756E74");
         assert_eq!(sig_params[1]["field"], "count");
         assert_eq!(sig_params[1]["type_byte"], 0x01);
         // `type_text` is codegen-only and must never leak into the carrier.
@@ -2767,11 +2767,11 @@ mod tests {
         // `const { sig_param_name::<N>(..) }` name build, and the
         // documented rollback message/code on `Err`.
         assert!(out.contains("<AccountId as ::rshooks::sig::SigParamType>::TYPE_BYTE == 8u8"));
-        assert!(out.contains("::rshooks::sig::sig_param_name::<13>(0, 8u8, b\"account\")"));
+        assert!(out.contains("::rshooks::sig::sig_param_name::<14>(0, 8u8, b\"account\")"));
         assert!(out.contains("b\"rshooks: bad sig param 'account'\", 0i64"));
 
         assert!(out.contains("<u16 as ::rshooks::sig::SigParamType>::TYPE_BYTE == 1u8"));
-        assert!(out.contains("::rshooks::sig::sig_param_name::<11>(1, 1u8, b\"count\")"));
+        assert!(out.contains("::rshooks::sig::sig_param_name::<12>(1, 1u8, b\"count\")"));
         assert!(out.contains("b\"rshooks: bad sig param 'count'\", 1i64"));
 
         // The account decode's prologue textually precedes count's, which
