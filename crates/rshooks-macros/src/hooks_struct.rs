@@ -12,26 +12,20 @@
 //!
 //! Declared fields are grouped by kind into per-kind namespace structs, and
 //! the outer struct holds one field per kind that has at least one declared
-//! entry: `{Struct}State` for `#[state]` fields (accessed as
-//! `self.state.<field>` / `{Struct}.state.<field>`), `{Struct}HookParams`
-//! for `#[hook_param]` fields (`self.hook_param.<field>`), and
-//! `{Struct}OtxnParams` for `#[otxn_param]` fields
-//! (`self.otxn_param.<field>`). A kind with no declared fields contributes
-//! no namespace struct and no outer field. The declaration syntax itself is
-//! unaffected by this grouping — a field's attribute (`#[state(..)]` /
-//! `#[hook_param(..)]` / `#[otxn_param(..)]`) is exactly what routes it into
-//! its namespace.
+//! entry: `{Struct}State` for `#[state]` fields (`self.state.<field>`),
+//! `{Struct}HookParams` for `#[hook_param]` fields
+//! (`self.hook_param.<field>`), and `{Struct}OtxnParams` for
+//! `#[otxn_param]` fields (`self.otxn_param.<field>`). A kind with no
+//! declared fields contributes no namespace struct and no outer field.
 //!
 //! # Why hand-rolled, not `syn`/`quote`
 //!
-//! Same rationale as every other macro in this crate (see the crate doc
-//! comment in `lib.rs`): the accepted struct/field shape is small and fixed
-//! (§5.1's shape table), so a single bounded-lookahead pass over the token
-//! buffer is enough — no general item/type parser needed. [`crate::shape`]
-//! is not reused here because it derives structs meant to be *read back*
-//! (`FromBytes`/`ToBytes` on real fields); this module's fields carry no
-//! bytes at all and its field grammar (attribute-driven key/name specs) is
-//! materially different.
+//! The accepted struct/field shape is small and fixed (§5.1's shape
+//! table), so a single bounded-lookahead pass over the token buffer is
+//! enough. [`crate::shape`] is not reused here because it derives structs
+//! meant to be read back (`FromBytes`/`ToBytes` on real fields); this
+//! module's fields carry no bytes at all and its field grammar
+//! (attribute-driven key/name specs) is materially different.
 
 use proc_macro::{Delimiter, Ident, Span, TokenStream, TokenTree};
 
@@ -170,11 +164,9 @@ impl Namespace {
     }
 
     /// The field-level attribute name that routes a field into this
-    /// namespace (`#[state]` / `#[hook_param]` / `#[otxn_param]`). Text-
-    /// identical to [`Namespace::field_name`] today, but sourced separately
-    /// so generated doc comments describing "the `#[..]` entries" name the
-    /// attribute, not the outer struct's field, even if the two ever
-    /// diverge.
+    /// namespace (`#[state]` / `#[hook_param]` / `#[otxn_param]`). Sourced
+    /// separately from [`Namespace::field_name`] so generated doc comments
+    /// name the attribute, not the outer struct's field.
     fn attr_name(self) -> &'static str {
         match self {
             Namespace::State => "state",
@@ -849,11 +841,10 @@ fn generate(parsed: &ParsedStruct, description: Option<&str>) -> TokenStream {
     //    comment's shape). Fields keep their marker-injected type, keyed to
     //    their ordinal in the original flat declaration (`field_index`) —
     //    grouping into namespaces never renumbers markers. The struct
-    //    item's own leading attributes (doc comments, `#[cfg]`, `#[allow]`,
-    //    ...) attach to the OUTER struct only — emitted immediately before
-    //    its declaration, never before a namespace struct, which is a
-    //    macro-generated implementation detail the user's attributes were
-    //    never written against.
+    //    item's own leading attributes attach to the OUTER struct only,
+    //    never to a namespace struct, which is a macro-generated
+    //    implementation detail the user's attributes were never written
+    //    against.
     match &parsed.body {
         StructBody::Unit => {
             out.push_str(&leading_attrs_text);
@@ -1011,18 +1002,12 @@ fn generate(parsed: &ParsedStruct, description: Option<&str>) -> TokenStream {
 }
 
 /// Assembles a named-field body's struct-declaration text: the namespace
-/// structs first, then the struct item's own leading attributes (doc
-/// comments, `#[cfg]`, `#[allow]`, ...) immediately followed by the outer
-/// struct's declaration. `leading_attrs_text` is placed here, right before
-/// `outer_struct_text`, and nowhere earlier — it must attach to the outer
-/// struct the user actually wrote `#[hooks]` on, never to a namespace
-/// struct, which is a macro-generated implementation detail the user's
-/// attributes were never written against. Kept `proc_macro`-free (plain
-/// strings only) so this ordering invariant can be pinned by a unit test —
-/// `proc_macro` types (`Span`/`Ident`/`TokenStream::parse`) panic outside an
-/// active macro invocation, which is why every other module in this crate
-/// with unit tests exercises a plain-Rust-typed core instead (see
-/// [`ChainFieldJson`]'s doc comment).
+/// structs first, then the struct item's own leading attributes immediately
+/// followed by the outer struct's declaration. `leading_attrs_text` must
+/// attach to the outer struct the user actually wrote `#[hooks]` on, never
+/// to a namespace struct. Kept `proc_macro`-free (plain strings only) so
+/// this ordering invariant can be pinned by a unit test — `proc_macro`
+/// types panic outside an active macro invocation.
 fn assemble_named_body(
     leading_attrs_text: &str,
     namespace_structs_text: &str,
@@ -1049,15 +1034,13 @@ fn rewritten_field_type(struct_name: &str, field_index: usize, f: &ParsedField) 
 
 /// Builds the field's marker type name: `__RshooksSpec{Struct}Field{N}{Name}`.
 ///
-/// Derived from the field's *ordinal position* (`field_index`) plus a
-/// sanitized `UpperCamelCase` rendering of its name, rather than the name
-/// alone — two distinct field names that collapse to the same
-/// `UpperCamelCase` text under [`to_upper_camel`] (e.g. `foo_bar` and
-/// `foo__bar`, both `FooBar`) would otherwise collide on one marker type.
-/// The ordinal makes every marker name unique regardless of how the field
-/// names compare. `field_name` is sanitized by stripping a leading `r#`
-/// raw-identifier prefix first (`r#type` -> `type` -> `Type`) so a raw
-/// identifier field still produces a valid, non-raw marker identifier.
+/// Includes the field's ordinal position (`field_index`) because two
+/// distinct field names can collapse to the same `UpperCamelCase` text
+/// under [`to_upper_camel`] (e.g. `foo_bar` and `foo__bar`, both `FooBar`)
+/// — the ordinal keeps every marker name unique regardless. `field_name` is
+/// sanitized by stripping a leading `r#` raw-identifier prefix first
+/// (`r#type` -> `type` -> `Type`) so a raw identifier field still produces
+/// a valid marker identifier.
 fn marker_name(struct_name: &str, field_index: usize, field_name: &str) -> String {
     let sanitized = field_name.strip_prefix("r#").unwrap_or(field_name);
     format!(
@@ -1071,12 +1054,9 @@ fn marker_name(struct_name: &str, field_index: usize, field_name: &str) -> Strin
 /// [`field_marker_and_impls`] promotes to a compile-time, `'static`
 /// `EncodedStateKey` via `EncodedStateKey::from_short` instead of
 /// re-encoding at runtime on every access. `false` for any other key
-/// expression (a non-literal expression, or a literal that isn't a byte
-/// string) — those keep the existing runtime `StateKeyEncode::encode` path
-/// via `StateSpec::with_key`'s default. Unlike
-/// [`crate::hooks_shared::parse_byte_string_value`], a mismatch here is not
-/// an error — a non-byte-string const key expression is a normal,
-/// supported shape.
+/// expression, which keeps the runtime `StateKeyEncode::encode` path via
+/// `StateSpec::with_key`'s default — a normal, supported shape, not an
+/// error.
 fn is_byte_string_literal(expr: &[TokenTree]) -> bool {
     let [TokenTree::Literal(lit)] = expr else {
         return false;
@@ -1096,20 +1076,15 @@ fn field_marker_and_impls(
 ) -> String {
     let marker = marker_name(struct_name, field_index, &f.name.to_string());
     let value_ty = tokens_to_string(&f.value_ty);
-    // The marker's visibility follows the *field's own* declared visibility
-    // (private by default), not the struct's — UNLESS the struct itself
-    // carries no `pub` token at all (a private struct), in which case the
-    // marker is forced private regardless of the field's own visibility.
-    // Without that override, a `pub` field on a private struct would give
-    // its marker (and hence the `StateSpec`/`ParamSpec` associated types it
-    // exposes) wider reach than the struct that declares it is ever
-    // actually reachable at, which is a leak in the other direction from
-    // the one this whole scheme exists to prevent: a marker unconditionally
-    // `pub` would otherwise expose a private `#[state]`/`#[hook_param]`/
-    // `#[otxn_param]` value/key/name type through those associated types
-    // (`E0446`) the moment that type isn't itself `pub` — the common case
-    // for a hook's internal key/value structs. Matching the field's own
-    // visibility (when the struct is reachable at all) keeps the marker
+    // The marker's visibility follows the field's own declared visibility
+    // — avoiding `E0446` ("private type in public interface") when a
+    // private `#[state]`/`#[hook_param]`/`#[otxn_param]` value/key/name
+    // type would otherwise leak through the marker's `StateSpec`/
+    // `ParamSpec` associated types — unless the struct itself carries no
+    // `pub` token at all, in which case the marker is forced private
+    // regardless of the field's visibility. Without that override, a
+    // `pub` field on a private struct would give its marker wider reach
+    // than the struct is ever actually reachable at: the marker should be
     // exactly as reachable as the field it backs, never more.
     let field_vis = if struct_is_pub {
         tokens_to_string(&f.vis)
@@ -1125,10 +1100,10 @@ fn field_marker_and_impls(
                     let expr_text = tokens_to_string(expr);
                     // A byte-string-literal key (the common case) is
                     // promoted to a compile-time `'static` `EncodedStateKey`
-                    // via `with_key` below instead of re-encoding the same
-                    // literal at runtime on every access; any other const
-                    // expression (e.g. a `HookKey`-derived value) keeps the
-                    // runtime `encode_key` path via `with_key`'s default.
+                    // via `with_key` below instead of re-encoding at
+                    // runtime on every access; any other const expression
+                    // keeps the runtime `encode_key` path via `with_key`'s
+                    // default.
                     let override_method = is_byte_string_literal(expr).then(|| {
                         format!(
                             "#[inline(always)]\n\
@@ -1222,13 +1197,9 @@ fn field_marker_and_impls(
 /// JSON entry.
 ///
 /// Kept separate from [`ParsedField`] (which holds live `proc_macro`
-/// `TokenTree`s) purely so [`encode_chain_json`] — and its determinism and
+/// `TokenTree`s) so [`encode_chain_json`] — and its determinism and
 /// JSON-escaping guarantees — can be unit tested: every `proc_macro` type
-/// (`Span`, `Ident`, `TokenStream::parse`, ...) panics outside an active
-/// macro invocation, which is why every *other* module in this crate that
-/// has unit tests (`sha256`, `base58`, `xfl_literal`, `metadata`'s
-/// `canonical_name`) tests a plain-Rust-typed core, never `proc_macro`
-/// types directly — this follows the same convention.
+/// panics outside an active macro invocation.
 enum ChainFieldJson {
     State {
         field: String,
@@ -1244,9 +1215,7 @@ enum ChainFieldJson {
         value: String,
         required: bool,
         /// Normalized token text of the `default = <expr>` expression, if
-        /// declared — not just whether one was present, so downstream
-        /// consumers (the build's byte-equality consistency check, the
-        /// per-entry sidecar transcription) can see and compare the actual
+        /// declared, so downstream consumers can compare the actual
         /// default value, not merely its presence.
         default: Option<String>,
     },
@@ -1455,10 +1424,7 @@ mod tests {
     }
 
     /// `encode_chain_json` operates on the plain-`String` [`ChainFieldJson`]
-    /// view precisely so it can be exercised here without any live
-    /// `proc_macro` context (`Span`/`Ident`/`TokenStream::parse` all panic
-    /// outside an actual macro invocation — see [`ChainFieldJson`]'s doc
-    /// comment).
+    /// view so it can be exercised here without a live `proc_macro` context.
     fn sample_entry() -> ChainFieldJson {
         ChainFieldJson::State {
             field: "deposits".to_string(),

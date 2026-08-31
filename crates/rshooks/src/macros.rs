@@ -54,60 +54,50 @@ macro_rules! guard_m {
 ///
 /// # Why this exists
 ///
-/// `guard!`'s worst-case-instruction-count model assumes each `guard!` call
-/// site is a single point in the compiled module, entered up to `maxiter`
-/// times across the whole hook execution — a nested loop's inner `guard!`
-/// is meant to amortize its cost across every outer iteration that reaches
-/// it (the outer loop's own `guard!` already bounds how many times that
-/// can happen). This holds as long as the compiled module actually
+/// `guard!`'s worst-case-instruction-count model assumes each call site is
+/// a single point in the compiled module, so an inner `guard!`'s cost is
+/// meant to amortize across the outer loop's iterations rather than being
+/// counted per iteration — this holds only as long as the compiled module
 /// contains one physical copy of the inner loop.
 ///
-/// At `opt-level = 3`, LLVM routinely fully unrolls a small, provably-
-/// bounded outer loop (2 or 3 iterations is a typical threshold) whenever
-/// it judges duplicating the body worthwhile — completely independent of
-/// whether that body is written inline or behind a function call (the
-/// flatten pass inlines every defined non-entry function into
-/// `hook()`/`cbak()` regardless, so unrolling and inlining compound rather
-/// than substitute for each other — `docs/DESIGN.md` §6.2b). When the
-/// outer loop wraps an inner `guard!`-protected loop, unrolling physically
-/// duplicates that inner loop once per outer iteration: the checker (which
-/// walks the compiled bytecode, not the source) then counts the inner
-/// loop's full worst-case cost *once per duplicate* instead of once total
-/// — silently multiplying, rather than amortizing, its contribution to the
-/// worst-case instruction count. Measured on `examples/80_governance`'s
+/// At `opt-level = 3`, LLVM often fully unrolls a small, provably-bounded
+/// outer loop (2 or 3 iterations is a typical threshold), independent of
+/// whether its body is inline or behind a function call (the flatten pass
+/// inlines everything into `hook()`/`cbak()` first, so unrolling and
+/// inlining compound — `docs/DESIGN.md` §6.2b). When the outer loop wraps
+/// an inner `guard!`-protected loop, unrolling physically duplicates that
+/// inner loop once per outer iteration, and the checker (which walks
+/// compiled bytecode, not source) counts the inner loop's full worst-case
+/// cost once per duplicate instead of once total — multiplying rather than
+/// amortizing its contribution. On `examples/80_governance`'s
 /// vote-garbage-collection loop (an outer 2-iteration table loop wrapping a
-/// `guard!(66)`-bounded 32-topic scan): unrolling doubled that loop's
-/// measured cost, worth roughly a third of the whole `govern` entry's
-/// worst-case instruction count.
+/// `guard!(66)`-bounded 32-topic scan), this doubled the loop's measured
+/// cost, worth roughly a third of the whole `govern` entry's worst-case
+/// instruction count.
 ///
-/// `no_unroll` breaks this by routing the loop's induction variable through
+/// `no_unroll` routes the loop's induction variable through
 /// [`core::hint::black_box`] at its comparison: the optimizer can no longer
 /// prove the trip count at compile time, so it keeps the loop as one real
 /// `loop` construct instead of duplicating its body. This changes no
 /// observable behavior (`black_box` is the identity function) — only which
 /// optimizations the compiler is allowed to apply.
 ///
-/// Only worth reaching for at a call site actually exhibiting this
-/// pathology (an outer loop, itself small enough to be a plausible full-
-/// unroll candidate, wrapping further `guard!`-protected work) — a plain
-/// small loop with a cheap, unguarded body is usually *cheaper* fully
-/// unrolled (straight-line code has no loop-control overhead and no
-/// worst-case-padding waste), so applying this unconditionally to every
-/// `guard!`-protected loop is not a good default.
+/// Only worth reaching for where this pathology can actually occur (an
+/// outer loop small enough to be a full-unroll candidate, wrapping further
+/// `guard!`-protected work) — a plain small loop with a cheap, unguarded
+/// body is usually *cheaper* fully unrolled, so applying this
+/// unconditionally to every `guard!`-protected loop is not a good default.
 ///
 /// # Failure mode
 ///
 /// `black_box` is a best-effort optimization barrier, not a guaranteed
-/// one — the compiler is not contractually required to honor it, only
-/// documented (as of this writing) to do so in practice. If a future
-/// toolchain version ever stopped treating it as opaque, this function
-/// would still behave identically (it is the identity function either
-/// way), but the unrolling this doc comment describes could silently
-/// return, regressing the caller's worst-case instruction count with no
-/// compile-time or runtime signal — nothing below the protocol's 65535
-/// ceiling would catch a regression that stays under it. Guard against
-/// this by measuring the worst case after any toolchain upgrade for a hook
-/// that relies on `no_unroll`.
+/// one — documented (as of this writing) to stay opaque in practice, but
+/// not contractually required to. If a future toolchain stopped treating it
+/// as opaque, the unrolling above could silently return, regressing the
+/// caller's worst-case instruction count with no compile-time or runtime
+/// signal — nothing below the protocol's 65535 ceiling would catch a
+/// regression that stays under it. Re-measure the worst case after any
+/// toolchain upgrade for a hook that relies on `no_unroll`.
 ///
 /// # Examples
 ///
@@ -233,19 +223,18 @@ pub const fn padded_bytes<const N: usize>(src: &[u8]) -> [u8; N] {
 ///
 /// This right-pads (`src` at the front, zero bytes at the end).
 ///
-/// **Not needed for building a short hook-state key anymore**: a
-/// `[u8; N]` (`1 <= N <= `[`crate::types::STATE_KEY_LEN`]) works directly
-/// as a [`crate::state::StateKeyEncode`] key — e.g. `state_get::<u64>(b"counter")` —
-/// sent to the host at its own real length; the host itself left-pads a
+/// Not needed for building a short hook-state key: a `[u8; N]`
+/// (`1 <= N <= `[`crate::types::STATE_KEY_LEN`]) works directly as a
+/// [`crate::state::StateKeyEncode`] key — e.g. `state_get::<u64>(b"counter")`
+/// — sent to the host at its own real length; the host itself left-pads a
 /// short key internally (see `rshooks::state`'s module doc comment, "Key
 /// length and padding," and DESIGN.md §5.7). Reach for `pad!` when a
-/// fixed-size buffer genuinely needs local right-padding for some other
-/// reason — e.g. building a full, already-32-byte
-/// [`crate::types::StateKey`]/[`crate::types::NameSpace`] constant on
-/// purpose, or padding a byte string for a use unrelated to hook-state
-/// keys. [`pad_left!`](crate::pad_left) is the mirror-image macro (left-pad
-/// instead of right-pad) for the same kind of non-key use — see its own
-/// doc comment.
+/// fixed-size buffer needs local right-padding for some other reason — e.g.
+/// building a full, already-32-byte [`crate::types::StateKey`]/
+/// [`crate::types::NameSpace`] constant, or padding a byte string for a use
+/// unrelated to hook-state keys. [`pad_left!`](crate::pad_left) is the
+/// mirror-image macro (left-pad instead of right-pad) for the same kind of
+/// non-key use.
 ///
 /// # Examples
 /// ```
@@ -306,17 +295,16 @@ pub const fn padded_bytes_left<const N: usize>(src: &[u8]) -> [u8; N] {
 ///
 /// The host itself left-pads a state/param key shorter than the fixed key
 /// width (32 bytes for hook state, 1–32 bytes for hook/otxn parameters) —
-/// see DESIGN.md §5.6 ("Endianness conventions") for that host-side
-/// behavior, and §5.7 ("Hook state key encoding") for why a Rust hook does
-/// **not** need to reproduce it locally for an ordinary `StateKeyEncode`
-/// key (a plain `[u8; N]`, `state_keys!` variant, or `#[derive(HookKey)]`
-/// struct passed at its own real length already lands on the same slot the
-/// host's left-pad produces — no `pad_left!` involved). Reach for
-/// `pad_left!` instead when a hook genuinely needs the *already-padded* 32
-/// bytes themselves as a value — e.g. reproducing, byte-for-byte, what the
-/// host's left-pad of a given short key would look like, for a purpose
-/// other than passing it to `state`/`state_set` (which never needs this:
-/// pass the short key directly).
+/// see DESIGN.md §5.6 ("Endianness conventions") and §5.7 ("Hook state key
+/// encoding"). An ordinary `StateKeyEncode` key (a plain `[u8; N]`,
+/// `state_keys!` variant, or `#[derive(HookKey)]` struct passed at its own
+/// real length) already lands on the same slot the host's left-pad
+/// produces, with no `pad_left!` involved. Reach for `pad_left!` instead
+/// when a hook needs the *already-padded* 32 bytes themselves as a value —
+/// e.g. reproducing, byte-for-byte, what the host's left-pad of a given
+/// short key would look like, for a purpose other than passing it to
+/// `state`/`state_set` (which never needs this: pass the short key
+/// directly).
 ///
 /// Same compile-time-only shape as [`pad!`](crate::pad): the array length
 /// is inferred from context, the argument must be a constant expression, a

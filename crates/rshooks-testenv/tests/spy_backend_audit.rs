@@ -1,13 +1,12 @@
 //! Spy-backend audit (design §2.1): installs a call-counting
 //! [`HostBackend`] and drives every public `rshooks` API in the bridged
 //! families (state, otxn, hook_ctx, ledger, control, etxn, trace, plus the
-//! Phase 2 families float, slot, sto, util, keylet —
-//! `.claude/design/TESTENV_PHASE2_DESIGN.md` stage P2-A), then asserts each
-//! one reached the backend.
+//! Phase 2 families float, slot, sto, util, keylet), then asserts each one
+//! reached the backend.
 //!
-//! This is independent of `rshooks-testenv`'s own [`rshooks_testenv::TestEnv`] —
-//! `HostBackend` is `pub` (only `#[doc(hidden)]`) precisely so a downstream
-//! crate can implement it directly, which this test exercises.
+//! Independent of `rshooks-testenv`'s own [`rshooks_testenv::TestEnv`] —
+//! `HostBackend` is `pub` (only `#[doc(hidden)]`) so a downstream crate can
+//! implement it directly, which this test exercises.
 
 #![allow(
     clippy::unwrap_used,
@@ -627,17 +626,13 @@ fn every_phase2_backend_method_is_reached() {
     }
 }
 
-/// Drives `rshooks::xfl_unchecked::XFLUnchecked`'s operators specifically
-/// (P2-E — `crates/rshooks/testenv-call-sites.txt`'s "xfl_unchecked.rs"
-/// section), independent of [`every_phase2_backend_method_is_reached`]'s
-/// `XFL` (checked) exercise above: `XFL`'s operators already prove
+/// Drives `rshooks::xfl_unchecked::XFLUnchecked`'s operators specifically,
+/// independent of [`every_phase2_backend_method_is_reached`]'s `XFL`
+/// (checked) exercise above: `XFL`'s operators already prove
 /// `float_negate`/`float_sum`/`float_multiply`/`float_divide` are
 /// *reachable* through `xfl.rs`'s own bridging, but that alone would not
 /// catch a regression that broke `xfl_unchecked.rs`'s separate raw call
-/// sites specifically (P2-D found exactly this: those sites called
-/// `rshooks_core::float_*` directly, unconditionally, bypassing any
-/// installed backend — see the inventory file's own note on why
-/// `xfl_unchecked.rs` is scanned at all).
+/// sites, which could bypass any installed backend entirely.
 #[test]
 fn xfl_unchecked_operators_reach_the_backend() {
     use rshooks::xfl::XFL;

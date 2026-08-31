@@ -3,19 +3,17 @@
 //! `crate::host::sto`/`crate::host::slots`' raw STObject/slot navigation.
 //!
 //! A structural serialized-field walk: fields in **any** order — real
-//! xahaud's raw parse (`STObject::set`, and `HookAPI::get_stobject_length`,
-//! `HookAPI.cpp:2888-3179`, which every `sto_*` function goes through) reads
-//! a field sequence by decoding each field's own header in turn, never
-//! requiring ascending `(type, field)` order to locate or consume a field;
-//! `crate::host::sto`'s own module doc comment cites `HookAPI::sto_validate`
+//! xahaud's raw parse (`STObject::set`; every `sto_*` function goes through
+//! `HookAPI::get_stobject_length`, `HookAPI.cpp:2888-3179`) decodes each
+//! field's own header in turn, never requiring ascending `(type, field)`
+//! order. `crate::host::sto`'s module doc cites `HookAPI::sto_validate`
 //! (`HookAPI.cpp:68-96`) as having "no field-ordering or duplicate-field
-//! check", and this walker (which `sto_validate` calls directly) matches
-//! that exactly — canonical variable-length prefixes, correct
+//! check"; this walker (which `sto_validate` calls directly) matches that.
+//! Structural rules enforced: canonical variable-length prefixes, correct
 //! inner-object/array terminators, no trailing bytes, and a depth limit of
-//! 2 (enough for `EmitDetails`/`Memos`, no general recursion) are the only
-//! structural rules enforced here. [`validate_emit_blob`] layers its own,
-//! additional rules on top for `emit`'s acceptance grammar specifically —
-//! see its own doc comment.
+//! 2 (enough for `EmitDetails`/`Memos`, no general recursion).
+//! [`validate_emit_blob`] layers additional rules on top for `emit`'s
+//! acceptance grammar — see its own doc comment.
 //!
 //! What this walker does *not* check (documented, design §5.6): fee
 //! sufficiency, ledger-window validity against real ledger progress, and
@@ -23,67 +21,49 @@
 //!
 //! # Order is tolerant everywhere; duplicate tolerance differs by real path
 //!
-//! Every caller below is order-tolerant, but real xahaud's own duplicate
-//! handling is *not* uniform across the two families of host function this
+//! Every caller below is order-tolerant, but real xahaud's duplicate
+//! handling is *not* uniform across the two host-function families this
 //! walker backs, so this module's tolerance isn't either:
 //!
 //! - [`validate_emit_blob`] (`crate::backend::Backend::emit`) and
 //!   `crate::backend::Backend::prepare` both parse a hook-authored buffer
 //!   through real xahaud's `STObject::set`-family deserialization — `emit`
-//!   via `STTx(SerialIter)` -> `STObject::set`
-//!   (`src/libxrpl/protocol/STObject.cpp:203`), `prepare`
-//!   (`HookAPI::prepare`, `HookAPI.cpp:382`) via
-//!   `STObject(SerialIter&, sfGeneric)`'s own `SerialIter`-based
-//!   construction at the top of that function (`HookAPI.cpp:392-396`,
-//!   before it round-trips through JSON). `STObject::set`'s main loop
-//!   consumes fields in whatever order they appear — no ordering check —
-//!   but afterward sorts every field by code and rejects the object
-//!   outright (`Throw<std::runtime_error>("Duplicate field detected")`) if
-//!   any two share a field code (`STObject.cpp:266-276`). This walker
-//!   itself stays order/duplicate-tolerant (kept uniform with the `sto_*`
-//!   family below, since callers besides [`validate_emit_blob`] use it
-//!   too); [`validate_emit_blob`] alone layers a duplicate rejection back
-//!   on top — a direct citation of `STObject::set`'s real invariant, not
-//!   independent mock strictness — see its own doc comment. (This walker's
-//!   duplicate check does not recurse into nested objects/arrays the way
-//!   `STObject::set` genuinely does at every depth; only top-level
-//!   duplicates are caught here — a known, narrower scope, not a claim of
-//!   full fidelity.)
+//!   via `STTx(SerialIter)` -> `STObject::set` (`STObject.cpp:203`),
+//!   `prepare` via `HookAPI::prepare`'s own `SerialIter`-based construction
+//!   (`HookAPI.cpp:392-396`). `STObject::set` consumes fields in whatever
+//!   order they appear, but afterward sorts every field by code and throws
+//!   `"Duplicate field detected"` if any two share one
+//!   (`STObject.cpp:266-276`). This walker itself stays order/
+//!   duplicate-tolerant (shared with the `sto_*` family below);
+//!   [`validate_emit_blob`] alone layers that duplicate rejection back on,
+//!   scoped to top-level fields only — not recursed into nested
+//!   objects/arrays the way `STObject::set` does at every depth.
 //! - `crate::host::sto::sto_validate`/`sto_subfield`/`sto_subarray`: cited
-//!   directly above and in `crate::host::sto`'s own module doc comment
-//!   (`HookAPI::sto_validate`, `HookAPI.cpp:68-96`, "no field-ordering or
-//!   duplicate-field check"; every other `sto_*` function shares its
-//!   underlying single-field parser, `HookAPI::get_stobject_length`,
-//!   `HookAPI.cpp:2888-3179`) — genuinely duplicate-tolerant on real
-//!   xahaud, unlike the `STObject::set` family above: `get_stobject_length`
-//!   never sorts or compares field codes across calls, it just measures one
-//!   field's length at a time.
-//! - `crate::otxn::deserialize`/`from_emitted`: parses a blob that has
-//!   already passed [`validate_emit_blob`], so must tolerate whatever order
-//!   that already accepted — not an independent host-behavior claim, just
-//!   internal consistency with the function above.
+//!   above and in `crate::host::sto`'s module doc (`HookAPI::sto_validate`,
+//!   `HookAPI.cpp:68-96`, "no field-ordering or duplicate-field check";
+//!   every other `sto_*` function shares the same underlying parser,
+//!   `HookAPI::get_stobject_length`, `HookAPI.cpp:2888-3179`) — genuinely
+//!   duplicate-tolerant on real xahaud, unlike the `STObject::set` family
+//!   above.
+//! - `crate::otxn::deserialize`/`from_emitted`: parses a blob that already
+//!   passed [`validate_emit_blob`], so tolerates whatever order that
+//!   already accepted.
 //! - `crate::host::slots` (`slot_subfield`/`slot_set`/`otxn_slot`/
-//!   `meta_slot`/`xpop_slot`): root slot content is always sourced from a
-//!   real, already-canonically-serialized ledger object or transaction —
-//!   see that module's own "slot content = value payload, exactly what
-//!   `slot()` itself returns" doc section — so this walker's order/
-//!   duplicate tolerance is inert here: genuine ledger data was always
-//!   canonical and duplicate-free already, on either the old strict walk or
-//!   this one.
+//!   `meta_slot`/`xpop_slot`): root slot content always comes from a real,
+//!   already-canonically-serialized ledger object or transaction (see that
+//!   module's "slot content = value payload" doc section), so this
+//!   walker's order/duplicate tolerance is inert here.
 //!
 //! # P2-D extension: field/array navigation primitives
 //!
-//! `.claude/design/TESTENV_PHASE2_DESIGN.md` §4 ("slot family", "sto_*")
-//! calls for extending this walker with offset exposure rather than forking
-//! a second parser. [`FieldSpan`] (now `pub(crate)` with `pub(crate)`
-//! fields), [`walk_top_level_fields`]/[`walk_object_fields`] (renamed-export
-//! of the existing top-level/nested-object walks), [`walk_array_elements`]
-//! (new — per-element spans, not just a pass/fail skip), and
-//! [`field_value_payload`] (new — the **value-only** payload range a stored
-//! slot or `sto_subfield` reports, VL length-prefix stripped for
-//! VL/AccountID fields) are `crate::host::slots`/`crate::host::sto`'s shared
-//! foundation. See those modules' doc comments for the upstream citations
-//! behind the per-type payload convention `field_value_payload` implements.
+//! [`FieldSpan`], [`walk_top_level_fields`]/[`walk_object_fields`],
+//! [`walk_array_elements`] (per-element spans), and [`field_value_payload`]
+//! (the **value-only** payload range a stored slot or `sto_subfield`
+//! reports, VL length-prefix stripped for VL/AccountID fields) are
+//! `crate::host::slots`/`crate::host::sto`'s shared foundation
+//! (`.claude/design/TESTENV_PHASE2_DESIGN.md` §4 "slot family", "sto_*").
+//! See those modules' doc comments for the upstream citations behind the
+//! per-type payload convention `field_value_payload` implements.
 
 use std::vec::Vec;
 
@@ -326,13 +306,13 @@ fn walk_array_body(data: &[u8], pos: &mut usize, depth: u32) -> Result<(), ()> {
 /// [`ARRAY_END_MARKER`], with no leading array-type header — the exact
 /// shape a slot's/`sto_subarray`'s array-typed content has, per
 /// `crate::host::slots`'/`crate::host::sto`'s module doc comments) and
-/// returns each element's own `(start, end)` span — header included, footer
+/// returns each element's own `(start, end)` span — header and footer
 /// (`0xE1`, since every element is itself an `STObject`) included: the
 /// "fully formed" convention `sto_subarray`/`slot_subarray` both use.
 /// Requires the whole buffer to parse as element spans with nothing left
 /// over; any parse failure — including a buffer that doesn't end in
 /// [`ARRAY_END_MARKER`] — is `Err(())`, matching [`walk_top_level_fields`]'s
-/// own full-consumption contract for the top-level case.
+/// full-consumption contract for the top-level case.
 pub(crate) fn walk_array_elements(data: &[u8]) -> Result<Vec<(usize, usize)>, ()> {
     let mut pos = 0usize;
     let mut spans = Vec::new();
@@ -371,9 +351,9 @@ pub(crate) fn walk_top_level_fields(data: &[u8]) -> Result<Vec<FieldSpan>, ()> {
 
 /// [`walk_top_level_fields`] when `in_object` is `false`, or
 /// [`walk_object_body`] (depth `0`, a fresh budget — see `crate::host::slots`'
-/// module doc comment for why each slot's own content is parsed with its
-/// own fresh depth budget rather than one shared across slot hops) when
-/// `true`. `crate::host::slots::slot_subfield`'s one call site: a
+/// module doc for why each slot's content is parsed with its own fresh
+/// depth budget rather than one shared across slot hops) when `true`.
+/// `crate::host::slots::slot_subfield`'s one call site: a
 /// [`crate::invocation::SlotKind::Root`] parent has no wrapping terminator
 /// (`in_object = false`); a [`crate::invocation::SlotKind::Object`] parent's
 /// stored bytes already end in `0xE1` (`in_object = true`).
@@ -403,21 +383,20 @@ fn field_bytes(data: &[u8], range: (usize, usize)) -> Option<&[u8]> {
 /// type except `STI_VL`(7)/`STI_ACCOUNT`(8), where the VL length-prefix
 /// (present in `value_range`, since real wire bytes carry it) is stripped:
 /// a slot's content is exactly what the host's `entry->add(s)` reports for
-/// that field's own value alone (`crate::host::slots`' module doc comment
-/// cites `otxn_field`'s identically-shaped documented behavior — a
-/// `sfAccount` field reads back as exactly its 20 raw bytes, matching
+/// that field's value alone (`crate::host::slots`' module doc cites
+/// `otxn_field`'s identically-shaped documented behavior — a `sfAccount`
+/// field reads back as exactly its 20 raw bytes, matching
 /// `examples/15_slot-objects`' e2e-pinned `check_account_walk`), and
-/// `sto_subfield`'s own "payload" convention strips the same prefix
+/// `sto_subfield`'s "payload" convention strips the same prefix
 /// (`HookAPI::get_stobject_length`'s `payload_start`/`payload_length` are
 /// computed *after* decoding a VL type's own length prefix — see
-/// `crate::host::sto`'s module doc comment for the citation).
+/// `crate::host::sto`'s module doc for the citation).
 ///
 /// Does **not** special-case `STI_ARRAY`(15) into the "fully formed"
-/// (header-included) shape `sto_subfield` itself uses for arrays — callers
-/// that need that (only `sto_subfield`) special-case it themselves using
-/// `field.range` directly; every other caller (slot content, `sto_subarray`
-/// element payloads never call this for VL types at all) wants the uniform
-/// value-only meaning this function gives.
+/// (header-included) shape `sto_subfield` uses for arrays — the one
+/// caller that needs that special-cases it itself using `field.range`
+/// directly; every other caller wants the uniform value-only meaning this
+/// function gives.
 pub(crate) fn field_value_payload(data: &[u8], field: &FieldSpan) -> Result<(usize, usize), ()> {
     let ty = (field.code >> 16) as u32;
     if ty == STI_VL || ty == STI_ACCOUNT {
@@ -442,12 +421,11 @@ pub(crate) fn field_value_payload(data: &[u8], field: &FieldSpan) -> Result<(usi
 /// and throws `"Duplicate field detected"` if any two share one
 /// (`STObject.cpp:266-276`; see this module's doc comment). The underlying
 /// field walk itself (shared with `sto_validate`/`sto_subfield`, whose real
-/// host implementation genuinely does tolerate a repeat) stays permissive;
-/// this rejection is layered on here specifically, matching `emit`'s own
+/// host implementation genuinely tolerates a repeat) stays permissive;
+/// this rejection is layered on here, matching `emit`'s own
 /// `STTx(SerialIter)` -> `STObject::set` parse path. Scoped to top-level
-/// fields only — nested objects/arrays are not independently checked, so
-/// this is narrower than `STObject::set`'s real per-depth invariant, not a
-/// claim of matching it exactly at every nesting level.
+/// fields only — nested objects/arrays are not independently checked,
+/// narrower than `STObject::set`'s real per-depth invariant.
 pub(crate) fn validate_emit_blob(
     blob: &[u8],
     expected_emit_details: Option<&[u8]>,

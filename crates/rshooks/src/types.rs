@@ -1,84 +1,66 @@
 //! Fixed-size protocol buffer newtypes.
 //!
 //! Each type below (`AccountId`, `Hash`, `Keylet`, ...) is a
-//! `#[repr(transparent)]` tuple struct wrapping a `[u8; N]` — not a bare
-//! type alias. `#[repr(transparent)]` guarantees the wrapper has *exactly*
-//! the same layout, size, and alignment as its inner array (zero-cost: no
-//! extra memory, no extra indirection, and it is FFI-compatible with a raw
-//! `[u8; N]` wherever that matters), so this newtype step only adds
-//! type-level distinctness (an `AccountId` and a `Hash` can no longer be
-//! passed to each other's slots by accident) at zero runtime cost.
+//! `#[repr(transparent)]` tuple struct wrapping a `[u8; N]`, not a bare type
+//! alias — `#[repr(transparent)]` guarantees the wrapper has exactly the
+//! inner array's layout, size, and alignment (zero-cost, FFI-compatible
+//! with a raw `[u8; N]`), so the newtype only adds type-level distinctness
+//! (an `AccountId` and a `Hash` can no longer be passed to each other's
+//! slots by accident).
 //!
 //! The inner field is `pub` (`AccountId(pub [u8; 20])`) and every type
 //! implements [`core::ops::Deref`]/[`core::ops::DerefMut`] (target
 //! `[u8; N]`), [`AsRef<[u8]>`]/[`AsMut<[u8]>`], and
-//! `From<[u8; N]>`/`Into<[u8; N]>`, to keep migration cost low: method
-//! calls (`.as_ptr()`, `.len()`, indexing, `.starts_with(..)`, ...) reach
-//! through to the inner array via auto-deref exactly as they did when
-//! these were plain array aliases. Passing a newtype by reference where a
-//! *bare* `&[u8]`/`&mut [u8]` parameter is expected does need an explicit
-//! conversion (`value.as_ref()` / `value.as_mut()`) — Rust does not chain a
-//! user `Deref` impl with the built-in array-to-slice unsized coercion at a
-//! call site — but every `rshooks::api` wrapper that takes a caller
-//! buffer or key/value byte slice (`state`, `otxn_field`, `hook_param`,
-//! `hook_account`, `ledger_last_hash`, `util_accid`, `etxn_details`, `slot`,
-//! ...) sidesteps that entirely by bounding the parameter with
-//! `AsRef<[u8]>`/`AsMut<[u8]>` instead of taking a bare `&[u8]`/`&mut [u8]`,
-//! so `otxn_field(&mut sender, sfAccount)` / `state(&mut raw, &STATE_KEY)`
-//! work as-is, no `.as_ref()`/`.as_mut()` needed (see `api::state`'s module
-//! doc comment for the full reasoning, and its `ForeignRef` trait for the
-//! one remaining exception — `state_foreign`'s `namespace`/`account`, which
-//! are `Option`-shaped and need a different trick). The explicit-conversion
-//! case above only still applies to genuinely bare `&[u8]`/`&mut [u8]`
-//! parameters outside that wrapper layer (e.g. a hook's own helper
-//! function, or `core`/`alloc` APIs).
+//! `From<[u8; N]>`/`Into<[u8; N]>`: method calls (`.as_ptr()`, `.len()`,
+//! indexing, `.starts_with(..)`, ...) reach the inner array via auto-deref
+//! exactly as they did as plain array aliases. Passing a newtype by
+//! reference where a *bare* `&[u8]`/`&mut [u8]` parameter is expected does
+//! need an explicit conversion (`value.as_ref()`/`value.as_mut()`) — Rust
+//! does not chain a user `Deref` impl with the array-to-slice unsized
+//! coercion at a call site — but every `rshooks::api` wrapper that takes a
+//! caller buffer or key/value byte slice (`state`, `otxn_field`,
+//! `hook_param`, `hook_account`, `ledger_last_hash`, `util_accid`,
+//! `etxn_details`, `slot`, ...) bounds the parameter with
+//! `AsRef<[u8]>`/`AsMut<[u8]>` instead of a bare `&[u8]`/`&mut [u8]`, so
+//! `otxn_field(&mut sender, sfAccount)` works as-is, no conversion needed
+//! (see `api::state`'s module doc for the `ForeignRef` exception —
+//! `state_foreign`'s `Option`-shaped `namespace`/`account`). The explicit
+//! conversion is only needed outside that wrapper layer (a hook's own
+//! helper function, `core`/`alloc` APIs, ...).
 //!
-//! Every type here also implements [`crate::convert::ToBytes`]/
+//! Every type also implements [`crate::convert::ToBytes`]/
 //! [`crate::convert::FromBytes`] (a fixed-length passthrough to/from its
 //! inner array), so all ten work directly as
 //! [`crate::state::state_get`]/[`crate::state::state_set_loose`] value
-//! types.
+//! types, and [`crate::convert::FixedRead`], so a type can be the return
+//! type of `otxn_field_exact`/`hook_param_exact`/`slot_exact`/`state_exact`
+//! — `let sender: AccountId = otxn_field_exact(sfAccount)?;`, no turbofish.
 //!
-//! All of these are always zero-initialized as `[0u8; N]` at call sites —
+//! All of these are always zero-initialized as `[0u8; N]` at call sites,
 //! never via `MaybeUninit` (see `macros.rs` for why `uninit_buf!` is
 //! deliberately not provided). Every type provides two equivalent ways to
-//! get that zero value: [`Default::default`] (for ordinary `let`
-//! bindings — `AccountId::default()`) and a `const fn zeroed() -> Self`
-//! (for `const`/`static` contexts, where `Default::default` can't be
-//! called — `Default` is not, and cannot be, a `const fn` trait method on
-//! stable Rust). Both produce the identical all-zero value; reach for
-//! whichever the binding's context requires. The typical use for either is
-//! allocating a fixed-size scratch buffer to hand to a host call's
+//! get that zero value: [`Default::default`] for ordinary `let` bindings,
+//! and a `const fn zeroed() -> Self` for `const`/`static` contexts (where
+//! `Default::default` can't be called — `Default` cannot be a `const fn`
+//! trait method on stable Rust). Both produce the identical all-zero value;
+//! the typical use is a fixed-size scratch buffer for a host call's
 //! caller-buffer output parameter, e.g. `let mut sender =
-//! AccountId::default(); otxn_field(&mut sender, sfAccount)?;` — see
-//! [`mod@crate::api`]'s wrapper functions.
-//!
-//! Every type also implements [`crate::convert::FixedRead`], so it works
-//! directly as the return type of `otxn_field_exact`/`hook_param_exact`/
-//! `slot_exact`/`state_exact` — `let sender: AccountId =
-//! otxn_field_exact(sfAccount)?;`, no turbofish, the expected length coming
-//! from the annotated return type rather than a caller-supplied `N`. See
-//! [`crate::convert::FixedRead`]'s doc comment for the full story.
+//! AccountId::default(); otxn_field(&mut sender, sfAccount)?;`.
 //!
 //! `==`/`!=` on any of these ten types is loop-free: `PartialEq` is a
 //! hand-written impl delegating to the matching [`crate::buf_eq`] function
-//! rather than a derive (derived `==` on a `[u8; N]`-backed type compiles to
-//! a `memcmp` loop on `wasm32v1-none`). [`AccountId`] additionally
-//! implements `Ord`/`PartialOrd` (`<`, `>`, ...), also loop-free, giving the
-//! canonical 160-bit big-endian ordering XRPL/Xahau uses to pick the
-//! high/low account of a pair (e.g. a `RippleState` trustline keylet) — see
-//! [`crate::buf_eq::buf_cmp_20`].
-//!
-//! **Breaking change:** `PartialEq` used to be derived; it is now a
-//! hand-written impl (see above), which drops `StructuralPartialEq`. A
-//! `const`/`static` of one of these ten types (e.g. one built with
-//! [`crate::account_id!`]) can therefore no longer be used as a `match`
-//! pattern — `match account { OWNER => ..., _ => ... }` stops compiling.
-//! Rewrite it as `if account == OWNER { ... } else { ... }`. This loss
-//! propagates to any downstream struct/enum holding one of these types as a
-//! field, for the same reason. Values themselves — comparing with `==`,
-//! storing in a `HashMap`/`BTreeMap` key, etc. — are unaffected; only
-//! pattern-matching a value against one of these types' consts is.
+//! rather than a derive (derived `==` on a `[u8; N]`-backed type compiles
+//! to a `memcmp` loop on `wasm32v1-none`). That drops `StructuralPartialEq`,
+//! so a `const`/`static` of one of these types can't be used as a `match`
+//! pattern (`match account { OWNER => ..., _ => ... }` — rewrite as
+//! `if account == OWNER { ... }`); the same loss propagates to any
+//! downstream struct/enum holding one of these types as a field, which
+//! likewise can't be matched against a `const`/`static` pattern. Values
+//! themselves (`==`, `HashMap` keys, ...) are unaffected. [`AccountId`]
+//! additionally implements
+//! `Ord`/`PartialOrd`, also loop-free (via [`crate::buf_eq::buf_cmp_20`]),
+//! giving the canonical 160-bit big-endian ordering XRPL/Xahau uses to pick
+//! the high/low account of a pair (e.g. a `RippleState` trustline keylet).
 
 use core::marker::PhantomData;
 
@@ -119,16 +101,10 @@ pub const EMIT_DETAILS_MAX_LEN: usize = 138;
 /// `FromBytes`/`FixedRead`/`PartialEq`/`Eq` impls. See the module doc
 /// comment for the rationale.
 ///
-/// `PartialEq` is hand-written rather than derived, delegating to `$eq_fn`
-/// (one of the loop-free `crate::buf_eq::buf_eq_*` functions) — derived
-/// `==` on a `[u8; $len]`-backed type compiles to a `memcmp` loop on
-/// `wasm32v1-none`. `Eq` is still derived; a manual `PartialEq` does not
-/// prevent that.
-///
-/// **Breaking:** a hand-written `PartialEq` drops `StructuralPartialEq`, so
-/// a `const`/`static` of `$name` can no longer appear as a `match` pattern
-/// — convert such a site to `if value == THE_CONST { .. }`. See the module
-/// doc comment for the full migration note.
+/// `PartialEq` delegates to `$eq_fn` (one of the loop-free
+/// `crate::buf_eq::buf_eq_*` functions) rather than being derived — see the
+/// module doc comment for why, and for the `match`-pattern implication.
+/// `Eq` is still derived.
 macro_rules! fixed_bytes_type {
     ($(#[$meta:meta])* $name:ident, $len:expr, $eq_fn:path) => {
         $(#[$meta])*
@@ -445,12 +421,8 @@ impl IouAmount {
     }
 }
 
-// `AccountId` additionally gets a total order: `Ord`/`PartialOrd`, loop-free
-// via `buf_eq::buf_cmp_20`. This is the canonical 160-bit big-endian
-// ordering XRPL/Xahau uses to pick the "high"/"low" account of a pair (e.g.
-// the two accounts in a `RippleState` trustline keylet) — that high/low use
-// is the primary intended use case for `<`/`>` here. `<=`/`>=` come for
-// free from `Ord`'s default methods; no special handling needed.
+// Loop-free via `buf_cmp_20` — see the module doc comment for the ordering
+// this gives. `<=`/`>=` come free from `Ord`'s default methods.
 impl Ord for AccountId {
     #[inline(always)]
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
@@ -499,9 +471,8 @@ pub struct Amount;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Issue;
 
-/// Wire-type marker: a field this crate models no typed read for — a `Blob`,
-///
-/// A `Blob`, a `PathSet`, a `Hash160` (whose fields mean different things),
+/// Wire-type marker: a field this crate models no typed read for — a
+/// `Blob`, a `PathSet`, a `Hash160` (whose fields mean different things),
 /// or a slot whose type was never established. Still fully usable through
 /// [`crate::slot_obj`]: navigable by either key kind (the host decides at
 /// runtime whether the operation makes sense) and readable through the raw
@@ -541,17 +512,14 @@ impl<T> Clone for SField<T> {
 
 impl<T> Copy for SField<T> {}
 
-// Comparison is on the code alone, *across* type parameters — hand-written
-// rather than derived for both halves of that. Derived `PartialEq` would
-// compare only `SField<T>` with `SField<T>` and would carry a needless
-// `T: PartialEq` bound; this impl instead lets an erased field code (what
-// [`crate::slot_obj::SlotObject::field_code`] hands back, an
-// `SField<Opaque>`) be compared directly against any generated constant, in
-// either direction: `slot.field_code()? == sfBalance`.
-//
-// Two `SField`s with the same code always name the same field, so equality
-// that ignores `T` is the right relation — `T` records how the value reads
-// back, not which field it is.
+// Comparison is on the code alone, across type parameters — hand-written
+// rather than derived (which would compare only same-`T` and carry a
+// needless `T: PartialEq` bound), so an erased field code (what
+// `SlotObject::field_code` hands back, an `SField<Opaque>`) compares
+// directly against any generated constant in either direction:
+// `slot.field_code()? == sfBalance`. Two `SField`s with the same code
+// always name the same field, so equality ignoring `T` is the right
+// relation — `T` records how the value reads back, not which field it is.
 impl<A, B> PartialEq<SField<B>> for SField<A> {
     #[inline(always)]
     fn eq(&self, other: &SField<B>) -> bool {

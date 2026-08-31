@@ -4,12 +4,11 @@
 //! [`crate::protocol_parse`]) exactly once into a single serializable
 //! [`ProtocolFormats`] tree, cross-validates it against the vendored
 //! `hook/sfcodes.h`, and `gen_core` round-trips that tree through
-//! `crates/rshooks-core/protocol_formats.json` — serializing it, then
-//! deserializing it back — exactly as it does for
+//! `crates/rshooks-core/protocol_formats.json`, exactly as it does for
 //! [`crate::ir::HookApiSpec`] and `hook_api.json`. The JSON is the real
-//! intermediate artifact of the pipeline, not a documentation side-effect of
-//! it: every later consumer (a view renderer, a transaction-builder
-//! renderer) reads *it*, never a re-parse of the vendored files.
+//! intermediate artifact of the pipeline: every later consumer (a view
+//! renderer, a transaction-builder renderer) reads it, never a re-parse of
+//! the vendored files.
 //!
 //! # What the artifact carries, and what it deliberately does not
 //!
@@ -21,8 +20,8 @@
 //!
 //! That last table is what makes **canonical wire order derivable**: the
 //! declared macro order is *not* canonical (Payment declares `sfDestination`,
-//! type 8, before `sfAmount`, type 6), and this artifact does not pretend it
-//! is. A consumer that needs canonical order sorts by [`SFieldDef::code`].
+//! type 8, before `sfAmount`, type 6). A consumer that needs canonical order
+//! sorts by [`SFieldDef::code`].
 //!
 //! Deliberately absent, because neither is format data: concrete
 //! `soeDEFAULT` default *values* (upstream encodes only "may be omitted"),
@@ -33,14 +32,13 @@
 //! # Versioning and the extension contract
 //!
 //! [`ProtocolFormats::version`] is [`PROTOCOL_FORMATS_VERSION`]. The
-//! contract for changing this artifact is **additive**: new fields may be
-//! added to any struct here (a consumer that does not know them ignores
-//! them) without a version bump, and any such addition must deserialize
-//! cleanly for a consumer written against an earlier shape. The version is
-//! bumped only when an existing field changes meaning, changes type, or
-//! disappears — the changes a consumer cannot absorb silently. Because the
-//! artifact is checked in and `cargo xtask gen-core --check` fails on drift,
-//! a change of either kind shows up as a reviewable diff.
+//! contract is **additive**: new fields may be added to any struct here
+//! without a version bump (a consumer that doesn't know them ignores them),
+//! and must deserialize cleanly for a consumer written against an earlier
+//! shape. The version bumps only when an existing field changes meaning,
+//! changes type, or disappears. The artifact is checked in and
+//! `cargo xtask gen-core --check` fails on drift, so either kind of change
+//! shows up as a reviewable diff.
 
 use std::collections::BTreeMap;
 
@@ -237,8 +235,8 @@ fn sfcode_value(spec: &ConstSpec) -> Result<u32> {
 /// The four fields whose serialized type names a whole container
 /// (`sfLedgerEntry`, `sfTransaction`, `sfValidation`, `sfMetadata`, IDs
 /// 10001..10004) are exempt: `sfcodes.h` is generated from the Hook API's
-/// point of view and deliberately omits them, since no hook ever reads a
-/// field of one of those types. They are still carried in the artifact.
+/// point of view and omits them, since no hook ever reads a field of one of
+/// those types. They are still carried in the artifact.
 fn cross_validate(decls: &[SFieldDecl], sfcodes: &[ConstSpec]) -> Result<Vec<u32>> {
     let mut header: BTreeMap<&str, u32> = BTreeMap::new();
     for spec in sfcodes {
@@ -412,8 +410,7 @@ pub fn build(
 #[cfg(test)]
 mod tests {
     //! Test code is exempt from the workspace's panic-freedom lints
-    //! (`docs/DESIGN.md` §8): panicking on a known-good fixture is the
-    //! normal, idiomatic way to assert behavior in a test.
+    //! (`docs/DESIGN.md` §8).
     #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
     use std::collections::BTreeSet;
@@ -456,11 +453,10 @@ mod tests {
         .unwrap_or_else(|e| panic!("{e:#}"))
     }
 
-    /// Lower bounds, not exact counts: the point is that the parser has not
-    /// silently dropped whole swathes of the corpus, and an upstream sync
-    /// that *adds* a type should not need a test edit. (On the currently
-    /// vendored `release` snapshot the real numbers are 74 / 34 / 329 / 28 —
-    /// the design doc's "≥75 / ≥40" predated a look at the actual files.)
+    /// Lower bounds, not exact counts: pins that the parser hasn't silently
+    /// dropped whole swathes of the corpus, without needing a test edit when
+    /// an upstream sync adds a type. (Currently vendored `release` snapshot:
+    /// 74 / 34 / 329 / 28.)
     #[test]
     fn the_real_corpus_parses_completely() {
         let f = corpus();
@@ -665,11 +661,10 @@ mod tests {
         );
     }
 
-    /// The artifact's central promise to a future transaction-builder
-    /// renderer: declared macro order is not canonical wire order, but the
-    /// artifact carries enough to derive the latter by sorting on
-    /// [`SFieldDef::code`] — and that sort is total, because no format names
-    /// the same field twice, not even across the common-field split.
+    /// Declared macro order is not canonical wire order, but sorting on
+    /// [`SFieldDef::code`] derives it — and that sort is total, since no
+    /// format names the same field twice, not even across the common-field
+    /// split.
     #[test]
     fn canonical_sfcode_order_is_derivable_by_sorting() {
         let f = corpus();
@@ -729,10 +724,8 @@ mod tests {
         );
     }
 
-    /// The versioning and additive-extension contract from the module docs:
-    /// a consumer compiled against today's shape must keep deserializing an
-    /// artifact that has *grown* fields, and must ignore rather than absorb
-    /// them.
+    /// A consumer compiled against today's shape must keep deserializing an
+    /// artifact that has *grown* fields, ignoring rather than absorbing them.
     #[test]
     fn the_version_and_additive_extension_contract_hold() {
         let f = corpus();
@@ -753,10 +746,8 @@ mod tests {
         );
     }
 
-    /// Rendering is a pure function of the artifact, and the artifact
-    /// survives the JSON hop the real pipeline takes: generating from the
-    /// in-memory IR and from the same IR round-tripped through JSON produces
-    /// byte-identical output.
+    /// Generating from the in-memory IR and from the same IR round-tripped
+    /// through JSON produces byte-identical output.
     #[test]
     fn generated_sources_are_deterministic() {
         let f = corpus();

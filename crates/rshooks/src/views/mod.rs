@@ -37,18 +37,15 @@
 //!
 //! The default includes active and pending formats. `active-amendments`
 //! narrows the surface to what is live; `all-amendments` exposes dormant
-//! formats for custom networks. If both are enabled, the wider surface wins
-//! so Cargo feature unification remains additive.
+//! formats for custom networks. If both are enabled, the wider surface wins.
 //!
 //! The `sfield` constants a view reads follow the same tiers, so a pending
 //! view and its pending-only fields compile together or not at all. The raw
-//! layers are untouched: `rshooks::raw::sfcodes` stays a complete mirror,
-//! and [`crate::tx_type::TxType`]/[`crate::ledger_entry_type::LedgerEntryType`]
-//! stay exhaustive, because decoding a wire value is a different job from
-//! offering an API.
+//! layers stay untouched and exhaustive regardless: `rshooks::raw::sfcodes`,
+//! [`crate::tx_type::TxType`], [`crate::ledger_entry_type::LedgerEntryType`].
 //!
-//! [`source`] is hand-written: it holds the whole of the views' logic, so
-//! the generated files contain declarations and nothing else.
+//! [`source`] is hand-written and holds the whole of the views' logic; the
+//! generated files contain declarations and nothing else.
 //!
 //! Views suit named fields of a known object type. Use [`crate::api::otxn`]
 //! or [`crate::slot_obj`] directly for dynamic objects and array traversal.

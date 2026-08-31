@@ -3,9 +3,8 @@
 //! `#[hooks] struct` and `#[hooks] impl` each embed a JSON declaration in the
 //! name of a deliberately dead wasm export, using the same
 //! prefix-plus-uppercase-hex mechanism as the `metadata!` carrier. This
-//! module extracts and validates both carriers and exposes the shared
-//! trigger/mask logic the sidecar and SetHook template generators both
-//! need.
+//! module extracts and validates both carriers, and exposes the shared
+//! trigger/mask logic used by the sidecar and SetHook template generators.
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -75,12 +74,10 @@ pub struct ParamDecl {
     pub value: String,
     /// Whether `required` was declared.
     pub required: bool,
-    /// Normalized token text of the `default = ...` expression, if
-    /// declared (`None` when no `default` was declared). Carrying the
-    /// actual expression text, not just whether one was present, keeps it
-    /// covered by the byte-equal discovery-vs-selected-build consistency
-    /// check (`assert_carriers_match`) and lets it appear in the per-entry
-    /// sidecar's transcribed `chain.decls`.
+    /// Normalized token text of the `default = ...` expression, or `None`
+    /// if not declared. Kept as text (not just presence) so it's covered by
+    /// `assert_carriers_match`'s byte-equal check and can appear in the
+    /// per-entry sidecar's transcribed `chain.decls`.
     pub default: Option<String>,
 }
 
@@ -119,11 +116,10 @@ pub struct EntryDecl {
     pub hook_can_emit: Option<Vec<String>>,
     /// The `description = "..."` attribute value, if declared.
     pub description: Option<String>,
-    /// Declared signature parameters
-    /// (`docs/PARAM_SIGNATURE_DESIGN.md` §1/§4) — extra `ident: Type`
-    /// arguments on the `#[hook(..)]` fn, in wire-index order. `#[serde(default)]`
-    /// so a carrier built before this feature (no `sig_params` key at all)
-    /// still parses, as an empty list.
+    /// Declared signature parameters (`docs/PARAM_SIGNATURE_DESIGN.md`
+    /// §1/§4) — extra `ident: Type` arguments on the `#[hook(..)]` fn, in
+    /// wire-index order. `#[serde(default)]` so a carrier with no
+    /// `sig_params` key still parses, as an empty list.
     #[serde(default)]
     pub sig_params: Vec<SigParamDecl>,
 }
@@ -282,10 +278,9 @@ const HOOKS_SCHEMA: &str = "rshooks-hooks-v2";
 
 /// Validates the two carriers' declared identity: exact schema tags, and
 /// that the impl carrier's target type matches the struct carrier's
-/// annotated struct — both carriers are untrusted input from the build's
-/// perspective (hand-decoded from wasm export names), so a mismatch here
-/// signals a version skew or a malformed/foreign carrier rather than a
-/// well-formed but merely invalid chain, and is reported distinctly from
+/// annotated struct. Both carriers are untrusted input (hand-decoded from
+/// wasm export names), so a mismatch here signals version skew or a
+/// malformed/foreign carrier, reported distinctly from
 /// [`validate_entries`]'s content-level checks.
 fn validate_carrier_identity(chain: &ChainCarrier, hooks: &EntriesCarrier) -> Result<()> {
     if chain.schema != CHAIN_SCHEMA {
@@ -315,9 +310,8 @@ fn validate_carrier_identity(chain: &ChainCarrier, hooks: &EntriesCarrier) -> Re
 }
 
 /// Validates a parsed impl carrier: non-empty, unique indices in `0..=9`
-/// (the macro already guarantees this; re-checked here since carriers are
-/// untrusted input from the build's perspective), known transaction-type
-/// names, and `HookName` character-count rules.
+/// (re-checked here since carriers are untrusted input), known
+/// transaction-type names, and `HookName` character-count rules.
 pub fn validate_entries(entries: &EntriesCarrier) -> Result<()> {
     if entries.entries.is_empty() {
         bail!("no #[hook] entries declared in the #[hooks] impl block");
@@ -432,17 +426,14 @@ pub struct TriggerMasks {
 
 /// The `on = all` `HookOn` mask: 64 zero hex digits.
 ///
-/// `hook_mask` cannot express this: passing `None` yields "field omitted"
-/// (the `on` attribute itself was never written), and passing `Some(&[])`
-/// yields the deny-all base mask (`FF..BF..FF`, i.e. "fires on nothing").
-/// Neither is "fires on everything except SetHook", which is what `on = all`
-/// means. Per the ordinary (active-low) HookOn bits, 0 means "do fire"; per
-/// the special-cased SetHook bit (byte 29, tt22), 0 also means "do NOT
-/// fire" (that bit is active-high). So the all-zero mask is exactly
-/// "fire on every transaction type except SetHook" — see the rshooks v0.2
-/// implementation contract §D for the derivation, and
-/// `on_all_mask_is_all_zero_and_fires_on_everything_but_sethook` below for
-/// the cross-check against `metadata::hook_mask`'s bit conventions.
+/// `hook_mask` cannot express this: `None` means "field omitted" (the `on`
+/// attribute was never written), and `Some(&[])` yields the deny-all base
+/// mask (`FF..BF..FF`, "fires on nothing") — neither is "fires on everything
+/// except SetHook", which is what `on = all` means. Ordinary (active-low)
+/// HookOn bits: 0 = do fire. The special-cased SetHook bit (byte 29, tt22)
+/// is active-high: 0 = do NOT fire. So the all-zero mask is exactly "fire on
+/// every transaction type except SetHook" — see the rshooks v0.2
+/// implementation contract §D for the derivation.
 #[must_use]
 pub fn hook_on_all_mask() -> String {
     "0".repeat(64)
@@ -630,13 +621,11 @@ mod tests {
         assert_eq!(mask.len(), 64);
         assert!(mask.chars().all(|c| c == '0'));
 
-        // Cross-check against `hook_mask`'s own bit conventions: the deny-all
-        // base value has every ordinary bit set to 1 (do NOT fire) and the
-        // SetHook bit (byte 29, low nibble) cleared to 0 within 0xBF (do NOT
-        // fire on SetHook either). `on = all` must invert every ordinary bit
-        // to 0 (DO fire) while leaving the SetHook bit at 0 (still do NOT
-        // fire) — which is exactly the all-zero mask, confirming the byte-29
-        // special case does not need separate handling here.
+        // Cross-check against `hook_mask`: the deny-all base has every
+        // ordinary bit set to 1 (do NOT fire) and the SetHook bit (byte 29,
+        // low nibble) cleared to 0 within 0xBF (do NOT fire on SetHook
+        // either). `on = all` inverts every ordinary bit to 0 (DO fire)
+        // while leaving the SetHook bit at 0 — exactly the all-zero mask.
         let deny_all = metadata::hook_mask(Some(&[]))
             .expect("hook_mask never fails for an empty list")
             .expect("deny-all base mask is never all-zero");
@@ -693,8 +682,6 @@ mod tests {
 
     #[test]
     fn entry_decl_without_sig_params_key_defaults_to_empty() {
-        // A carrier built before this feature has no `sig_params` key at
-        // all — `#[serde(default)]` must still parse it, as an empty list.
         let on = r#"{"form":"omitted","HookOn":null,"HookOnIncoming":null,"HookOnOutgoing":null}"#;
         let wasm = wasm_with_carriers(CHAIN_JSON, &entries_json(on, "null"));
         let carriers = extract_chain_carriers(&wasm, "vault").expect("extraction succeeds");

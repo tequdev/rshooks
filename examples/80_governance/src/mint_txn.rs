@@ -150,21 +150,17 @@ impl MintTxn {
     }
 
     /// Appends a precomputed STObject/STArray field header (see
-    /// [`codec::field_header`] — this covers ordinary fields, the
-    /// `GenesisMint` object-start marker, and the `GenesisMints`
-    /// array-start marker uniformly, since all three are just a field
-    /// header whose `(type, field)` happen to fall in the object/array
-    /// ranges). Takes the header **already computed** (see the `HDR_*`
-    /// constants below) rather than an `sfXxx` constant to derive one from
-    /// at runtime: `field_header` is only documented as safe to call from a
-    /// `const` context (its internal range checks become compile-time
-    /// assertions there, never runtime code) — calling it at runtime here as
-    /// `field_header(sfXxx)` compiled to a genuine, unreachable-in-
-    /// practice assertion-failure path whose panic-message formatting
-    /// pulled in enough machinery to blow this hook's nesting budget once
-    /// inlined (see `crate`'s module doc comment). Every header this
-    /// module ever writes is for a compile-time-constant field, so
-    /// precomputing them as `const`s has no runtime cost either way.
+    /// [`codec::field_header`] — this covers ordinary fields and the
+    /// `GenesisMint`/`GenesisMints` object/array-start markers uniformly,
+    /// since all three are just a header whose `(type, field)` fall in
+    /// those ranges). Takes the header already computed (the `HDR_*`
+    /// constants below) rather than deriving one from an `sfXxx` constant
+    /// at runtime: `field_header`'s range checks are compile-time
+    /// assertions in a `const` context, but at runtime compile to a
+    /// genuine (unreachable-in-practice) panic path whose message
+    /// formatting blows this hook's nesting budget once inlined. Every
+    /// header this module writes is for a compile-time-constant field, so
+    /// precomputing costs nothing either way.
     #[inline(always)]
     fn push_field_header(&mut self, header: ([u8; 3], usize)) -> usize {
         let (hdr, hdr_len) = header;

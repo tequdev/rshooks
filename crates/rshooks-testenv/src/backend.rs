@@ -227,26 +227,21 @@ impl HostBackend for Backend {
         }
     }
 
-    // Ported against `HookAPI::hook_param` (`Xahau/xahaud`, branch `dev`,
-    // `src/xrpld/app/hook/detail/HookAPI.cpp:1672-1698`, fetched for P2-E):
-    // overrides for the *currently invoked* position's hook hash are
-    // checked first — an entry present there (even an empty one) answers
-    // the call outright, `DOESNT_EXIST` for an empty value ("allow
-    // overrides to 'delete' parameters", matching upstream's own comment)
-    // and never falling through to the seeded `hook_params` below. This
-    // reduces xahaud's real chain-forward semantics (any *later* hook in
-    // the same chain execution sees a param override set by an *earlier*
-    // one, keyed by the setting hook's own `hookHash` argument) to this
-    // harness's explicit-invocation model: there is no chain, so "the
-    // currently invoked position's hash" (`World::current_hook_hash`,
-    // i.e. `world.hook_hashes[world.hook_pos]` when seeded) stands in for
-    // "the hook whose params these are" — an override only takes effect on
-    // a *later, separate* `TestEnv::invoke` call seeded with the same
-    // `hook_pos`/`hook_hash`, never within the invocation that set it (see
-    // `crate::host::control`'s module doc comment for the commit-on-accept
-    // timing this implies). No `current_hook_hash()` at all (position never
-    // seeded a hash) skips the override lookup entirely, per this method's
-    // own "absent -> no override lookup" contract.
+    // Ported against `HookAPI::hook_param` (`Xahau/xahaud` `dev`,
+    // `src/xrpld/app/hook/detail/HookAPI.cpp:1672-1698`): overrides for the
+    // *currently invoked* position's hook hash are checked first — a
+    // present entry (even empty) answers the call outright, `DOESNT_EXIST`
+    // for an empty value ("allow overrides to 'delete' parameters",
+    // matching upstream), never falling through to seeded `hook_params`.
+    // Reduces xahaud's chain-forward semantics (a later hook in the chain
+    // sees an override an earlier one set, keyed by the setting hook's own
+    // `hookHash`) to this harness's explicit-invocation model: "the
+    // currently invoked position's hash" (`World::current_hook_hash`)
+    // stands in for "the hook whose params these are" — an override only
+    // takes effect on a later, separate `invoke` call seeded with the same
+    // `hook_pos`/`hook_hash` (see `crate::host::control`'s module doc for
+    // the commit-on-accept timing this implies). No seeded hash at the
+    // position skips the override lookup entirely.
     fn hook_param(&self, name: &[u8]) -> Result<Vec<u8>, i64> {
         let w = self.world.borrow();
         if let Some(hash) = w.current_hook_hash() {
@@ -340,11 +335,10 @@ impl HostBackend for Backend {
         let nonce = self.ctx.borrow_mut().next_details_nonce();
         // This harness never populates `EmitCallback` — every emitted blob
         // is built with `callback: None`, regardless of whether the
-        // currently invoked entry declares a `#[cbak]` body. This is a
-        // real, permanent limitation (not a landed-later gap): an
-        // `invoke_cbak` context built from such a blob therefore always
-        // differs from a genuine on-chain callback in that one field — see
-        // the book's "what this harness does not model" list.
+        // currently invoked entry declares a `#[cbak]` body. Permanent
+        // limitation: an `invoke_cbak` context built from such a blob
+        // always differs from a genuine on-chain callback in that one
+        // field — see the book's "what this harness does not model" list.
         let details = build_etxn_details(&EmitDetailsInputs {
             generation,
             burden,
@@ -377,11 +371,11 @@ impl HostBackend for Backend {
     }
 
     fn emit(&self, tx_blob: &[u8]) -> Result<[u8; 32], i64> {
-        // Each `RefCell` read below is taken into an owned value on its own
-        // statement, never as a `match`/`if` scrutinee — a scrutinee's
-        // temporary `Ref` is kept alive for the whole `match`/`if`
-        // expression (Rust's temporary-scope rule), which would still be
-        // borrowed when an arm below needs `borrow_mut()`.
+        // Each `RefCell` read below is taken into an owned value on its
+        // own statement, never as a `match`/`if` scrutinee: a scrutinee's
+        // temporary `Ref` stays alive for the whole expression (Rust's
+        // temporary-scope rule) and would still be borrowed when an arm
+        // below needs `borrow_mut()`.
         let require_result = self.ctx.borrow().require_reserved();
         let reserved = match require_result {
             Ok(r) => r,
@@ -566,35 +560,27 @@ impl HostBackend for Backend {
         crate::host::keylet::util_keylet(keylet_type, args)
     }
 
-    // `ledger_keylet` needs `World` access (a seeded ledger-object search),
-    // unlike every other P2-C function above — see `host::util`'s module
-    // doc comment for why it stays here rather than in a `host::` submodule
-    // (mirrors the state family's own `self.world.borrow()` pattern).
-    // Search rule: the smallest seeded 34-byte keylet whose 32-byte key is
-    // strictly greater than `low`'s and less-than-or-equal-to `high`'s (the
-    // half-open-below/closed-above range `(low, high]`) — ported from
-    // `HookAPI::ledger_keylet` (`Xahau/xahaud`, branch `dev`,
+    // `ledger_keylet` needs `World` access (seeded ledger-object search),
+    // unlike other P2-C functions above — see `host::util`'s module doc
+    // for why it stays here (mirrors the state family's own
+    // `self.world.borrow()` pattern). Search rule: the smallest seeded
+    // 34-byte keylet whose 32-byte key is strictly greater than `low`'s
+    // and `<=` `high`'s (half-open-below/closed-above `(low, high]`) —
+    // ported from `HookAPI::ledger_keylet` (`Xahau/xahaud` `dev`,
     // `src/xrpld/app/hook/detail/HookAPI.cpp`), which calls
-    // `view().succ(klLo.key, klHi.key.next())`: `View::succ` finds the
-    // smallest key strictly greater than its first argument that is less
-    // than its (exclusive) second argument, and passing `klHi.key.next()`
-    // (the immediate successor of `high`) as that exclusive bound makes the
-    // overall range inclusive of `high` itself. This port compares directly
-    // against `high` (`<=`) instead of reproducing `.next()`'s wraparound
-    // arithmetic on an all-`0xFF` key — an intentional simplification for
-    // an edge case unreachable in practice (a real keylet hash landing on
-    // the maximum possible 256-bit value), noted here per this stage's
-    // "state the assumption" policy for details not pinned by a source (1-3
-    // list in the design doc). `low`/`high` must be well-formed 34-byte
-    // keylets — a length `< 34` is `TOO_SMALL`, `> 34` is `TOO_BIG`
-    // (upstream's own wasm-wrapper gate, `applyHook.cpp:2841-2844`: `<`
-    // checked for `lread_len`/`hread_len`/`write_len` together before `>`
-    // is checked for all three) — and share the same 2-byte type prefix
+    // `view().succ(klLo.key, klHi.key.next())`: `succ` finds the smallest
+    // key strictly greater than its first argument and less than its
+    // (exclusive) second, and passing `high.next()` as that bound makes
+    // the range inclusive of `high`. This port compares directly against
+    // `high` (`<=`) instead of reproducing `.next()`'s wraparound on an
+    // all-`0xFF` key — a stated simplification for an edge case
+    // unreachable in practice (a keylet hash at the max 256-bit value).
+    // `low`/`high` must be well-formed 34-byte keylets — `< 34` is
+    // `TOO_SMALL`, `> 34` is `TOO_BIG` (upstream's wasm-wrapper gate,
+    // `applyHook.cpp:2841-2844`) — sharing the same 2-byte type prefix
     // (`DOES_NOT_MATCH` otherwise, matching `klLo.type != klHi.type`); the
-    // output keylet's type prefix is always taken from `low` (`Keylet
-    // kl_out{klLo.type, *found}` — never looked up from the found object
-    // itself, since `succ()` searches the *global* key space with no type
-    // filter).
+    // output's type prefix is always taken from `low` (`succ()` searches
+    // the *global* key space with no type filter).
     fn ledger_keylet(&self, low: &[u8], high: &[u8]) -> Result<Vec<u8>, i64> {
         if low.len() < 34 || high.len() < 34 {
             return Err(rshooks_core::TOO_SMALL);
@@ -626,14 +612,12 @@ impl HostBackend for Backend {
     }
 
     // `trace_float` needs `World` access (captures into `World::traces`),
-    // so — like `trace`/`trace_num` above — it lands directly here rather
-    // than in a `host::` submodule; `host::control`'s module doc comment
-    // notes the same for this function specifically. Stores the message
-    // verbatim and the raw XFL `i64` bit pattern as its big-endian 8-byte
-    // encoding, mirroring `trace_num`'s own convention exactly (a full
-    // xahaud-faithful "Float mantissa*10^(exponent)" text rendering is not
-    // reproduced — design doc §4 marks that as not required, only that the
-    // raw value itself is captured for a test to inspect/decode).
+    // so it lands here rather than a `host::` submodule, like `trace`/
+    // `trace_num` above. Stores the message verbatim and the raw XFL `i64`
+    // bit pattern as big-endian 8 bytes, mirroring `trace_num`'s
+    // convention (design §4: a full xahaud-faithful "Float
+    // mantissa*10^(exponent)" text rendering is not required, only that
+    // the raw value is captured for a test to decode).
     fn trace_float(&self, msg: &[u8], value: i64) -> i64 {
         self.world
             .borrow_mut()
@@ -764,32 +748,29 @@ impl HostBackend for Backend {
     // methods, so it lives here rather than in a `host::` submodule (see
     // `host::mod`'s module doc comment).
     //
-    // Ported against `Xahau/xahaud`, branch `dev`,
-    // `src/xrpld/app/hook/detail/HookAPI.cpp:382-495`
-    // (`HookAPI::prepare`) — fetched and read directly for this stage:
+    // Ported against `HookAPI::prepare` (`Xahau/xahaud` `dev`,
+    // `src/xrpld/app/hook/detail/HookAPI.cpp:382-495`):
     //
     // - Requires a prior `etxn_reserve` (`PREREQUISITE_NOT_MET` otherwise,
     //   `HookAPI.cpp:387-388`).
     // - A template that fails to parse is `INVALID_ARGUMENT`
     //   (`HookAPI.cpp:393-404`/`463-464`/`483-484` — **not** `PARSE_ERROR`,
-    //   which this function never returns, matching the cited source).
+    //   which this function never returns).
     // - Always overwritten, unconditionally (`HookAPI.cpp:407-419`):
     //   `Sequence = 0`, `SigningPubKey` = empty, `Account` = the hook's own
-    //   account (never validated against a pre-existing value — always
-    //   clobbered).
+    //   account (never checked against a pre-existing value).
     // - Filled only if absent (`HookAPI.cpp:421-453`):
     //   `FirstLedgerSequence = ledger_seq + 1`,
     //   `LastLedgerSequence = ledger_seq + 5` (inlined literals, no named
-    //   constant upstream — matches this repo's own `txn.rs`
-    //   `prepare_for_emit`, independently pinned the same way),
+    //   constant upstream — matches this repo's `txn.rs`
+    //   `prepare_for_emit`, pinned independently the same way),
     //   `EmitDetails` = this invocation's `etxn_details()` bytes (already
-    //   fully-formed field bytes — `crate::details::build_etxn_details`
-    //   builds header + object + terminator in one call, so no extra
-    //   wrapping is applied here).
-    // - `Fee` = `etxn_fee_base` of the blob *with* `EmitDetails` already
-    //   spliced in but `Fee` not yet set (`HookAPI.cpp:475-479` — `Fee` is
-    //   computed and overwritten last, deliberately after `EmitDetails`,
-    //   since the fee call needs the `EmitDetails`-sized blob).
+    //   fully-formed — `crate::details::build_etxn_details` builds header
+    //   + object + terminator in one call).
+    // - `Fee` = `etxn_fee_base` of the blob with `EmitDetails` already
+    //   spliced in but `Fee` not yet set (`HookAPI.cpp:475-479` — computed
+    //   and overwritten last, since the fee call needs the
+    //   `EmitDetails`-sized blob).
     fn prepare(&self, template: &[u8]) -> Result<Vec<u8>, i64> {
         self.ctx.borrow().require_reserved()?;
 
@@ -859,14 +840,14 @@ fn emplace_value(blob: &[u8], code: u32, value: &[u8]) -> Result<Vec<u8>, i64> {
 }
 
 /// Boundary tests for the checked `u64` → `i64` conversions this file
-/// applies to protocol values (design review FIX 7): values guaranteed
-/// valid by [`crate::TestEnv`]'s now-validating builders (`otxn_emitted`,
-/// `base_fee_drops`) pass through unchanged at the `i64::MAX` boundary, and
-/// a burden/reserve product that still overflows past `i64::MAX` (despite
-/// fitting in `u64`) reports `FEE_TOO_LARGE` rather than wrapping. White-box
-/// (constructs `Backend` directly over a fresh `World`/`InvocationContext`)
-/// so `reserved` can be pinned precisely, independent of any one `#[hooks]`
-/// chain's hardcoded `etxn_reserve` call.
+/// applies to protocol values: values guaranteed valid by
+/// [`crate::TestEnv`]'s validating builders (`otxn_emitted`,
+/// `base_fee_drops`) pass through unchanged at the `i64::MAX` boundary,
+/// and a burden/reserve product that overflows past `i64::MAX` (despite
+/// fitting in `u64`) reports `FEE_TOO_LARGE` rather than wrapping.
+/// White-box (constructs `Backend` directly over a fresh
+/// `World`/`InvocationContext`) so `reserved` can be pinned precisely,
+/// independent of any `#[hooks]` chain's hardcoded `etxn_reserve` call.
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::indexing_slicing)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8

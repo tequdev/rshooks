@@ -22,12 +22,12 @@ pub(crate) fn encode_type_section(
 }
 
 /// Encodes an import section from `imports`, in declaration order. The
-/// Table/Memory/Global arms, and the Tag/FuncExact hard errors, are
-/// identical across every pass; `func_entity` decides the Func arm: it is
-/// called with the function import's ordinal (0-based, among function
-/// imports only) and its original type index, and returns the entity type
-/// to import, or `None` to drop this import entirely (the cleaner's GC
-/// case). Callers append any extra imports (`_g`) after this returns.
+/// Table/Memory/Global arms and the Tag/FuncExact hard errors are identical
+/// across every pass; `func_entity` decides the Func arm: called with the
+/// function import's ordinal (0-based, among function imports only) and its
+/// original type index, returning the entity type to import, or `None` to
+/// drop this import (the cleaner's GC case). Callers append any extra
+/// imports (`_g`) after this returns.
 pub(crate) fn encode_import_section(
     imports: &[wasmparser::Import],
     mut func_entity: impl FnMut(u32, u32) -> Result<Option<wasm_encoder::EntityType>>,

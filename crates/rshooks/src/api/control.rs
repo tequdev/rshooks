@@ -7,10 +7,9 @@ use crate::error::{Result, res};
 /// message and an application-defined return code.
 ///
 /// On the real wasm host this call never returns (`accept` unwinds hook
-/// execution). On host builds the underlying stub returns normally, so this
-/// falls back to an explicit infinite loop purely to honor the `-> !`
-/// signature without invoking real undefined behavior; that branch is
-/// reachable only in host tests/doctests, never in a real wasm hook.
+/// execution). On host builds the stub returns normally, so this falls back
+/// to an infinite loop purely to honor the `-> !` signature without
+/// invoking real UB — reachable only in host tests/doctests.
 ///
 /// # Examples
 ///
@@ -21,9 +20,8 @@ use crate::error::{Result, res};
 /// ```
 #[inline(always)]
 pub fn accept(msg: &[u8], code: i64) -> ! {
-    // A backend's `accept` is `-> !`: if one is installed, this call either
-    // diverges (the common case) or, with no backend installed, evaluates
-    // to `None` and falls through to the raw call below unchanged.
+    // A backend's `accept` is `-> !`: if installed, this diverges; with no
+    // backend, `with_backend` returns `None` and falls through unchanged.
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
     {
         rshooks_core::backend::with_backend(|b| {
@@ -39,9 +37,7 @@ pub fn accept(msg: &[u8], code: i64) -> ! {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        // Host-only: the stub `accept` returns normally, so an explicit
-        // infinite loop is the only panic-free way to honor `-> !` here.
-        // Never reached in a real wasm hook (the arm above is used there).
+        // Host-only fallback for `-> !`; never reached in a real wasm hook.
         #[allow(clippy::empty_loop)]
         loop {}
     }

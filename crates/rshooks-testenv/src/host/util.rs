@@ -1,46 +1,36 @@
 //! `util_sha512h`/`util_accid`/`util_raddr`/`util_verify` semantics (P2-C —
 //! `.claude/design/TESTENV_PHASE2_DESIGN.md` §4 "util_* and ledger_keylet",
-//! stage plan §7). `util_keylet` itself lives in [`super::keylet`], not here
-//! (§0's family table lists it under "util (5)", but the implementation is
-//! large enough on its own, 26 keylet types plus
-//! [`rshooks_core::backend::KeyletArg`] resolution, to warrant its own
-//! module). `ledger_keylet` needs [`crate::world::World`] access (a seeded
-//! ledger-object search) this module's other functions don't, so it lives
-//! directly in `crate::backend`'s `impl HostBackend for Backend` block —
-//! see that file's own module doc comment.
+//! stage plan §7). `util_keylet` lives in [`super::keylet`] instead (26
+//! keylet types plus [`rshooks_core::backend::KeyletArg`] resolution
+//! warrant their own module). `ledger_keylet` needs [`crate::world::World`]
+//! access, so it lives in `crate::backend`'s `impl HostBackend for Backend`
+//! block instead — see that file's own module doc comment.
 //!
 //! Every function here is a direct port of xahaud's own implementation
-//! (`Xahau/xahaud`, branch `dev`), not a reinterpretation of the `hook-api`
-//! skill's prose summary — sources consulted:
+//! (`Xahau/xahaud`, branch `dev`), sourced from:
 //!
 //! - `src/xrpld/app/hook/detail/HookAPI.cpp` (`HookAPI::util_raddr`/
-//!   `util_accid`/`util_verify`/`util_sha512h`) — every function's own
-//!   validation order and error codes.
+//!   `util_accid`/`util_verify`/`util_sha512h`) — validation order and error
+//!   codes.
 //! - `src/libxrpl/protocol/PublicKey.cpp` (`ripple::verify`, `publicKeyType`,
-//!   `ed25519Canonical`) — [`util_verify`]'s exact digest/key-type dispatch,
-//!   confirmed from source rather than assumed: `HookAPI::util_verify` calls
-//!   `ripple::verify(pubkey, data, sig, /* mustBeFullyCanonical */ false)`,
-//!   which for a `0x02`/`0x03`-prefixed (secp256k1) key verifies the
-//!   **SHA-512-Half of `data`** (`sha512Half(m)`, i.e. exactly
-//!   [`util_sha512h`]'s own primitive applied to the payload — not the raw
-//!   payload, and not a hash of the signature), and for a `0xED`-prefixed
-//!   (ed25519) key verifies the **raw, unhashed `data`** directly (Ed25519
-//!   already hashes internally as part of the algorithm). `false` for
-//!   `mustBeFullyCanonical` means both "canonical" and "fully canonical"
-//!   secp256k1 signature forms (see `ecdsaCanonicality` in `PublicKey.cpp`)
-//!   are accepted — ECDSA's `(R, S)`/`(R, G-S)` malleable-pair symmetry means
-//!   a plain, unmodified verify against the parsed signature already accepts
-//!   both forms with no extra normalization step needed (this port relies on
-//!   that standard ECDSA property rather than reimplementing
-//!   `secp256k1_ecdsa_signature_normalize`).
+//!   `ed25519Canonical`) — [`util_verify`]'s digest/key-type dispatch:
+//!   `HookAPI::util_verify` calls `ripple::verify(pubkey, data, sig,
+//!   /* mustBeFullyCanonical */ false)`, which for a `0x02`/`0x03`-prefixed
+//!   (secp256k1) key verifies the **SHA-512-Half of `data`**
+//!   ([`util_sha512h`]'s own primitive, not the raw payload or a hash of the
+//!   signature), and for a `0xED`-prefixed (ed25519) key verifies the
+//!   **raw, unhashed `data`** directly (Ed25519 hashes internally).
+//!   `mustBeFullyCanonical = false` accepts both "canonical" and "fully
+//!   canonical" secp256k1 forms (`ecdsaCanonicality` in `PublicKey.cpp`) —
+//!   ECDSA's `(R, S)`/`(R, G-S)` malleable-pair symmetry means a plain,
+//!   unmodified verify already accepts both, so this port needs no
+//!   `secp256k1_ecdsa_signature_normalize`-style step.
 //! - `rshooks_macros::base58` (`crates/rshooks-macros/src/base58.rs`) — the
 //!   XRPL base58 alphabet and base58check decode algorithm, copied here
-//!   (not depended on: that crate is proc-macro-only, compile-time-only, and
-//!   cannot be a runtime dependency of this crate — see that module's own
-//!   doc comment for the same reasoning applied to `account_id!`). The
-//!   encode direction (needed here for [`util_raddr`], which that
-//!   proc-macro crate has no need for) is new, but uses the identical
-//!   alphabet/checksum convention.
+//!   rather than depended on (that crate is proc-macro-only,
+//!   compile-time-only — see its own doc comment for the same reasoning
+//!   applied to `account_id!`). The encode direction ([`util_raddr`]) is new
+//!   but uses the identical alphabet/checksum convention.
 
 use std::string::String;
 use std::vec::Vec;
@@ -79,9 +69,8 @@ pub(crate) fn util_sha512h(data: &[u8]) -> [u8; 32] {
 // ---------------------------------------------------------------------
 
 /// XRPL's base58 alphabet — NOT Bitcoin's (same 58 symbols, different
-/// order). Copied verbatim from `rshooks_macros::base58::ALPHABET` — see
-/// this module's doc comment for why that crate can't be a runtime
-/// dependency here.
+/// order). Copied verbatim from `rshooks_macros::base58::ALPHABET` (see the
+/// module doc comment for why that crate can't be a runtime dependency).
 const ALPHABET: &[u8; 58] = b"rpshnaf39wBUDNEGHJKLM4PQRST7VWXYZ2bcdeCg65jkm8oFqi1tuvAxyz";
 
 /// 1 version byte + 20-byte `AccountID` payload + 4-byte checksum.
@@ -90,12 +79,9 @@ const DECODED_LEN: usize = 25;
 /// Plain base58 decode (XRPL alphabet) — no length/checksum validation,
 /// that's [`util_accid`]'s job. Ported from
 /// `rshooks_macros::base58::base58_decode`.
-// `carry` accumulates a base-256 digit (`u8` promoted to `u32`) times the
-// constant 58 plus a byte already known `< 256` — bounded well below
-// `u32::MAX` for any realistic input length (this function is only ever
-// called on a `util_accid` argument already capped at 49 bytes); matches
-// `rshooks_macros::base58::base58_decode`'s own unannotated arithmetic
-// (that proc-macro crate runs under a different, host-only lint profile).
+// `carry` (a `u32`) accumulates a base-256 digit times 58 plus a byte
+// `< 256` — bounded well below `u32::MAX` since callers cap input at 49
+// bytes (see `util_accid`).
 #[allow(clippy::arithmetic_side_effects)]
 fn base58_decode(s: &str) -> Option<Vec<u8>> {
     let mut num: Vec<u8> = Vec::new();
@@ -130,9 +116,9 @@ fn base58_decode(s: &str) -> Option<Vec<u8>> {
 /// of [`base58_decode`]. Not present in `rshooks_macros::base58` (that
 /// proc-macro crate only ever needs to decode a source-code literal) — new
 /// here, but the same alphabet/convention.
-// `carry` is bounded the same way as `base58_decode`'s (only ever called on
-// a 20-byte `AccountID`); `ALPHABET[d as usize]` is safe because `d` is
-// always `carry % 58`, so `< 58 == ALPHABET.len()`.
+// `carry` is bounded as in `base58_decode` (only ever called on a 20-byte
+// `AccountID`); `ALPHABET[d as usize]` is safe since `d` is always
+// `carry % 58`, so `< 58 == ALPHABET.len()`.
 #[allow(clippy::arithmetic_side_effects, clippy::indexing_slicing)]
 fn base58_encode(bytes: &[u8]) -> String {
     let leading_zeros = bytes.iter().take_while(|&&b| b == 0).count();
@@ -164,15 +150,12 @@ fn base58_encode(bytes: &[u8]) -> String {
 /// `HookAPI::util_accid` (`decodeBase58Token(raddress, TokenType::
 /// AccountID)`; empty result -> `INVALID_ARGUMENT`) plus the wasm-facing
 /// wrapper's own `read_len > 49 -> TOO_BIG` bound (`hook-api` skill's
-/// `utility.md`; not shown in the `HookAPI::` C++ snippet itself, which
-/// operates on an already-bounded `std::string`, but this backend receives
-/// the raw resolved bytes before any such bound has been applied, so it is
-/// enforced here).
-// `decoded[0]`/`decoded[0..21]`/`decoded[21..25]`/`decoded[1..21]` are all
-// only reached after the `decoded.len() != DECODED_LEN` (25) check
-// immediately above returns early — every index/slice below is in bounds
-// by construction (mirrors `rshooks_macros::base58::decode`'s identical
-// reasoning for the same checks).
+/// `utility.md`): this backend receives the raw resolved bytes before that
+/// bound is applied elsewhere, so it's enforced here too.
+// `decoded[0]`/`decoded[0..21]`/`decoded[21..25]`/`decoded[1..21]` are only
+// reached after the `decoded.len() != DECODED_LEN` (25) check above returns
+// early, so every index/slice below is in bounds by construction (mirrors
+// `rshooks_macros::base58::decode`'s identical reasoning).
 #[allow(clippy::indexing_slicing)]
 pub(crate) fn util_accid(r_address: &[u8]) -> Result<Vec<u8>, i64> {
     if r_address.len() > 49 {
@@ -220,10 +203,9 @@ fn sha256(data: &[u8]) -> [u8; 32] {
 // ---------------------------------------------------------------------
 
 /// Big-endian Ed25519 subgroup order `L`, verbatim from `PublicKey.cpp`'s
-/// `ed25519Canonical` — the malleability check xahaud applies to an Ed25519
-/// signature's `S` component *before* calling into the actual Ed25519
-/// verify routine (so a non-canonical `S` is rejected even if the
-/// underlying primitive would otherwise accept it).
+/// `ed25519Canonical` — the malleability check xahaud applies to a
+/// signature's `S` component before the actual Ed25519 verify, rejecting a
+/// non-canonical `S` even where the underlying primitive would accept it.
 const ED25519_ORDER_BE: [u8; 32] = [
     0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x14, 0xDE, 0xF9, 0xDE, 0xA2, 0xF7, 0x9C, 0xD6, 0x58, 0x12, 0x63, 0x1A, 0x5C, 0xF5, 0xD3, 0xED,
@@ -232,9 +214,9 @@ const ED25519_ORDER_BE: [u8; 32] = [
 /// `PublicKey.cpp::ed25519Canonical`: `sig` must be exactly 64 bytes, and
 /// its `S` half (`sig[32..64]`, stored little-endian, reversed to
 /// big-endian here) must be strictly less than [`ED25519_ORDER_BE`].
-// `sig[32..64]` is reached only after the `sig.len() != 64` check just
-// above; `s_be[i]` is safe because `i` ranges over `sig[32..64]`'s own 32
-// elements via `.enumerate()`, so `i` is always `< 32 == s_be.len()`.
+// `sig[32..64]` is reached only after the `sig.len() != 64` check above;
+// `s_be[i]` is safe since `i` ranges over `sig[32..64]`'s 32 elements via
+// `.enumerate()`, so `i` is always `< 32 == s_be.len()`.
 #[allow(clippy::indexing_slicing)]
 fn ed25519_canonical(sig: &[u8]) -> bool {
     if sig.len() != 64 {
@@ -292,11 +274,11 @@ fn verify_ed25519(data: &[u8], signature: &[u8], public_key: &[u8]) -> bool {
 }
 
 /// secp256k1 branch of `ripple::verify`: DER-parse the signature (a parse
-/// failure returns `false`, not an error — see the module doc comment), then
-/// ECDSA-verify it against `sha512Half(data)` (not `data` itself).
-/// `mustBeFullyCanonical = false` needs no explicit low-`S` normalization
-/// here — see the module doc comment for why a plain verify already accepts
-/// both malleable forms.
+/// failure returns `false`, not an error), then ECDSA-verify it against
+/// `sha512Half(data)` (not `data` itself). No explicit low-`S`
+/// normalization is needed for `mustBeFullyCanonical = false` — see the
+/// module doc comment for why a plain verify already accepts both
+/// malleable forms.
 fn verify_secp256k1(data: &[u8], signature: &[u8], public_key: &[u8]) -> bool {
     let Ok(verifying_key) = Secp256k1VerifyingKey::from_sec1_bytes(public_key) else {
         return false;
@@ -436,7 +418,7 @@ mod tests {
 
         let signing_key = SigningKey::from_bytes(&[9u8; 32].into()).unwrap();
         let verifying_key = signing_key.verifying_key();
-        let public_key = verifying_key.to_encoded_point(true); // compressed, 33 bytes
+        let public_key = verifying_key.to_encoded_point(true);
         assert_eq!(public_key.as_bytes().len(), 33);
 
         let data = b"rshooks testenv secp256k1 vector";

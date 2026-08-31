@@ -5,49 +5,38 @@
 //! Hook API parameter name** — satisfying
 //! `rshooks::convert::TypedParamName`'s `Self: ToBytes` supertrait bound,
 //! so a hand-written `TypedParamName` impl can pair it with a value type
-//! directly. See
-//! `rshooks::ParamName`'s doc comment (the public-facing re-export site)
-//! for the full user-facing writeup, grammar, and worked/compile-fail
-//! examples — this module only implements the codegen.
+//! directly. See `rshooks::ParamName`'s doc comment for the full
+//! user-facing writeup, grammar, and worked/compile-fail examples — this
+//! module only implements the codegen.
 //!
 //! # Why a separate derive, not `#[derive(HookData)]`?
 //!
 //! A hook-state key/value (`HookKey`/`HookData`) and a Hook API parameter
-//! *name* share the same "fixed-offset struct" shape, but are genuinely
-//! different concepts, and `ParamName` is deliberately narrower:
+//! *name* share the same fixed-offset struct shape but are different
+//! concepts:
 //!
 //! - A parameter name is only ever **written** — handed to
 //!   `hook_param`/`otxn_param` to locate a value, never read back and
-//!   decoded as itself. So `ParamName` generates only
-//!   `rshooks::convert::ToBytes` (the encoding half) — no `FromBytes`,
-//!   no `FixedRead`, no inherent `LEN` const or layout doc table. Trying
-//!   to read a `#[derive(ParamName)]` type back as a value (or use it
-//!   where `hook_param_typed`/`otxn_param_typed` expect a value type) fails to
-//!   compile with an ordinary rustc trait-bound error naming the missing
-//!   trait — the same "don't implement our own type checker, let rustc's
-//!   error do the work" convention `HookData` already follows for a field
-//!   of the wrong type. The value-side counterpart is
-//!   `#[derive(ParamValue)]` (see [`crate::param_value`]).
+//!   decoded as itself. So `ParamName` generates only `ToBytes` — no
+//!   `FromBytes`, no `FixedRead`, no inherent `LEN` const or layout doc
+//!   table. Trying to read a `#[derive(ParamName)]` type back as a value
+//!   fails to compile with an ordinary rustc trait-bound error naming the
+//!   missing trait. The value-side counterpart is `#[derive(ParamValue)]`
+//!   (see [`crate::param_value`]).
 //! - A Hook API parameter name has its own length bound the Hook API
 //!   itself enforces (`hook_api.h`: 1 to 32 bytes — see
 //!   `rshooks::convert::PARAM_NAME_MAX_LEN`), distinct from a hook state
-//!   key's *fixed* 32 bytes (always zero-padded — see
-//!   [`crate::hook_key`]) or a hook state *value*'s lack of any size cap
-//!   at all. `ParamName` bakes this in as an unconditional compile-time
-//!   assert generated alongside the `ToBytes` impl — a
-//!   `#[derive(ParamName)]` struct that encodes to 0 or to 33+ bytes fails
-//!   to compile *at its own definition*, not only later when something
-//!   tries to actually use it as a parameter name.
-//!
-//! See `rshooks::HookData`'s/`rshooks::HookKey`'s doc comments for the
-//! reciprocal note (use those for hook-state values/keys, `ParamName` for
-//! parameter names, `ParamValue` for parameter values).
+//!   key's fixed 32 bytes (see [`crate::hook_key`]) or a hook state
+//!   value's lack of any size cap. `ParamName` bakes this in as a
+//!   compile-time assert generated alongside the `ToBytes` impl, so a
+//!   struct that encodes to 0 or to 33+ bytes fails to compile at its own
+//!   definition.
 //!
 //! # Why hand-rolled, not `syn`/`quote`; codegen strategy
 //!
-//! Identical rationale to [`crate::hook_data`] (see that module's doc
-//! comment) — struct-shape parsing is shared via [`crate::shape`]; only the
-//! `ToBytes`-only-plus-length-assert generation differs.
+//! Identical rationale to [`crate::hook_data`] — struct-shape parsing is
+//! shared via [`crate::shape`]; only the `ToBytes`-only-plus-length-assert
+//! generation differs.
 
 use crate::err;
 use crate::shape::{StructShape, parse_struct};
@@ -134,15 +123,13 @@ impl ::rshooks::convert::ToBytes for {name} {{
     }
 }
 
-/// Generates the compile-time (monomorphized) assert that `<name as
-/// ToBytes>::MAX_LEN` is `1..=PARAM_NAME_MAX_LEN` — the Hook API's own
-/// parameter-name length bound (`name` must already have a `ToBytes` impl
-/// in scope).
+/// Generates the compile-time assert that `<name as ToBytes>::MAX_LEN` is
+/// `1..=PARAM_NAME_MAX_LEN` — the Hook API's own parameter-name length
+/// bound (`name` must already have a `ToBytes` impl in scope).
 ///
-/// Factored out so [`crate::hooks_struct`]'s `name_by` field codegen (which
-/// re-emits the same bound check for a caller-supplied name type) can reuse
-/// the exact same logic this derive uses for a field-based struct, rather
-/// than a second, potentially-drifting copy.
+/// Factored out so [`crate::hooks_struct`]'s `name_by` field codegen can
+/// reuse the exact same logic instead of a second, potentially-drifting
+/// copy.
 pub(crate) fn param_name_length_assert(name: &str) -> String {
     format!(
         "

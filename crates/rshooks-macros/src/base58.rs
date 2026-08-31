@@ -2,9 +2,8 @@
 //! a validated 20-byte AccountID, entirely at proc-macro compile time (used
 //! by [`crate::account_id`]).
 //!
-//! Not a `bs58` dependency, for the same "don't add mandatory build-time
-//! weight to every Hook crate" reasoning as [`crate::sha256`] and this
-//! crate's own `syn`/`quote` rationale (see the crate doc comment).
+//! Not a `bs58` dependency — avoids adding mandatory build-time weight to
+//! every Hook crate, same as [`crate::sha256`].
 
 use crate::sha256::sha256;
 
@@ -60,9 +59,7 @@ impl DecodeError {
 /// Decodes a classic XRPL/Xahau r-address string into its 20-byte
 /// AccountID, verifying length, version byte, and checksum along the way.
 ///
-/// Algorithm: XRPL-alphabet base58 decode (big-integer-via-byte-array
-/// accumulation, exactly like Bitcoin base58check except for the alphabet
-/// and the leading-zero-symbol), then the standard base58check length /
+/// XRPL-alphabet base58 decode, then the standard base58check length /
 /// version / double-SHA256-checksum checks.
 // `decoded[0]`/`decoded[0..21]`/`decoded[21..25]`/`decoded[1..21]` are all
 // only reached after the `decoded.len() != DECODED_LEN` (25) check above
@@ -96,10 +93,8 @@ pub(crate) fn decode(address: &str) -> Result<[u8; 20], DecodeError> {
 // in bounds.
 #[allow(clippy::indexing_slicing)]
 fn base58_decode(s: &str) -> Result<Vec<u8>, DecodeError> {
-    // Big-endian accumulator built by repeated multiply-by-58-and-add,
-    // stored little-endian (least-significant byte first) while
-    // accumulating so carry propagation is a simple left-to-right byte
-    // scan; reversed to big-endian at the end.
+    // Accumulator built by repeated multiply-by-58-and-add, stored
+    // little-endian while accumulating, reversed to big-endian at the end.
     let mut num: Vec<u8> = Vec::new();
 
     for ch in s.chars() {
@@ -180,9 +175,8 @@ mod tests {
 
     #[test]
     fn genesis_master_account() {
-        // Xahau/XRPL standalone-network genesis/master account (seed
-        // "masterpassphrase") — hardcoded by hand as `GENESIS_ACCOUNT` in
-        // examples/80_reward/src/mint_txn.rs and examples/81_govern/src/lib.rs.
+        // Genesis/master account (seed "masterpassphrase"), also hardcoded
+        // as `GENESIS_ACCOUNT` in examples/80_reward and examples/81_govern.
         assert_eq!(
             decode("rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh").ok(),
             Some(hex_to_20("b5f762798a53d543a014caf8b297cff8f2f937e8"))
@@ -203,8 +197,7 @@ mod tests {
 
     #[test]
     fn checksum_mismatch() {
-        // Last char 'h' -> 'H': still valid base58 chars, valid length,
-        // version byte 0, but the checksum no longer matches.
+        // Last char 'h' -> 'H': valid chars/length/version, bad checksum.
         assert!(matches!(
             decode("rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTH"),
             Err(DecodeError::ChecksumMismatch)
@@ -213,9 +206,7 @@ mod tests {
 
     #[test]
     fn wrong_version() {
-        // Valid base58 chars, valid length, valid checksum, but version
-        // byte is 5, not 0 — also a well-formed base58check string that
-        // doesn't start with 'r'.
+        // Well-formed base58check string with version byte 5, not 0.
         assert!(matches!(
             decode("sJHw2iRxXngPFKZvYbjkfifqt8CJghksMM"),
             Err(DecodeError::WrongVersion(5))

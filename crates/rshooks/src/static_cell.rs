@@ -2,11 +2,10 @@
 //!
 //! Constant templates and large zero-initialized buffers should live in
 //! `static`s rather than stack locals (data segment / BSS instead of
-//! runtime store chains or a compiler-generated memset — see
-//! `docs/DESIGN.md` §6.3, "static-buffer idiom"). A bare `static mut`
-//! makes that possible but forces every hook to repeat an unsafe,
-//! clippy-fighting access incantation and offers no protection against
-//! creating two aliasing `&mut` to the same buffer.
+//! runtime store chains or a compiler-generated memset). A bare `static
+//! mut` makes that possible but forces every hook to repeat an unsafe
+//! access and offers no protection against creating two aliasing `&mut`
+//! to the same buffer.
 //!
 //! `HookStatic<T>` wraps the buffer with a take-once flag: [`take`] hands
 //! out the one-and-only `&'static mut T` and every later call returns
@@ -64,13 +63,13 @@ pub struct HookStatic<T: Clone> {
 // the plain (non-testenv, or no-backend-installed) path is the atomic
 // flag; that path hands out the interior `&mut` exactly once (the swap has
 // exactly one winner, on any number of threads), so shared references
-// never expose aliased mutation through it. Under
-// `testenv`, a second claim path exists (`HookStatic::take`'s
-// backend-installed body) that never hands out `&mut` to the original
-// storage at all — it only ever reads `self.value` to produce an
-// independent clone, and only while `testenv_claim::CLAIM_LOCK` excludes
-// the plain path's own swap-then-borrow — so the two paths never observe
-// or produce aliased mutation of one another.
+// never expose aliased mutation through it. Under `testenv`, a second
+// claim path exists (`HookStatic::take`'s backend-installed body) that
+// never hands out `&mut` to the original storage at all — it only ever
+// reads `self.value` to produce an independent clone, and only while
+// `testenv_claim::CLAIM_LOCK` excludes the plain path's own
+// swap-then-borrow — so the two paths never observe or produce aliased
+// mutation of one another.
 unsafe impl<T: Send + Clone> Sync for HookStatic<T> {}
 
 impl<T: Clone> HookStatic<T> {
@@ -109,13 +108,13 @@ impl<T: Clone> HookStatic<T> {
     /// Native `testenv` counterpart to the plain [`take`](Self::take):
     /// with a backend installed on the calling thread, this never touches
     /// the take-once flag and never hands out the original storage at
-    /// all. Instead it asks the backend
-    /// (`HostBackend::static_take_allowed`, keyed by this cell's own
-    /// address) whether a fresh claim is allowed this invocation: `false`
-    /// is `None`; `true` clones the pristine storage and leaks the clone,
-    /// so every invocation gets its own independent `&'static mut T` with
-    /// no static-side epoch or field. With no backend installed on the
-    /// thread, falls through to the plain take-once behavior unchanged.
+    /// all. Instead it asks the backend (`HostBackend::static_take_allowed`,
+    /// keyed by this cell's own address) whether a fresh claim is allowed
+    /// this invocation: `false` is `None`; `true` clones the pristine
+    /// storage and leaks the clone, so every invocation gets its own
+    /// independent `&'static mut T` with no static-side epoch or field.
+    /// With no backend installed on the thread, falls through to the plain
+    /// take-once behavior unchanged.
     ///
     /// `testenv_claim::CLAIM_LOCK` is held for the whole decision on both
     /// branches: the plain branch's `taken` swap and this branch's storage

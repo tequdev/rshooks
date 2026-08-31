@@ -4,30 +4,27 @@
 //! format, plus the three `.cpp` files carrying the common-field lists and
 //! the inner-object formats.
 //!
-//! Like [`crate::parse`] (which handles the `hook/*.h` headers) this is a
-//! from-scratch parser written for `xtask`, deliberately independent of the
-//! minimal parser the parity test in
-//! `crates/rshooks-core/tests/protocol_formats_parity.rs` uses: that test is
-//! this parser's correctness oracle, and shared code would hide a shared bug.
+//! Deliberately independent of the minimal parser the parity test in
+//! `crates/rshooks-core/tests/protocol_formats_parity.rs` uses (that test is
+//! this parser's correctness oracle; shared code would hide a shared bug).
 //!
-//! # Why a tokenizer and not pattern matching
+//! # Why a tokenizer, not pattern matching
 //!
 //! The corpus mixes forms freely — compact `{{a},{b}}` and multiline
 //! initializer lists, trailing commas, an empty field list `({})`, comments
 //! *inside* field lists, a commented-out `//UNTYPED_SFIELD(...)` line, and a
 //! `#ifndef` block in `ledger_entries.macro` that *defines*
 //! `LEDGER_ENTRY_DUPLICATE`/`EXPAND` in terms of `LEDGER_ENTRY` before any
-//! invocation appears. Everything here therefore runs on a comment- and
+//! invocation appears. Everything here runs on a comment- and
 //! directive-stripped token stream with balanced-delimiter scanning.
 //!
 //! # Why unrecognized input is a hard error
 //!
-//! Nothing in this module skips what it does not understand. A `.macro` file
-//! must consist *entirely* of recognized invocations, a field list entry must
+//! Nothing here skips what it doesn't understand: a `.macro` file must
+//! consist *entirely* of recognized invocations, a field list entry must
 //! match `{sfX, soeY[, extra...]}`, and an anchored `.cpp` region must parse
 //! completely. An upstream format change can therefore only fail the build —
-//! never silently drop a transaction type, a ledger entry, or a field from
-//! the generated artifact.
+//! never silently drop a transaction type, ledger entry, or field.
 
 use std::collections::BTreeMap;
 
@@ -145,12 +142,12 @@ pub struct InnerObjectDecl {
 /// The numeric serialized type ID of a `.macro` `STI` token.
 ///
 /// The four "pseudo" types (10001..10004) name whole serialized containers
-/// rather than a field's value type; upstream's own `hook/sfcodes.h` omits
-/// their four fields for that reason, which
-/// [`crate::protocol_ir`]'s cross-validation gate accounts for.
+/// rather than a field's value type; upstream's `hook/sfcodes.h` omits their
+/// four fields for that reason, which [`crate::protocol_ir`]'s
+/// cross-validation gate accounts for.
 ///
-/// An unknown token is a hard error: a new serialized type upstream must be
-/// mapped deliberately, never defaulted.
+/// An unknown token is a hard error: a new serialized type must be mapped
+/// deliberately, never defaulted.
 pub fn sti_code(token: &str) -> Result<u32> {
     Ok(match token {
         "UINT16" => 1,
@@ -200,14 +197,11 @@ pub const PSEUDO_STI_MIN: u32 = 10_000;
 /// numbers. Character and string literals are copied through untouched, so a
 /// `'/'` or `"//"` inside one cannot start a comment.
 ///
-/// An **unterminated** `/*` is a hard error, not a comment running to the
-/// end of the file. Blanking the rest of the input would delete every
-/// declaration after it and leave the parsers with nothing to complain
-/// about — precisely the silent drop this module's "why unrecognized input
-/// is a hard error" rule exists to prevent. An unterminated *literal* is
-/// different and is still deferred: [`end_of_literal`] already rejects it
-/// from inside [`match_delimiter`]/[`split_top_level`], where the parser can
-/// say which declaration it was in.
+/// An **unterminated** `/*` is a hard error rather than a comment running to
+/// the end of the file — blanking the rest of the input would silently drop
+/// every declaration after it. An unterminated *literal* is deferred instead:
+/// [`end_of_literal`] rejects it from inside [`match_delimiter`]/
+/// [`split_top_level`], where the parser can say which declaration it was in.
 pub fn strip_comments(src: &str) -> Result<String> {
     let bytes = src.as_bytes();
     let mut out = String::with_capacity(src.len());
@@ -232,9 +226,8 @@ pub fn strip_comments(src: &str) -> Result<String> {
                         closed = true;
                         break;
                     }
-                    // One space per *byte*, so byte offsets — and with them
-                    // the line numbers in error messages — survive the strip
-                    // even across the non-ASCII bytes in a license header.
+                    // One space per byte, so offsets survive even across
+                    // non-ASCII bytes in a license header.
                     out.push(if bytes[i] == b'\n' { '\n' } else { ' ' });
                     i += 1;
                 }
@@ -249,8 +242,7 @@ pub fn strip_comments(src: &str) -> Result<String> {
             b'\'' | b'"' => {
                 let end = match end_of_literal(bytes, i) {
                     Ok(end) => end,
-                    // An unterminated literal is left to the parsers, which
-                    // report it with far more context than this pass could.
+                    // Left to the parsers, which have more context to report it.
                     Err(_) => bytes.len(),
                 };
                 out.push_str(src.get(i..end).unwrap_or_default());
@@ -279,9 +271,9 @@ pub fn strip_comments(src: &str) -> Result<String> {
 ///   `#define`s `LEDGER_ENTRY_DUPLICATE(...)` and `EXPAND(x)` in terms of
 ///   `LEDGER_ENTRY(__VA_ARGS__)` before any real invocation appears; without
 ///   this those definitions read as invocations.
-/// - `TxFormats.cpp`/`LedgerFormats.cpp` define their `TRANSACTION` /
+/// - `TxFormats.cpp`/`LedgerFormats.cpp` define their `TRANSACTION`/
 ///   `LEDGER_ENTRY` macro over two lines, and the continuation line mentions
-///   `commonFields` — the very anchor [`parse_common_fields`] keys on.
+///   `commonFields` — the anchor [`parse_common_fields`] keys on.
 pub fn strip_directives(src: &str) -> String {
     let mut out = String::with_capacity(src.len());
     let mut continuing = false;
@@ -716,9 +708,8 @@ pub fn parse_common_fields(src: &str, what: &str) -> Result<Vec<FieldEntry>> {
 ///
 /// Anchored on `add(`; the file mixes compact `{{a},{b}}` and multiline
 /// initializer lists, both of which reduce to the same brace-delimited field
-/// list. Anything inside a matched `add(` call that does not parse is a hard
-/// error; text outside those calls (the constructor boilerplate, the two
-/// accessor definitions below it) is ignored.
+/// list. Anything inside a matched `add(` call that fails to parse is a hard
+/// error; text outside those calls is ignored.
 pub fn parse_inner_objects(src: &str) -> Result<Vec<InnerObjectDecl>> {
     let src = preprocess(src)?;
     let bytes = src.as_bytes();
@@ -807,8 +798,7 @@ pub fn index_sfields(decls: &[SFieldDecl]) -> Result<BTreeMap<&str, &SFieldDecl>
 #[cfg(test)]
 mod tests {
     //! Test code is exempt from the workspace's panic-freedom lints
-    //! (`docs/DESIGN.md` §8): panicking on a known-good fixture is the
-    //! normal, idiomatic way to assert behavior in a test.
+    //! (`docs/DESIGN.md` §8).
     #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
     use super::*;
@@ -822,10 +812,9 @@ mod tests {
         assert!(stripped.contains("'/'"));
     }
 
-    /// An unterminated `/*` blanks everything after it, so accepting one
-    /// would delete declarations with nothing left to complain about — the
-    /// silent drop this module's hard-error rule exists to prevent. The
-    /// fixture is a real format file whose second declaration would vanish.
+    /// Pins that an unterminated `/*` errors rather than silently dropping
+    /// every declaration after it (the fixture's second declaration would
+    /// otherwise vanish).
     #[test]
     fn an_unterminated_block_comment_is_an_error() {
         let src = "\
@@ -842,8 +831,7 @@ TYPED_SFIELD(sfFlags, UINT32, 2)
             "{msg}"
         );
 
-        // And the parsers inherit it rather than silently returning the one
-        // declaration that survived the blanking.
+        // Parsers inherit the failure rather than returning a partial result.
         let msg = match parse_sfields(src) {
             Ok(decls) => panic!("expected a failure, parsed {} declarations", decls.len()),
             Err(e) => format!("{e:#}"),

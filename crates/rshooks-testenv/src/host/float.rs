@@ -2,16 +2,13 @@
 //! `.claude/design/TESTENV_PHASE2_DESIGN.md` §4 "float_*", stage plan §7).
 //!
 //! Pure functions over the XFL `i64` bit pattern; no [`crate::world::World`]
-//! / [`crate::invocation::InvocationContext`] coupling anywhere in this
-//! module (float ops need no world state — design §4). Every function here
-//! is a line-for-line Rust port of xahaud's real implementation (`Xahau/
-//! xahaud`, branch `dev`), not a reinterpretation of the `hook-api` skill's
-//! prose summary — where the two disagree, this module follows the C++
-//! source and says so in a comment (the skill is "primary oracle" per the
-//! design doc's source ordering, but ranks *below* the actual upstream
-//! implementation, which is source (4) in that same list and is what was
-//! consulted here):
+//! / [`crate::invocation::InvocationContext`] coupling (float ops need no
+//! world state — design §4). Every function is a line-for-line Rust port of
+//! xahaud's real implementation (`Xahau/xahaud`, branch `dev`); where it
+//! disagrees with the `hook-api` skill's prose summary, this module follows
+//! the C++ source and says so in a comment.
 //!
+//! Source of truth:
 //! - `src/xrpld/app/hook/detail/HookAPI.cpp` (`HookAPI::float_*`) and
 //!   `src/xrpld/app/hook/HookAPI.h` (`namespace hook_float` — bit
 //!   accessors, `normalize_xfl`, `make_float`) — the `float_*` bodies.
@@ -23,56 +20,46 @@
 //!   `float_mulratio` all construct an `IOUAmount` internally and inherit
 //!   its arithmetic.
 //! - `include/xrpl/basics/Number.h`/`.cpp` (`Number::normalize`,
-//!   `operator+=`) — `IOUAmount`'s own arithmetic delegates to `Number`
-//!   whenever `STNumberSwitchover` is on, which it is by default
-//!   (`LocalValue<bool> r{true}` in `Number.cpp`) and is never toggled
-//!   anywhere in the hook execution path. `Number` is the one place real
-//!   rounding happens (round-to-nearest-even via 16 packed guard digits);
-//!   `float_multiply`/`float_int`/`float_sto` never touch it (they use
-//!   their own bespoke, simpler truncating integer math — ported
-//!   separately below, *not* through the `Number`/`IOUAmount` helpers).
+//!   `operator+=`) — `IOUAmount` delegates to `Number` whenever
+//!   `STNumberSwitchover` is on, which it always is on the hook execution
+//!   path (`LocalValue<bool> r{true}` in `Number.cpp`, never toggled).
+//!   `Number` is the one place real rounding happens (round-to-nearest-even
+//!   via 16 packed guard digits); `float_multiply`/`float_int`/`float_sto`
+//!   use their own bespoke truncating integer math instead, ported
+//!   separately below.
 //!
-//! # One documented non-obvious quirk (not an ambiguity — a confirmed
-//! # source-level oddity, kept byte-for-byte on purpose)
+//! # Non-obvious quirk kept byte-for-byte on purpose
 //!
-//! [`hook_float_is_negative`] mirrors `hook_float::is_negative` **exactly**,
-//! including for the canonical-zero bit pattern (`0`): the raw bit-62 check
-//! reports canonical zero as "negative" (`(0 >> 62) & 1 == 0`). Every real
-//! call site in `HookAPI.cpp` except two short-circuits on `float1 == 0`
-//! *before* ever calling `is_negative`, so the quirk is inert there. The
-//! two call sites that do not short-circuit are:
+//! [`hook_float_is_negative`] mirrors `hook_float::is_negative` exactly,
+//! including for canonical zero (`0`): the raw bit-62 check reports it as
+//! "negative" (`(0 >> 62) & 1 == 0`). Every real call site in `HookAPI.cpp`
+//! except two short-circuits on `float1 == 0` before calling `is_negative`,
+//! so the quirk is inert there. The two that don't short-circuit:
 //! - `float_compare`: harmless — the mantissa is also `0` for a zero
 //!   operand, so `0 * -1 == 0 * 1 == 0` either way.
-//! - `float_sto`'s *native* (`is_xrp`) encoding branch: **not** harmless —
-//!   encoding canonical-zero XFL as a native amount produces 8 all-zero
-//!   bytes (no `0b0100_0000` "non-negative" flag), unlike every other
-//!   native-zero encoder in this codebase (e.g. `txn::codec::
-//!   encode_native_amount_const(0)`, which always sets that flag). This
-//!   module reproduces that exact byte sequence — see [`float_sto`]'s test
+//! - `float_sto`'s native (`is_xrp`) branch: not harmless — encoding
+//!   canonical-zero XFL as a native amount produces 8 all-zero bytes (no
+//!   `0b0100_0000` "non-negative" flag), unlike every other native-zero
+//!   encoder in this codebase (e.g. `txn::codec::encode_native_amount_const
+//!   (0)`, which always sets that flag). This module reproduces that exact
+//!   byte sequence — see [`float_sto`]'s test
 //!   `native_zero_encodes_as_all_zero_bytes_not_positive_zero`.
 //!
-//! Every other call site here uses [`get_mantissa`]/[`get_exponent`] (which
-//! *do* fold the zero case in, because `hook_float::get_mantissa`/
-//! `get_exponent` themselves do — that part is not call-site-dependent) or
-//! calls [`hook_float_is_negative`] only after already establishing the
-//! operand is non-zero, exactly mirroring each C++ function's own control
-//! flow.
+//! Every other call site uses [`get_mantissa`]/[`get_exponent`] (which fold
+//! the zero case in themselves) or calls [`hook_float_is_negative`] only
+//! after already establishing the operand is non-zero.
 
-// This module is a value-range-bounded arithmetic port of xahaud's own XFL
-// engine (`hook_float::*`, `ripple::Number`/`IOUAmount`) — every `+`/`-`/
-// `*`/`/` below mirrors one line of the C++ source it is documented against
-// (see the module doc comment), operating on quantities whose ranges are
-// bounded by XFL's own fixed limits (16-digit mantissas, `-96..=80`
-// exponents) exactly as the C++ relies on. Converting each operator to its
-// `checked_*`/`wrapping_*` spelling would break that line-for-line
-// correspondence to the source everywhere it matters for review, without
-// adding real safety: every place overflow is actually reachable already
-// has an explicit range check next to it (see e.g. `normalize_xfl`'s
-// `adjust > 18`/`-adjust > 18` guards before the one risky multiply/divide).
-// A blanket module-level allow (matching `rshooks_macros`'s own
-// arithmetic-heavy `lib.rs`) is more honest here than scattering `#[allow]`
-// on 80-plus individual lines that would otherwise say nothing beyond "this
-// is arithmetic, like the whole module is."
+// Value-range-bounded arithmetic port of xahaud's XFL engine
+// (`hook_float::*`, `ripple::Number`/`IOUAmount`): every `+`/`-`/`*`/`/`
+// mirrors one line of the cited C++ source, operating on quantities bounded
+// by XFL's own fixed limits (16-digit mantissas, `-96..=80` exponents), same
+// as the C++. Switching to `checked_*`/`wrapping_*` would break that
+// line-for-line correspondence without adding safety: every place overflow
+// is reachable already has an explicit range check next to it (e.g.
+// `normalize_xfl`'s `adjust > 18`/`-adjust > 18` guards before the risky
+// multiply/divide). A blanket module-level allow (matching
+// `rshooks_macros`'s own `lib.rs`) beats scattering `#[allow]` on 80+
+// individual arithmetic lines.
 #![allow(clippy::arithmetic_side_effects)]
 
 use std::vec::Vec;
@@ -226,15 +213,12 @@ fn normalize_xfl(mut man: u64, mut exp: i32, neg: bool) -> Normalized {
     if man == 0 {
         return Normalized::Value(0);
     }
-    // `int32_t mo = log10(man);` — C++ truncates the `double` result toward
-    // zero; for `man >= 1` (guaranteed here) `log10(man) >= 0`, so
-    // truncation and `floor` coincide. Using `f64::log10` here (not a
-    // from-scratch bignum digit count) is deliberate: it is *exactly* what
-    // xahaud itself does, boundary float-imprecision included — the
-    // subsequent min/max-mantissa correction branches below exist
-    // specifically to self-heal a mis-estimated `mo` (see the C++
-    // comment this ports: "even after adjustment the mantissa can be
-    // outside the range by one place").
+    // `int32_t mo = log10(man);` — C++ truncates toward zero; for `man >= 1`
+    // (guaranteed here) that coincides with `floor`. `f64::log10` here is
+    // deliberate, boundary imprecision included — the min/max-mantissa
+    // correction branches below exist to self-heal a mis-estimated `mo`
+    // ("even after adjustment the mantissa can be outside the range by one
+    // place", per the C++ comment this ports).
     let mo = (man as f64).log10() as i32;
     let adjust = 15 - mo;
     if adjust > 0 {
@@ -612,13 +596,11 @@ pub(crate) fn float_set(exponent: i32, mantissa: i64) -> i64 {
         return 0;
     }
     let neg = mantissa < 0;
-    // C++ special-cases `mantissa == i64::MIN` with a `man++` before negating
-    // (plain `-man` would overflow `int64_t`). `i64::unsigned_abs` handles
-    // `i64::MIN` correctly without that workaround (`u64` has the range),
-    // and `normalize_xfl` immediately renormalizes any magnitude down to 16
-    // significant digits regardless, so the two approaches are
-    // observationally identical for every input this function can produce
-    // a non-error result for.
+    // C++ special-cases `mantissa == i64::MIN` with `man++` before negating
+    // (plain `-man` overflows `int64_t`); `i64::unsigned_abs` handles
+    // `i64::MIN` directly (`u64` has the range), and `normalize_xfl`
+    // renormalizes any magnitude to 16 significant digits regardless, so the
+    // two approaches are observationally identical here.
     let mag = mantissa.unsigned_abs();
     match normalize_xfl(mag, exponent, neg) {
         Normalized::Overflow => INVALID_FLOAT, // C++ remaps XFL_OVERFLOW -> INVALID_FLOAT here
@@ -656,11 +638,10 @@ pub(crate) fn float_multiply(f1: i64, f2: i64) -> i64 {
 }
 
 /// `ripple::mulRatio` (`IOUAmount.cpp`) restricted to the always-non-negative
-/// mantissa xahaud's own call site (`HookAPI::mulratio_internal`) passes —
-/// the `!roundUp && neg` rounding branch in the real function is
-/// unreachable there and is not ported (see the module doc comment's
-/// C++-fidelity policy: this is a documented simplification, not a guess).
-#[allow(clippy::indexing_slicing)] // `POWER_TABLE[i]` for the const-eval build is `i < 30` by the loop guard; `log10_ceil`'s own index is bounded the same way; `room_to_grow`/`must_shrink` are each `FL64 - log10_ceil(..)` or the reverse, so bounded to `0..=30` (`log10_ceil`'s own range) and only indexed after a `> 0` guard
+/// mantissa xahaud's call site (`HookAPI::mulratio_internal`) passes — the
+/// real function's `!roundUp && neg` rounding branch is unreachable there
+/// and not ported (a documented simplification, not a guess).
+#[allow(clippy::indexing_slicing)] // `POWER_TABLE[i]`/`log10_ceil`'s index are bounded by the `i < 30` loop guard; `room_to_grow`/`must_shrink` are each `FL64 - log10_ceil(..)` (or the reverse), so bounded to `0..=30` and only indexed after a `> 0` guard
 fn mul_ratio(
     mantissa: u64,
     exponent: i32,
@@ -862,12 +843,11 @@ pub(crate) fn float_sum(f1: i64, f2: i64) -> i64 {
     };
 
     // `make_float(IOUAmount&)` on a zero-mantissa amount always yields
-    // `EXPONENT_UNDERSIZED` internally, which `float_sum` remaps to `0` —
-    // collapsed here into the direct check (see this module's design
-    // notes: HookAPI.cpp's own version of this path corrupts an
-    // intermediate value through an `Expected::error()` cast and is not
-    // worth reproducing bug-for-bug when the net observable behavior is
-    // this simple check).
+    // `EXPONENT_UNDERSIZED`, which `float_sum` remaps to `0` — collapsed
+    // here into a direct check. HookAPI.cpp's own path corrupts an
+    // intermediate value via an `Expected::error()` cast first; not worth
+    // reproducing bug-for-bug since the net observable behavior is this
+    // simple check.
     if sum.mantissa == 0 {
         return 0;
     }
@@ -988,28 +968,19 @@ fn write_field_header(out: &mut Vec<u8>, field: u16, ty: u16) {
     }
 }
 
-/// `HookAPI::float_sto_set`. For a native (`is_xrp`) amount, xahaud's real
-/// implementation skips the first byte entirely (rather than folding its
-/// low 6 magnitude bits into the mantissa) and reinterprets bytes `1..8` as
-/// a bare integer at exponent `0`, then renormalizes — and that
-/// reinterpretation itself masks the new first byte (wire byte 1) with
-/// `0x3F` (see the shared `mantissa_bytes[0] & 0x3F` step below, the same
-/// masking upstream applies), dropping its own top 2 bits too. So the full
-/// native-amount decode loses 8 magnitude bits total (byte 0's low 6 plus
-/// byte 1's top 2), not just byte 0's 6. For any drops count produced by
-/// [`float_sto`] itself this is a lossless round trip in practice
-/// (`float_sto`'s own encode never emits a drops value at or above `2^54`,
-/// since `drops <= mantissa <= MAX_MANTISSA < 2^54` always — see
-/// `native_amount_round_trip_via_drops`'s test), but a native amount blob
-/// from elsewhere (e.g. a real ledger `Amount` field with mainnet-scale
-/// drops, which *can* exceed `2^54`) would silently lose those 8 bits — see
-/// `native_amount_with_large_drops_loses_byte0_low_bits`'s test for a
-/// hand-constructed demonstration (its `drops & ((1u64 << 54) - 1)` expected
-/// value already reflects the combined 8-bit loss: clearing a 64-bit
-/// magnitude's top 10 bits leaves only 8 magnitude-eligible bits actually
-/// cleared, since the topmost 2 of those 10 are the always-zero
-/// native/sign control-bit positions, never magnitude). Ported byte-for-byte
-/// regardless, because that really is what the host returns.
+/// `HookAPI::float_sto_set`. For a native (`is_xrp`) amount, xahaud skips
+/// byte 0 entirely (rather than folding its low 6 magnitude bits into the
+/// mantissa) and reinterprets bytes `1..8` as a bare integer at exponent
+/// `0`, then renormalizes; that reinterpretation also masks the new byte 0
+/// (wire byte 1) with `0x3F` (see `mantissa_bytes[0] & 0x3F` below),
+/// dropping its top 2 bits too. Total loss: 8 magnitude bits (byte 0's low
+/// 6 plus byte 1's top 2), not just 6. Lossless in practice for any drops
+/// [`float_sto`] itself produces (`drops <= mantissa <= MAX_MANTISSA <
+/// 2^54` always — see `native_amount_round_trip_via_drops`), but a native
+/// blob from elsewhere with mainnet-scale drops `>= 2^54` (e.g. a real
+/// ledger `Amount`) silently loses those 8 bits — see
+/// `native_amount_with_large_drops_loses_byte0_low_bits`. Ported
+/// byte-for-byte regardless: that really is what the host returns.
 #[allow(clippy::indexing_slicing)] // every index/slice below is reached only after an explicit `len()` guard immediately before it (`upto.len() > 8`/`< 11`/`< 10`/`< 8`) that establishes enough remaining bytes
 pub(crate) fn float_sto_set(sto: &[u8]) -> i64 {
     let mut upto = sto;
@@ -1069,24 +1040,18 @@ pub(crate) fn float_sto_set(sto: &[u8]) -> i64 {
 /// serialized `Amount` value bytes (8 native / 48 IOU, no header, matching
 /// `crate::host::slots`' slot-content convention) to an XFL bit pattern.
 ///
-/// Deliberately **not** [`float_sto_set`]'s decode, despite superficially
-/// overlapping input shapes: `float_sto_set` documents its own
-/// byte-0-skipping quirk for the native case (an upstream oddity specific
-/// to *that* function), whereas `slot_float`'s real native path uses the
-/// *full* 62-bit drops magnitude — `st_amt.xrp().drops()` in the cited
-/// source — with mantissa = drops, exponent = -6, then
-/// [`normalize_xfl`]. The IOU path decodes the wire mantissa/exponent (same
-/// bit layout `float_sto_set` decodes) but, unlike `float_sto_set`, does
-/// **not** renormalize: a well-formed on-ledger IOU amount is already
-/// canonical, mirroring the cited source's `st_amt.iou()` →
-/// `make_float(IOUAmount)` (a distinct, non-renormalizing overload from the
-/// byte-triple [`make_float`] this module otherwise uses only for
-/// already-in-range constructions).
+/// Not [`float_sto_set`]'s decode: the native path here uses the *full*
+/// 62-bit drops magnitude (`st_amt.xrp().drops()`), mantissa = drops,
+/// exponent = -6, then [`normalize_xfl`] — `float_sto_set`'s
+/// byte-0-skipping quirk is specific to that function. The IOU path decodes
+/// the same wire mantissa/exponent layout but, unlike `float_sto_set`, does
+/// not renormalize: a well-formed on-ledger IOU amount is already
+/// canonical, mirroring the cited source's non-renormalizing
+/// `st_amt.iou()` → `make_float(IOUAmount)` overload.
 ///
 /// `bytes.len()` not 8 or 48 is defensive-only: `crate::host::slots` only
-/// ever constructs a `SlotKind::Amount` entry from
-/// `crate::slot_obj::classify_amount`-shaped content (8 or 48 bytes), so
-/// this arm is unreachable via any real slot navigation path.
+/// constructs `SlotKind::Amount` from `crate::slot_obj::classify_amount`
+/// output (8 or 48 bytes) — unreachable via real slot navigation.
 #[allow(clippy::indexing_slicing)] // every index below is reached only after the `bytes.len() == 8`/`== 48` match arm guard establishes it in-bounds — same pattern as `float_sto_set` above
 pub(crate) fn slot_amount_to_xfl(bytes: &[u8]) -> i64 {
     match bytes.len() {
@@ -1149,13 +1114,12 @@ pub(crate) fn float_divide(f1: i64, f2: i64) -> i64 {
 }
 
 /// `HookAPI::float_divide_internal` (long division by hand, matching the
-/// `fixFloatDivide`-amendment-enabled branch — assumed active, since it has
-/// been active on Xahau mainnet since well before this port; documented
-/// assumption, not independently re-verifiable from the vendored headers
-/// alone). Operands are pre-validated by [`float_divide`]/[`float_invert`];
-/// the C++'s own `normalize_xfl(man,exp)` calls on an already-normalized
-/// operand's extracted mantissa/exponent are always a no-op (see the
-/// reasoning in this port's accompanying notes) and are elided here.
+/// `fixFloatDivide`-amendment-enabled branch — assumed active since it has
+/// been active on Xahau mainnet well before this port; not independently
+/// re-verifiable from the vendored headers alone). Operands are
+/// pre-validated by [`float_divide`]/[`float_invert`]; the C++'s own
+/// `normalize_xfl(man,exp)` calls on an already-normalized operand are
+/// always a no-op and are elided here.
 fn float_divide_internal(f1: i64, f2: i64) -> i64 {
     if f2 == 0 {
         return DIVISION_BY_ZERO;
@@ -1408,10 +1372,9 @@ mod tests {
     #[test]
     fn float_set_mantissa_zero_is_canonical_zero_not_an_error() {
         // Deviates from the `hook-api` skill's "mantissa=0 -> INVALID_FLOAT"
-        // claim -- the real xahaud source (`HookAPI::float_set`) short-
-        // circuits `mantissa == 0` to a successful `0` *before* ever
-        // reaching the error-producing normalize path. Confirmed against
-        // `HookAPI.cpp` directly (see this module's doc comment).
+        // claim: `HookAPI::float_set` short-circuits `mantissa == 0` to `0`
+        // before reaching the error-producing normalize path (confirmed
+        // against `HookAPI.cpp` directly).
         assert_eq!(float_set(0, 0), 0);
         assert_eq!(float_set(80, 0), 0);
     }
@@ -1614,7 +1577,7 @@ mod tests {
 
     #[test]
     fn float_int_basic() {
-        let x = float_set(0, 4_200_000_000_000_000); // 4.2 * 10^15... actually exponent 0, mantissa 4.2e15 -> value 4_200_000_000_000_000
+        let x = float_set(0, 4_200_000_000_000_000); // exponent 0, mantissa 4.2e15 -> value 4_200_000_000_000_000
         assert_eq!(float_int(x, 0, 0), 4_200_000_000_000_000);
     }
 
@@ -1733,12 +1696,11 @@ mod tests {
         assert_eq!(drops, 5_000_000);
 
         // float_sto_set reinterprets the drops bytes as a bare integer at
-        // exponent 0 *before* renormalization -- for any realistic drops
-        // count (well under 2^54, so byte0's skipped low 6 bits are always
-        // 0 -- see the module doc comment) that still round-trips back to
-        // the same canonical XFL, since `value` itself represents exactly
-        // the integer 5_000_000 and XFL normalization is a deterministic,
-        // unique function of the real number represented.
+        // exponent 0 before renormalizing; for realistic drops counts (well
+        // under 2^54, so byte 0's skipped low 6 bits are always 0) that
+        // still round-trips to the same canonical XFL, since XFL
+        // normalization is a deterministic, unique function of the real
+        // number represented.
         let decoded = float_sto_set(&out);
         assert_eq!(decoded, float_set(0, 5_000_000));
         assert_eq!(decoded, value);
@@ -1747,9 +1709,9 @@ mod tests {
     #[test]
     fn native_amount_with_large_drops_loses_byte0_low_bits() {
         // A hand-constructed native amount blob (not one `float_sto` could
-        // have produced -- see that function's own doc comment) whose
-        // drops value needs byte0's low 6 bits: `drops = (0x3F << 56) | 1`,
-        // i.e. `0x3F00000000000001`, comfortably above `2^54`.
+        // produce) whose drops value needs byte0's low 6 bits: `drops =
+        // (0x3F << 56) | 1`, i.e. `0x3F00000000000001`, comfortably above
+        // `2^54`.
         let drops: u64 = (0x3Fu64 << 56) | 1;
         let mut out = drops.to_be_bytes();
         out[0] |= 0b0100_0000; // native, non-negative

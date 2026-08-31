@@ -1,13 +1,13 @@
 //! `format_availability.json`: which declared formats a hook author can
 //! actually use on Xahau.
 //!
-//! `protocol_formats.json` is upstream's word on what the *protocol* declares.
-//! It is not the same question as what a hook can *use*: xahaud's format
-//! tables are inherited wholesale from rippled and include amendments Xahau
-//! marks `Supported::no` — the node would be amendment-blocked if one ever
-//! activated — alongside Xahau-native features that are supported but not yet
-//! voted in. Generating a typed view for an `AMMBid` or an `XChainCommit`
-//! offers a hook author an API that can never match a real transaction.
+//! `protocol_formats.json` is upstream's word on what the *protocol*
+//! declares, not what a hook can *use*: xahaud's format tables are inherited
+//! wholesale from rippled and include amendments Xahau marks
+//! `Supported::no` (amendment-blocked if one ever activated) alongside
+//! Xahau-native features supported but not yet voted in. Generating a typed
+//! view for an `AMMBid` or an `XChainCommit` would offer an API that can
+//! never match a real transaction.
 //!
 //! This file is the curated answer, and it is **not** vendor data: nothing
 //! upstream states it, and no parser derives it. It lives beside
@@ -27,38 +27,37 @@
 //!   only under [`ALL_FEATURE`], for a custom network whose operator knows
 //!   otherwise.
 //!
-//! Nothing is *omitted* any more: every tier is rendered, and the `#[cfg]`
-//! it carries decides whether it compiles. [`Tier::cfg_attr`] has the
-//! truth table and the widest-wins precedence rule for both features on.
+//! Every tier is rendered; the `#[cfg]` it carries decides whether it
+//! compiles. [`Tier::cfg_attr`] has the truth table and the widest-wins
+//! precedence rule for both features on.
 //!
-//! The `Supported::no` half is objective and checkable against the vendored
-//! `features.macro`. The active/pending split is a fact about ledger state,
-//! which no file in this repository can answer — hence a curated list rather
-//! than a derivation. It is not guesswork either: [`DOC`] (reproduced into
-//! the artifact itself) records the mainnet snapshot the current tiers were
-//! verified against and the `sha512half(feature_name) ∈ Amendments`
-//! membership recipe to re-verify them, along with the retired-amendment
-//! caveat that makes absence from that list *not* evidence of dormancy.
+//! The `Supported::no` half is checkable against the vendored
+//! `features.macro`. The active/pending split is a fact about ledger state
+//! no file in this repository can answer, hence a curated list rather than a
+//! derivation: [`DOC`] (reproduced into the artifact) records the mainnet
+//! snapshot the current tiers were verified against, the
+//! `sha512half(feature_name) ∈ Amendments` membership recipe to re-verify
+//! them, and the retired-amendment caveat that makes absence from that list
+//! *not* evidence of dormancy.
 //!
 //! # Formats are the unit, with a curated escape hatch for fields
 //!
 //! Tiers are per *format*, and a field's tier is derived from the formats
-//! referencing it. That is right almost always and wrong in one class of
-//! case: an amendment can gate a **field** of an otherwise available
-//! format. `sfCredentialIDs` sits on `Payment` — active — but needs
-//! `featureCredentials`, which xahaud marks `Supported::no`, so no
-//! validated Xahau `Payment` can carry it. [`FormatAvailability::field_overrides`]
-//! is the curated fix, applied after derivation;
-//! [`FormatAvailability::field_tiers`] documents the full rule.
+//! referencing it. That's right almost always and wrong in one class of
+//! case: an amendment can gate a **field** of an otherwise available format.
+//! `sfCredentialIDs` sits on `Payment` — active — but needs
+//! `featureCredentials`, which xahaud marks `Supported::no`, so no validated
+//! Xahau `Payment` can carry it. [`FormatAvailability::field_overrides`] is
+//! the curated fix, applied after derivation; [`FormatAvailability::field_tiers`]
+//! documents the full rule.
 //!
 //! # The one automatic mutation
 //!
 //! `cargo xtask gen-core` appends any format present in the artifact but
-//! missing here as [`Tier::Dormant`], and that is the only edit it makes:
-//! a newly vendored format is unusable until a human says otherwise, which
-//! is the safe direction. Moving an entry *between* tiers is always a human
-//! decision. `gen-core --check` fails on an unclassified format (telling the
-//! reader to run `gen-core`) and on a classification naming a format the
+//! missing here as [`Tier::Dormant`] — the only edit it makes: a newly
+//! vendored format is unusable until a human says otherwise. Moving an entry
+//! *between* tiers is always a human decision. `gen-core --check` fails on
+//! an unclassified format and on a classification naming a format the
 //! artifact does not declare, so the two files cannot drift apart silently.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -543,10 +542,9 @@ mod tests {
         assert!(a.auto_add(&formats()).is_empty());
     }
 
-    /// The invariant `auto_add`'s doc comment states: a run that finds no
-    /// new format must leave the file byte-identical. Serialized rather than
-    /// compared structurally, because byte-identity is the property that
-    /// actually matters to `gen-core --check`.
+    /// A run that finds no new format must leave the file byte-identical —
+    /// the property `gen-core --check` actually relies on, hence the
+    /// serialized rather than structural comparison.
     #[test]
     fn auto_add_on_a_complete_file_is_byte_identical() {
         let mut a = classified();

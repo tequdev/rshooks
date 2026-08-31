@@ -1,14 +1,14 @@
 //! The unnest (ladder-flattening) pass: `docs/DESIGN.md` §6.2c.
 //!
 //! Runs for api-version 0 only, immediately after [`crate::flatten`] and
-//! before the guard pass. It exists because LLVM's stackifier lays out every
-//! diverging early-exit (`rollback!`-style) as a tail after the end of a
-//! dedicated `block` wrapping the whole remaining body — an "error ladder"
-//! whose nesting grows linearly with the number of error paths a hook
-//! checks. The vendored upstream checker rejects modules whose `block`/
-//! `loop`/`if` nesting exceeds 32 levels (`Guard.h` `NESTING_LIMIT`,
-//! `GuardRuleDepth32`), which a hook with a few dozen checks would hit
-//! regardless of guard correctness.
+//! before the guard pass. LLVM's stackifier lays out every diverging
+//! early-exit (`rollback!`-style) as a tail after the end of a dedicated
+//! `block` wrapping the whole remaining body — an "error ladder" whose
+//! nesting grows linearly with the number of error paths a hook checks. The
+//! vendored upstream checker rejects modules whose `block`/`loop`/`if`
+//! nesting exceeds 32 levels (`Guard.h` `NESTING_LIMIT`, `GuardRuleDepth32`),
+//! which a hook with a few dozen checks would hit regardless of guard
+//! correctness.
 //!
 //! # Algorithm
 //!
@@ -22,8 +22,8 @@
 //!    tail**: a symbolic stack simulation starting from an empty stack,
 //!    allowing only `i32.const`/`i64.const`, `local.get`, `call` (to an
 //!    *imported* function only), and `drop`, never popping below empty,
-//!    terminating at `unreachable`. Hitting anything else (a branch, a
-//!    nested block, `local.set`, running out of instructions without
+//!    terminating at `unreachable`. Anything else (a branch, a nested
+//!    block, `local.set`, running out of instructions without
 //!    `unreachable`) disqualifies it.
 //! 2. **Rewrite referencing branches.** Every `br_if` targeting a qualifying
 //!    block becomes `if (empty blocktype) { <tail> } end` spliced at the
@@ -31,20 +31,18 @@
 //!    stack effect); every plain `br` becomes the tail spliced directly (no
 //!    `if`, since control reaches it unconditionally). The tail is
 //!    self-contained and branch-free, so splicing it at a different nesting
-//!    depth than where it originally lived changes nothing about its
-//!    behavior — that invariant is exactly what qualification buys.
-//!    `br_table` is never rewritten (LLVM ladders only ever use `br`/
-//!    `br_if`); see "`br_table` safety" below for what this means for
-//!    blocks it targets.
+//!    depth changes nothing about its behavior — that invariant is exactly
+//!    what qualification buys. `br_table` is never rewritten (LLVM ladders
+//!    only ever use `br`/`br_if`); see "`br_table` safety" below for what
+//!    that means for blocks it targets.
 //! 3. **Unwrap unreferenced blocks.** Any empty-blocktype block no longer
 //!    targeted by *any* branch (this also catches pre-existing unreferenced
-//!    wrapper blocks left over from flatten, whose `return`-rewrite never
-//!    materialized) is removed — its `block`/`end` tokens are dropped, and
-//!    every branch that was nested inside it and targeted a label *outside*
-//!    it has its `relative_depth` decremented by 1 (removing the frame means
-//!    one fewer level of nesting to cross to reach that same target; a
-//!    branch whose target was *inside* the removed block is unaffected,
-//!    since the removed frame was never "between" it and its target).
+//!    wrapper blocks left over from flatten) is removed — its `block`/`end`
+//!    tokens are dropped, and every branch nested inside it that targeted a
+//!    label *outside* it has its `relative_depth` decremented by 1 (one
+//!    fewer level of nesting to cross to that target). A branch whose
+//!    target was *inside* the removed block is unaffected, since the
+//!    removed frame was never "between" it and its target.
 //! 4. **Iterate to fixpoint.** Steps 1–3 repeat until a full pass rewrites
 //!    and removes nothing. This terminates because every non-trivial pass
 //!    strictly decreases one of two bounded quantities: a rewrite removes at
@@ -55,18 +53,16 @@
 //!    A rewrite does not always enable a removal in the same pass: a
 //!    qualifying block whose span contains a `br_table` can be rewritten
 //!    yet is never removable (see "`br_table` safety" below), so the
-//!    `block` count alone is not a valid bound. In practice a single
-//!    ladder (of any depth) is fully collapsed in one pass: every level's
-//!    continuation is
-//!    independent of the others (each qualifies purely from what follows
-//!    its *own* `end`), so all of them are found, rewritten, and removed
-//!    together.
+//!    `block` count alone is not a valid bound. In practice a single ladder
+//!    (of any depth) collapses in one pass, since every level's
+//!    continuation qualifies independently of the others (purely from what
+//!    follows its own `end`).
 //!
 //! # `br_table` safety
 //!
 //! `wasmparser::Operator::BrTable` cannot be reconstructed with a different
 //! set of target depths from outside the crate (its `targets` field is a
-//! borrowed-reader type with private internals) — so no code path in this
+//! borrowed-reader type with private internals), so no code path in this
 //! pass may ever need to renumber one. Two rules guarantee that:
 //!
 //! - A block *targeted* by any `br_table` is never treated as qualifying
@@ -76,10 +72,10 @@
 //! - A block whose span *contains* a `br_table` anywhere inside it is never
 //!   removed (removing it could require renumbering that `br_table`'s
 //!   depths). It can still be rewritten if it qualifies (rewriting only
-//!   touches branches *referencing* it, not its interior), but if it can
-//!   never become removable this way, that rewrite would just add bytes for
-//!   no depth benefit — see `unnest_function`'s `unsafe_frames` computation,
-//!   used for both exclusions uniformly.
+//!   touches branches *referencing* it, not its interior), but such a
+//!   rewrite would just add bytes for no depth benefit since it can never
+//!   become removable — see `unnest_function`'s `unsafe_frames`
+//!   computation, used for both exclusions uniformly.
 //!
 //! This is conservative (a `block` mixing an interior `br_table` — e.g. from
 //! a Rust `match`, unrelated to any ladder — with an otherwise-qualifying
@@ -88,37 +84,36 @@
 //!
 //! # Dead-code elimination (post-pass)
 //!
-//! Step 3 removes a qualifying block's own `block`/`end` tokens, but it does
-//! *not* remove the instructions that originally followed that `end` — the
-//! very tail step 1 scanned to decide the block qualified in the first
-//! place. Those instructions are still needed as a *program text* while the
-//! block frame exists (steps 1–2 read them, don't move them), but once the
-//! frame is gone in step 3, they're left sitting in straight-line code
-//! immediately after whatever unconditional terminator now precedes them at
-//! that same nesting level — usually the `unreachable` that used to end the
-//! block's own body, or a spliced tail's `unreachable` from step 2. Wasm's
-//! operand-stack polymorphism after an unconditional terminator (`Guard.h`'s
-//! own checker sums instructions *syntactically*, not by reachability) means
-//! this leftover tail stays well-typed and present in the emitted binary
-//! even though it can never execute — inflating the reported worst-case
-//! instruction count for code that is provably dead.
+//! Step 3 removes a qualifying block's own `block`/`end` tokens, but not the
+//! instructions that originally followed that `end` — the tail step 1
+//! scanned to decide the block qualified. Those instructions were needed as
+//! program text while the block frame existed (steps 1–2 read them, don't
+//! move them); once the frame is gone, they're left sitting in
+//! straight-line code right after whatever unconditional terminator now
+//! precedes them at that nesting level — usually the `unreachable` that
+//! used to end the block's own body, or a spliced tail's `unreachable` from
+//! step 2. Wasm's operand-stack polymorphism after an unconditional
+//! terminator (`Guard.h`'s own checker sums instructions *syntactically*,
+//! not by reachability) means this leftover tail stays well-typed and
+//! present in the emitted binary even though it can never execute —
+//! inflating the reported worst-case instruction count for provably dead
+//! code.
 //!
 //! After step 4's fixpoint loop finishes, [`eliminate_dead_code`] makes one
-//! more linear pass over the (already-flattened, already-unnested) function
-//! body to drop exactly that kind of leftover: every instruction following
-//! an unconditional terminator (`unreachable`, `br`, `br_table`, `return`)
-//! at the same nesting level, up to (not including) the `end`/`else` that
-//! closes that level. A nested `block`/`loop`/`if` encountered while
-//! already dead is dropped as one whole unit — its own opening instruction
-//! is never emitted and its interior is never inspected — rather than
-//! descended into, so no frame is ever *partially* dropped. Combined with
-//! the fact that no *enclosing* frame is ever removed (only whole nested
-//! spans, and only ones that were themselves unreachable), no surviving
-//! branch's `relative_depth` is ever affected: every frame a surviving
-//! branch could target either still encloses it exactly as before, or was
-//! deleted together with the branch itself (since a branch inside a
-//! wholly-dropped span is unreachable code too, and is dropped along with
-//! it). One linear pass is exhaustive — unlike steps 1–4, which alternate
+//! more linear pass over the body to drop exactly that kind of leftover:
+//! every instruction following an unconditional terminator (`unreachable`,
+//! `br`, `br_table`, `return`) at the same nesting level, up to (not
+//! including) the `end`/`else` that closes that level. A nested
+//! `block`/`loop`/`if` encountered while already dead is dropped as one
+//! whole unit — its opening instruction is never emitted and its interior
+//! never inspected — rather than descended into, so no frame is ever
+//! *partially* dropped. Combined with the fact that no *enclosing* frame is
+//! ever removed (only whole nested spans that were themselves unreachable),
+//! no surviving branch's `relative_depth` is ever affected: every frame a
+//! surviving branch could target either still encloses it exactly as
+//! before, or was deleted together with the branch itself (a branch inside
+//! a wholly-dropped span is unreachable code too, and is dropped with it).
+//! One linear pass is exhaustive — unlike steps 1–4, which alternate
 //! rewriting and removal because a rewrite can create a *new* removal
 //! candidate, dropping dead code never creates more dead code for a later
 //! pass to find, since the scan already follows every nesting level (and
@@ -480,14 +475,13 @@ fn unnest_function<'a>(
 ) -> Result<(Vec<Operator<'a>>, FuncStats)> {
     let mut stats = FuncStats::default();
 
-    // Safety bound on the fixpoint loop: every iteration that changes
-    // anything strictly reduces either the `br`/`br_if` count or the
-    // `block` count (see the module doc comment's termination argument),
-    // both initially bounded by `ops.len()`, plus one final iteration to
-    // detect the fixpoint — so `2 * len + 16` can never legitimately be
-    // exceeded. It only guards against a logic bug turning into an infinite
-    // loop instead of a silently half-transformed body (see the `converged`
-    // check below).
+    // Safety bound on the fixpoint loop: every changing iteration strictly
+    // reduces the `br`/`br_if` count or the `block` count (see the module
+    // doc's termination argument), both bounded by `ops.len()`, plus one
+    // final iteration to detect the fixpoint — so `2 * len + 16` can never
+    // legitimately be exceeded. Guards against a logic bug turning into an
+    // infinite loop instead of a silently half-transformed body (see the
+    // `converged` check below).
     let max_iters = ops.len().saturating_mul(2).saturating_add(16);
     let mut converged = false;
 
@@ -613,37 +607,34 @@ fn unnest_function<'a>(
     Ok((ops, stats))
 }
 
-/// Post-fixpoint dead-code elimination: see the module doc comment's
-/// "Dead-code elimination (post-pass)" section for the full rationale.
+/// Post-fixpoint dead-code elimination: see the module doc's "Dead-code
+/// elimination (post-pass)" section for the full rationale.
 ///
 /// Makes one linear pass over `ops`, tracking a single `dead` flag scoped to
-/// whatever nesting level is currently being scanned (there is never a need
-/// for a *stack* of these — a new level is only ever entered while `dead` is
-/// `false`, since a level entered while `dead` is `true` is instead dropped
-/// whole via `skip_depth` below, so the level a `block`/`loop`/`if`'s `end`
-/// returns to is always `false` by construction). Once an unconditional
-/// terminator (`unreachable`, `br`, `br_table`, `return`) is emitted while
-/// alive, `dead` flips to `true` and every following instruction at the same
-/// level is dropped until the `else`/`end` that closes it, which resets
-/// `dead` to `false` for the next region (the `else` arm, or whatever
-/// follows the closing `end`).
+/// the nesting level currently being scanned (never needs a *stack* of
+/// these — a new level is only ever entered while `dead` is `false`, since a
+/// level entered while `dead` is `true` is instead dropped whole via
+/// `skip_depth` below, so the level a `block`/`loop`/`if`'s `end` returns to
+/// is always `false` by construction). Once an unconditional terminator
+/// (`unreachable`, `br`, `br_table`, `return`) is emitted while alive,
+/// `dead` flips to `true` and every following instruction at that level is
+/// dropped until the `else`/`end` that closes it, which resets `dead` to
+/// `false` for the next region.
 ///
 /// `skip_depth` handles the one case a flat `dead` flag alone can't: a
 /// nested `block`/`loop`/`if` whose own *opening* instruction is itself
-/// already dead. That whole span — however deeply nested internally — is
-/// dropped as a single unit: its instructions are never emitted and never
-/// individually inspected, so no branch inside it (necessarily also dead
-/// code, since a branch can only target a frame that lexically encloses it)
-/// needs its own handling, and no frame outside the span is touched at all.
+/// already dead. That whole span — however deeply nested — is dropped as a
+/// single unit: instructions are never emitted or individually inspected,
+/// so no branch inside it (necessarily also dead code, since a branch can
+/// only target a frame that lexically encloses it) needs its own handling.
 fn eliminate_dead_code<'a>(ops: Vec<Operator<'a>>) -> (Vec<Operator<'a>>, u32) {
     let mut out = Vec::with_capacity(ops.len());
     let mut removed: u32 = 0;
     let mut dead = false;
     // >0 while dropping a whole nested `block`/`loop`/`if` ... `end` span
-    // that is itself dead code; counts that span's own internal nesting so
-    // its matching `end` is found without emitting or inspecting anything
-    // in between. `else` doesn't change this count: it doesn't close the
-    // `if` frame, only `end` does.
+    // that is itself dead code; counts that span's internal nesting so its
+    // matching `end` is found without emitting or inspecting anything in
+    // between. `else` doesn't change this count — only `end` closes a frame.
     let mut skip_depth: u32 = 0;
 
     for op in ops {
@@ -669,16 +660,11 @@ fn eliminate_dead_code<'a>(ops: Vec<Operator<'a>>) -> (Vec<Operator<'a>>, u32) {
                     continue;
                 }
                 out.push(op);
-                // `dead` is already `false` here (the `if dead` branch
-                // above returns before reaching this point) — the newly
-                // opened region starts alive, as it must.
             }
             Operator::Else | Operator::End => {
-                // Closes the current region (an `if`'s `then` arm, or the
-                // enclosing `block`/`loop`/`if`/function scope): always
-                // kept even when `dead`, since it's the boundary token the
-                // dead run stops at, not part of the dead run itself. The
-                // next region starts alive.
+                // Boundary token the dead run stops at, not part of it —
+                // always kept even when `dead`. The next region starts
+                // alive.
                 out.push(op);
                 dead = false;
             }
@@ -687,9 +673,8 @@ fn eliminate_dead_code<'a>(ops: Vec<Operator<'a>>) -> (Vec<Operator<'a>>, u32) {
             | Operator::BrTable { .. }
             | Operator::Return => {
                 if dead {
-                    // Already unreachable code following an earlier
-                    // terminator at this same level — drop it like any
-                    // other dead instruction, same as the `_` arm below.
+                    // Unreachable code following an earlier terminator at
+                    // this level — drop it like any other dead instruction.
                     removed += 1;
                     continue;
                 }
@@ -713,9 +698,9 @@ fn eliminate_dead_code<'a>(ops: Vec<Operator<'a>>) -> (Vec<Operator<'a>>, u32) {
 /// both its opening `block` and matching `end`), decrementing every
 /// surviving `br`/`br_if`'s `relative_depth` that targeted a label *outside*
 /// a removed frame by the number of removed frames it had to cross. Per the
-/// module doc comment's `br_table` safety argument, no frame in `removable`
-/// ever contains or is targeted by a `br_table`, so `br_table` instructions
-/// are always copied through unchanged (their depths never need adjusting).
+/// module doc's `br_table` safety argument, no frame in `removable` ever
+/// contains or is targeted by a `br_table`, so `br_table` instructions are
+/// always copied through unchanged (their depths never need adjusting).
 fn remove_frames<'a>(ops: &[Operator<'a>], removable: &HashSet<usize>) -> Vec<Operator<'a>> {
     let mut out = Vec::with_capacity(ops.len());
     // Parallel to the currently-open frame stack: `true` at position `k`
@@ -760,15 +745,15 @@ fn remove_frames<'a>(ops: &[Operator<'a>], removable: &HashSet<usize>) -> Vec<Op
 
 /// Computes a branch's new `relative_depth` after removing the frames
 /// marked `true` in `skip_stack` (the currently-open frame stack, outer to
-/// inner, *before* removal — i.e. exactly as seen by the branch at the point
-/// it is encountered). The target frame's stack position is
-/// `len - 1 - relative_depth` (or "before everything", conceptually -1, if
+/// inner, *before* removal — as seen by the branch at the point it is
+/// encountered). The target frame's stack position is
+/// `len - 1 - relative_depth` (or -1, "before everything", if
 /// `relative_depth` reaches past the whole stack — the implicit
 /// function-level scope). Every removed frame whose stack position is
-/// *deeper* than the target's (i.e. sits between the branch and its target)
-/// contributes exactly one level of decrement; a removed frame at or before
-/// the target's position leaves the branch's depth to that target
-/// unaffected (see the module doc comment for the derivation).
+/// *deeper* than the target's (sits between the branch and its target)
+/// contributes one level of decrement; a removed frame at or before the
+/// target's position leaves the branch's depth to that target unaffected
+/// (see the module doc for the derivation).
 fn adjust_depth(skip_stack: &[bool], relative_depth: u32) -> u32 {
     let len = skip_stack.len();
     let target_pos: i64 = if (relative_depth as usize) < len {

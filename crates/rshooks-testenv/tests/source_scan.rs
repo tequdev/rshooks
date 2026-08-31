@@ -1,29 +1,20 @@
 //! Source-scan tests (design §2.1), two of them:
 //!
 //! 1. [`inventory_matches_a_fresh_grep_of_the_bridged_families`] asserts
-//!    set-equality between `crates/rshooks/testenv-call-sites.txt` (bridged +
-//!    unbridged sections together) and a fresh grep of every direct
-//!    `rshooks_core::<fn>(` call site in the bridged families under
-//!    `crates/rshooks/src/api/*.rs`, plus `crates/rshooks/src/xfl.rs`/
-//!    `xfl_unchecked.rs` and `api/keylet.rs`'s `util_keylet_buf(` calls (see
-//!    [`find_raw_call_in_keylet`]'s doc comment and the inventory file's own
-//!    header for why those two need different matching than the rest). This
-//!    only keeps the committed *inventory* honest against a fresh grep — it
-//!    does not by itself prove any call site is actually intercepted under
-//!    `testenv`; a raw call and its own bridging `#[cfg(feature =
-//!    "testenv", ...)]` guard could both vanish together (e.g. an entire
-//!    intercepted block deleted) without this test noticing, since the grep
-//!    and the inventory would still agree.
-//! 2. [`every_raw_call_site_has_an_enclosing_testenv_guard`] is the test that
-//!    actually catches that case: for every raw call site the grep in (1)
-//!    finds, it requires the literal text `feature = "testenv"` to appear
-//!    somewhere in the enclosing `fn`'s body (a brace-depth walk from the
-//!    preceding `fn ` line — see [`fn_body_end_line`]'s doc comment for the
-//!    heuristic's limits). Deleting an entire interception block (the
-//!    `#[cfg(...)] if let Some(..) = ... { return ...; }` guard plus its raw
-//!    fallback call) makes this test fail even though (1) would stay green,
-//!    because the surviving raw call's enclosing fn no longer contains the
-//!    marker text at all.
+//!    set-equality between `crates/rshooks/testenv-call-sites.txt` and a
+//!    fresh grep of every direct `rshooks_core::<fn>(` call site under
+//!    `crates/rshooks/src/api/*.rs` (plus `xfl.rs`/`xfl_unchecked.rs`, and
+//!    `keylet.rs`'s `util_keylet_buf(` calls — see
+//!    [`find_raw_call_in_keylet`]). This only keeps the inventory honest
+//!    against a fresh grep — it does not prove any call site is actually
+//!    intercepted under `testenv`, since a raw call and its own bridging
+//!    cfg guard could both vanish together without the grep noticing.
+//! 2. [`every_raw_call_site_has_an_enclosing_testenv_guard`] catches that
+//!    case: for every raw call site the grep in (1) finds, it requires the
+//!    literal text `feature = "testenv"` to appear somewhere in the
+//!    enclosing `fn`'s body (a brace-depth walk — see
+//!    [`fn_body_end_line`]). Deleting an entire interception block makes
+//!    this test fail even though (1) would stay green.
 
 #![allow(
     clippy::panic,
@@ -98,10 +89,9 @@ fn identifier_after(line: &str, idx: usize) -> Option<String> {
 }
 
 /// Whether `word` occurs in `haystack` as a standalone token (not as a
-/// substring of a longer identifier) — distinguishes a real `#[cfg(test)]`/
-/// `#[cfg(all(test, ...))]` test-module gate from `#[cfg(feature =
-/// "testenv", ...)]`, whose `testenv` would otherwise falsely match a naive
-/// `contains("test")` check.
+/// substring of a longer identifier) — distinguishes a real `#[cfg(test)]`
+/// gate from `#[cfg(feature = "testenv", ...)]`, whose `testenv` would
+/// otherwise falsely match a naive `contains("test")` check.
 fn contains_word(haystack: &str, word: &str) -> bool {
     let bytes = haystack.as_bytes();
     let mut start = 0usize;
@@ -155,13 +145,11 @@ fn find_raw_call(line: &str) -> Option<String> {
 }
 
 /// `api/keylet.rs`'s 26 typed helpers each intercept the backend with their
-/// own real slices *before* falling through to `util_keylet_buf` (a
-/// crate-local composing call, not a bare `rshooks_core::<fn>(` one — see
-/// `crates/rshooks/testenv-call-sites.txt`'s header and
-/// [`rshooks_core::backend::KeyletArg`]'s doc comment for the full
-/// rationale). [`find_raw_call`]'s `"rshooks_core::"` needle never matches
-/// those calls, so this file's own raw-call marker is
-/// `util_keylet_buf(` instead.
+/// own real slices before falling through to `util_keylet_buf` (a
+/// crate-local composing call, not a bare `rshooks_core::<fn>(` one).
+/// [`find_raw_call`]'s `"rshooks_core::"` needle never matches those calls,
+/// so this file's raw-call marker for keylet.rs is `util_keylet_buf(`
+/// instead.
 fn find_raw_call_in_keylet(line: &str) -> Option<String> {
     const NEEDLE: &str = "util_keylet_buf(";
     if line.contains(NEEDLE) {
@@ -199,8 +187,7 @@ fn grep_raw_call_sites(api_dir: &Path) -> BTreeSet<Row> {
         }
     }
     // `xfl.rs`/`xfl_unchecked.rs` (crate root, not under `api/`) each have
-    // their own raw call sites — see the inventory file's own trailing
-    // sections for why both are scanned as honorary members of the "float"
+    // their own raw call sites, scanned as honorary members of the "float"
     // bridged family.
     for file_name in ["xfl.rs", "xfl_unchecked.rs"] {
         let path = api_dir.parent().unwrap_or(api_dir).join(file_name);
@@ -243,15 +230,12 @@ fn inventory_matches_a_fresh_grep_of_the_bridged_families() {
 }
 
 /// Brace-depth walk from `start_line` (already known to contain a `fn `
-/// declaration, per [`find_fn_name`]) to the line where that function's body
-/// closes. A single lightweight heuristic — raw `{`/`}` counting across
-/// every char of each line, no string/comment awareness — deliberately not
-/// a real parser: good enough to bound "the text of this one function" for
-/// [`find_unbridged_call_sites`]'s marker search, not to be relied on for
-/// anything more precise. Stops at the first line where the depth returns to
-/// (or below) zero after having gone positive at least once; falls back to
-/// the file's last line if the brace is never closed (defensive — every
-/// real Rust `fn` closes; this only guards against a heuristic miscount).
+/// declaration) to the line where that function's body closes. A single
+/// lightweight heuristic — raw `{`/`}` counting, no string/comment
+/// awareness — good enough to bound "the text of this one function", not a
+/// real parser. Stops at the first line where the depth returns to zero
+/// after having gone positive; falls back to the file's last line if the
+/// brace is never closed.
 fn fn_body_end_line(lines: &[&str], start_line: usize) -> usize {
     let mut depth: i64 = 0;
     let mut opened = false;
@@ -274,10 +258,9 @@ fn fn_body_end_line(lines: &[&str], start_line: usize) -> usize {
 }
 
 /// One raw call site whose enclosing `fn` body carries no `feature =
-/// "testenv"` cfg marker anywhere in it — the actual interception-loss
-/// signal [`every_raw_call_site_has_an_enclosing_testenv_guard`] checks for.
-/// `(label, fn_name)`, `label` matching [`grep_raw_call_sites`]'s own row
-/// shape (`"api/<file>.rs"` or the bare `xfl.rs`/`xfl_unchecked.rs` name).
+/// "testenv"` cfg marker anywhere in it. `(label, fn_name)`, `label`
+/// matching [`grep_raw_call_sites`]'s row shape (`"api/<file>.rs"` or the
+/// bare `xfl.rs`/`xfl_unchecked.rs` name).
 fn find_unbridged_call_sites(api_dir: &Path) -> Vec<(String, String)> {
     const MARKER: &str = "feature = \"testenv\"";
     let mut offenders = Vec::new();

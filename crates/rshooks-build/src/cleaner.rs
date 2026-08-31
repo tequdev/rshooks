@@ -230,23 +230,13 @@ pub fn clean(wasm: &[u8], _opts: &Options) -> Result<Vec<u8>> {
                     // linear memory is zero-initialized by definition, so
                     // trailing zero bytes in an active data segment are pure
                     // dead weight (5000 drops/byte SetHook fee) — untouched
-                    // memory reads as zero either way, and memory size comes
-                    // from the memory section, not segment lengths. Only the
-                    // payload shrinks from the tail; the offset expression is
-                    // untouched.
-                    //
-                    // Guarded by `trim_safe`: active segments apply in order
-                    // and may legally OVERLAP, in which case a trailing zero
-                    // can be a deliberate overwrite of an earlier segment's
-                    // non-zero byte — trimming it would change memory
-                    // contents. An out-of-bounds segment traps at
-                    // instantiation, and trimming could shrink it into
-                    // bounds — turning that trap into success. LLVM/wasm-ld
-                    // emit neither shape, but `clean` accepts arbitrary
-                    // wasm, so trimming is skipped unless every offset is a
-                    // plain `i32.const`, every segment fits the first
-                    // memory's initial size, and no two segment ranges
-                    // intersect.
+                    // memory reads as zero either way. Only the payload
+                    // shrinks from the tail; the offset expression is
+                    // untouched, and addressable memory size comes from the
+                    // memory section, not data-segment lengths, so trimming
+                    // a segment's payload can't shrink it. See
+                    // `data_trim_is_safe`'s doc for why `trim_safe` gates
+                    // this.
                     if trim_safe {
                         if let Some(trimmed) = trim_trailing_zeros(d.data) {
                             let expr = ir::remap_const_expr(offset_expr, &mut remapper)?;

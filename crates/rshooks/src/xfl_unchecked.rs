@@ -9,8 +9,7 @@ use crate::xfl::XFL;
 
 /// A raw XFL `i64` register value that has **not** been validated: it may
 /// be a canonical XFL value, a non-canonical bit pattern, or a negative
-/// Hook API error code sharing the same channel. See the module doc
-/// comment for the full soundness argument and the poison audit table.
+/// Hook API error code sharing the same channel.
 #[derive(Clone, Copy, Debug)]
 pub struct XFLUnchecked(i64);
 
@@ -34,27 +33,18 @@ impl XFLUnchecked {
     ///
     /// Implemented as `float_sum(self, 0)` — a host round trip, not a
     /// guest-side range check — deliberately: the host's
-    /// `RETURN_IF_INVALID_FLOAT` (see the module doc comment) is the same
-    /// gate every other float host call runs, so this reuses it instead of
-    /// re-deriving the mantissa/exponent bounds locally and risking drift
-    /// from the host's actual rules.
+    /// `RETURN_IF_INVALID_FLOAT` is the same gate every other float host
+    /// call runs, so this reuses it instead of re-deriving the
+    /// mantissa/exponent bounds locally and risking drift from the host's
+    /// actual rules.
     ///
-    /// `float_sum(value, 0)` (as opposed to `float_sum(0, value)` or some
-    /// other minimal-cost round trip) fully validates `value`, despite
-    /// `HookAPI::float_sum`'s own internal short-circuit — `if (float1 ==
-    /// 0) return float2; if (float2 == 0) return float1;`, i.e. summing
-    /// with `0` skips `float_sum`'s own arithmetic entirely and returns the
-    /// other operand untouched, which might suggest `float_sum(value, 0)`
-    /// "validates" `0` (the constant) but waves `value` through unchecked.
-    /// It does not: that short-circuit lives inside `HookAPI::float_sum`,
-    /// which is only ever reached *after* the
-    /// `DEFINE_HOOK_FUNCTION(int64_t, float_sum, ...)` wrapper in
-    /// `applyHook.cpp` has already run `RETURN_IF_INVALID_FLOAT(float1)`
-    /// (rejecting an invalid `value` immediately, before `HookAPI::float_sum`
-    /// is called at all) and `RETURN_IF_INVALID_FLOAT(float2)` (trivially
-    /// satisfied by the literal `0`). So an invalid `value` never reaches
-    /// the short-circuit, and a valid `value` passes through it unchanged
-    /// — correctly, since it was already canonical.
+    /// This fully validates `value` despite `HookAPI::float_sum`'s own
+    /// internal `+0` short-circuit (`if (float2 == 0) return float1;`):
+    /// that short-circuit lives inside `HookAPI::float_sum`, which is only
+    /// reached *after* the `DEFINE_HOOK_FUNCTION(int64_t, float_sum, ...)`
+    /// wrapper in `applyHook.cpp` has already run
+    /// `RETURN_IF_INVALID_FLOAT(float1)` on `value`, rejecting it before
+    /// `HookAPI::float_sum` — and thus the short-circuit — is ever reached.
     #[inline(always)]
     pub fn validate(self) -> Result<XFL> {
         #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]

@@ -1,23 +1,19 @@
 //! Persistent hook state: `state`, `state_set`, `state_foreign(_set)`.
 //!
-//! Two distinct integer conventions coexist in this module, deliberately:
+//! Two integer conventions coexist here, deliberately:
 //! - [`state_u64`] (and `state_foreign_u64`) use the host's "as-int64" mode
 //!   (`write_ptr = 0, write_len = 0`) — the host packs the entry's raw bytes
 //!   **big-endian** into the returned `i64` (see DESIGN.md §5.2). There is
-//!   no write-side as-int64 mode ([`crate::error::HookError`]'s module doc
-//!   notes `state_set` "carr[ies] no write buffer"), so [`state_update_u64`]
-//!   writes back with `to_be_bytes` to round-trip through that same
-//!   big-endian convention.
-//! - [`state_u32`], [`state_i64`], [`state_xfl`], [`state_u64_le`] (and their
-//!   `state_set_*`/`state_update_*` twins, where present) instead read/write
-//!   a plain fixed-size buffer via [`state_exact`] and decode/encode it
-//!   **little-endian** — the convention the `state-counter` example already
-//!   uses by hand (`u64::from_le_bytes`/`to_le_bytes` around a plain
-//!   `state`/`state_set` round-trip). These do not use the host's as-int64
-//!   mode at all. [`state_u64_le`] is the unsigned 64-bit counterpart to
-//!   [`state_u64`]'s as-int64 big-endian read — see its own doc comment for
-//!   the side-by-side comparison, and DESIGN.md §5.6 ("Endianness
-//!   conventions") for the full two-world rule this split reflects.
+//!   no write-side as-int64 mode, so [`state_update_u64`] writes back with
+//!   `to_be_bytes` to round-trip through that same big-endian convention.
+//! - [`state_u32`], [`state_i64`], [`state_xfl`], [`state_u64_le`] (and
+//!   their `state_set_*`/`state_update_*` twins, where present) instead
+//!   read/write a plain fixed-size buffer via [`state_exact`] and
+//!   decode/encode it **little-endian**, matching this crate's typed layer;
+//!   these do not use the host's as-int64 mode at all. [`state_u64_le`] is
+//!   the unsigned 64-bit counterpart to [`state_u64`]'s as-int64 big-endian
+//!   read — see its own doc comment for the side-by-side comparison, and
+//!   DESIGN.md §5.6 ("Endianness conventions") for the full two-world rule.
 //!
 //! Every helper above is a standalone function keyed by a raw `&[u8]` — for
 //! a typed layer where the key itself is a compile-time-checked enum
@@ -31,24 +27,20 @@
 //!
 //! Every key- or buffer-shaped parameter in this module (`state`'s `key`
 //! and `out`, `state_set`'s `key` and `data`, `state_foreign`'s `key` and
-//! `out`, ...) is generic instead of a bare `&[u8]`/`&mut [u8]`
-//! specifically so a [`crate::types::StateKey`] (or any other
-//! `rshooks::types` newtype a hook chooses to key or read/write state
-//! with) can be passed straight through as `&STATE_KEY`/`&mut raw`, with no
-//! `.as_ref()`/`.as_mut()` at the call site. A bare `&[u8]`/`&mut [u8]`
-//! parameter can't do this: `StateKey` only implements
-//! [`core::ops::Deref`]/[`core::ops::DerefMut`] with `[u8; 32]` as its
-//! target (not `[u8]` — see `crate::types`' module doc comment for why),
-//! and Rust does not chain that one `Deref` hop with the further built-in
-//! array-to-slice unsized coercion at a single call site, so `&STATE_KEY`
-//! alone never reaches a `&[u8]` parameter. Bounding the parameter by
-//! [`AsRef<[u8]>`](AsRef)/[`AsMut<[u8]>`](AsMut) instead sidesteps the
-//! coercion question entirely: every `crate::types` newtype already
-//! implements both directly, no coercion needed. This is zero-cost —
+//! `out`, ...) is bounded by [`AsRef<[u8]>`](AsRef)/[`AsMut<[u8]>`](AsMut)
+//! rather than a bare `&[u8]`/`&mut [u8]`, so a [`crate::types::StateKey`]
+//! (or any other `rshooks::types` newtype) passes straight through as
+//! `&STATE_KEY`/`&mut raw`, with no `.as_ref()`/`.as_mut()` at the call
+//! site. A bare `&[u8]`/`&mut [u8]` parameter can't do this: `StateKey`
+//! only implements [`core::ops::Deref`]/[`core::ops::DerefMut`] with
+//! `[u8; 32]` as its target (not `[u8]` — see `crate::types`' module doc
+//! comment for why), and Rust does not chain that one `Deref` hop with the
+//! further built-in array-to-slice unsized coercion at a single call site,
+//! so `&STATE_KEY` alone never reaches a `&[u8]` parameter. Bounding by
+//! `AsRef`/`AsMut` sidesteps the coercion question entirely: every
+//! `crate::types` newtype already implements both directly. Zero-cost —
 //! `#[inline(always)]` plus one generic parameter monomorphized per call
-//! site compiles to the exact same code as the old concrete parameter did
-//! (verified: `mise run build-examples`'s per-example wasm size and
-//! worst-case instruction count are unchanged by this).
+//! site compiles to the same code a concrete parameter would.
 //!
 //! `namespace`/`account` (`state_foreign`'s optional pair) are a special
 //! case, covered by [`ForeignRef`] below rather than a plain `AsRef<[u8]>`/
@@ -62,26 +54,22 @@ use crate::xfl::XFL;
 /// implementing [`AsRef<[u8]>`] (present) as `state_foreign`'s
 /// `namespace`/`account` arguments.
 ///
-/// This is deliberately a different shape from `state`'s `key` parameter
-/// (`&(impl AsRef<[u8]> + ?Sized)`): `namespace`/`account` are *optional*,
-/// and a generic `Option<K: AsRef<[u8]>>` parameter cannot also accept a
-/// bare `None` literal — with nothing else in the call to pin down `K`,
-/// `None` is genuinely ambiguous and fails to compile
-/// (`error[E0283]: type annotations needed`, verified directly against
-/// rustc, not just reasoned about). `ForeignRef` sidesteps that by giving
-/// the "present" and "absent" cases two different shapes instead of one
-/// `Option<K>`: a bare `&value` (present, any `AsRef<[u8]>`) or `None`
-/// (absent — resolvable because this trait has exactly one
-/// `Option<...>`-shaped impl, so `None`'s type isn't ambiguous). The one
-/// thing this does **not** support, unlike `state`'s `key` — is
+/// A different shape from `state`'s `key` parameter because
+/// `namespace`/`account` are *optional*: a generic `Option<K: AsRef<[u8]>>`
+/// parameter can't also accept a bare `None` literal — with nothing else in
+/// the call to pin down `K`, `None` is genuinely ambiguous
+/// (`error[E0283]: type annotations needed`). `ForeignRef` sidesteps that
+/// by giving the "present" and "absent" cases two different shapes instead
+/// of one `Option<K>`: a bare `&value` (present, any `AsRef<[u8]>`) or
+/// `None` (absent — resolvable because this trait has exactly one
+/// `Option<...>`-shaped impl, so `None`'s type isn't ambiguous).
+///
+/// The one thing this does **not** support, unlike `state`'s `key`, is
 /// `Some(&value)` for a `rshooks::types` newtype: `Option<&AccountId>`
-/// doesn't match either impl below (also verified against rustc).
-/// Supporting that too would mean adding a generic `Option<&'a T>` impl,
-/// which reintroduces exactly the `None`-ambiguity problem this trait
-/// exists to avoid. Pass the bare reference instead: `Some(&target)`
-/// becomes `&target`, `None` stays `None`. (`Some(raw)` for an
-/// already-`&[u8]` value, e.g. one produced by `.as_ref()`, still works —
-/// it matches the `Option<&'a [u8]>` impl exactly.)
+/// doesn't match either impl below. Pass the bare reference instead:
+/// `Some(&target)` becomes `&target`, `None` stays `None`. (`Some(raw)` for
+/// an already-`&[u8]` value, e.g. one produced by `.as_ref()`, still
+/// works — it matches the `Option<&'a [u8]>` impl exactly.)
 pub trait ForeignRef<'a> {
     /// `self`, resolved to `Some(bytes)` (present) or `None` (absent).
     fn foreign_ref(self) -> Option<&'a [u8]>;
@@ -101,10 +89,8 @@ impl<'a, T: AsRef<[u8]> + ?Sized> ForeignRef<'a> for &'a T {
     }
 }
 
-/// Read this hook's own state, decoded as an optional-defaulting `(ptr, len)`
-/// pair — `None` becomes `(0, 0)`. Only ever used in the read direction,
-/// never mixed with a write-direction call, so it does not blur the
-/// pointer-direction discipline used elsewhere in this crate.
+/// Decodes an optional `(ptr, len)` pair for a read-direction host call only
+/// — `None` becomes `(0, 0)`.
 #[inline(always)]
 fn opt_in(o: Option<&[u8]>) -> (u32, u32) {
     match o {
@@ -157,15 +143,14 @@ pub fn state<B: AsMut<[u8]> + ?Sized, K: AsRef<[u8]> + ?Sized>(
 /// decode inside rshooks" principle.
 ///
 /// Deliberately **not** implemented by having [`state`] call this (or vice
-/// versa): measured directly, routing [`state`] *through* a second,
-/// separately-defined function (even with both `#[inline(always)]`)
-/// changed `rshooks-build`'s unnest pass's output for an unrelated hook
-/// (`examples/81_govern`, which never touches this function's raw-code
-/// path) enough to push its nesting depth from 22 to 55 — the pass's
-/// heuristics operate on the compiled wasm's actual block shape, not a
-/// purely semantics-preserving view of the source. Duplicating this one
-/// small function body instead keeps [`state`]'s own compiled output
-/// provably unaffected.
+/// versa): routing [`state`] *through* a second, separately-defined
+/// function (even with both `#[inline(always)]`) changed `rshooks-build`'s
+/// unnest pass's output for an unrelated hook (`examples/81_govern`, which
+/// never touches this function's raw-code path), pushing its nesting depth
+/// from 22 to 55 — the pass's heuristics operate on the compiled wasm's
+/// actual block shape, not source semantics. Duplicating this one small
+/// function body instead keeps [`state`]'s own compiled output provably
+/// unaffected.
 #[inline(always)]
 pub(crate) fn state_raw_code<B: AsMut<[u8]> + ?Sized, K: AsRef<[u8]> + ?Sized>(
     out: &mut B,
@@ -197,15 +182,15 @@ pub(crate) fn state_raw_code<B: AsMut<[u8]> + ?Sized, K: AsRef<[u8]> + ?Sized>(
 /// **big-endian**: an 8-byte little-endian counter read this way comes back
 /// byte-swapped.
 ///
-/// **Intended use**: this reads an entry whose bytes originated from Xahau
-/// Binary itself — e.g. a value mirroring a protocol field like
-/// `Tx.Sequence`, or interop with a C hook that wrote the entry with
-/// explicit big-endian bytes to match protocol convention (see DESIGN.md
-/// §5.6, "Endianness conventions", for the full two-world rule). It is
-/// **not** the right function for reading a value this crate's own typed
-/// storage layer wrote — `crate::state`'s `state_get`/`state_set_loose` and
-/// every `rshooks::types`/`#[derive(HookData)]` value are little-endian
-/// by convention, and reading one of those through this big-endian as-int64
+/// **Intended use**: an entry whose bytes originated from Xahau Binary
+/// itself — e.g. a value mirroring a protocol field like `Tx.Sequence`, or
+/// interop with a C hook that wrote the entry with explicit big-endian
+/// bytes to match protocol convention (see DESIGN.md §5.6, "Endianness
+/// conventions", for the full two-world rule). **Not** the right function
+/// for reading a value this crate's own typed storage layer wrote —
+/// `crate::state`'s `state_get`/`state_set_loose` and every
+/// `rshooks::types`/`#[derive(HookData)]` value are little-endian by
+/// convention, and reading one of those through this big-endian as-int64
 /// path silently byte-swaps it (both calls succeed; only the returned value
 /// is wrong). Reach for [`state_u64_le`] instead when the entry was written
 /// by this crate's typed/LE layer.
@@ -222,11 +207,9 @@ pub fn state_u64<K: AsRef<[u8]> + ?Sized>(key: &K) -> Result<u64> {
 
 /// As-int64-mode counterpart to [`state_raw_code`]: calls the host `state`
 /// function with `write_ptr = 0, write_len = 0` and returns its
-/// **undecoded** `i64` result. See [`state_raw_code`]'s doc comment for
-/// why this exists (an internal fast path for raw-code comparisons before
-/// ever constructing a [`HookError`]) and for why it deliberately
-/// duplicates [`state_u64`]'s own call instead of [`state_u64`] routing
-/// through it — [`state_u64`] itself is unaffected either way.
+/// **undecoded** `i64` result. See [`state_raw_code`]'s doc comment for why
+/// this exists and for why it deliberately duplicates [`state_u64`]'s own
+/// call rather than routing through it.
 #[inline(always)]
 pub(crate) fn state_u64_raw_code<K: AsRef<[u8]> + ?Sized>(key: &K) -> i64 {
     let key = key.as_ref();
@@ -267,17 +250,15 @@ pub fn state_u64_le<K: AsRef<[u8]> + ?Sized>(key: &K) -> Result<u64> {
 /// `T`'s length — any [`crate::convert::FixedRead`] type, most commonly a
 /// `rshooks::types` newtype or a raw `[u8; N]`.
 ///
-/// An entry longer than that already fails as
-/// [`HookError::TooSmall`](crate::error::HookError::TooSmall) from the
-/// underlying host call (the buffer `T::read_exact` allocates has exactly
-/// that capacity); an entry shorter is caught by `T::read_exact` itself
-/// (the host call succeeds but writes fewer bytes) and mapped to the same
-/// [`HookError::TooSmall`] variant, since both cases are "the entry does
-/// not have the exact expected size". No loop, no panic.
+/// Both a longer entry and a shorter one fail as
+/// [`HookError::TooSmall`](crate::error::HookError::TooSmall) — the buffer
+/// `T::read_exact` allocates has exactly `T`'s capacity, and a shorter
+/// entry is caught by `T::read_exact` itself (the host call succeeds but
+/// writes fewer bytes) and mapped to the same variant, since both cases are
+/// "the entry does not have the exact expected size". No loop, no panic.
 ///
 /// `T` is inferred from context, not a turbofish — see
-/// [`crate::api::otxn::otxn_field_exact`]'s doc comment for the full
-/// story.
+/// [`crate::api::otxn::otxn_field_exact`]'s doc comment.
 ///
 /// # Examples
 ///
@@ -353,12 +334,9 @@ pub fn state_set_xfl<K: AsRef<[u8]> + ?Sized>(value: XFL, key: &K) -> Result<usi
 /// Collapses a **raw, undecoded** host-call `i64` result (`code`) into
 /// "value present" (`Ok(Some(v))`, via `decode`), "no entry yet"
 /// (`Ok(None)`, from comparing `code` directly against
-/// [`rshooks_core::DOESNT_EXIST`] — see [`state_raw_code`]'s doc comment for
-/// why this must happen *before* any [`HookError`] is constructed), or "a
-/// real error" (`Err(e)`, from `decode`'s own `res(code)` call on that rare
-/// path — every caller here only ever propagates `e` onward via `?`,
-/// never matching a further specific variant, so [`HookError::from`]'s
-/// decode still optimizes away there too, per the same principle). Pure
+/// [`rshooks_core::DOESNT_EXIST`] before any [`HookError`] is constructed —
+/// see [`state_raw_code`]'s doc comment for why), or "a real error"
+/// (`Err(e)`, from `decode`'s own `res(code)` call on that rare path). Pure
 /// function, no host call — kept separate from the `state_update_*`
 /// functions so it has a standalone unit test.
 #[inline(always)]
@@ -373,8 +351,7 @@ fn value_or_absent<T>(code: i64, decode: impl FnOnce(i64) -> Result<T>) -> Resul
 /// buffer via the raw host call, returning the **undecoded** `i64` result
 /// alongside the buffer — the buffer-mode counterpart to
 /// [`state_u64_raw_code`], backing [`state_update_u32`]/
-/// [`state_update_i64`]/[`state_update_xfl`]. See [`state_raw_code`]'s doc
-/// comment for why this exists; the exact-length check
+/// [`state_update_i64`]/[`state_update_xfl`]. The exact-length check
 /// [`state_exact`]/[`FixedRead::read_exact`] normally performs is each
 /// caller's own responsibility here (via [`value_or_absent`]'s `decode`
 /// closure), since this function only makes the raw code available before
@@ -512,11 +489,10 @@ where
 {
     let out = out.as_mut();
     let key = key.as_ref();
-    // `ForeignRef::foreign_ref` takes `self` by value, and the testenv
-    // block below needs the same resolved bytes `opt_in` consumes next —
-    // extracted once here (identical value, identical evaluation point) so
-    // both can use it. See `crates/rshooks/testenv-call-sites.txt`'s notes
-    // for why this extraction, not a restructure, is necessary here.
+    // `ForeignRef::foreign_ref` takes `self` by value; the testenv block
+    // below needs the same resolved bytes `opt_in` consumes next, so both
+    // are extracted once here (see
+    // `crates/rshooks/testenv-call-sites.txt`).
     let ns_bytes = namespace.foreign_ref();
     let acc_bytes = account.foreign_ref();
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
@@ -545,10 +521,8 @@ where
 
 /// `state_foreign` counterpart to [`state_raw_code`]: calls the host
 /// `state_foreign` function directly and returns its **undecoded** `i64`
-/// result. See [`state_raw_code`]'s doc comment for why this exists (and
-/// for why it deliberately duplicates [`state_foreign`]'s own call instead
-/// of [`state_foreign`] routing through it) — [`state_foreign`] itself is
-/// unaffected either way.
+/// result. See [`state_raw_code`]'s doc comment for why this deliberately
+/// duplicates [`state_foreign`]'s own call rather than routing through it.
 #[inline(always)]
 pub(crate) fn state_foreign_raw_code<'ns, 'ac, B, K, N, A>(
     out: &mut B,
@@ -813,11 +787,10 @@ mod tests {
     // `state_exact`'s length comparison lives in `T::read_exact` (the
     // `FixedRead` impl, one per concrete `T`), exercised standalone by
     // `convert.rs`'s `fixed_read_array_rejects_short_write`/
-    // `fixed_read_succeeds_on_exact_write` (and `types.rs`'s newtype-
-    // flavored equivalents). `state_exact` itself always goes through the
-    // host stub on this target (returning `NotImplemented` before any
-    // length check happens), so there is nothing left for a standalone,
-    // non-host-call test to exercise here.
+    // `fixed_read_succeeds_on_exact_write` (and `types.rs`'s newtype
+    // equivalents). `state_exact` itself always goes through the host stub
+    // on this target (`NotImplemented` before any length check happens),
+    // so there is nothing left for a standalone test to exercise here.
 
     #[test]
     fn value_or_absent_distinguishes_doesnt_exist_from_real_errors() {

@@ -4,69 +4,53 @@
 //! zero-cost `rshooks::convert::ToBytes`/`FromBytes`/`FixedRead` triple,
 //! for a **hook-state value** — read back and decoded by
 //! `state_get_typed`/`state_get`, written by `state_set_typed`/`state_set_loose`.
-//! See `rshooks::HookData`'s doc comment (the public-facing re-export
-//! site) for the full user-facing writeup, grammar, and worked/
-//! compile-fail examples — this module only implements the codegen.
+//! See `rshooks::HookData`'s doc comment for the user-facing writeup,
+//! grammar, and worked/compile-fail examples — this module only implements
+//! the codegen.
 //!
-//! Three sibling derives cover the other three roles a fixed-offset struct
-//! plays in this crate — see each one's own doc comment for the full
-//! rationale for why these are four separate, deliberately narrower
-//! derives rather than one derive covering everything:
+//! Three sibling derives cover the other roles a fixed-offset struct plays
+//! in this crate:
 //!
 //! - [`crate::hook_key`]'s `#[derive(HookKey)]` — a hook-state **key**
-//!   (write-only, plus an explicit `StateKeyEncode` impl with a 32-byte
-//!   bound checked at derive time).
+//!   (write-only, plus a `StateKeyEncode` impl with a 32-byte bound checked
+//!   at derive time).
 //! - [`crate::param_name`]'s `#[derive(ParamName)]` — a composite Hook API
-//!   parameter **name** (write-only, with the Hook API's 1–32-byte
-//!   parameter-name bound checked at derive time).
+//!   parameter **name** (write-only, 1–32-byte bound checked at derive
+//!   time).
 //! - [`crate::param_value`]'s `#[derive(ParamValue)]` — a Hook API
 //!   parameter **value** (read-only).
 //!
 //! # Why hand-rolled, not `syn`/`quote`
 //!
-//! Same reasoning as the rest of this crate (see the crate doc comment):
-//! this derive only ever needs to recognize one shape (a named-field
-//! struct, each field a bare `name: Type` pair, `Type` being a path or a
-//! `[u8; N]` array) — never a general Rust-item/type parser. `syn`+`quote`'s
-//! compile cost would be paid on every build of every hook crate for a
-//! job this small, token-shape-matching pass handles directly. Shared with
+//! This derive only ever needs to recognize one shape (a named-field
+//! struct, each field a bare `name: Type` pair, `Type` a path or a
+//! `[u8; N]` array) — never a general Rust-item/type parser, so a
+//! token-shape-matching pass handles it without paying `syn`+`quote`'s
+//! compile cost on every hook-crate build. Shared with
 //! [`crate::hook_key`]/[`crate::param_name`]/[`crate::param_value`] via
 //! [`crate::shape`].
 //!
 //! # Codegen strategy
 //!
-//! Every field's byte width is that field's own
-//! `<FieldType as ToBytes>::MAX_LEN` — an associated-const expression, not a
-//! value this macro can compute (it only ever sees a field's type as
-//! syntax, e.g. the text `AccountId` or `[u8; 20]`, never its resolved
-//! `MAX_LEN`, which may live in a crate this macro cannot see). So instead
-//! of baking in literal numeric offsets, the generated code computes a
-//! chain of `const __OFF_N: usize = __OFF_{N-1} + <FieldTypeN as
-//! ToBytes>::MAX_LEN;` declarations — one per field boundary, entirely
-//! compile-time — and every field read/write uses `__dst[__OFF_i..__OFF_{i+1}]`
-//! against those consts. Because every offset is a compile-time constant
-//! (never a runtime-computed length), and every per-field copy delegates to
-//! that field's own already-optimized `ToBytes::write`/`FromBytes::read`
-//! (itself following the same convention, all the way down through nested
-//! `#[derive(HookData)]` types), the result is the same "unrolled, fixed
-//! offset" shape `rshooks` already hand-writes elsewhere (see
-//! `rshooks::txn::codec`'s `write_field_header`/`write_const_bytes` and
-//! `txn_template!`'s generated setters, which use the identical
-//! `#[allow(clippy::indexing_slicing)]`-annotated fixed-offset-range pattern
-//! for the same reason: proven in-bounds by construction, not by a runtime
-//! check clippy can see).
+//! Each field's byte width is `<FieldType as ToBytes>::MAX_LEN`, an
+//! associated-const expression this macro cannot resolve (it only sees a
+//! field's type as syntax). So instead of literal numeric offsets, the
+//! generated code emits a chain of `const __OFF_N: usize = __OFF_{N-1} +
+//! <FieldTypeN as ToBytes>::MAX_LEN;` declarations — one per field
+//! boundary — and every field read/write indexes `__dst[__OFF_i..__OFF_{i+1}]`
+//! against those consts. All offsets are compile-time constants and every
+//! per-field copy delegates to that field's own `ToBytes::write`/
+//! `FromBytes::read`, matching the same unrolled fixed-offset shape used by
+//! `rshooks::txn::codec` and `txn_template!`.
 //!
 //! # Why the generated code hardcodes `::rshooks::...` paths
 //!
 //! This derive is re-exported as `rshooks::HookData`, so every crate that
 //! can invoke it already depends on `rshooks` under that exact name (Cargo
-//! normalizes the hyphen to an underscore) — the generated code can
-//! therefore reference `::rshooks::convert::{ToBytes, FromBytes,
-//! FixedRead}` and `::rshooks::error::{HookError, Result}` as absolute
-//! paths unconditionally, without requiring the invoking module to have
-//! those names in scope via `use` (unlike relying on `rshooks::prelude::*`
-//! already being imported, which every example happens to do but which this
-//! derive does not assume).
+//! normalizes the hyphen to an underscore). The generated code therefore
+//! references `::rshooks::convert::{ToBytes, FromBytes, FixedRead}` and
+//! `::rshooks::error::{HookError, Result}` as absolute paths, without
+//! requiring the invoking module to have those names in scope via `use`.
 
 use crate::err;
 use crate::shape::{StructShape, parse_struct};
@@ -81,10 +65,8 @@ pub fn derive(input: TokenStream) -> TokenStream {
 }
 
 /// Builds a rustdoc table (declaration order, field name, field type) for
-/// the generated `LEN` const. Deliberately does not print numeric offsets —
-/// this macro only ever sees a field's type as syntax, never its resolved
-/// `ToBytes::MAX_LEN`, so the concrete byte offsets are a compile-time fact
-/// this comment can describe but not compute.
+/// the generated `LEN` const. Omits numeric offsets — this macro only sees
+/// a field's type as syntax, never its resolved `ToBytes::MAX_LEN`.
 fn layout_table_doc(shape: &StructShape) -> String {
     let mut s = String::new();
     s.push_str("/// Total encoded length in bytes: [`rshooks::convert::ToBytes::MAX_LEN`].\n");

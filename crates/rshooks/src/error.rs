@@ -19,11 +19,10 @@
 /// assert_eq!(err, HookError::DoesntExist);
 /// assert_eq!(err.code(), -5);
 /// ```
-// `#[repr(u8)]` is load-bearing for `code()` below: it lets the discriminant
-// be read via unsafe pointer casting even though `Unknown(i64)` carries data
-// (see the Rust reference, "Casting" > "Pointer casting" for enums with a
-// primitive representation). Declaration order 0..=44 must stay in exact
-// sync with `code()`'s `TABLE`.
+// `#[repr(u8)]` is load-bearing: `code()` reads the discriminant via unsafe
+// pointer casting even though `Unknown(i64)` carries data (see the Rust
+// reference, "Casting" > "Pointer casting"). Declaration order 0..=44 must
+// stay in sync with `code()`'s `TABLE`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum HookError {
@@ -133,18 +132,12 @@ impl From<i64> for HookError {
         // identity mapping), which alone blows the Guard-type nesting limit once
         // inlined into hook/cbak. A table lookup is nesting-depth ~1.
         //
-        // `INVALID_FLOAT` is handled *before* the table, not inside it: its value is
-        // `-10024`, not the `-24` its declaration-order position would suggest (see
-        // `rshooks_core::INVALID_FLOAT`'s own doc comment — "kept verbatim; this is
-        // not a typo in this translation"). Folding it into the table naively (by
-        // declaration-order position, matching the original match arms' order) would
-        // both mis-map a real `-24` return to `InvalidFloat` and, far worse, silently
-        // stop recognizing genuine `-10024` returns as `InvalidFloat` (they'd fall
-        // through to `Unknown`, breaking any caller that specifically matches on
-        // `HookError::InvalidFloat`) -- caught by cross-checking this table against
-        // `rshooks_core::error`'s constants sorted by value, not by source order.
-        // `-24` itself is not assigned to anything and is left a genuine gap (`None`)
-        // below, matching `error.h` upstream.
+        // `INVALID_FLOAT` is handled before the table: its value is `-10024`, not
+        // the `-24` its declaration-order position would suggest (kept verbatim
+        // from `rshooks_core::INVALID_FLOAT`). Folding it into the table instead
+        // would mis-map a genuine `-24` error onto `InvalidFloat` and stop the
+        // table from ever recognizing the real `-10024` value. `-24` itself is
+        // left a genuine gap (`None`) below, matching `error.h` upstream.
         if code == rshooks_core::INVALID_FLOAT {
             return HookError::InvalidFloat;
         }
@@ -181,20 +174,16 @@ impl HookError {
     /// inverse of [`HookError::from`]: `HookError::from(c).code() == c` for
     /// every code, known or unknown.
     ///
-    /// Like `From`'s inverse, this is deliberately NOT a 46-arm match:
-    /// matching on the variant to select 1-of-45 distinct wide `i64`
-    /// constants requires WASM structured control flow to nest a nearly
-    /// equal number of blocks (unlike a native jump table, WASM's
-    /// `br_table` still needs one nested block per distinct branch target),
-    /// which alone can blow the Guard-type 16-level nesting limit once
-    /// inlined. Instead this reads the variant's discriminant directly
-    /// (an O(1) memory load, no branching) and indexes a const table.
+    /// Deliberately not a match, same reasoning as `From<i64>` above:
+    /// selecting 1-of-45 wide `i64` constants needs WASM structured control
+    /// flow to nest a block per branch target, which can blow the
+    /// Guard-type nesting limit once inlined. Instead this reads the
+    /// discriminant directly and indexes a const table.
     #[must_use]
     pub fn code(&self) -> i64 {
-        // The one payload-carrying arm is handled by a single two-way
-        // branch, not folded into the table: it can't participate in a
-        // dense discriminant-indexed lookup since its code is data, not a
-        // per-variant constant.
+        // The one payload-carrying arm gets a plain two-way branch: its
+        // code is data, not a per-variant constant, so it can't sit in the
+        // table.
         if let HookError::Unknown(code) = *self {
             return code;
         }
@@ -253,10 +242,8 @@ impl HookError {
             rshooks_core::TOO_MANY_NAMESPACES,
         ];
         // `.get` + `unwrap_or`, not `TABLE[..]`: this crate denies
-        // `clippy::indexing_slicing` (panic-free is enforced, not
-        // promised, per `docs/DESIGN.md` §8). `tag` is provably in
-        // `0..45` here, so the fallback is unreachable in practice --
-        // mirrors `From`'s own `.get(..)` table lookup above.
+        // `clippy::indexing_slicing` (docs/DESIGN.md §8). `tag` is provably
+        // in `0..45` here, so the fallback is unreachable in practice.
         TABLE
             .get(tag as usize)
             .copied()
@@ -407,11 +394,9 @@ mod tests {
     #[test]
     fn discriminant_matches_declaration_order() {
         // Guards the invariant `code()`'s SAFETY comment relies on: the u8
-        // discriminant read via pointer casting must match each variant's
-        // position in the enum's declaration (and thus its slot in
-        // `code()`'s `TABLE`). Spot-checks the first, last, and one
-        // interior fieldless variant, plus `Unknown`'s discriminant (45,
-        // even though `code()` never indexes the table with it).
+        // discriminant must match each variant's declaration-order
+        // position. Spot-checks the first, last, and one interior
+        // fieldless variant, plus `Unknown`'s discriminant (45).
         fn discriminant(e: &HookError) -> u8 {
             // SAFETY: same reasoning as `code()` -- see its doc comment.
             unsafe { *(e as *const HookError as *const u8) }

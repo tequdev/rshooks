@@ -19,13 +19,12 @@ hook_errors! {
     }
 }
 
-/// The `MIN` Hook parameter's decoded shape: a single drops value. A
-/// one-field `ParamValue` wrapper (rather than reading a bare `[u8; 8]`)
-/// lets the parameter's meaning travel with its type, and decodes through
-/// this crate's little-endian `FromBytes`, matching `examples/12_typed-data`'s
-/// `CFG` convention (`FixedRead` is implemented for `[u8; N]`,
-/// `rshooks::types` newtypes, `XFL`, and `#[derive(ParamValue)]`/
-/// `#[derive(HookData)]` structs — not for a bare `u64`).
+/// The `MIN` Hook parameter's decoded shape: a single drops value, wrapped
+/// in a `ParamValue` so it decodes through `FixedRead` (implemented for
+/// fixed-size arrays, `rshooks::types` newtypes, `XFL`, and
+/// `#[derive(ParamValue)]`/`#[derive(HookData)]` structs — not a bare
+/// `u64`, which only implements `FromBytes` and decodes its bytes as
+/// little-endian).
 #[derive(ParamValue)]
 struct MinDrops {
     drops: u64,

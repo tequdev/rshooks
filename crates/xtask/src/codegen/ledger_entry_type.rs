@@ -1,17 +1,11 @@
 //! Generates the typed `rshooks::LedgerEntryType` model from the ledger
 //! entry formats in `protocol_formats.json`.
 //!
-//! The ledger-entry counterpart of [`super::tx_type`], and generated for the
-//! same reason: a typed mirror is the `rshooks` layer's job per
-//! `docs/DESIGN.md` §5, but every variant is a pure function of upstream's
-//! own declaration, so it is generated rather than hand-maintained.
-//!
-//! One difference worth noting: [`super::tx_type`] has to *derive* each
-//! variant's canonical spelling from a `tt*` constant name, with an acronym
-//! table and a list of irregular names. Nothing like that is needed here —
-//! `LEDGER_ENTRY(tag, value, name, rpcName, fields)` states the canonical
-//! name outright, so the variant names are quoted from upstream rather than
-//! reconstructed.
+//! Ledger-entry counterpart of [`super::tx_type`] (typed mirrors are the
+//! `rshooks` layer's job per `docs/DESIGN.md` §5). Unlike `tx_type`, no name
+//! derivation is needed: `LEDGER_ENTRY(tag, value, name, rpcName, fields)`
+//! states the canonical name outright, so variants are quoted from upstream
+//! rather than reconstructed.
 
 use std::fmt::Write as _;
 

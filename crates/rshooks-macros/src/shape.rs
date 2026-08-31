@@ -7,9 +7,7 @@
 //! All four need to recognize exactly the same input shape — a plain,
 //! non-generic, named-field struct, each field a bare `name: Type` pair —
 //! and differ only in what they generate from it (see each module's own
-//! doc comment). Factored out here so that shape-recognition logic (and
-//! its hand-rolled `proc_macro::TokenStream` walking — see `rshooks-macros`'
-//! crate doc comment for why this crate doesn't use `syn`/`quote`) has one
+//! doc comment). Factored out here so the shape-recognition logic has one
 //! definition, not four copies that could drift apart.
 
 use crate::err;
@@ -27,9 +25,8 @@ pub struct FieldShape {
     pub name: String,
     /// The field's type, reconstructed as source text (see
     /// [`tokens_to_string`]) — never type-checked by this macro itself; a
-    /// type that doesn't implement the trait(s) the caller's generated code
-    /// needs surfaces as an ordinary rustc trait-bound error against that
-    /// generated code, not a diagnostic this macro produces directly.
+    /// type that doesn't implement the required trait(s) surfaces as an
+    /// ordinary rustc trait-bound error against the generated code.
     pub ty: String,
 }
 
@@ -259,14 +256,12 @@ pub(crate) fn parse_fields(
 }
 
 /// Reconstructs a type's source text from its captured tokens, preserving
-/// exactly the adjacency `rshooks-macros`' own tokenizer already recorded via
-/// each `Punct`'s [`Spacing`] — so a multi-token compound like the `::` in
-/// `crate::types::AccountId` round-trips as `::` (no space, which Rust's
-/// path grammar requires) rather than `: :` (two independent colons, a
-/// parse error in path position). A space is inserted before every other
-/// token boundary; this is always syntactically safe (it can only ever
-/// separate two tokens that were already distinct, never accidentally glue
-/// two identifiers/literals into one).
+/// each `Punct`'s [`Spacing`] so a multi-token compound like the `::` in
+/// `crate::types::AccountId` round-trips as `::` (no space, required by
+/// Rust's path grammar) rather than `: :` (a parse error in path
+/// position). A space is inserted before every other token boundary — safe
+/// since it can only separate tokens that were already distinct, never
+/// glue two identifiers/literals into one.
 pub fn tokens_to_string(tokens: &[TokenTree]) -> String {
     let mut out = String::new();
     let mut prev_joint = false;

@@ -3,29 +3,26 @@
 //!
 //! # The typed path is the norm for a field with a modeled type
 //!
-//! [`otxn_field_typed`] is the default way to read a field the generated
-//! [`crate::sfield`] table gives a value type to (`sfAccount`, `sfSequence`,
-//! `sfAmount`, ...): the field constant itself pins down what comes back, no
-//! turbofish and no separate decode step. [`otxn_field`] (raw bytes) and
-//! [`otxn_field_exact`] (fixed-length, `T`-inferred) remain the escape
-//! hatches — for a field this crate models no typed read for
-//! ([`crate::types::Opaque`], `STObject`, `STArray`), or when the caller
-//! wants the wire bytes directly.
+//! [`otxn_field_typed`] reads a field the generated [`crate::sfield`] table
+//! gives a value type to (`sfAccount`, `sfSequence`, `sfAmount`, ...): the
+//! field constant pins down what comes back, no turbofish, no separate
+//! decode step. [`otxn_field`] (raw bytes) and [`otxn_field_exact`]
+//! (fixed-length, `T`-inferred) are the escape hatches for a field this
+//! crate models no typed read for ([`crate::types::Opaque`], `STObject`,
+//! `STArray`), or when the caller wants the wire bytes directly.
 //!
 //! # Decoding a raw protocol field: use `from_be_bytes`, not `FromBytes`
 //!
-//! [`otxn_field_exact`]'s raw bytes are Xahau Binary — the protocol's own
-//! **big-endian** wire format (see DESIGN.md §5.6, "Endianness
-//! conventions") — never this crate's little-endian [`crate::convert::FromBytes`]
-//! trait, which is the convention for *hook-private* data (state/param
-//! values this crate's own typed layer wrote), a completely different
-//! domain. A numeric protocol field read through the raw escapes must be
-//! decoded with an explicit `u64::from_be_bytes(...)` call at the use site
+//! [`otxn_field_exact`]'s raw bytes are Xahau Binary, the protocol's own
+//! **big-endian** wire format (DESIGN.md §5.6) — never this crate's
+//! little-endian [`crate::convert::FromBytes`] trait, which is the
+//! convention for *hook-private* data (state/param values this crate's own
+//! typed layer wrote). A numeric protocol field read through the raw
+//! escapes needs an explicit `u64::from_be_bytes(...)` call at the use site
 //! (`examples/03_hook-params/src/lib.rs`'s native-`Amount` decode,
 //! `u64::from_be_bytes(n.0) & !NATIVE_AMOUNT_FLAG_BITS`, is exactly that).
-//! [`otxn_field_typed`] does this decoding itself for
-//! every field it models, so a field with a modeled type no longer needs the
-//! idiom at all — see its doc comment.
+//! [`otxn_field_typed`] does this decoding itself for every field it
+//! models.
 
 use crate::convert::{FixedRead, TypedParamName};
 use crate::error::{HookError, Result, res};
@@ -133,12 +130,10 @@ pub(crate) fn otxn_type_code() -> u16 {
 
 /// Read field `field_id` from the originating transaction, requiring it to
 /// be exactly `T`'s length — any [`crate::convert::FixedRead`] type, most
-/// commonly a `rshooks::types` newtype or a raw `[u8; N]`. A field longer
-/// than that already fails as [`crate::error::HookError::TooSmall`] from the
-/// underlying host call (the buffer `T::read_exact` allocates has exactly
-/// that capacity); a field shorter is caught by `T::read_exact` itself and
-/// mapped to the same variant — see `state_exact` (`state.rs`) for the
-/// identical pattern and rationale. No loop, no panic.
+/// commonly a `rshooks::types` newtype or a raw `[u8; N]`. Both a longer
+/// field and a shorter one fail as [`crate::error::HookError::TooSmall`]
+/// (see `state_exact` in `state.rs` for the identical pattern). No loop, no
+/// panic.
 ///
 /// `T` is inferred from context (a `let` binding's type annotation, a
 /// function's declared return type, ...), not a turbofish — e.g.
@@ -161,12 +156,11 @@ pub fn otxn_field_exact<T: FixedRead>(field_id: impl Into<u32>) -> Result<T> {
     T::read_exact(|buf| otxn_field(buf, field_id))
 }
 
-/// Sealing module: see [`crate::slot_obj`]'s `private` module for the
-/// identical rationale, applied here to the same end — a downstream impl of
-/// [`OtxnFieldValue`] could otherwise claim a wire-type/Rust-type pairing
-/// this crate never verified (e.g. reading a `Blob` field as an
-/// `AccountId`), and the generated [`crate::sfield`] table is the only thing
-/// that is supposed to make that pairing.
+/// Sealing module (same rationale as [`crate::slot_obj`]'s `private`
+/// module): without it, a downstream [`OtxnFieldValue`] impl could claim a
+/// wire-type/Rust-type pairing this crate never verified (e.g. reading a
+/// `Blob` field as an `AccountId`) — only the generated [`crate::sfield`]
+/// table is supposed to make that pairing.
 mod private {
     pub trait Sealed {}
 }
@@ -176,30 +170,27 @@ mod private {
 /// [`crate::slot_obj::SlotObject::value`]'s per-type reads, with identical
 /// per-type semantics (narrow-int as-int64, `u64`/`Hash`/`AccountId`/
 /// `CurrencyCode` as exact wire bytes, `Amount`/`Issue` classified by
-/// length) — see that impl family's doc comments for the width/endianness
-/// rationale each impl here mirrors.
+/// length).
 ///
 /// [`Self::Output`](OtxnFieldValue::Output) is `Self` for every scalar and
 /// fixed-byte type, and the classified [`AmountBytes`]/[`IssueData`] for
 /// `Amount`/`Issue`, whose wire encoding is one of two shapes rather than
 /// one. **Sealed** (see [`private`]) — implemented for exactly the value
 /// types [`crate::sfield`] pairs with a field constant. `STObject`,
-/// `STArray`, and [`crate::types::Opaque`] have deliberately no impl: an
-/// object or array has no single scalar value, and an opaque field's shape
-/// is not known at compile time, so a call naming one of those is a compile
-/// error — read it with the raw [`otxn_field`]/[`otxn_field_exact`] escape
-/// hatches instead.
+/// `STArray`, and [`crate::types::Opaque`] have no impl (no single scalar
+/// value; an opaque field's shape isn't known at compile time), so a call
+/// naming one of those is a compile error — read it with the raw
+/// [`otxn_field`]/[`otxn_field_exact`] escape hatches instead.
 pub trait OtxnFieldValue: private::Sealed + Sized {
     /// What the read returns.
     type Output;
 
     /// Reads `field` and decodes it as [`Self::Output`](Self::Output).
-    /// Called by [`otxn_field_typed`]; takes the [`SField`] itself rather
-    /// than its raw `u32` code so that calling this directly buys nothing —
-    /// an `SField<Self>` can only come from the generated [`crate::sfield`]
-    /// table ([`SField`]'s constructor is `pub(crate)` precisely to keep
-    /// code/type pairings unforgeable), so this is [`otxn_field_typed`]
-    /// under another name, not a bypass around it.
+    /// Called by [`otxn_field_typed`]; takes the [`SField`] itself (not a
+    /// raw `u32`) so calling this directly buys nothing over
+    /// [`otxn_field_typed`] — an `SField<Self>` can only come from the
+    /// generated [`crate::sfield`] table ([`SField`]'s constructor is
+    /// `pub(crate)` to keep code/type pairings unforgeable).
     #[doc(hidden)]
     fn read_otxn_field(field: SField<Self>) -> Result<Self::Output>;
 }
@@ -293,14 +284,13 @@ impl OtxnFieldValue for Issue {
     }
 }
 
-/// Reads a field from the originating transaction as its modeled Rust type —
-/// the safer default over [`otxn_field_exact`] for exactly the reason
-/// [`otxn_param_typed`]'s doc comment gives for parameters: `field`'s own
-/// type parameter is what decides [`Self::Output`](OtxnFieldValue::Output),
-/// so there is no separate type argument spelled independently of the
-/// constant that could name a mismatched type for the field actually
-/// intended. No turbofish, no annotation — `otxn_field_typed(sfAccount)`
-/// reads back an `AccountId` because `sfAccount: SField<AccountId>` says so.
+/// Reads a field from the originating transaction as its modeled Rust
+/// type — the safer default over [`otxn_field_exact`]: `field`'s own type
+/// parameter decides [`Self::Output`](OtxnFieldValue::Output), so there is
+/// no separate type argument that could name a mismatched type for the
+/// field actually intended. No turbofish, no annotation —
+/// `otxn_field_typed(sfAccount)` reads back an `AccountId` because
+/// `sfAccount: SField<AccountId>` says so.
 ///
 /// Escape hatches: [`otxn_field`] (raw bytes, any field) and
 /// [`otxn_field_exact`] (fixed-length, `T` inferred from context) for a
@@ -400,14 +390,13 @@ pub fn otxn_param<B: AsMut<[u8]> + ?Sized>(out: &mut B, name: &[u8]) -> Result<u
 /// Read a Hook parameter attached to the originating transaction, requiring
 /// it to be exactly `T`'s length — any [`crate::convert::FixedRead`] type,
 /// most commonly a `rshooks::types` newtype, a raw `[u8; N]`, or a
-/// [`crate::ParamValue`]-derived struct. A parameter longer than that already
-/// fails as [`crate::error::HookError::TooSmall`] from the underlying host
-/// call; a parameter shorter is caught by `T::read_exact` itself and mapped
-/// to the same variant — see [`otxn_field_exact`]/`state_exact` (`state.rs`)
-/// for the identical pattern and rationale. No loop, no panic.
+/// [`crate::ParamValue`]-derived struct. Both a longer parameter and a
+/// shorter one fail as [`crate::error::HookError::TooSmall`] (see
+/// [`otxn_field_exact`]/`state_exact` in `state.rs` for the identical
+/// pattern). No loop, no panic.
 ///
 /// `T` is inferred from context, not a turbofish — see
-/// [`otxn_field_exact`]'s doc comment for the full story.
+/// [`otxn_field_exact`]'s doc comment.
 ///
 /// # Examples
 ///
@@ -426,9 +415,9 @@ pub fn otxn_param_exact<T: FixedRead>(name: &[u8]) -> Result<T> {
 /// Calls the host `otxn_param` function directly and returns its
 /// **undecoded** `i64` result — no [`res`] applied. `#[inline(always)]` and
 /// `pub(crate)`: an internal fast path for [`otxn_param_opt`] — see
-/// [`crate::api::hook_ctx::hook_param_raw_code`]'s doc comment for the
-/// identical rationale (including why this deliberately duplicates
-/// [`otxn_param`]'s own call rather than routing through it).
+/// [`crate::api::hook_ctx::hook_param_raw_code`]'s doc comment for why this
+/// deliberately duplicates [`otxn_param`]'s own call rather than routing
+/// through it.
 #[inline(always)]
 pub(crate) fn otxn_param_raw_code(buf: &mut [u8], name: &[u8]) -> i64 {
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
@@ -482,21 +471,17 @@ pub fn otxn_param_opt<T: FixedRead>(name: &[u8]) -> Result<Option<T>> {
 }
 
 /// Read a Hook parameter attached to the originating transaction, named by
-/// `name` itself — see [`crate::convert::TypedParamName`]'s doc comment
-/// for why this is the safer alternative to [`otxn_param_exact`] when a
+/// `name` itself — the safer alternative to [`otxn_param_exact`] when a
 /// parameter is always meant to decode as `name`'s one paired value type:
 /// there is no separate `name` argument spelled independently of the type
-/// that could name a *different* parameter than the one actually
-/// intended. `N::Value` (the return type) is inferred from `name`'s own
-/// type — no turbofish.
+/// that could name a *different* parameter than the one actually intended.
+/// `N::Value` (the return type) is inferred from `name`'s own type — no
+/// turbofish.
 ///
 /// Costs nothing beyond [`otxn_param_exact`] for the common
-/// plain-byte-string-name case (e.g. a hand-written
-/// [`crate::convert::TypedParamName`] impl overriding `with_name_bytes` to
-/// hand back a `'static` literal) — see
-/// [`crate::convert::TypedParamName`]'s "Zero-cost" section. A
-/// **composite, struct-shaped** name costs a small, genuine runtime encode
-/// instead (unavoidable for an arbitrary type) — see the same doc comment.
+/// plain-byte-string-name case (see [`crate::convert::TypedParamName`]'s
+/// "Cost" section). A **composite, struct-shaped** name costs a small,
+/// genuine runtime encode instead (unavoidable for an arbitrary type).
 ///
 /// # Examples
 ///

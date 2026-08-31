@@ -73,11 +73,10 @@ pub fn run(args: &ChainBuildArgs) -> Result<()> {
     std::fs::create_dir_all(&root)
         .with_context(|| format!("creating output root {}", root.display()))?;
     // Held for the *entire* chain build (discovery through publish), not
-    // just the final publish step: this closes the window where a
-    // concurrent `rshooks build` run sharing the same cargo target
-    // directory could overwrite the cdylib artifact between this process
-    // compiling it and reading it back. Released on every exit path
-    // (including early `?` returns) via `LockGuard`'s `Drop` impl.
+    // just the final publish step: closes the window where a concurrent
+    // `rshooks build` sharing the same cargo target directory could
+    // overwrite the cdylib artifact between compiling it and reading it
+    // back. Released on every exit path via `LockGuard`'s `Drop` impl.
     let _lock = acquire_lock(&root)?;
 
     println!("discovery build ({})", plan.package_name);
@@ -520,11 +519,9 @@ impl BuildPlan {
 /// `cdylib_target_name` target from its `--message-format=json` output.
 ///
 /// Collects every candidate path across all matching `compiler-artifact`
-/// messages rather than taking the last one seen ("last-wins"): more than
-/// one *distinct* path is an unresolvable ambiguity, reported as an error
-/// listing every candidate, rather than silently picking whichever happened
-/// to be reported last. The same path reported more than once (e.g. an
-/// identical message repeated) is not ambiguous.
+/// messages rather than taking the last one seen: more than one *distinct*
+/// path is an unresolvable ambiguity, reported as an error listing every
+/// candidate. The same path reported more than once is not ambiguous.
 fn select_wasm_artifact(
     package_id: &str,
     cdylib_target_name: &str,
@@ -784,9 +781,8 @@ fn write_staged_file(path: &Path, bytes: &[u8]) -> Result<()> {
 /// `root`, atomically re-pointing `current`, then prunes old generations.
 /// The caller must already hold the publish advisory lock for `root` (see
 /// [`acquire_lock`]) for the whole chain build, not just this step — `run`
-/// acquires it once, before discovery, and holds it across every entry
-/// build and every `publish` call. On any failure, staging is removed and
-/// `current` is left untouched.
+/// acquires it once and holds it across every entry build and `publish`
+/// call. On any failure, staging is removed and `current` is left untouched.
 fn publish(
     root: &Path,
     staged_wasms: &[(String, Vec<u8>)],
@@ -870,10 +866,10 @@ fn is_prune_eligible(age_since_modified: Duration) -> bool {
 
 /// Deletes generations older than the newest `keep`, skipping any candidate
 /// whose mtime is within [`PRUNE_GRACE_PERIOD`] (see [`is_prune_eligible`]).
-/// Best-effort: failures to remove an old generation, or to read its mtime,
-/// are not fatal — an unreadable mtime is treated as "not yet eligible"
-/// rather than deleted (a resolved `current -> gen-N` consumer may still be
-/// reading a pruning candidate).
+/// Best-effort: failures to remove a generation, or to read its mtime, are
+/// not fatal — an unreadable mtime is treated as "not yet eligible" rather
+/// than deleted (a resolved `current -> gen-N` consumer may still be reading
+/// it).
 fn retain_latest_generations(root: &Path, keep: usize) {
     let Ok(gens) = list_generations(root) else {
         return;
@@ -1098,8 +1094,7 @@ mod tests {
         let wasms = vec![("0.deposit.wasm".to_string(), b"AA".to_vec())];
         let sidecars = vec![("0.deposit.metadata.json".to_string(), b"{}".to_vec())];
 
-        // `publish` expects the caller to already hold the publish lock for
-        // the whole chain build; simulate that here as `run` does.
+        // Simulate `run` holding the publish lock across the whole build.
         let lock = acquire_lock(&root).expect("acquire lock for the whole build, as `run` does");
 
         let gen1 = publish(&root, &wasms, &sidecars, b"{}", b"{}").expect("first publish");

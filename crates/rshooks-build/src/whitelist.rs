@@ -421,13 +421,13 @@ mod tests {
     use super::*;
 
     /// `rshooks-core`'s `src/api.rs` is the mechanical translation of the same
-    /// `extern.h` header this whitelist is generated from. This test parses
-    /// the `pub fn NAME(params) -> ret;` declarations out of that file (a
-    /// naive text parse, as they appear verbatim inside the
+    /// `extern.h` header this whitelist is generated from. Parses the
+    /// `pub fn NAME(params) -> ret;` declarations out of that file (a naive
+    /// text parse, as they appear verbatim inside the
     /// `#[cfg(target_arch = "wasm32")] unsafe extern "C" { ... }` block) and
-    /// checks that every whitelist entry matches rshooks-core exactly, and
-    /// that no rshooks-core declaration is missing from the whitelist. This is
-    /// what keeps the two crates from silently drifting apart.
+    /// checks every whitelist entry matches rshooks-core exactly, with no
+    /// rshooks-core declaration missing — this is what keeps the two crates
+    /// from silently drifting apart.
     #[test]
     fn whitelist_matches_rshooks_core_api() {
         let src = include_str!("../../rshooks-core/src/api.rs");
@@ -459,9 +459,9 @@ mod tests {
     /// wasm-import extern block, not the host-stub module) out of the given
     /// Rust source text.
     fn parse_extern_fns(src: &str) -> Vec<(String, Vec<ValType>, ValType)> {
-        // Join continuation lines: a declaration may span multiple lines when
-        // rustfmt wraps long argument lists. We normalize by stripping
-        // newlines between a `pub fn` and its terminating `;`.
+        // A declaration may span multiple lines when rustfmt wraps long
+        // argument lists; normalize by stripping newlines between a `pub fn`
+        // and its terminating `;`.
         let mut joined = String::new();
         let mut depth: i32 = 0;
         let mut in_decl = false;

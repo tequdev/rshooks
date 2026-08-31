@@ -1,9 +1,9 @@
 //! Integration tests for the rshooks-build pipeline (`docs/DESIGN.md` §8),
 //! using `wat`-authored fixtures.
 //!
-//! Test code is exempt from the workspace's panic-freedom lints (per
-//! `docs/DESIGN.md` §8): `unwrap`/`expect`/`panic!`/indexing on a known-good
-//! fixture is the normal, idiomatic way to assert behavior in a test.
+//! Test code is exempt from the workspace's panic-freedom lints (`docs/DESIGN.md`
+//! §8): `unwrap`/`expect`/`panic!`/indexing on a known-good fixture is
+//! idiomatic here.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -99,9 +99,7 @@ fn data_segments(wasm: &[u8]) -> Vec<(i32, Vec<u8>)> {
     out
 }
 
-// ---------------------------------------------------------------------
 // Cleaner
-// ---------------------------------------------------------------------
 
 const MINIMAL_HOOK: &str = r#"
 (module
@@ -179,9 +177,8 @@ fn gc_drops_unreachable_function_and_remaps_calls() {
     "#;
     let cleaned = rshooks_build::clean(&wasm(src), &opts()).expect("clean succeeds");
 
-    // Re-parse: there should be exactly 2 defined functions left (helper,
-    // hook) — `dead` was dropped — and hook's call to helper must have been
-    // remapped from its original index (2) to its new one (1).
+    // Exactly 2 defined functions should remain (helper, hook) — `dead`
+    // dropped — and hook's call to helper remapped from index 2 to 1.
     let mut new_func_count = 0u32;
     let mut hook_new_idx = None;
     for payload in wasmparser::Parser::new(0).parse_all(&cleaned) {
@@ -208,8 +205,8 @@ fn gc_drops_unreachable_function_and_remaps_calls() {
         "hook should now be function index 2 (import 0, helper 1, hook 2)"
     );
 
-    // Find hook's function body (defined function local index 1, i.e. the
-    // second entry in the code section) and check its `call` immediate.
+    // hook's body is defined-function local index 1 (second code-section
+    // entry); check its `call` immediate.
     let mut code_bodies = Vec::new();
     for payload in wasmparser::Parser::new(0).parse_all(&cleaned) {
         if let wasmparser::Payload::CodeSectionEntry(body) = payload.expect("valid wasm") {
@@ -232,8 +229,8 @@ fn gc_drops_unreachable_function_and_remaps_calls() {
         "hook should call helper (remapped 2->1) then accept (unchanged 0)"
     );
 
-    // Byte-level: the re-encoded body must contain `call 1` (0x10 0x01) and
-    // must not contain the old target `call 2` (0x10 0x02).
+    // Byte-level: re-encoded body must contain `call 1` (0x10 0x01), not
+    // `call 2` (0x10 0x02).
     assert!(
         contains_bytes(&hook_body, &[0x10, 0x01]),
         "expected `call 1` in re-encoded body"
@@ -248,9 +245,7 @@ fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|w| w == needle)
 }
 
-// ---------------------------------------------------------------------
 // Cleaner: trailing-zero data-segment trim (`docs/DESIGN.md` §6.2 step 3)
-// ---------------------------------------------------------------------
 
 #[test]
 fn cleaner_trims_trailing_zeros_from_active_data_segment() {
@@ -277,10 +272,10 @@ fn cleaner_trims_trailing_zeros_from_active_data_segment() {
 #[test]
 fn cleaner_skips_trim_when_data_segments_overlap() {
     // Active segments apply in declaration order and may legally overlap:
-    // here the second segment's trailing zero deliberately overwrites the
-    // first segment's non-zero byte at address 6. Trimming that zero would
-    // leave 0x43 ('C') in memory instead of 0x00 — so the trim must be
-    // skipped wholesale and both payloads pass through byte-identical.
+    // here the second segment's trailing zero overwrites the first
+    // segment's non-zero byte at address 6. Trimming that zero would leave
+    // 0x43 ('C') in memory instead of 0x00, so the trim must be skipped
+    // wholesale and both payloads pass through byte-identical.
     let src = r#"
     (module
       (import "env" "accept" (func $accept (param i32 i32 i64) (result i64)))
@@ -358,9 +353,7 @@ fn cleaner_data_segment_trim_is_idempotent() {
     );
 }
 
-// ---------------------------------------------------------------------
 // Guard pass
-// ---------------------------------------------------------------------
 
 const GUARDED_LOOP_HOOK: &str = r#"
 (module
@@ -414,9 +407,7 @@ fn validator_rejects_unguarded_loop_with_location() {
     );
 }
 
-// ---------------------------------------------------------------------
 // Guard pass: actionable hints for compiler-generated loop shapes
-// ---------------------------------------------------------------------
 
 const COMPARE_LIKE_LOOP_HOOK: &str = r#"
 (module
@@ -461,9 +452,9 @@ const ZERO_INIT_LIKE_LOOP_HOOK: &str = r#"
 
 // A loop that loads memory (like `COMPARE_LIKE_LOOP_HOOK`) but also calls an
 // imported Hook API function — the shape a real business-logic loop over
-// hook state would have. The heuristic must stay conservative here: a `call`
-// anywhere in the loop body should suppress the hint entirely, even though
-// loads are present.
+// hook state would have. The heuristic must stay conservative: a `call`
+// anywhere in the loop body suppresses the hint entirely, even with loads
+// present.
 const CALLING_LOOP_HOOK: &str = r#"
 (module
   (import "env" "state" (func $state (param i32 i32 i32 i32) (result i64)))
@@ -541,8 +532,8 @@ fn auto_guard_inserts_exact_pattern_and_passes_revalidation() {
     };
     let out = rshooks_build::auto_guard(&input, &o).expect("auto-guard succeeds");
 
-    // `_g` must have been added as the first (only) import, shifting
-    // `hook` from function index 0 to 1.
+    // `_g` should be added as the first (only) import, shifting `hook`
+    // from function index 0 to 1.
     let mut g_index = None;
     let mut hook_index = None;
     let mut n_func_imports = 0u32;
@@ -578,8 +569,8 @@ fn auto_guard_inserts_exact_pattern_and_passes_revalidation() {
         "hook should have shifted from 0 to 1 once `_g` was inserted"
     );
 
-    // Locate hook's body and check the exact inserted instruction sequence
-    // immediately follows the loop header.
+    // hook's body should have the exact inserted instruction sequence
+    // immediately following the loop header.
     let mut bodies = Vec::new();
     for payload in wasmparser::Parser::new(0).parse_all(&out) {
         if let wasmparser::Payload::CodeSectionEntry(body) = payload.expect("valid wasm") {
@@ -612,8 +603,8 @@ fn auto_guard_inserts_exact_pattern_and_passes_revalidation() {
     }
     assert!(found_loop, "fixture should contain a loop");
 
-    // Byte-level: the tail of the inserted sequence (`call <g_index>`
-    // followed by `drop`) must appear verbatim.
+    // Byte-level: the inserted sequence's tail (`call <g_index>; drop`)
+    // must appear verbatim.
     assert!(
         contains_bytes(hook_body, &[0x10, g_index as u8, 0x1A]),
         "expected `call {g_index}; drop` (0x10 {g_index:#x} 0x1A) in the rebuilt body"
@@ -622,16 +613,14 @@ fn auto_guard_inserts_exact_pattern_and_passes_revalidation() {
     rshooks_build::validate(&out, &opts()).expect("auto-guarded module should re-validate cleanly");
 }
 
-// ---------------------------------------------------------------------
 // Validator hard-error rules
-// ---------------------------------------------------------------------
 
-// `_g` is imported (but never called — there are no loops here) purely to
-// satisfy R1 (`docs/DESIGN.md` §6.2b/§6.4): every api-version-0 module must
-// import `_g`, even without a single loop. This is a real, vendored-checker-
-// discovered rule, not a pipeline artifact of the `build`/`clean` commands
-// (which now guarantee it via the flatten pass) — `validate()` is exercised
-// directly here, bypassing that pass, so the fixture must supply it itself.
+// `_g` is imported (never called — no loops here) purely to satisfy R1
+// (`docs/DESIGN.md` §6.2b/§6.4): every api-version-0 module must import
+// `_g`, even without a single loop. This is a real, vendored-checker-
+// discovered rule, not a pipeline artifact — `build`/`clean` guarantee it
+// via the flatten pass, but `validate()` is exercised directly here,
+// bypassing that pass, so the fixture must supply it itself.
 const MINIMAL_HOOK_ALREADY_CLEAN: &str = r#"
 (module
   (import "env" "_g" (func $g (param i32 i32) (result i32)))
@@ -805,9 +794,9 @@ fn validator_rejects_oversized_module() {
 #[test]
 fn validator_allow_oversize_downgrades_to_warning() {
     let big = "x".repeat(70_000);
-    // `_g` import: R1 (`docs/DESIGN.md` §6.2b/§6.4) — see the comment on
-    // `MINIMAL_HOOK_ALREADY_CLEAN` above; this test also calls `validate()`
-    // directly, so the fixture must satisfy R1 itself.
+    // `_g` import: R1 (`docs/DESIGN.md` §6.2b/§6.4, see
+    // `MINIMAL_HOOK_ALREADY_CLEAN` above) — `validate()` is called directly
+    // here too, so the fixture must satisfy R1 itself.
     let src = format!(
         r#"(module (import "env" "_g" (func $g (param i32 i32) (result i32))) (memory 2) (data (i32.const 0) "{big}") (func $hook (param i32) (result i64) (i64.const 0)) (export "hook" (func $hook)))"#
     );
@@ -822,9 +811,7 @@ fn validator_allow_oversize_downgrades_to_warning() {
     assert!(report.warnings.iter().any(|w| w.contains("INVALID")));
 }
 
-// ---------------------------------------------------------------------
 // End-to-end: clean + check is idempotent
-// ---------------------------------------------------------------------
 
 #[test]
 fn end_to_end_clean_and_check_is_idempotent() {
@@ -858,14 +845,12 @@ fn end_to_end_clean_and_check_is_idempotent() {
 
 #[test]
 fn run_pipeline_reports_fee_relevant_size() {
-    // `MINIMAL_HOOK` has no loop and never calls `_g`, so it does not
-    // survive the pipeline's final gate any more: the vendored upstream
-    // guard checker (`docs/DESIGN.md` §6.5) unconditionally requires every
-    // API-version-0 module to import `_g`, regardless of whether it has any
-    // loops at all — a real divergence from the old Rust-only pipeline (see
-    // the end-to-end report). `GUARDED_LOOP_HOOK` calls `_g` in a properly
-    // guarded loop, so it clears that gate and exercises the same
-    // fee-reporting behavior this test is actually about.
+    // `MINIMAL_HOOK` has no loop and never calls `_g`, so it doesn't survive
+    // the pipeline's final gate: the vendored upstream guard checker
+    // (`docs/DESIGN.md` §6.5) unconditionally requires every API-version-0
+    // module to import `_g`, regardless of loops. `GUARDED_LOOP_HOOK` calls
+    // `_g` in a properly guarded loop, so it clears that gate and exercises
+    // the fee-reporting behavior this test is actually about.
     let (out, report) =
         rshooks_build::run_pipeline(&wasm(GUARDED_LOOP_HOOK), &opts()).expect("pipeline succeeds");
     assert!(!out.is_empty());

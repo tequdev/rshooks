@@ -16,10 +16,10 @@
 //! slots, float ops, and signature verification are in scope and modeled;
 //! fee/reserve economics (explicit approximations), real instruction
 //! metering, guard enforcement, and multi-hook chain auto-execution
-//! (`HookOn` trigger filtering included — every `invoke` is a direct,
-//! explicit entry call) stay out of scope and remain e2e-only territory. See
-//! `.claude/design/TESTENV_DESIGN.md` §5/§6 for the complete, normative list
-//! of what is and is not modeled.
+//! (including `HookOn` trigger filtering — every `invoke` is a direct,
+//! explicit entry call) are e2e-only territory. See
+//! `.claude/design/TESTENV_DESIGN.md` §5/§6 for the normative list of what
+//! is and is not modeled.
 //!
 //! # Getting started
 //!
@@ -36,37 +36,34 @@
 //!
 //! - **`rshooks::raw` (direct `rshooks_core` calls) bypasses this harness.**
 //!   The mock backend only intercepts the `rshooks` wrapper layer; a hook
-//!   that calls `rshooks_core` directly keeps hitting the real
-//!   `NOT_IMPLEMENTED` host stubs under `testenv`, exactly as it would on any
-//!   other native build. This is a deliberate, documented WCE-escape-hatch
-//!   limitation, not a bug.
+//!   calling `rshooks_core` directly hits the real `NOT_IMPLEMENTED` host
+//!   stubs under `testenv`, same as any other native build. Deliberate
+//!   WCE-escape-hatch limitation, not a bug.
 //! - **Statics outside [`rshooks::static_cell::HookStatic`] are not reset**
 //!   between invocations — an ordinary `static` a hook declares by hand
 //!   keeps its value across every `TestEnv::invoke` call on the same
 //!   process, unlike the fresh-wasm-instance-per-invocation reality.
-//!   `HookStatic` is the sanctioned pattern this harness resets per
-//!   invocation (take-once-per-invocation); see [`prelude::HookChainEntries`]'s
-//!   crate for the take-set mechanism.
+//!   `HookStatic` is the sanctioned per-invocation-reset pattern
+//!   (take-once-per-invocation); see [`prelude::HookChainEntries`]'s crate
+//!   for the take-set mechanism.
 //! - **No `HookOn` filtering.** `invoke::<C>(index)` is a direct entry call:
 //!   it runs the declared entry unconditionally, even if the seeded
-//!   [`Otxn`]'s type would not have triggered it on-chain. [`TestEnv::strict_can_emit`]
-//!   is the one place declarations are still checked (against
-//!   `NativeEntry::can_emit`).
+//!   [`Otxn`]'s type would not have triggered it on-chain.
+//!   [`TestEnv::strict_can_emit`] is the one place declarations are still
+//!   checked (against `NativeEntry::can_emit`).
 //! - **Fees are an explicit approximation** (`base_fee × etxn_burden`, base
 //!   fee 10 drops by default) — real fee calculation parses the transaction
 //!   blob and runs the ledger's fee calculator; that stays e2e-only.
 //! - **A bare `return code` is provisional.** No live-node evidence pins its
-//!   real on-chain commit semantics yet (design §4); this harness maps it to
+//!   real on-chain commit semantics (design §4); this harness maps it to
 //!   [`ExitType::Return`] with the invocation's state snapshot **restored**
 //!   (the conservative choice) and `is_success() == false`.
 
 // `accept!`/`rollback!` reach this crate's backend via
 // `panic::panic_any(HookExitSignal(..))`, caught by `TestEnv::invoke`'s
-// `catch_unwind` — see `.claude/design/TESTENV_DESIGN.md` §2.2. A test
-// profile compiled with `panic = "abort"` would abort the whole test
-// process at the very first `accept!`/`rollback!` instead of unwinding, so
-// this compile-time guard turns that into an actionable error instead of a
-// silent process abort.
+// `catch_unwind` (design §2.2). Under `panic = "abort"` that would abort
+// the whole test process at the first `accept!`/`rollback!`, so this guard
+// turns it into an actionable compile error instead.
 #[cfg(panic = "abort")]
 compile_error!(
     "rshooks-testenv requires `panic = \"unwind\"` (the default Rust test \

@@ -12,21 +12,17 @@
 //!
 //! # Why the accessors live here, not on the spec traits themselves
 //!
-//! [`StateSpec`]/[`ParamSpec`] are implemented by types *outside* this
-//! crate (macro-generated marker structs in a downstream hook crate), and
-//! Rust's orphan rules mean a downstream crate cannot add an inherent impl
-//! to [`State`]/[`HookParam`]/[`OtxnParam`] itself, nor a blanket trait impl
-//! that would give every `StateSpec`/`ParamSpec` implementor its own
-//! `.get()` method (that would require the *trait itself* to declare
-//! `.get()`, at which point every future accessor added here becomes a
-//! breaking change for any downstream `impl StateSpec for ...`). Instead,
-//! the marker traits declare only the *data* a spec carries (the value
-//! type, the key/name argument shape, and how to compute a key/name from
-//! those arguments) — [`State`]/[`HookParam`]/[`OtxnParam`]'s generic
-//! inherent impls, defined once in this crate, are what turn that data into
-//! callable methods. This is exactly why the ZST handle types
-//! ([`State`]/[`HookParam`]/[`OtxnParam`]) exist at all rather than calling
-//! `MySpec::get()` directly on the marker type.
+//! [`StateSpec`]/[`ParamSpec`] are implemented by macro-generated marker
+//! structs in a downstream hook crate, and Rust's orphan rules block that
+//! crate from adding an inherent impl to [`State`]/[`HookParam`]/
+//! [`OtxnParam`], or a blanket trait impl giving every implementor its own
+//! `.get()` (that would require the *trait itself* to declare `.get()`,
+//! making every future accessor added here a breaking change for any
+//! downstream `impl StateSpec for ...`). So the marker traits declare only
+//! the *data* a spec carries (value type, key/name argument shape, how to
+//! compute a key/name from those arguments), and [`State`]/[`HookParam`]/
+//! [`OtxnParam`]'s generic inherent impls, defined once in this crate, turn
+//! that data into callable methods.
 //!
 //! # `State` vs. [`mod@crate::state`]
 //!
@@ -35,22 +31,19 @@
 //! `state_set_encoded`, `state_update_encoded`, `state_delete_encoded`,
 //! `state_foreign_get_encoded`, `state_foreign_set_encoded`) — this module
 //! adds no new decode logic of its own. [`StateSpec::with_key`] produces an
-//! already-encoded key once (via [`StateSpec::encode_key`] by default, or a
+//! already-encoded key (via [`StateSpec::encode_key`] by default, or a
 //! `'static`-promoted literal for a macro-generated constant key — see
 //! [`StateSpec::with_key`]'s doc comment) and hands it straight to the
 //! matching funnel, so no [`StateKeyEncode::encode`] call happens on this
-//! path at all — [`StateEntry`] (bound via [`State::at`]) calls the same
-//! funnels directly with its own already-encoded key.
+//! path — [`StateEntry`] (bound via [`State::at`]) calls the same funnels
+//! directly with its own already-encoded key.
 //!
 //! # Params: absence vs. decode failure
 //!
-//! [`HookParam`]/[`OtxnParam`]'s `.get()` is built on the new
-//! [`crate::api::hook_ctx::hook_param_opt`]/[`crate::api::otxn::otxn_param_opt`]
-//! absence-aware reads, not the older [`crate::api::hook_ctx::hook_param_exact`]/
-//! [`crate::api::otxn::otxn_param_exact`] — see those functions' doc
-//! comments for the exact "absent is `Ok(None)`, a present-but-malformed
-//! value is still `Err`, never confused" contract every accessor in this
-//! module preserves. `.get_or_default()` only ever substitutes
+//! [`HookParam`]/[`OtxnParam`]'s `.get()` is built on
+//! [`crate::api::hook_ctx::hook_param_opt`]/[`crate::api::otxn::otxn_param_opt`]:
+//! absent is `Ok(None)`, a present-but-malformed value is still `Err`,
+//! never confused. `.get_or_default()` only ever substitutes
 //! [`ParamDefault::default_value`] for the *absent* case; a decode failure
 //! still propagates as `Err`. `.get_required()` maps absence specifically
 //! to [`crate::error::HookError::DoesntExist`].
@@ -515,12 +508,10 @@ where
     /// Reads this parameter, decoded as `V`, treating absence as
     /// [`HookError::DoesntExist`] rather than `None`.
     ///
-    /// Caveat: this maps *absence* to [`HookError::DoesntExist`]. No
-    /// in-tree [`FixedRead`] decoder ever returns that same error code for
-    /// a present-but-malformed value (they return [`HookError::TooSmall`]
-    /// instead) — but if a value type's own `FixedRead` impl ever did
-    /// return `DoesntExist` while decoding a *present* value, that case
-    /// would be indistinguishable from true absence here.
+    /// Caveat: no in-tree [`FixedRead`] decoder returns `DoesntExist` for a
+    /// present-but-malformed value (they return [`HookError::TooSmall`]),
+    /// but a custom `FixedRead` impl that did would be indistinguishable
+    /// from true absence here.
     #[inline(always)]
     pub fn get_required(&self) -> Result<V> {
         match self.get()? {
@@ -587,12 +578,10 @@ where
     /// Reads this parameter, decoded as `V`, treating absence as
     /// [`HookError::DoesntExist`] rather than `None`.
     ///
-    /// Caveat: this maps *absence* to [`HookError::DoesntExist`]. No
-    /// in-tree [`FixedRead`] decoder ever returns that same error code for
-    /// a present-but-malformed value (they return [`HookError::TooSmall`]
-    /// instead) — but if a value type's own `FixedRead` impl ever did
-    /// return `DoesntExist` while decoding a *present* value, that case
-    /// would be indistinguishable from true absence here.
+    /// Caveat: no in-tree [`FixedRead`] decoder returns `DoesntExist` for a
+    /// present-but-malformed value (they return [`HookError::TooSmall`]),
+    /// but a custom `FixedRead` impl that did would be indistinguishable
+    /// from true absence here.
     #[inline(always)]
     pub fn get_required(&self) -> Result<V>
     where
@@ -645,12 +634,10 @@ where
     /// Reads this parameter, decoded as `V`, treating absence as
     /// [`HookError::DoesntExist`] rather than `None`.
     ///
-    /// Caveat: this maps *absence* to [`HookError::DoesntExist`]. No
-    /// in-tree [`FixedRead`] decoder ever returns that same error code for
-    /// a present-but-malformed value (they return [`HookError::TooSmall`]
-    /// instead) — but if a value type's own `FixedRead` impl ever did
-    /// return `DoesntExist` while decoding a *present* value, that case
-    /// would be indistinguishable from true absence here.
+    /// Caveat: no in-tree [`FixedRead`] decoder returns `DoesntExist` for a
+    /// present-but-malformed value (they return [`HookError::TooSmall`]),
+    /// but a custom `FixedRead` impl that did would be indistinguishable
+    /// from true absence here.
     #[inline(always)]
     pub fn get_required(&self) -> Result<V> {
         match self.get()? {
@@ -717,12 +704,10 @@ where
     /// Reads this parameter, decoded as `V`, treating absence as
     /// [`HookError::DoesntExist`] rather than `None`.
     ///
-    /// Caveat: this maps *absence* to [`HookError::DoesntExist`]. No
-    /// in-tree [`FixedRead`] decoder ever returns that same error code for
-    /// a present-but-malformed value (they return [`HookError::TooSmall`]
-    /// instead) — but if a value type's own `FixedRead` impl ever did
-    /// return `DoesntExist` while decoding a *present* value, that case
-    /// would be indistinguishable from true absence here.
+    /// Caveat: no in-tree [`FixedRead`] decoder returns `DoesntExist` for a
+    /// present-but-malformed value (they return [`HookError::TooSmall`]),
+    /// but a custom `FixedRead` impl that did would be indistinguishable
+    /// from true absence here.
     #[inline(always)]
     pub fn get_required(&self) -> Result<V>
     where

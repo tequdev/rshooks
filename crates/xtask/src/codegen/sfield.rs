@@ -1,13 +1,11 @@
 //! Generates typed `SField<T>` constants from the same parsed `sfcodes.h`
 //! data used for `rshooks_core::sfcodes`.
 //!
-//! Like [`super::tx_type`] — the two generators whose output lands in
-//! `rshooks` rather than `rshooks-core` — a typed mirror is the
-//! `rshooks` layer's job per `docs/DESIGN.md` §5, while a mechanical 1:1
-//! header translation is `rshooks-core`'s per §4. It is still fully mechanical
-//! *within* that typed layer — every constant's value type is a pure
-//! function of the serialized type ID packed into its own code — so it is
-//! generated rather than hand-maintained, exactly as `sfcodes.rs` is.
+//! Like [`super::tx_type`], output lands in `rshooks` (the typed layer, per
+//! `docs/DESIGN.md` §5) rather than `rshooks-core` (mechanical header
+//! translation, §4). Still generated rather than hand-maintained: each
+//! constant's value type is a pure function of the serialized type ID packed
+//! into its own code.
 //!
 //! `SField<T>` and its wire markers remain hand-written in `rshooks::types`.
 

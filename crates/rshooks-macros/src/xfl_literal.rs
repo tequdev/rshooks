@@ -8,10 +8,10 @@
 //! itself exists to avoid (e.g. `0.1` is not exactly representable in
 //! `f64`), defeating the entire point of a bit-exact compile-time literal.
 //!
-//! See `rshooks::XFL!`'s doc comment (the public re-export site) for the
-//! full bit-layout writeup, worked examples, and the `compile_fail` cases;
-//! this module only concerns itself with the proc-macro plumbing and the
-//! pure text -> bits algorithm.
+//! See `rshooks::XFL!`'s doc comment for the full bit-layout writeup,
+//! worked examples, and the `compile_fail` cases; this module only
+//! concerns itself with the proc-macro plumbing and the pure text -> bits
+//! algorithm.
 
 use proc_macro::{Span, TokenStream, TokenTree};
 
@@ -32,11 +32,10 @@ const SIGN_SHIFT: u32 = 62;
 /// decimal digits.
 const MANTISSA_DIGITS: usize = 16;
 
-/// `XFL!`'s `#[proc_macro]` entry point (see `rshooks_macros::XFL`, the thin
-/// wrapper in `lib.rs`). Walks the input for an optional leading `-` `Punct`
-/// followed by exactly one numeric `Literal`, then hands the literal's raw
-/// text off to [`encode`] -- the pure, independently testable part of this
-/// module.
+/// `XFL!`'s `#[proc_macro]` entry point. Walks the input for an optional
+/// leading `-` `Punct` followed by exactly one numeric `Literal`, then
+/// hands the literal's raw text off to [`encode`] -- the pure,
+/// independently testable part of this module.
 pub(crate) fn expand(input: TokenStream) -> TokenStream {
     const USAGE: &str = "XFL! expects a single numeric literal, e.g. XFL!(0.1)";
 
@@ -80,15 +79,13 @@ pub(crate) fn expand(input: TokenStream) -> TokenStream {
 ///
 /// Pure string/integer arithmetic from end to end: `text` is split by hand
 /// into an integer part, an optional fractional part, and an optional
-/// exponent part (rejecting anything left over as an unsupported literal
-/// kind or a disallowed suffix), the two digit runs are concatenated into
-/// one significant-digit string, then normalized -- leading zeros stripped,
-/// trailing zeros stripped (bumping the exponent to compensate), checked
-/// against the 16-significant-digit limit, and finally padded back out to
-/// exactly 16 digits (bumping the exponent the other way) -- before the
-/// exponent is range-checked and the bits assembled. Every exponent
-/// adjustment uses saturating arithmetic, so a pathological input like
-/// `1e99999999999999999999` is rejected as "too large" rather than
+/// exponent part, the two digit runs are concatenated into one
+/// significant-digit string, then normalized -- leading/trailing zeros
+/// stripped (bumping the exponent to compensate), checked against the
+/// 16-significant-digit limit, and padded back out to exactly 16 digits --
+/// before the exponent is range-checked and the bits assembled. Every
+/// exponent adjustment uses saturating arithmetic, so a pathological input
+/// like `1e99999999999999999999` is rejected as "too large" rather than
 /// panicking or wrapping.
 // Every `bytes[i]`/`&bytes[a..b]` below is reached only after a `i <
 // bytes.len()` (or equivalent, already-checked-range) guard immediately
@@ -117,11 +114,9 @@ fn encode(text: &str, negative: bool) -> Result<u64, String> {
 
     // Hand-scan the underscore-stripped text into (integer digits)
     // ['.' (fractional digits)] [('e'|'E') ['+'|'-'] exponent digits]
-    // [suffix]. rustc itself is loose about where `_` may appear in a
-    // numeric literal (`1_`, `1e2_`, and `1e_2` all tokenize fine) --
-    // this parser doesn't need to replicate that placement, it just
-    // strips every underscore unconditionally before scanning, which is
-    // lossless for every literal rustc will hand it.
+    // [suffix]. Underscores are stripped unconditionally before scanning
+    // rather than validated for placement -- lossless for every literal
+    // rustc will hand it.
     let stripped: String = text.chars().filter(|&c| c != '_').collect();
     let bytes = stripped.as_bytes();
     let mut i = 0usize;
@@ -160,9 +155,8 @@ fn encode(text: &str, negative: bool) -> Result<u64, String> {
         if i == exp_digits_start {
             return Err(format!("{USAGE} (malformed exponent)"));
         }
-        // Saturating accumulation: an absurdly long exponent (e.g.
-        // `1e99999999999999999999`) must be rejected by the range check
-        // below as "too large"/"too small", never panic or silently wrap.
+        // Saturating accumulation: an absurdly long exponent must be
+        // rejected by the range check below, never panic or wrap.
         let mut acc: i64 = 0;
         for &b in &bytes[exp_digits_start..i] {
             let digit = i64::from(b - b'0');
@@ -186,9 +180,9 @@ fn encode(text: &str, negative: bool) -> Result<u64, String> {
     }
 
     // Concatenate the integer and fractional digit runs into one
-    // significant-digit string, with the base-10 exponent that applies to
-    // treating that whole run as an integer (each fractional digit divides
-    // the value by one further power of ten).
+    // significant-digit string, adjusting the exponent by the fractional
+    // digit count (each fractional digit divides by one further power of
+    // ten).
     let mut digits: Vec<u8> = int_part.bytes().chain(frac_part.bytes()).collect();
     let frac_len = i64::try_from(frac_part.len()).unwrap_or(i64::MAX);
     let mut exponent = exp_value.saturating_sub(frac_len);
@@ -203,10 +197,9 @@ fn encode(text: &str, negative: bool) -> Result<u64, String> {
     digits.drain(..first_nonzero);
 
     // Strip trailing zeros, bumping the exponent once per digit removed so
-    // `digits * 10^exponent` still equals the original value -- this is
-    // what lets `1.50`, `1_000`, and `2600000` normalize down to their true
-    // significant-digit count instead of false-tripping the 16-digit limit
-    // below.
+    // `digits * 10^exponent` still equals the original value -- lets
+    // `1.50`, `1_000`, and `2600000` normalize to their true
+    // significant-digit count instead of false-tripping the limit below.
     while digits.last() == Some(&b'0') {
         digits.pop();
         exponent = exponent.saturating_add(1);
@@ -220,9 +213,8 @@ fn encode(text: &str, negative: bool) -> Result<u64, String> {
         ));
     }
 
-    // Pad back out to exactly 16 significant digits (XFL's mantissa is
-    // always a normalized 16-digit integer), dropping the exponent by one
-    // per padding digit -- the exact mirror of the trailing-zero strip
+    // Pad back out to exactly 16 significant digits, dropping the exponent
+    // by one per padding digit -- the mirror of the trailing-zero strip
     // above. `pad` is at most `MANTISSA_DIGITS` (16), so the `i64`
     // conversion below is always exact.
     let pad = MANTISSA_DIGITS - digits.len();
@@ -266,10 +258,8 @@ mod tests {
     /// every one of these must hold bit-for-bit.
     ///
     /// `XFL!(-1)`'s expected value here (`1_478_180_677_777_522_688`) is
-    /// **not** the value originally supplied in this macro's spec
-    /// (`1_477_180_677_777_522_688`, off by exactly `10^15` -- a single
-    /// mis-typed digit). It is independently re-derived from xahaud's own
-    /// source (`hook_float::make_float`/`set_sign`/`invert_sign` in
+    /// derived from xahaud's own source
+    /// (`hook_float::make_float`/`set_sign`/`invert_sign` in
     /// `src/xrpld/app/hook/HookAPI.h`): negating an XFL is a pure XOR of bit
     /// 62 (`invert_sign`), leaving the exponent and mantissa fields
     /// bit-for-bit identical to the positive value -- so `XFL!(-1)` must
@@ -324,16 +314,10 @@ mod tests {
     /// not a valid numeric literal by rustc's own grammar (a leading `.`
     /// with no integer part, or an exponent marker with no digits after
     /// it) -- these can never actually appear as `XFL!(..)`'s input in real
-    /// source, because rustc's tokenizer rejects them as a syntax error
-    /// *before* macro expansion ever runs (confirmed directly: `1e`, `1e+`,
-    /// and `.5` all fail to lex as valid Rust source on their own, with
-    /// rustc's own "expected at least one digit in exponent" / "float
-    /// literals must have an integer part" errors -- there is no
-    /// `compile_error!` from this macro to pin in a trybuild fixture for
-    /// them, since this macro's `expand()` never runs). Covered here at the
-    /// `encode()` level instead, purely defensively: `encode` is a plain
-    /// `&str -> Result` function and must not panic on any input, tokenizer
-    /// artifact or not.
+    /// source, since rustc's tokenizer rejects them before macro expansion
+    /// ever runs. Covered here at the `encode()` level purely defensively:
+    /// `encode` is a plain `&str -> Result` function and must not panic on
+    /// any input, tokenizer artifact or not.
     #[test]
     fn malformed_exponent_and_leading_dot_text_is_rejected() {
         assert!(encode("1e", false).is_err());

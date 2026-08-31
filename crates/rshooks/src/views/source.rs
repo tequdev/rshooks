@@ -14,12 +14,11 @@
 //!
 //! - [`OtxnSource`] — a ZST. Reads go straight to the originating
 //!   transaction (`otxn_field`), one host call per access, with the field
-//!   lookup paid by the host. This is the cheapest way to read the
-//!   originating transaction.
+//!   lookup paid by the host. The cheapest way to read the originating
+//!   transaction.
 //! - [`SlotSource`] — wraps an already-loaded `SlotObject<STObject>`. Reads
-//!   navigate to a child slot and read it. This is the only source that can
-//!   reach *into* a container, and the only one available for a ledger
-//!   object.
+//!   navigate to a child slot and read it. The only source that can reach
+//!   *into* a container, and the only one available for a ledger object.
 //!
 //! Both are monomorphized and every accessor is `#[inline(always)]`, so the
 //! abstraction compiles away: a view accessor is the host call it wraps.
@@ -31,15 +30,14 @@
 //! against `rshooks_core::DOESNT_EXIST`, never by matching
 //! `HookError::DoesntExist`.
 //!
-//! This is not a micro-optimization, it is a hard requirement:
-//! `docs/DESIGN.md` §5.6 explains that `HookError::from` compiles to a
-//! ~40-block `br_table` which the optimizer only keeps at call sites that
-//! inspect *which* variant a failure was, and that `rshooks-build` inlines
-//! every function into `hook()`/`cbak()` and must then keep total block
-//! nesting under the guard checker's 32-level limit. A view emits an
-//! optional read per optional field, so a single `Err(HookError::DoesntExist)`
-//! match in this module would be inlined into `hook()` once per accessor
-//! call and blow the budget on its own. The raw-code helpers
+//! This is a hard requirement, not a micro-optimization: `HookError::from`
+//! compiles to a ~40-block `br_table` that the optimizer only keeps at call
+//! sites inspecting *which* variant a failure was (`docs/DESIGN.md` §5.6),
+//! and `rshooks-build` inlines every function into `hook()`/`cbak()`, which
+//! must stay under the guard checker's 32-level nesting limit. A view emits
+//! an optional read per optional field, so matching
+//! `Err(HookError::DoesntExist)` here would be inlined once per accessor
+//! call and blow that budget on its own. The raw-code helpers
 //! ([`crate::api::otxn`]'s `otxn_field_raw_code`, [`crate::api::slot`]'s
 //! `slot_subfield_raw_code`) exist for exactly this.
 //!
@@ -49,42 +47,31 @@
 //!
 //! # Slot lifetime: get, read, clear
 //!
-//! Every [`SlotSource`] read is get → read → **clear**. It navigates to a
+//! Every [`SlotSource`] read is get → read → **clear**: it navigates to a
 //! child slot, performs a terminal read, and releases the child before
 //! returning — through the `take_*` read-and-clear family
 //! ([`SlotObject::take_raw`] is the variable-length member, added for this).
-//!
-//! The consequence is the point: a view's accessors can be called any number
-//! of times and consume **zero** slots beyond the view's own root. Without
-//! it, the 255-slot budget would fall to one slot per accessor call, and a
-//! view over a ledger object with thirty fields would be unusable.
+//! A view's accessors can therefore be called any number of times while
+//! consuming **zero** slots beyond the view's own root; without it, the
+//! 255-slot budget would fall to one slot per accessor call.
 //!
 //! The generated `*_slot` subobject accessors are the one deliberate
 //! exception: they hand the child slot's ownership to the caller, who then
 //! owns its lifetime the way they would after any `SlotObject::get`. Their
 //! doc comments say so.
 //!
-//! ## What that costs, stated plainly
+//! This clear is the only instruction a view spends that a hand-written hook
+//! need not. The C idiom — and [`SlotObject`]'s own consuming reads, whose
+//! module docs explain why — does `slot_subfield` then a read and leaves the
+//! slot allocated, since the budget is per-execution and the host frees
+//! everything when the hook returns. A generated accessor cannot know how
+//! many times it will be called, so leaking a slot per call would make it
+//! unusable in a loop. Where that trade isn't wanted, the raw layers cost
+//! exactly what they always did: [`crate::slot_obj`]'s non-clearing reads
+//! and [`crate::api::slot`]'s numbered functions.
 //!
-//! This is the **only** place a view spends an instruction a hand-written
-//! hook need not. The C idiom — and [`SlotObject`]'s own consuming reads,
-//! whose module docs explain why — does `slot_subfield` then a read and
-//! leaves the slot allocated, because the budget is per-execution and the
-//! host frees everything when the hook returns. A view adds one
-//! `slot_clear` host call per slot-backed read on top of that.
-//!
-//! It is not a tax a view can opt out of. A generated accessor cannot know
-//! how many times a hook will call it, and an accessor that leaks one slot
-//! per call is one a hook cannot use in a loop at all. Where that trade is
-//! not the one you want, the raw layers are unchanged and public:
-//! [`crate::slot_obj`]'s non-clearing reads and
-//! [`crate::api::slot`]'s numbered functions cost exactly what they always
-//! did.
-//!
-//! Nothing else here costs anything. An [`OtxnSource`] accessor is one
-//! `otxn_field` call and no bookkeeping — the same call a hand-written hook
-//! would make, with the field code supplied by a generated constant instead
-//! of typed out. Both sources' reads write straight into the caller's
+//! An [`OtxnSource`] accessor, by contrast, is one `otxn_field` call and no
+//! bookkeeping. Both sources' reads write straight into the caller's
 //! storage; nothing is copied twice.
 
 use crate::api::otxn;
@@ -282,11 +269,6 @@ impl ViewValue for Issue {
 /// **Sealed** — see [`private`]. Two implementations, [`OtxnSource`] and
 /// [`SlotSource`]; the module docs cover what each costs and why the
 /// slot-backed one clears every child slot it opens.
-///
-/// A third implementation over already-parsed bytes (a buffer walker) would
-/// slot in here without touching a line of generated code. That extension
-/// point is the reason this trait exists rather than two duplicated view
-/// hierarchies.
 pub trait FieldSource: private::SealedSource {
     /// Reads a field whose serialized type has a modeled value type,
     /// `Ok(None)` when it is absent.
@@ -320,16 +302,11 @@ pub trait FieldSource: private::SealedSource {
 
 /// Reads a view's fields directly off the originating transaction.
 ///
-/// A zero-sized type: a view built on it is a zero-sized struct, and its
-/// accessors are one host call each with no bookkeeping. This is the
-/// cheapest way to read the originating transaction — the host does the
-/// field lookup, and no slot is consumed at all.
-///
-/// It cannot reach into a container: an `STObject`/`STArray` field is
-/// readable only as raw bytes here, because `otxn_field` has no way to
-/// navigate. Load the transaction into a slot
-/// (`SlotObject::from_otxn`) and use a [`SlotSource`] view when you need to
-/// go inside one.
+/// A zero-sized type; a view built on it is a zero-sized struct. Cannot
+/// reach into a container — an `STObject`/`STArray` field is readable only
+/// as raw bytes here, since `otxn_field` has no way to navigate. Load the
+/// transaction into a slot (`SlotObject::from_otxn`) and use a
+/// [`SlotSource`] view to go inside one.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct OtxnSource;
 

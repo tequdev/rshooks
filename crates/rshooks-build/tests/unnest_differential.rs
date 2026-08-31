@@ -1,15 +1,13 @@
 //! Differential + structural tests for the unnest pass (`docs/DESIGN.md`
-//! §6.2c): every fixture is executed both *before* and *after* unnesting, in
-//! a real wasm interpreter (`wasmi`, a dev-dependency), with the same
-//! stubbed `env` import. Fixtures whose diverging tails trap (by design —
-//! that's what makes them "diverging") are driven down both their success
-//! path (no trap: same return value, same host-call sequence) and their
-//! error path(s) (both pre- and post-unnest must trap, with an identical
-//! host-call sequence recorded *before* the trap).
+//! §6.2c): every fixture runs both *before* and *after* unnesting in a real
+//! wasm interpreter (`wasmi`, dev-only), against the same stubbed `env`
+//! import. Fixtures whose diverging tails trap (by design) are driven down
+//! both their success path (no trap: same return value, same host-call
+//! sequence) and their error path(s) (both pre- and post-unnest must trap,
+//! with an identical host-call sequence recorded *before* the trap).
 //!
-//! Test code is exempt from the workspace's panic-freedom lints (per
-//! `docs/DESIGN.md` §8): `unwrap`/`expect` on a known-good fixture is the
-//! normal, idiomatic way to assert behavior in a test.
+//! Test code is exempt from the workspace's panic-freedom lints (`docs/DESIGN.md`
+//! §8): `unwrap`/`expect` on a known-good fixture is idiomatic here.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -27,12 +25,12 @@ struct HostState {
     log: Rc<RefCell<Vec<(i32, i32)>>>,
 }
 
-/// Instantiates `wasm` with the standard `env::obs` stub and calls the
-/// named export with `param`. Returns `Ok(result)` if the call completed
-/// normally, or `Err(())` if it trapped (the fixtures below all trap via
-/// `unreachable`, which is the entire point of a "diverging tail" — we only
-/// care *that* both sides trap, not the exact trap-message text), plus the
-/// full `(a, b)` call-observation log recorded up to that point.
+/// Instantiates `wasm` with the standard `env::obs` stub and calls the named
+/// export with `param`. Returns `Ok(result)` if the call completed normally,
+/// or `Err(())` if it trapped (the fixtures below all trap via
+/// `unreachable` — we only care *that* both sides trap, not the trap
+/// message), plus the full `(a, b)` call-observation log recorded up to
+/// that point.
 fn run(wasm: &[u8], export: &str, param: i32) -> (Result<i64, ()>, Vec<(i32, i32)>) {
     let engine = Engine::default();
     let module = Module::new(&engine, wasm).expect("fixture is valid wasm");
@@ -93,9 +91,8 @@ fn assert_differential(wat: &str, cases: &[(&str, i32)]) -> (Vec<u8>, rshooks_bu
     (post, report)
 }
 
-/// Computes the maximum simultaneous `block`/`loop`/`if` nesting depth
-/// across every defined function body in `wasm` (matches
-/// `ir::max_nesting_depth`'s definition, duplicated here since that helper
+/// Maximum simultaneous `block`/`loop`/`if` nesting depth across every
+/// defined function body in `wasm` (mirrors `ir::max_nesting_depth`, which
 /// is private to the crate).
 fn max_nesting_depth(wasm: &[u8]) -> u32 {
     let mut overall = 0u32;
@@ -141,14 +138,10 @@ fn contains_block(wasm: &[u8]) -> bool {
     false
 }
 
-// ---------------------------------------------------------------------
 // Fixture (a): a classic 3-level error ladder. Three nested empty blocks,
 // each with a `br_if` in the innermost body targeting one of them, and a
 // self-contained diverging tail (an `obs` call + `unreachable`) right after
-// each block's own `end`. The success path falls all the way through to a
-// `return`.
-// ---------------------------------------------------------------------
-
+// each block's own `end`. The success path falls through to a `return`.
 const CLASSIC_LADDER: &str = r#"
 (module
   (import "env" "obs" (func $obs (param i32 i32) (result i32)))
@@ -174,8 +167,8 @@ fn classic_three_level_ladder_collapses_and_matches() {
     let pre = wat::parse_str(CLASSIC_LADDER).expect("fixture is valid wat");
     let pre_depth = max_nesting_depth(&pre);
 
-    // x=99: success path, no trap. x=0,1,2: each takes a distinct rollback
-    // tail and traps.
+    // x=99: success, no trap. x=0,1,2: each takes a distinct rollback tail
+    // and traps.
     let (post, report) = assert_differential(
         CLASSIC_LADDER,
         &[("hook", 99), ("hook", 0), ("hook", 1), ("hook", 2)],
@@ -208,13 +201,9 @@ fn classic_three_level_ladder_collapses_and_matches() {
     );
 }
 
-// ---------------------------------------------------------------------
 // Fixture (b): an unconditional `br` to a diverging tail, alongside a
-// `br_if` targeting the *same* block (so this fixture also cross-checks
-// that mixing conditional and unconditional branches to one qualifying
-// block is handled correctly).
-// ---------------------------------------------------------------------
-
+// `br_if` targeting the *same* block — cross-checks that mixing conditional
+// and unconditional branches to one qualifying block is handled correctly.
 const UNCONDITIONAL_BR_TAIL: &str = r#"
 (module
   (import "env" "obs" (func $obs (param i32 i32) (result i32)))
@@ -230,9 +219,9 @@ const UNCONDITIONAL_BR_TAIL: &str = r#"
 
 #[test]
 fn unconditional_br_to_diverging_tail_matches() {
-    // x=0: `br_if` fires immediately, skipping the `obs(7, x)` call.
-    // x=5: `br_if` doesn't fire, `obs(7, x)` runs, then the unconditional
-    // `br` exits unconditionally. Both paths converge on the same tail.
+    // x=0: `br_if` fires immediately, skipping `obs(7, x)`. x=5: `br_if`
+    // doesn't fire, `obs(7, x)` runs, then `br` exits. Both converge on the
+    // same tail.
     let (post, report) = assert_differential(UNCONDITIONAL_BR_TAIL, &[("hook", 0), ("hook", 5)]);
     assert_eq!(report.blocks_removed, 1);
     assert_eq!(
@@ -242,12 +231,9 @@ fn unconditional_br_to_diverging_tail_matches() {
     assert!(!contains_block(&post));
 }
 
-// ---------------------------------------------------------------------
 // Fixture (c): a `br_table` targeting a block whose continuation would
 // otherwise qualify as a diverging tail. Per `docs/DESIGN.md` §6.2c, this
 // must be left entirely unhandled: the block must survive untouched.
-// ---------------------------------------------------------------------
-
 const BR_TABLE_TARGETS_LADDER_BLOCK: &str = r#"
 (module
   (import "env" "obs" (func $obs (param i32 i32) (result i32)))
@@ -274,12 +260,9 @@ fn br_table_targeting_ladder_block_is_left_untouched() {
     );
 }
 
-// ---------------------------------------------------------------------
 // Fixture (d): a continuation that is NOT self-contained (it uses
-// `local.set`, which is outside the allowed op set for a diverging tail).
-// No rewrite may happen.
-// ---------------------------------------------------------------------
-
+// `local.set`, outside the allowed op set for a diverging tail). No rewrite
+// may happen.
 const NON_SELF_CONTAINED_TAIL: &str = r#"
 (module
   (import "env" "obs" (func $obs (param i32 i32) (result i32)))
@@ -296,9 +279,8 @@ const NON_SELF_CONTAINED_TAIL: &str = r#"
 
 #[test]
 fn non_self_contained_tail_is_not_rewritten() {
-    // x=0: `br_if` fires, skipping `obs(1, x)`.
-    // x=7: `br_if` doesn't fire, `obs(1, x)` runs, falls through to the
-    // same continuation.
+    // x=0: `br_if` fires, skipping `obs(1, x)`. x=7: `br_if` doesn't fire,
+    // `obs(1, x)` runs, falls through to the same continuation.
     let (post, report) = assert_differential(NON_SELF_CONTAINED_TAIL, &[("hook", 0), ("hook", 7)]);
     assert_eq!(
         report.blocks_removed, 0,
@@ -308,13 +290,10 @@ fn non_self_contained_tail_is_not_rewritten() {
     assert!(contains_block(&post));
 }
 
-// ---------------------------------------------------------------------
 // Fixture (e): a block with a non-empty result type, whose continuation
 // (dropping the block's own result value, then `unreachable`) would
 // otherwise be exactly the shape of a qualifying diverging tail. Only
 // empty-blocktype blocks qualify, so this must be left untouched.
-// ---------------------------------------------------------------------
-
 const NON_EMPTY_RESULT_BLOCK: &str = r#"
 (module
   (import "env" "obs" (func $obs (param i32 i32) (result i32)))
@@ -341,14 +320,11 @@ fn non_empty_result_block_is_not_rewritten() {
     assert!(contains_block(&post));
 }
 
-// ---------------------------------------------------------------------
-// Counts the number of `Operator::Call` instructions targeting import index
-// `target`, and the number of `Operator::I32Const` instructions carrying
-// `value`, across every defined function body in `wasm` — used below to
-// confirm specific (live vs. dead) instruction occurrences, not just that
-// *some* instruction count changed. `contains_loop` mirrors `contains_block`
-// above but for `Operator::Loop`.
-// ---------------------------------------------------------------------
+// `count_calls`/`count_i32_const` count specific instruction occurrences
+// (targeting import index `target`, or carrying `value`) across every
+// defined function body in `wasm`, so assertions below can confirm exactly
+// which calls survive rather than just that *some* count changed.
+// `contains_loop` mirrors `contains_block` above but for `Operator::Loop`.
 
 fn count_calls(wasm: &[u8], target: u32) -> usize {
     let mut n: usize = 0;
@@ -403,19 +379,15 @@ fn contains_loop(wasm: &[u8]) -> bool {
     false
 }
 
-// ---------------------------------------------------------------------
 // Fixture (f): the motivating case from `docs/DESIGN.md` §6.2c — step 3
 // unwraps ladder block `$L0`, but its *original* continuation (`obs(100,
-// x)` then `unreachable`, right after where its `end` used to be) is left
-// in place rather than removed, so it now sits directly after the
-// unwrapped block body's own `unreachable` — dead code duplicating what
-// step 2 already spliced into the rewritten `br_if`. A second, wholly
-// unrelated dead group (`obs(999, x)` then `unreachable`) follows it,
-// mirroring the multi-group leftover seen in `03_hook-params`'s real
+// x)` then `unreachable`) is left in place rather than removed, so it now
+// sits directly after the unwrapped block body's own `unreachable` — dead
+// code duplicating what step 2 already spliced into the rewritten `br_if`.
+// A second, unrelated dead group (`obs(999, x)` then `unreachable`) follows
+// it, mirroring the multi-group leftover seen in `03_hook-params`'s real
 // output. The post-pass must drop both dead groups in full, leaving only
 // the one live copy of each call.
-// ---------------------------------------------------------------------
-
 const DEAD_TAIL_AFTER_LADDER_BLOCK: &str = r#"
 (module
   (import "env" "obs" (func $obs (param i32 i32) (result i32)))
@@ -435,8 +407,8 @@ const DEAD_TAIL_AFTER_LADDER_BLOCK: &str = r#"
 fn dead_tail_after_ladder_block_is_eliminated() {
     // x=0: `br_if` fires, takes the spliced `obs(100, x)` tail (traps).
     // x=5: `br_if` doesn't fire, falls through to `obs(1, x)` (traps too —
-    // this fixture has no non-trapping path, which is fine: both branches
-    // are exercised and must match pre/post regardless).
+    // this fixture has no non-trapping path; both branches still must match
+    // pre/post).
     let (post, report) =
         assert_differential(DEAD_TAIL_AFTER_LADDER_BLOCK, &[("hook", 0), ("hook", 5)]);
 
@@ -465,16 +437,12 @@ fn dead_tail_after_ladder_block_is_eliminated() {
     );
 }
 
-// ---------------------------------------------------------------------
-// Fixture (g): an entire nested `loop` — unnest's own steps never touch
-// `loop` frames at all, so this isolates the dead-code pass's "drop a whole
-// nested span" behavior from any interaction with steps 1–4 — sits after an
-// unconditional `return` at the top level, i.e. the whole loop is dead
-// code, not just a flat instruction run. It must be dropped as one unit
-// (and the trailing top-level `unreachable` after it, itself dead too, must
-// go as well).
-// ---------------------------------------------------------------------
-
+// Fixture (g): an entire nested `loop`, sitting after an unconditional
+// `return` at the top level — the whole loop is dead code, not just a flat
+// instruction run. Unnest's own steps never touch `loop` frames, so this
+// isolates the dead-code pass's "drop a whole nested span" behavior from
+// steps 1-4. It must be dropped as one unit (and the trailing top-level
+// `unreachable` after it, itself dead too, must go as well).
 const DEAD_NESTED_LOOP: &str = r#"
 (module
   (import "env" "obs" (func $obs (param i32 i32) (result i32)))

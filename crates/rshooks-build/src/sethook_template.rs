@@ -207,12 +207,11 @@ fn build_entry_template(
 }
 
 /// Builds the `HookParameters` declaration array for one entry's declared
-/// signature parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §4) — `None`
-/// (the whole key omitted) for an entry with no `sig_params`, superseding
-/// the general "`HookParameters` is never generated" rule
-/// (`docs/MULTI_HOOK_STRUCT_DESIGN.md` §9 point #10) only for declared
-/// signature parameters; `sig_params` is already carrier-order (= wire
-/// index) ascending, so no re-sorting is needed here.
+/// signature parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §4) — `None` (key
+/// omitted) for an entry with no `sig_params`. This is the sole exception
+/// to the "`HookParameters` is never generated" rule
+/// (`docs/MULTI_HOOK_STRUCT_DESIGN.md` §9 point #10). `sig_params` is
+/// already carrier-order (= wire index) ascending, so no re-sorting needed.
 fn build_hook_parameters(sig_params: &[SigParamDecl]) -> Option<Vec<HookParameterItem>> {
     if sig_params.is_empty() {
         return None;
@@ -232,8 +231,8 @@ fn build_hook_parameters(sig_params: &[SigParamDecl]) -> Option<Vec<HookParamete
 
 /// Derives `required_amendments` from what the template's own fields
 /// structurally require. Always includes `"Hooks"`. Does NOT account for
-/// Hook API surface used inside the wasm itself — that limitation is
-/// documented in the sidecar's own field.
+/// Hook API surface used inside the wasm itself (documented in the
+/// sidecar's own field).
 #[must_use]
 pub fn required_amendments(entries: &[EntryDecl]) -> Vec<String> {
     let mut amendments = vec!["Hooks".to_string()];

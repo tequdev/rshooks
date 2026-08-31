@@ -22,9 +22,8 @@ hook_errors! {
 
 /// Reads the configured `BL` blocklist account, if any.
 ///
-/// Treats a decode failure the same as an absent parameter (`.ok().flatten()`
-/// collapsing both `Err` and `Ok(None)` to `None`): any read failure falls
-/// straight to "nothing to block", not just an unset `BL`.
+/// Treats a decode failure the same as an absent parameter: any read
+/// failure falls straight to "nothing to block", not just an unset `BL`.
 fn blocked_account() -> Option<AccountId> {
     Firewall.hook_param.blocked.get().ok().flatten()
 }

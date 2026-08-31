@@ -7,45 +7,36 @@
 //! encoded length (`<= rshooks::types::STATE_KEY_LEN`, 32 bytes), never
 //! locally zero-padded up to 32: the Hook API host left-pads a shorter key
 //! itself (see `rshooks::state`'s module doc comment, "Key length and
-//! padding"). See `rshooks::HookKey`'s doc comment (the public-facing
-//! re-export site) for the full user-facing writeup, grammar, and
-//! worked/compile-fail examples — this module only implements the codegen.
+//! padding"). See `rshooks::HookKey`'s doc comment for the full user-facing
+//! writeup, grammar, and worked/compile-fail examples — this module only
+//! implements the codegen.
 //!
 //! # Why a separate derive, not `#[derive(HookData)]`?
 //!
-//! A hook-state key and a hook-state value share the same "fixed-offset
-//! struct" shape, but play different roles, and `HookKey` is deliberately
-//! narrower than `HookData`:
+//! A hook-state key and a hook-state value share the same fixed-offset
+//! struct shape but play different roles:
 //!
 //! - A state key is only ever **written** (handed to the host to locate a
 //!   value) — never read back and decoded as itself. So `HookKey`
-//!   generates only `rshooks::convert::ToBytes` (the encoding half,
-//!   needed for [`crate::shape`]'s per-field codegen and for nesting) plus
-//!   `StateKeyEncode` — no `FromBytes`, no `FixedRead`, no inherent `LEN`
-//!   const. The value-side counterpart is `#[derive(HookData)]` (see
-//!   [`crate::hook_data`]), which *does* generate the full read/write
-//!   triple, since a state value genuinely is read back.
-//! - A hook state key has its own length bound distinct from a Hook API
-//!   *parameter* name's (1 to 32 bytes, see [`crate::param_name`]): a state
-//!   key's real encoded length must fit within
-//!   `rshooks::types::STATE_KEY_LEN` (32) bytes — there is no lower bound
-//!   to enforce here (unlike a parameter name, which the Hook API itself
-//!   rejects below 1 byte; a `HookKey` struct always has at least one field
-//!   by its own grammar, so its encoded length is never 0). `HookKey` bakes
-//!   the upper bound in as an unconditional compile-time assert generated
-//!   alongside the impls — a `#[derive(HookKey)]` struct that encodes to
-//!   more than 32 bytes fails to compile *at its own definition*, not only
-//!   later at whatever call site first tries to use it as a key.
-//!
-//! See `rshooks::HookData`'s doc comment for the reciprocal note (use
-//! `HookKey` for state keys, `HookData` for state values, `ParamName`/
-//! `ParamValue` for Hook API parameter names/values).
+//!   generates only `ToBytes` (needed for [`crate::shape`]'s per-field
+//!   codegen and nesting) plus `StateKeyEncode` — no `FromBytes`, no
+//!   `FixedRead`, no inherent `LEN` const. `#[derive(HookData)]` (see
+//!   [`crate::hook_data`]) generates the full read/write triple for state
+//!   values, which genuinely are read back.
+//! - A state key's real encoded length must fit within
+//!   `rshooks::types::STATE_KEY_LEN` (32) bytes, with no lower bound to
+//!   enforce (a `HookKey` struct always has at least one field by its own
+//!   grammar, so its encoded length is never 0) — unlike a Hook API
+//!   parameter name (1 to 32 bytes, see [`crate::param_name`]), which the
+//!   Hook API itself rejects below 1 byte. `HookKey` bakes the upper bound
+//!   in as a compile-time assert generated alongside the impls, so a
+//!   struct that encodes to more than 32 bytes fails to compile at its own
+//!   definition.
 //!
 //! # Why hand-rolled, not `syn`/`quote`; codegen strategy
 //!
-//! Identical rationale to [`crate::hook_data`] (see that module's doc
-//! comment) — struct-shape parsing is shared via [`crate::shape`]; only
-//! the generated impl set differs.
+//! Identical rationale to [`crate::hook_data`] — struct-shape parsing is
+//! shared via [`crate::shape`]; only the generated impl set differs.
 
 use crate::err;
 use crate::shape::{StructShape, parse_struct};
@@ -61,9 +52,8 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
 /// Generates the `ToBytes` impl plus an explicit `StateKeyEncode` impl
 /// (with its 32-byte compile-time length assert), for an already-validated
-/// [`StructShape`]. Deliberately does *not* generate `FromBytes`/
-/// `FixedRead`/an inherent `LEN` const — see this module's doc comment for
-/// why.
+/// [`StructShape`]. Does not generate `FromBytes`/`FixedRead`/an inherent
+/// `LEN` const — see this module's doc comment for why.
 pub(crate) fn generate(shape: &StructShape) -> TokenStream {
     let name = &shape.name;
 
@@ -134,16 +124,12 @@ impl ::rshooks::convert::ToBytes for {name} {{
 }
 
 /// Generates the `StateKeyEncode` impl for `name` (which must already have
-/// a `ToBytes` impl in scope): a compile-time (monomorphized) assert that
-/// `<name as ToBytes>::MAX_LEN` is `1..=STATE_KEY_LEN` — the Hook API's own
-/// key-length bound — followed by `encode()`'s body, writing `self` into a
-/// 32-byte scratch buffer via its own `ToBytes::write` and wrapping the
+/// a `ToBytes` impl in scope): a compile-time assert that `<name as
+/// ToBytes>::MAX_LEN` is `1..=STATE_KEY_LEN`, followed by `encode()`'s
+/// body, writing `self` into a 32-byte scratch buffer and wrapping the
 /// result in an [`EncodedStateKey`](::rshooks::state::EncodedStateKey) at
 /// its real length (never locally zero-padded — see `rshooks::state`'s
 /// module doc comment, "Key length and padding").
-///
-/// Factored out of [`derive`] so the generated `StateKeyEncode` impl body
-/// stays in one place.
 pub(crate) fn state_key_encode_impl(name: &str) -> String {
     format!(
         "

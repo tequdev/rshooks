@@ -121,19 +121,14 @@ pub fn util_keylet<B: AsMut<[u8]> + ?Sized>(
     f: u32,
 ) -> Result<usize> {
     let out = out.as_mut();
-    // Untyped escape hatch: by the time a caller reaches this function,
-    // any pointer-shaped component has already been `.as_ptr() as u32`-cast
-    // away by the *caller* (see `crate::api::keylet`'s 26 typed helpers,
-    // each of which intercepts with its own real slices *before* calling
-    // `util_keylet_buf`/`util_keylet` — `KeyletArg`'s doc comment and
-    // `crates/rshooks/testenv-call-sites.txt`'s header explain why this
-    // function cannot itself recover real bytes from `a..f`). This
-    // interception block can therefore only forward `a..f` as opaque
-    // `KeyletArg::Value`s — correct for a value-only keylet type called
-    // through this untyped path, but unable to resolve a pointer-bearing
-    // type's real bytes; a hook calling `util_keylet`/`util_keylet_buf`
-    // directly for a pointer-bearing type should expect e2e-only fidelity
-    // under `testenv` until a typed helper exists for it.
+    // Untyped escape hatch: by the time a caller reaches this function, any
+    // pointer-shaped component has already been `.as_ptr() as u32`-cast away
+    // by the caller (typed callers go through `crate::api::keylet`'s 26
+    // helpers instead, which intercept with real slices first). This block
+    // can therefore only forward `a..f` as opaque `KeyletArg::Value`s —
+    // correct for a value-only keylet type, but unable to resolve real bytes
+    // for a pointer-bearing type; calling this function directly for one
+    // gets only e2e-fidelity under `testenv` until a typed helper exists.
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
     if let Some(r) = rshooks_core::backend::with_backend(|backend| {
         backend.util_keylet(

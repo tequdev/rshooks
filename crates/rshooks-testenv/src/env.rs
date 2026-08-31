@@ -19,22 +19,18 @@ use crate::world::{EmitAttempt, EmittedTxn, TraceLine, World, normalize_state_ke
 
 /// The result of the emitted transaction a `#[cbak]` is being called back
 /// about — [`TestEnv::invoke_cbak`]'s second argument. Holds an owned,
-/// cloned [`EmittedTxn`] (not a borrow): every other cumulative accessor on
-/// [`TestEnv`] (`emitted()`, `emit_attempts()`, `traces()`) already hands
-/// back owned clones, so a caller typically has one in hand already (e.g.
-/// `env.emitted()[0].clone()`) — an owned variant here avoids adding the one
-/// lifetime parameter a borrowing alternative would need on `TestEnv::invoke_cbak`
-/// itself, for a type that only ever needs to survive one call.
+/// cloned [`EmittedTxn`] rather than a borrow, avoiding a lifetime
+/// parameter on `TestEnv::invoke_cbak` for a type that only needs to
+/// survive one call.
 ///
-/// Ported against `Xahau/xahaud`, branch `dev`,
-/// `src/xrpld/app/tx/detail/Transactor.cpp:1570-1583` (fetched for this
-/// stage — `Transactor::doHookCallback`'s call into `hook::apply`): the wasm
-/// `cbak(u32)` argument is `ctx_.tx.getTxnType() == ttEMIT_FAILURE ? 1UL :
-/// 0UL` — `0` when the emitted transaction applied as its own real type
-/// (success), `1` when it was rewritten to `ttEMIT_FAILURE` (the emission
-/// failed to apply). [`CbakOutcome::Success`]/[`CbakOutcome::Failure`] carry
-/// that same `0`/`1` distinction; `TestEnv::invoke_cbak` passes it as the
-/// callback's own `fn(u32) -> i64` argument verbatim.
+/// Ported against `Transactor::doHookCallback`'s call into `hook::apply`
+/// (`Xahau/xahaud` `dev`, `src/xrpld/app/tx/detail/Transactor.cpp:1570-1583`):
+/// the wasm `cbak(u32)` argument is `ctx_.tx.getTxnType() == ttEMIT_FAILURE
+/// ? 1UL : 0UL` — `0` when the emitted transaction applied as its own real
+/// type (success), `1` when it was rewritten to `ttEMIT_FAILURE`.
+/// [`CbakOutcome::Success`]/[`CbakOutcome::Failure`] carry that same `0`/`1`
+/// distinction; `TestEnv::invoke_cbak` passes it as the callback's
+/// `fn(u32) -> i64` argument verbatim.
 #[derive(Debug, Clone)]
 pub enum CbakOutcome {
     /// The emitted transaction applied successfully — the callback's wasm
@@ -66,12 +62,10 @@ impl CbakOutcome {
 /// Restores `world`'s `otxn`/`otxn_emitted` fields to `original` when
 /// dropped — [`TestEnv::invoke_cbak`]'s otxn swap is invocation-scoped
 /// (design §4 "cbak execution": "the ORIGINAL seeded otxn must be restored
-/// after the callback returns"), and an RAII guard (rather than a manual
-/// restore after the call) is what makes that hold even if the callback
-/// itself panics with a payload `run_entry` resumes the unwind of (a
-/// genuine test failure, not `accept!`/`rollback!`) — `Drop::drop` still
-/// runs while unwinding, the same guarantee [`crate::backend::BackendGuard`]-
-/// style guards in this codebase already rely on.
+/// after the callback returns"). An RAII guard holds even if the callback
+/// panics with a payload `run_entry` resumes the unwind of (a genuine test
+/// failure): `Drop::drop` still runs while unwinding, the same guarantee
+/// [`crate::backend::BackendGuard`]-style guards rely on.
 struct OtxnRestoreGuard<'a> {
     world: &'a Rc<RefCell<World>>,
     /// `Some` until [`Drop::drop`] runs (always exactly once); `Option` only
@@ -309,11 +303,10 @@ impl TestEnv {
     }
 
     /// Overrides this hook's own default state namespace (`[0u8; 32]` if
-    /// never called). Extension beyond the exact design §2.4 surface, added
-    /// because the design explicitly calls for a configurable own
-    /// namespace (see `.claude/design/TESTENV_IMPLEMENTATION.md`'s Stage 4
-    /// world-model note). Order-independent with [`Self::state_entry`], the
-    /// same way [`Self::hook_account`] is — see that method's doc comment.
+    /// never called; design §2.4 extension — see
+    /// `.claude/design/TESTENV_IMPLEMENTATION.md`'s Stage 4 world-model
+    /// note). Order-independent with [`Self::state_entry`], the same way
+    /// [`Self::hook_account`] is — see that method's doc comment.
     #[must_use]
     pub fn own_namespace(self, ns: [u8; 32]) -> Self {
         let mut w = self.world.borrow_mut();
@@ -358,13 +351,10 @@ impl TestEnv {
 
     // -- Phase 2 (`.claude/design/TESTENV_PHASE2_DESIGN.md` §3) --
     //
-    // Plain data plumbing as of P2-A: these seed `World` fields nothing yet
-    // reads (`crate::backend::Backend` does not override `slot_set`/
-    // `meta_slot`/`xpop_slot` — every Phase 2 `HostBackend` method still
-    // falls through to its trait default). Semantics land per-family in
-    // P2-C/P2-D.
+    // These seed `World` fields read by `crate::backend::Backend::slot_set`/
+    // `meta_slot`/`xpop_slot`.
     /// Seeds a ledger object at `keylet` (its 34-byte index), serialized as
-    /// `sto` — will back `slot_set`/`ledger_keylet` once P2-D/P2-C land.
+    /// `sto` — backs `slot_set`/`ledger_keylet`.
     #[must_use]
     pub fn ledger_object(self, keylet: [u8; 34], sto: &[u8]) -> Self {
         self.world
@@ -374,16 +364,14 @@ impl TestEnv {
         self
     }
 
-    /// Seeds the current transaction's metadata — will back `meta_slot`
-    /// once P2-D lands.
+    /// Seeds the current transaction's metadata — backs `meta_slot`.
     #[must_use]
     pub fn otxn_meta(self, sto: &[u8]) -> Self {
         self.world.borrow_mut().otxn_meta = Some(sto.to_vec());
         self
     }
 
-    /// Seeds an XPOP's `(transaction, metadata)` pair — will back
-    /// `xpop_slot` once P2-D lands.
+    /// Seeds an XPOP's `(transaction, metadata)` pair — backs `xpop_slot`.
     #[must_use]
     pub fn xpop(self, tx: &[u8], meta: &[u8]) -> Self {
         self.world.borrow_mut().xpop = Some((tx.to_vec(), meta.to_vec()));
@@ -429,24 +417,24 @@ impl TestEnv {
 
     /// Runs the entry declared at `index` in `C::ENTRIES`'s `#[cbak(index)]`
     /// body as a fresh invocation, standing in for xahaud's own callback
-    /// dispatch (`Transactor::doHookCallback`, `Xahau/xahaud` branch `dev`,
-    /// `src/xrpld/app/tx/detail/Transactor.cpp:1483-1614`, fetched for this
-    /// stage — see [`CbakOutcome`]'s own doc comment for the wasm-argument
-    /// citation): a fresh [`InvocationContext`] and world snapshot exactly
-    /// like [`Self::invoke`], plus an otxn swap for the duration of the call
-    /// — during a real callback, `otxn_field`/`otxn_type`/`otxn_id` all read
+    /// dispatch (`Transactor::doHookCallback`, `Xahau/xahaud` `dev`,
+    /// `src/xrpld/app/tx/detail/Transactor.cpp:1483-1614` — see
+    /// [`CbakOutcome`]'s doc comment for the wasm-argument citation): a
+    /// fresh [`InvocationContext`] and world snapshot exactly like
+    /// [`Self::invoke`], plus an otxn swap for the duration of the call —
+    /// during a real callback, `otxn_field`/`otxn_type`/`otxn_id` all read
     /// from the transaction *currently being applied*, i.e. the emitted
     /// transaction itself (`HookAPI::otxn_field`/`otxn_type`/`otxn_id`,
     /// `src/xrpld/app/hook/detail/HookAPI.cpp:1527-1562`, all read
-    /// `hookCtx.applyCtx.tx` directly — confirmed by reading the same file),
-    /// and `otxn_burden`/`otxn_generation` read the emitted transaction's
-    /// own `EmitDetails.EmitBurden`/`EmitGeneration` fields directly, not
+    /// `hookCtx.applyCtx.tx` directly), and `otxn_burden`/`otxn_generation`
+    /// read the emitted transaction's own
+    /// `EmitDetails.EmitBurden`/`EmitGeneration` fields directly, not
     /// `+1`-incremented the way `etxn_burden`/`etxn_generation` derive the
-    /// *next* emission's values (`HookAPI.cpp:1465-1520`, same file). The
-    /// otxn swap is undone by an RAII guard as soon as this call returns
-    /// (even if the callback body itself panics with a non-exit payload —
-    /// see [`OtxnRestoreGuard`]'s own doc comment) — "the ORIGINAL seeded
-    /// otxn must be restored after the callback returns" (design §4 "cbak
+    /// *next* emission's values (`HookAPI.cpp:1465-1520`). The otxn swap is
+    /// undone by an RAII guard as soon as this call returns, even if the
+    /// callback body panics with a non-exit payload (see
+    /// [`OtxnRestoreGuard`]'s doc comment) — "the ORIGINAL seeded otxn must
+    /// be restored after the callback returns" (design §4 "cbak
     /// execution"). Every other world field (state, hook identity, ledger
     /// fields, grants, seeded params) stays exactly as the surrounding
     /// `TestEnv` already has it — this harness does not model per-account
@@ -456,13 +444,13 @@ impl TestEnv {
     /// # Panics
     ///
     /// Panics if `index` does not name a declared entry (see [`Self::invoke`]),
-    /// or if the entry at `index` declares no `#[cbak]` body at all (listing
-    /// which declared indices *do* have one) — a genuine test-author error,
-    /// not a Hook API outcome (on-chain, a hook with no `cbak` export simply
-    /// never receives a callback at all; `Transactor::doHookCallback` skips
-    /// it via `!hookDef->isFieldPresent(sfHookCallbackFee)`,
-    /// `Transactor.cpp:1512-1518`). Also panics under the same reentrancy/
-    /// `strict_can_emit` conditions [`Self::invoke`] documents.
+    /// or if the entry at `index` declares no `#[cbak]` body (listing which
+    /// declared indices do have one) — on-chain, a hook with no `cbak`
+    /// export simply never receives a callback
+    /// (`Transactor::doHookCallback` skips it via
+    /// `!hookDef->isFieldPresent(sfHookCallbackFee)`, `Transactor.cpp:1512-1518`).
+    /// Also panics under the same reentrancy/`strict_can_emit` conditions
+    /// [`Self::invoke`] documents.
     #[allow(clippy::panic)] // documented API: an unknown entry index, or an entry with no cbak, is a test-author error
     pub fn invoke_cbak<C: HookChainEntries>(&self, index: u32, outcome: CbakOutcome) -> HookExit {
         let entry = Self::find_entry::<C>(index, "invoke_cbak");
@@ -529,11 +517,11 @@ impl TestEnv {
     /// [`InvocationContext`], a world snapshot, an installed mock backend,
     /// `hook_fn(arg)` run under `catch_unwind`, then the outcome mapping
     /// documented on [`ExitType`] — including, on `accept!`, merging this
-    /// invocation's control-leftover writes
-    /// (`hook_again_called`/`skip_directives`/`pending_param_overrides`, P2-E)
-    /// into the persistent [`World`] alongside the pre-existing
-    /// `pending_emissions` commit (see `crate::host::control`'s module doc
-    /// comment for why these three specifically commit only here).
+    /// invocation's control-leftover writes (`hook_again_called`/
+    /// `skip_directives`/`pending_param_overrides`, P2-E) into the
+    /// persistent [`World`] alongside the `pending_emissions` commit (see
+    /// `crate::host::control`'s module doc for why these three commit only
+    /// here).
     #[allow(clippy::panic)] // documented API: a `strict_can_emit` violation is a test-author assertion (design §5.6)
     fn run_entry(
         &self,
@@ -618,11 +606,11 @@ impl TestEnv {
 
     #[allow(clippy::panic)] // documented API: a `strict_can_emit` violation is a test-author assertion (design §5.6)
     fn assert_can_emit(&self, entry: &rshooks::decl::NativeEntry, pending: &[EmittedTxn]) {
-        // `None` (no `can_emit` declaration at all) is unrestricted — matches
-        // an absent on-chain `HookCanEmit`, which imposes no restriction.
-        // Only a declared list (`Some(&[..])`, empty slice included)
-        // constrains what this entry may emit — see `NativeEntry::can_emit`'s
-        // doc comment for the full three-state contract.
+        // `None` (no `can_emit` declaration) is unrestricted, matching an
+        // absent on-chain `HookCanEmit`. Only a declared list
+        // (`Some(&[..])`, empty slice included) constrains what this entry
+        // may emit — see `NativeEntry::can_emit`'s doc comment for the
+        // full three-state contract.
         let Some(allowed_list) = entry.can_emit else {
             return;
         };

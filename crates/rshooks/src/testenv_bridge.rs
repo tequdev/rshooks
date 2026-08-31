@@ -4,9 +4,8 @@
 //! back an owned `Result<Vec<u8>, i64>`; every wrapper function in
 //! [`crate::api`] that reads bytes writes into a caller-supplied
 //! `out: &mut [u8]` and returns the number of bytes written (or an error).
-//! This module is the seam between the two conventions, honoring the host
-//! buffer contract (`.claude/design/TESTENV_DESIGN.md` §5.2): a
-//! destination shorter than the value returns
+//! This module is the seam between the two conventions: a destination
+//! shorter than the value returns
 //! [`HookError::TooSmall`](crate::error::HookError::TooSmall) — it never
 //! truncates. [`write_bytes_truncate`]/[`write_bytes_truncate_code`] are the
 //! sole, deliberate exception, mirroring xahaud's own `hook_param`

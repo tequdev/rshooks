@@ -14,18 +14,17 @@
 //! value types, and the reads are the same host calls behind
 //! `#[inline(always)]` wrappers. Measured against raw code making the same
 //! calls with the same cleanup policy, the typed version is byte-identical —
-//! 197 instructions and 925 bytes either way (see
-//! `examples/08_slot-ledger`'s README, which tabulates the clearing variants
-//! too). Reach for the typed layer by
-//! default; reach for this one when a hook genuinely wants to place things
-//! in specific numbered slots and manage them itself, which
-//! `examples/80_reward` and `examples/81_govern` both do.
+//! 197 instructions and 925 bytes either way (see `examples/08_slot-ledger`'s
+//! README). Reach for the typed layer by default; reach for this one when a
+//! hook genuinely wants to place things in specific numbered slots and
+//! manage them itself, which `examples/80_reward` and `examples/81_govern`
+//! both do.
 //!
 //! **Do not mix the two.** Both address the same 255 registers. A
 //! `slot_clear(3)` here while a `SlotObject` happens to hold slot 3 leaves
 //! that handle looking valid while describing whatever lands there next —
-//! a logic hazard, not a memory-safety one (no `unsafe` on either side), so
-//! nothing prevents it. Pick one layer per hook.
+//! a logic hazard, not a memory-safety one, so nothing prevents it. Pick one
+//! layer per hook.
 //!
 //! That is also why these functions are **not in the prelude**: reaching for
 //! them takes an explicit `rshooks::api::slot::` path (and
@@ -82,15 +81,12 @@ pub fn slot_u64(slot_no: u32) -> Result<u64> {
 
 /// Serialize the object in `slot_no`, requiring the serialization to be
 /// exactly `T`'s length — any [`crate::convert::FixedRead`] type. A
-/// serialization longer than that already fails as
+/// serialization longer than `T` fails as
 /// [`crate::error::HookError::TooSmall`] from the underlying host call; a
 /// serialization shorter is caught by `T::read_exact` itself and mapped to
-/// the same variant — see `state_exact` (`state.rs`) for the identical
-/// pattern and rationale. No loop, no panic.
+/// the same variant. No loop, no panic.
 ///
-/// `T` is inferred from context, not a turbofish — see
-/// [`crate::api::otxn::otxn_field_exact`]'s doc comment for the full
-/// story.
+/// `T` is inferred from context, not a turbofish.
 ///
 /// # Examples
 ///

@@ -123,14 +123,11 @@ impl_buf_eq!(
 /// (e.g. two [`crate::types::AccountId`]s).
 ///
 /// Compares as three big-endian words (`u64` bytes 0..7, `u64` bytes 8..15,
-/// `u32` bytes 16..19), each built from literal indices, so the body is
-/// straight-line code (no loop, no bounds-check panic path) regardless of
-/// optimization level. Byte-lexicographic order on a 20-byte buffer is
-/// exactly numeric 160-bit big-endian order, which is exactly XRPL/Xahau's
-/// "high"/"low" account ordering used to canonicalize a pair of accounts
-/// (e.g. picking the low/high account of a `RippleState` trustline keylet).
-/// That high/low comparison is the primary intended use case for this
-/// function.
+/// `u32` bytes 16..19) from literal indices — straight-line, no loop, no
+/// bounds-check panic path. Byte-lexicographic order on a 20-byte buffer is
+/// exactly numeric 160-bit big-endian order, i.e. XRPL/Xahau's "high"/"low"
+/// account ordering used to canonicalize a pair of accounts (e.g. picking
+/// the low/high account of a `RippleState` trustline keylet).
 #[inline(always)]
 #[must_use]
 pub fn buf_cmp_20(a: &[u8; 20], b: &[u8; 20]) -> core::cmp::Ordering {
@@ -164,12 +161,10 @@ mod tests {
     #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
     use super::*;
 
-    /// Runs the same equal/unequal-at-every-position check that the
-    /// hand-written per-size tests below exercise, generically, so every
-    /// `buf_eq_*` function gets the same coverage without repeating the
-    /// boilerplate per size, and cross-checks every result against `a ==
-    /// b` (host-side; array `==` is what this module exists to *avoid*
-    /// inside a hook, but it's the correctness oracle here).
+    /// Generic equal/unequal-at-every-position check, shared by the
+    /// per-size tests below, cross-checked against `a == b` as the
+    /// correctness oracle (array `==` is what this module exists to
+    /// *avoid* inside a hook, but it's fine as a host-side reference).
     fn check_eq_and_all_single_byte_diffs<const N: usize>(eq: fn(&[u8; N], &[u8; N]) -> bool) {
         let a = [0x5Au8; N];
         let b = a;
@@ -347,12 +342,9 @@ mod tests {
     }
 
     /// Guards against a reordering of `buf_cmp_20`'s three word comparisons:
-    /// every case above differs in exactly one byte, so a byte at index 0
-    /// (first `u64` word) and a byte at index 19 (last `u32` word) always
-    /// move together and a swapped comparison order would go undetected.
-    /// Here the two words disagree — a's first word is smaller while a's
-    /// last word is larger, and vice versa — so only the *first* differing
-    /// word (index order 0 then 8 then 16) may decide the result.
+    /// the leading and trailing words are made to disagree (a's first word
+    /// smaller, a's last word larger, and vice versa), so only the *first*
+    /// differing word (index order 0 then 8 then 16) may decide the result.
     #[test]
     fn buf_cmp_20_first_differing_word_wins_even_when_later_words_disagree() {
         let mut a = [0x5Au8; 20];

@@ -81,8 +81,7 @@ describe('param-signature', () => {
       HookOn: calculateHookOn(['Invoke']),
       HookNamespace: hookNamespace,
       HookApiVersion: 0,
-      // Installed verbatim from the generated `sethook.template.json` -
-      // both declaration entries, `HookParameterValue = "00"`.
+      // Installed verbatim from the generated template (see header comment).
       HookParameters: declaredHookParameters,
     } as iHook
     await setHooksV3({

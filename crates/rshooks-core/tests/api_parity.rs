@@ -29,9 +29,8 @@ fn extern_h_matches_api_rs() {
         rust_fns.len()
     );
 
-    // Name sets, in order — a plain index-by-index walk reports both
-    // "missing on either side" (as an out-of-order/renamed neighbor) and
-    // ordering drift precisely.
+    // Index-by-index comparison reports both missing entries and ordering
+    // drift precisely.
     let c_names: Vec<&str> = c_protos.iter().map(|p| p.name.as_str()).collect();
     let rust_names: Vec<&str> = rust_fns.iter().map(|f| f.name.as_str()).collect();
     assert_eq!(

@@ -15,30 +15,24 @@
 //! # Field order is caller-supplied, not canonical
 //!
 //! [`StoWriter`] writes fields in exactly the order its methods are
-//! called, and never reorders or validates that order. This matches how
-//! xahaud actually processes an emitted blob: `HookAPI::emit` parses it as
-//! an `STTx` via `STObject::set`, which accepts a serialized object's
-//! fields in any order, and the node's own re-serialization
-//! (`STObject::add`) always sorts by field code regardless of the input
-//! order — the on-ledger transaction is canonically ordered no matter what
-//! order the hook wrote its fields in, so there is nothing for a writer to
-//! get wrong by not reordering. One consequence worth stating plainly:
-//! when fields are written outside ascending `(type, field)` order,
-//! [`StoWriter`]'s own buffer bytes are not byte-identical to the
-//! transaction's on-ledger serialization (the node's canonical
-//! re-serialization is) — this has no effect on validity or on
-//! `etxn_fee_base`, since the serialized size is the same either way; only
-//! field position differs.
+//! called and never reorders or validates that order. xahaud accepts a
+//! serialized object's fields in any order (`STObject::set`) and always
+//! re-serializes sorted by field code (`STObject::add`), so the on-ledger
+//! transaction is canonically ordered regardless of write order. A
+//! consequence: when fields are written outside ascending `(type, field)`
+//! order, [`StoWriter`]'s buffer bytes are not byte-identical to the
+//! on-ledger serialization — this has no effect on validity or
+//! `etxn_fee_base` (the serialized size is the same either way; only
+//! field position differs).
 //!
-//! What *is* enforced, because it concerns wire-level structural validity
-//! rather than field order: every write is checked against the buffer's
-//! real bounds and against overflow-checked cursor arithmetic;
+//! What *is* enforced: every write is checked against the buffer's real
+//! bounds and overflow-checked cursor arithmetic;
 //! [`StoWriter::begin_object`]/[`StoWriter::begin_array`] and
 //! [`StoWriter::end_object`]/[`StoWriter::end_array`] must match (an
 //! `STArray`'s direct children may only be opened with
-//! [`StoWriter::begin_object`] — a bare scalar field or a nested array
-//! directly inside an open array is rejected as invalid nesting); nesting
-//! is bounded by [`STO_WRITER_MAX_DEPTH`]; and no write succeeds once
+//! [`StoWriter::begin_object`] — a bare scalar or nested array directly
+//! inside an open array is rejected); nesting is bounded by
+//! [`STO_WRITER_MAX_DEPTH`]; and no write succeeds once
 //! [`StoWriter::prepare_for_emit`] has finalized the writer.
 //!
 //! # Required fields and duplicate rejection
@@ -46,28 +40,23 @@
 //! [`StoWriter`] detects the same required emit-plumbing fields
 //! `txn_template!` does — `sfSequence`, `sfFirstLedgerSequence`,
 //! `sfLastLedgerSequence`, `sfFee`, `sfSigningPubKey`, `sfAccount` — by
-//! value, as they are written, recording just enough (an offset, or a
-//! presence flag) for [`StoWriter::prepare_for_emit`] to patch or verify
-//! later. Because [`StoWriter::prepare_for_emit`] patches
-//! `FirstLedgerSequence`/`LastLedgerSequence`/`Account`/`Fee` at each
-//! field's *recorded* offset, a second write of any of these six fields
-//! would leave the first occurrence as an unpatched (or simply duplicated)
-//! twin in the emitted blob — an invalid transaction, since a serialized
-//! object cannot repeat a field. A second write of any of these six is
-//! therefore rejected with [`HookError::AlreadySet`] — an
-//! emitted-transaction-validity constraint, not an ordering rule. Any
-//! other field may be written more than once as far as [`StoWriter`]
-//! itself is concerned; whether a repeated non-plumbing field is valid is
-//! between the caller and the host, the same as for a hand-written
-//! serializer.
+//! value, as they are written, recording an offset or presence flag for
+//! [`StoWriter::prepare_for_emit`] to patch or verify later. Because
+//! `FirstLedgerSequence`/`LastLedgerSequence`/`Account`/`Fee` are patched
+//! at each field's *recorded* offset, a second write of any of these six
+//! fields would leave the first occurrence unpatched or duplicated in the
+//! emitted blob — a serialized object cannot repeat a field — so it is
+//! rejected with [`HookError::AlreadySet`]. Any other field may be
+//! written more than once as far as [`StoWriter`] is concerned; whether a
+//! repeated non-plumbing field is valid is between the caller and the
+//! host.
 //!
 //! # `prepare_for_emit` writes `EmitDetails` itself
 //!
 //! There is no public `emit_details` method: [`StoWriter::prepare_for_emit`]
 //! appends the runtime-sized `sfEmitDetails` field itself, at the current
-//! cursor — after every container the caller opened has been closed, and
-//! before computing `etxn_fee_base` (mirroring `txn_template!`'s
-//! `PREPARE_TXN()`-equivalent ordering: the fee is sized over the blob
+//! cursor, after every container the caller opened has been closed and
+//! before computing `etxn_fee_base` (the fee is sized over the blob
 //! *including* `EmitDetails`). `buf` must therefore have at least
 //! [`EMIT_DETAILS_MAX_LEN`](crate::types::EMIT_DETAILS_MAX_LEN) bytes of
 //! headroom beyond everything the caller already wrote, or
@@ -89,10 +78,10 @@ use crate::xfl::XFL;
 /// Maximum container nesting depth (top-level counts as depth 0, so this is
 /// the number of frames the writer can hold at once — the top-level object
 /// plus up to `STO_WRITER_MAX_DEPTH - 1` nested containers). Fixed and small
-/// so the writer stays allocation-free; comfortably covers every real
-/// transaction shape (Remit's `sfAmounts` array of `sfAmountEntry` objects
-/// is 2 deep) while matching the order of magnitude XRPL's own STObject
-/// parser bounds nesting to.
+/// to stay allocation-free; comfortably covers every real transaction shape
+/// (Remit's `sfAmounts` array of `sfAmountEntry` objects is 2 deep) while
+/// matching the order of magnitude XRPL's own STObject parser bounds
+/// nesting to.
 pub const STO_WRITER_MAX_DEPTH: usize = 10;
 
 /// The `ObjectEndMarker` field: type `STObject` (14), field `1` — reserved
@@ -291,9 +280,7 @@ impl<'a> StoWriter<'a> {
     /// Whether `code` is one of the six required emit-plumbing fields
     /// (`sfSequence`/`sfFirstLedgerSequence`/`sfLastLedgerSequence`/
     /// `sfFee`/`sfSigningPubKey`/`sfAccount`) that has already been
-    /// written once — see the module doc comment's "duplicate rejection"
-    /// section. `false` for every other field code, regardless of whether
-    /// it has been written before.
+    /// written once. `false` for every other field code.
     #[inline(always)]
     fn plumbing_already_set(&self, code: u32) -> bool {
         (code == sfSequence.code() && self.sequence_seen)
@@ -575,12 +562,11 @@ impl<'a> StoWriter<'a> {
     /// Validates the writer, patches the emit-plumbing fields, appends
     /// `sfEmitDetails`, and returns a [`crate::txn::Prepared`] handle — the
     /// dynamic counterpart to `txn_template!`'s generated
-    /// `prepare_for_emit()` (see its doc comment). Requires every container
-    /// the caller opened to be closed and every required field
-    /// ([`sfSequence`], [`sfFirstLedgerSequence`], [`sfLastLedgerSequence`],
-    /// [`sfFee`], [`sfSigningPubKey`], [`sfAccount`]) to have already been
-    /// written, in whatever order the caller chose (see the module doc
-    /// comment), then:
+    /// `prepare_for_emit()`. Requires every container the caller opened to
+    /// be closed and every required field ([`sfSequence`],
+    /// [`sfFirstLedgerSequence`], [`sfLastLedgerSequence`], [`sfFee`],
+    /// [`sfSigningPubKey`], [`sfAccount`]) to have already been written, in
+    /// whatever order the caller chose, then:
     ///
     /// 1. Patches `FirstLedgerSequence`/`LastLedgerSequence` from
     ///    `ledger_seq() + 1` / `+ 5`.

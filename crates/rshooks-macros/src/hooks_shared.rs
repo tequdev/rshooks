@@ -32,23 +32,18 @@ fn is_joint_punct(tt: Option<&TokenTree>, ch: char) -> bool {
 /// Angle brackets never arrive as a [`proc_macro::Group`] — they are plain
 /// `Punct` tokens indistinguishable, at the token level, from the
 /// less-than/greater-than comparison operators, a `->` return-type arrow,
-/// or a `>>` shift-right operator. This helper resolves the two cases that
-/// matter for the grammars this crate scans:
+/// or a `>>` shift-right operator. Two cases need special handling:
 ///
 /// - A `->` arrow (`Punct('-', Joint)` immediately followed by
 ///   `Punct('>', _)`) is treated as one atomic non-bracket unit: neither
-///   token touches `depth`, and the returned `consumed` is `2` so the
-///   caller skips both at once. Without this, a value like
+///   token touches `depth`, and `consumed` is `2`. Otherwise a value like
 ///   `default = |x: u32| -> u32 { x }` would misread the arrow's `>` as a
 ///   generic close.
-/// - Every other `>` decrements `depth`, clamped at `0` (never negative).
-///   A `>>` run's two `>` `Punct`s are, at the token level, indistinguishable
-///   from two nested generic closes (`Vec<Vec<T>>`) — clamping means a
-///   shift-right operator used at depth `0` (e.g. `default = 1u32 >> 2`)
-///   leaves `depth` at `0` instead of going negative and desyncing every
-///   comma check for the remainder of the scan, while a genuine `>>`
-///   closing two open levels still decrements twice, back to `0`, exactly
-///   as two separate `>` tokens would.
+/// - Every other `>` decrements `depth`, clamped at `0` (never negative),
+///   so a shift-right operator used at depth `0` (e.g.
+///   `default = 1u32 >> 2`) can't desync later comma checks by going
+///   negative, while a genuine `>>` closing two open levels
+///   (`Vec<Vec<T>>`) still decrements twice, back to `0`.
 ///
 /// Returns `(consumed, new_depth)`.
 pub(crate) fn step_angle_depth(tokens: &[TokenTree], i: usize, depth: i32) -> (usize, i32) {
@@ -56,12 +51,10 @@ pub(crate) fn step_angle_depth(tokens: &[TokenTree], i: usize, depth: i32) -> (u
 }
 
 /// One token's classification for [`step_angle_depth`]'s purposes,
-/// independent of any live `proc_macro` type — kept separate purely so the
+/// independent of any live `proc_macro` type — kept separate so the
 /// depth-stepping logic itself ([`step_angle_depth_core`]) can be unit
 /// tested. `proc_macro::TokenTree`/`TokenStream::from_str`/`Span` all panic
-/// outside an actual macro invocation (see `hooks_struct`'s
-/// `ChainFieldJson` doc comment for the same convention followed
-/// elsewhere in this crate).
+/// outside an actual macro invocation.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum AngleTok {
     /// `<`
@@ -91,8 +84,7 @@ fn classify_angle_tok(tokens: &[TokenTree], i: usize) -> AngleTok {
     }
 }
 
-/// The pure depth-stepping core of [`step_angle_depth`] — see that
-/// function's doc comment for the full rationale. Operates on a
+/// The pure depth-stepping core of [`step_angle_depth`], operating on a
 /// pre-classified [`AngleTok`] instead of a live `TokenTree` so it is
 /// testable without a `proc_macro` context. Returns `(consumed, new_depth)`.
 pub(crate) fn step_angle_depth_core(kind: AngleTok, depth: i32) -> (usize, i32) {
@@ -192,8 +184,8 @@ pub(crate) fn parse_attr_entries(
 /// §5.4 and contract §B1 item 1.
 ///
 /// Splits on `_`, capitalizes the first ASCII letter of every non-empty
-/// segment and leaves the rest as written (never lower-cases an
-/// already-uppercase run), then concatenates with no separator.
+/// segment, leaves the rest as written, then concatenates with no
+/// separator.
 pub(crate) fn to_upper_camel(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     for segment in name.split('_') {
@@ -335,10 +327,9 @@ pub(crate) fn parse_byte_string_value(
 /// split a generic-argument list (`V,` / `V`) and, in `hooks_impl`, a
 /// bracketed transaction-type list.
 ///
-/// An entirely empty trailing segment (from a trailing comma) is dropped —
-/// callers that care about a trailing comma's *presence* check that before
-/// calling this; callers that only want the non-empty argument list (the
-/// common case) get exactly that.
+/// An entirely empty trailing segment (from a trailing comma) is dropped;
+/// callers that care about a trailing comma's presence must check for it
+/// before calling this.
 pub(crate) fn split_top_level_commas(tokens: &[TokenTree]) -> Vec<Vec<TokenTree>> {
     let mut out = Vec::new();
     let mut current: Vec<TokenTree> = Vec::new();
@@ -388,17 +379,14 @@ mod tests {
     // --- F4: `step_angle_depth_core` — generic-containing inputs ---
     //
     // `proc_macro::TokenTree` cannot be constructed outside a live macro
-    // invocation (it panics — see `AngleTok`'s doc comment), so these tests
-    // exercise the pure depth-stepping core directly, simulating the token
-    // kind sequence a real `Pair<A, B>` / `State<Result<A, B>>` /
-    // `|x| -> u32 { x }` input would produce. This is the logic both
-    // `parse_attr_entries`'s value scan (hooks_shared.rs) and
-    // `parse_named_fields`'s field-type scan (hooks_struct.rs) now share.
+    // invocation, so these tests exercise the pure depth-stepping core
+    // directly, simulating the token kind sequence a real `Pair<A, B>` /
+    // `State<Result<A, B>>` / `|x| -> u32 { x }` input would produce —
+    // shared by `parse_attr_entries`'s value scan and `hooks_struct`'s
+    // field-type scan.
 
     /// Runs a full sequence of [`AngleTok`]s through [`step_angle_depth_core`]
-    /// starting at depth `0`, returning the depth *after* each input token
-    /// (an `ArrowStart` consumes 2 real tokens but only ever appears once in
-    /// these fixtures, so per-`AngleTok`-element depth tracking is exact).
+    /// starting at depth `0`, returning the depth *after* each input token.
     fn run(kinds: &[AngleTok]) -> Vec<i32> {
         let mut depth = 0i32;
         let mut out = Vec::with_capacity(kinds.len());
@@ -412,9 +400,8 @@ mod tests {
 
     #[test]
     fn generic_value_keeps_inner_comma_non_top_level() {
-        // `default = Pair<A, B>` — the token run after `=` is:
-        // Ident(Pair) `<` Ident(A) `,` Ident(B) `>`. A top-level-comma scan
-        // must NOT stop at the inner `,` (index 3): depth is 1 there.
+        // `default = Pair<A, B>`: Ident(Pair) `<` Ident(A) `,` Ident(B) `>`.
+        // A top-level-comma scan must not stop at the inner `,` (index 3).
         use AngleTok::{Gt, Lt, Other};
         let depths = run(&[Other, Lt, Other, Other, Other, Gt]);
         assert_eq!(
@@ -430,10 +417,8 @@ mod tests {
 
     #[test]
     fn nested_generic_field_type_closes_via_two_gt_tokens() {
-        // `State<Result<A, B>>` — field-type scan sees `<` `Result` `<` `A`
-        // `,` `B` `>` `>`. Two nested opens require two closes; the inner
-        // comma (index 4) must stay non-top-level, and depth must reach 0
-        // only after both `>` tokens.
+        // `State<Result<A, B>>`: `<` `Result` `<` `A` `,` `B` `>` `>`. Two
+        // nested opens require two closes before depth reaches 0.
         use AngleTok::{Gt, Lt, Other};
         let depths = run(&[Lt, Other, Lt, Other, Other, Other, Gt, Gt]);
         assert_eq!(depths[4], 2, "comma nested inside two open `<..>` levels");
@@ -443,14 +428,14 @@ mod tests {
 
     #[test]
     fn arrow_start_consumes_two_tokens_without_touching_depth() {
-        // `default = |x: u32| -> u32 { x }` — the `->` arrow's `-` and `>`
-        // must never be read as a generic close.
+        // `default = |x: u32| -> u32 { x }`: the arrow's `-`/`>` must never
+        // read as a generic close.
         let (consumed, depth) = step_angle_depth_core(AngleTok::ArrowStart, 0);
         assert_eq!(consumed, 2);
         assert_eq!(depth, 0);
 
-        // Same, mid-nesting (`Box<dyn Fn() -> T>`): the arrow must not
-        // prematurely close the still-open `Box<..>` level.
+        // Same, mid-nesting (`Box<dyn Fn() -> T>`): must not prematurely
+        // close the still-open `Box<..>` level.
         let (consumed, depth) = step_angle_depth_core(AngleTok::ArrowStart, 1);
         assert_eq!(consumed, 2);
         assert_eq!(depth, 1);
@@ -458,9 +443,8 @@ mod tests {
 
     #[test]
     fn stray_shift_right_at_depth_zero_clamps_instead_of_going_negative() {
-        // `default = 1u32 >> 2` at depth 0 — both `>` `Punct`s of the `>>`
-        // run must leave depth at 0, not go negative (which would desync
-        // every later top-level-comma check in the same scan).
+        // `default = 1u32 >> 2` at depth 0 — both `>` tokens must leave
+        // depth at 0, not go negative.
         let (_, d1) = step_angle_depth_core(AngleTok::Gt, 0);
         assert_eq!(d1, 0);
         let (_, d2) = step_angle_depth_core(AngleTok::Gt, d1);

@@ -1,10 +1,9 @@
 //! Off-chain unit tests for the `sto-writer` example, driven through
 //! `TestEnv::invoke` against the real `StoWriterRemit` chain — no wasm
 //! build, no node. `src/lib.rs` carries an equivalent in-crate
-//! `#[cfg(test)]` variant (which additionally covers `build_remit`/
-//! `prepare_for_emit` directly, since those are private and only reachable
-//! from an in-crate test) — see `book/src/testing/unit-tests.md` for both
-//! layouts documented side by side.
+//! `#[cfg(test)]` variant, which additionally covers `build_remit`/
+//! `prepare_for_emit` directly since those are private and only reachable
+//! from an in-crate test.
 
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, missing_docs)]
 
@@ -66,12 +65,9 @@ fn cur_and_issuer_parameters_add_a_second_amounts_entry() {
     assert!(issued_len > native_len);
 }
 
-// -- invoke_cbak (P2-E — `.claude/design/TESTENV_PHASE2_DESIGN.md` §4 "cbak
-// execution"). `StoWriterRemit`'s `#[cbak(0)]` body (`src/lib.rs`) is
-// `fn cbak(&self) -> HookResult { Ok(Accept::from_code(0)) }` — it
-// unconditionally accepts, so the only real behavior to assert is exactly
-// that: `invoke_cbak` reaches `Accept` regardless of `CbakOutcome`, and
-// leaves the surrounding `TestEnv` usable afterward.
+// `StoWriterRemit`'s `#[cbak(0)]` body unconditionally accepts, so the
+// only real behavior to assert is that `invoke_cbak` reaches `Accept`
+// regardless of `CbakOutcome`.
 
 #[test]
 fn invoke_cbak_success_reaches_the_real_accept_path() {
