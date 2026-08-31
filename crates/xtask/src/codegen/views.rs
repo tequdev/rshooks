@@ -372,7 +372,13 @@ fn optional_doc(p: Presence) -> &'static str {
 }
 
 /// Renders the value/raw accessors — the ones every source can serve.
-fn push_shared_accessor(buf: &mut String, a: &Accessor<'_>, view_tier: Tier) -> Result<()> {
+fn push_shared_accessor(
+    buf: &mut String,
+    a: &Accessor<'_>,
+    view_tier: Tier,
+    visibility: &str,
+    source: &str,
+) -> Result<()> {
     let opt = is_optional(a.spec.presence);
     match a.access {
         Access::Value(ty) => {
@@ -390,8 +396,8 @@ fn push_shared_accessor(buf: &mut String, a: &Accessor<'_>, view_tier: Tier) -> 
             writeln!(
                 buf,
                 "#[inline(always)]\n\
-                 pub fn {name}(&self) -> {ret} {{\n\
-                 self.src.{call}(crate::sfield::{sf})\n\
+                 {visibility}fn {name}(&self) -> {ret} {{\n\
+                 {source}.{call}(crate::sfield::{sf})\n\
                  }}\n",
                 name = a.name,
                 sf = a.def.name,
@@ -428,8 +434,8 @@ fn push_shared_accessor(buf: &mut String, a: &Accessor<'_>, view_tier: Tier) -> 
             writeln!(
                 buf,
                 "#[inline(always)]\n\
-                 pub fn {name}_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> {ret} {{\n\
-                 self.src.{call}(crate::sfield::{sf}.code(), out)\n\
+                 {visibility}fn {name}_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> {ret} {{\n\
+                 {source}.{call}(crate::sfield::{sf}.code(), out)\n\
                  }}\n",
                 name = a.name,
                 sf = a.def.name,
@@ -442,7 +448,13 @@ fn push_shared_accessor(buf: &mut String, a: &Accessor<'_>, view_tier: Tier) -> 
 
 /// Renders the `*_slot` child-slot accessor a container field gets on a
 /// slot-backed view. Writes nothing for a non-container field.
-fn push_slot_accessor(buf: &mut String, a: &Accessor<'_>, view_tier: Tier) -> Result<()> {
+fn push_slot_accessor(
+    buf: &mut String,
+    a: &Accessor<'_>,
+    view_tier: Tier,
+    visibility: &str,
+    source: &str,
+) -> Result<()> {
     let Access::Container(slot_ty) = a.access else {
         return Ok(());
     };
@@ -468,8 +480,8 @@ fn push_slot_accessor(buf: &mut String, a: &Accessor<'_>, view_tier: Tier) -> Re
     writeln!(
         buf,
         "#[inline(always)]\n\
-         pub fn {name}_slot(&self) -> {ret} {{\n\
-         self.src.{call}(crate::sfield::{sf})\n\
+         {visibility}fn {name}_slot(&self) -> {ret} {{\n\
+         {source}.{call}(crate::sfield::{sf})\n\
          }}\n",
         name = a.name,
         sf = a.def.name,
@@ -538,6 +550,13 @@ const TX_MODULE_DOC: &str = "\
 //! `…_slot` child-slot accessor on the slot-backed views only — navigating
 //! into a container is something `otxn_field` cannot do.
 //!
+//! The fields every transaction carries (`sfAccount`, `sfFee`, `sfMemos`, …)
+//! are served once, as [`TransactionCommonFields`] default methods — plus
+//! [`TransactionCommonSlotFields`] for their container navigation — rather
+//! than repeated on each view. Both traits are implemented for every view
+//! here and re-exported through `rshooks::prelude`; import one of those to
+//! call the common accessors.
+//!
 //! See [`crate::views`] for when to reach for a view at all, and
 //! [`crate::views::source`] for what one costs.
 ";
@@ -551,13 +570,66 @@ pub fn generate_tx(formats: &ProtocolFormats, availability: &FormatAvailability)
         "transaction",
     )?;
 
-    let mut body = String::from("\n");
+    let mut body = String::from(SOURCE_TRAIT_IMPORT);
+    push_tx_common_traits(&mut body, formats, &sfields, &field_tiers)?;
     for tx in &formats.transactions {
         let tier = availability.tx(&tx.name);
         push_tx_view(&mut body, tx, formats, &sfields, tier, &field_tiers)
             .with_context(|| format!("rendering the `{}` transaction view", tx.name))?;
     }
     Ok(with_generated_marker_in("xahaud-protocol", "transactions.macro", TX_MODULE_DOC) + &body)
+}
+
+/// Renders the transaction-common fields once as default trait methods.
+/// Every generated transaction view implements the first trait; slot-backed
+/// views receive the container navigation methods through the blanket second
+/// trait implementation.
+fn push_tx_common_traits(
+    buf: &mut String,
+    formats: &ProtocolFormats,
+    sfields: &BTreeMap<&str, &SFieldDef>,
+    field_tiers: &BTreeMap<String, Tier>,
+) -> Result<()> {
+    let fields: Vec<&FieldSpec> = formats.tx_common.iter().collect();
+    let accessors = resolve(&fields, sfields, "transaction common fields", field_tiers)?;
+    let mut shared = String::new();
+    let mut slot_only = String::new();
+    for a in &accessors {
+        push_shared_accessor(&mut shared, a, Tier::Active, "", "self.field_source()")?;
+        push_slot_accessor(&mut slot_only, a, Tier::Active, "", "self.field_source()")?;
+    }
+
+    writeln!(
+        buf,
+        "/// Accessors shared by every generated transaction view.\n\
+         ///\n\
+         /// This trait is implemented automatically; import it to call common-field\n\
+         /// methods on a transaction view.\n\
+         pub trait TransactionCommonFields {{\n\
+         /// The backing source used by this transaction view.\n\
+         #[doc(hidden)]\n\
+         type Source: crate::views::source::FieldSource;\n\
+         \n\
+         /// Returns the backing field source.\n\
+         #[doc(hidden)]\n\
+         fn field_source(&self) -> &Self::Source;\n\
+         \n\
+         {shared}\
+         }}\n\
+         \n\
+         /// Transaction-common container accessors available on slot-backed views.\n\
+         pub trait TransactionCommonSlotFields:\n\
+         TransactionCommonFields<Source = crate::views::source::SlotSource>\n\
+         {{\n\
+         {slot_only}\
+         }}\n\
+         \n\
+         impl<T> TransactionCommonSlotFields for T where\n\
+         T: TransactionCommonFields<Source = crate::views::source::SlotSource>\n\
+         {{}}\n"
+    )
+    .context("writing transaction common-field traits")?;
+    Ok(())
 }
 
 fn push_tx_view(
@@ -569,7 +641,11 @@ fn push_tx_view(
     field_tiers: &BTreeMap<String, Tier>,
 ) -> Result<()> {
     let fields = merged_fields(&tx.fields, &formats.tx_common);
-    let accessors = resolve(&fields, sfields, &tx.name, field_tiers)?;
+    // Validate collisions across the complete effective format, including a
+    // type-specific field which overrides a common declaration.
+    let _ = resolve(&fields, sfields, &tx.name, field_tiers)?;
+    let specific_fields: Vec<&FieldSpec> = tx.fields.iter().collect();
+    let accessors = resolve(&specific_fields, sfields, &tx.name, field_tiers)?;
     let name = &tx.name;
     let (cfg, tier_doc) = tier_prelude(tier);
 
@@ -625,8 +701,8 @@ fn push_tx_view(
 
     let mut shared = String::new();
     for a in &accessors {
-        push_shared_accessor(&mut shared, a, tier)?;
-        push_slot_accessor(&mut slot_only, a, tier)?;
+        push_shared_accessor(&mut shared, a, tier, "pub ", "self.src")?;
+        push_slot_accessor(&mut slot_only, a, tier, "pub ", "self.src")?;
     }
 
     writeln!(
@@ -639,6 +715,18 @@ fn push_tx_view(
         "{cfg}impl<S: crate::views::source::FieldSource> {name}<S> {{\n{shared}}}\n"
     )
     .context("writing the shared impl")?;
+    writeln!(
+        buf,
+        "{cfg}impl<S: crate::views::source::FieldSource> TransactionCommonFields for {name}<S> {{\n\
+         type Source = S;\n\
+         \n\
+         #[inline(always)]\n\
+         fn field_source(&self) -> &Self::Source {{\n\
+         &self.src\n\
+         }}\n\
+         }}\n"
+    )
+    .context("writing the transaction common-field trait impl")?;
     Ok(())
 }
 
@@ -665,6 +753,11 @@ const LEDGER_MODULE_DOC: &str = "\
 //! Presence and value-type rules are [`crate::views::tx`]'s, unchanged. A
 //! name that is both a transaction type and a ledger entry type
 //! (`DepositPreauth`) is two different structs in two different modules.
+//!
+//! The fields every ledger entry carries (`sfLedgerEntryType`, `sfFlags`, …)
+//! are served once, as [`LedgerEntryCommonFields`] default methods,
+//! implemented for every view here and re-exported through
+//! `rshooks::prelude`; import either to call the common accessors.
 ";
 
 /// Renders `crates/rshooks/src/views/ledger.rs`.
@@ -680,6 +773,7 @@ pub fn generate_ledger(
     )?;
 
     let mut body = String::from(SOURCE_TRAIT_IMPORT);
+    push_ledger_common_trait(&mut body, formats, &sfields, &field_tiers)?;
     for le in &formats.ledger_entries {
         let tier = availability.ledger_entry(&le.name);
         push_ledger_view(&mut body, le, formats, &sfields, tier, &field_tiers)
@@ -691,6 +785,38 @@ pub fn generate_ledger(
     )
 }
 
+/// Renders ledger-entry common fields once as default trait methods.
+fn push_ledger_common_trait(
+    buf: &mut String,
+    formats: &ProtocolFormats,
+    sfields: &BTreeMap<&str, &SFieldDef>,
+    field_tiers: &BTreeMap<String, Tier>,
+) -> Result<()> {
+    let fields: Vec<&FieldSpec> = formats.le_common.iter().collect();
+    let accessors = resolve(&fields, sfields, "ledger-entry common fields", field_tiers)?;
+    let mut methods = String::new();
+    for a in &accessors {
+        push_shared_accessor(&mut methods, a, Tier::Active, "", "self.field_source()")?;
+        push_slot_accessor(&mut methods, a, Tier::Active, "", "self.field_source()")?;
+    }
+    writeln!(
+        buf,
+        "/// Accessors shared by every generated ledger-entry view.\n\
+         ///\n\
+         /// This trait is implemented automatically; import it to call common-field\n\
+         /// methods on a ledger-entry view.\n\
+         pub trait LedgerEntryCommonFields {{\n\
+         /// Returns the backing field source.\n\
+         #[doc(hidden)]\n\
+         fn field_source(&self) -> &crate::views::source::SlotSource;\n\
+         \n\
+         {methods}\
+         }}\n"
+    )
+    .context("writing ledger-entry common-field trait")?;
+    Ok(())
+}
+
 fn push_ledger_view(
     buf: &mut String,
     le: &LedgerEntryFormat,
@@ -700,7 +826,11 @@ fn push_ledger_view(
     field_tiers: &BTreeMap<String, Tier>,
 ) -> Result<()> {
     let fields = merged_fields(&le.fields, &formats.le_common);
-    let accessors = resolve(&fields, sfields, &le.name, field_tiers)?;
+    // Validate the complete effective format, then render only type-specific
+    // fields here. Common accessors live on `LedgerEntryCommonFields`.
+    let _ = resolve(&fields, sfields, &le.name, field_tiers)?;
+    let specific_fields: Vec<&FieldSpec> = le.fields.iter().collect();
+    let accessors = resolve(&specific_fields, sfields, &le.name, field_tiers)?;
     let name = &le.name;
     let (cfg, tier_doc) = tier_prelude(tier);
 
@@ -745,10 +875,20 @@ fn push_ledger_view(
     .context("writing the view struct and constructors")?;
 
     for a in &accessors {
-        push_shared_accessor(buf, a, tier)?;
-        push_slot_accessor(buf, a, tier)?;
+        push_shared_accessor(buf, a, tier, "pub ", "self.src")?;
+        push_slot_accessor(buf, a, tier, "pub ", "self.src")?;
     }
-    buf.push_str("}\n\n");
+    writeln!(
+        buf,
+        "}}\n\n\
+         {cfg}impl LedgerEntryCommonFields for {name} {{\n\
+         #[inline(always)]\n\
+         fn field_source(&self) -> &crate::views::source::SlotSource {{\n\
+         &self.src\n\
+         }}\n\
+         }}\n"
+    )
+    .context("writing ledger-entry common-field trait impl")?;
     Ok(())
 }
 
@@ -852,8 +992,8 @@ fn push_inner_view(
     .context("writing the view struct and constructors")?;
 
     for a in &accessors {
-        push_shared_accessor(buf, a, tier)?;
-        push_slot_accessor(buf, a, tier)?;
+        push_shared_accessor(buf, a, tier, "pub ", "self.src")?;
+        push_slot_accessor(buf, a, tier, "pub ", "self.src")?;
     }
     buf.push_str("}\n\n");
     Ok(())
@@ -1097,13 +1237,35 @@ mod tests {
         // Unmodeled serialized type -> a raw `*_into` accessor only.
         assert!(payment.contains("pub fn paths_into<B: AsMut<[u8]> + ?Sized>"));
         assert!(!payment.contains("pub fn paths(&self)"));
-        // A container: raw bytes everywhere, a child slot on the slot-backed
-        // impl only.
-        assert!(payment.contains("pub fn memos_into<B: AsMut<[u8]> + ?Sized>"));
-        assert!(payment.contains("pub fn memos_slot(&self)"));
-        // Common fields are merged in, and the type-specific list wins on a
-        // name clash (Payment redeclares nothing, but it does inherit).
-        assert!(payment.contains("pub fn signing_pub_key_into"));
+        // Common fields render once, as default trait methods, not on the
+        // per-type views.
+        let common = tx
+            .split("pub trait TransactionCommonFields")
+            .nth(1)
+            .expect("no TransactionCommonFields trait");
+        let common = common
+            .split("pub trait TransactionCommonSlotFields")
+            .next()
+            .expect("no TransactionCommonSlotFields trait");
+        assert!(common.contains("fn signing_pub_key_into"));
+        assert!(common.contains("fn memos_into<B: AsMut<[u8]> + ?Sized>"));
+        assert!(!payment.contains("fn signing_pub_key_into"));
+        assert!(!payment.contains("fn memos_into"));
+        // A common container: raw bytes on the base trait, a child slot on
+        // the slot-source-bounded trait only.
+        assert!(!common.contains("fn memos_slot(&self)"));
+        let slot_common = tx
+            .split("pub trait TransactionCommonSlotFields")
+            .nth(1)
+            .expect("no TransactionCommonSlotFields trait")
+            .split("pub struct ")
+            .next()
+            .expect("unterminated trait section");
+        assert!(slot_common.contains("fn memos_slot(&self)"));
+        // Every view wires itself into the common trait.
+        assert!(payment.contains(
+            "impl<S: crate::views::source::FieldSource> TransactionCommonFields for Payment<S>"
+        ));
     }
 
     /// Every field any format references has an accessor name, and no

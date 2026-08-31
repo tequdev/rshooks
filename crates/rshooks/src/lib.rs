@@ -963,6 +963,8 @@ pub mod prelude {
     pub use crate::sto_writer::StoWriter;
     pub use crate::tx_type::TxType;
     pub use crate::types::*;
+    pub use crate::views::ledger::LedgerEntryCommonFields;
+    pub use crate::views::tx::{TransactionCommonFields, TransactionCommonSlotFields};
     pub use crate::xfl::XFL;
     pub use crate::xfl_unchecked::XFLUnchecked;
     // The `XFL!` macro and the `xfl::XFL` type above share a name but live

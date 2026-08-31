@@ -17,8 +17,70 @@
 //! Presence and value-type rules are [`crate::views::tx`]'s, unchanged. A
 //! name that is both a transaction type and a ledger entry type
 //! (`DepositPreauth`) is two different structs in two different modules.
+//!
+//! The fields every ledger entry carries (`sfLedgerEntryType`, `sfFlags`, …)
+//! are served once, as [`LedgerEntryCommonFields`] default methods,
+//! implemented for every view here and re-exported through
+//! `rshooks::prelude`; import either to call the common accessors.
 
 use crate::views::source::FieldSource as _;
+
+/// Accessors shared by every generated ledger-entry view.
+///
+/// This trait is implemented automatically; import it to call common-field
+/// methods on a ledger-entry view.
+pub trait LedgerEntryCommonFields {
+    /// Returns the backing field source.
+    #[doc(hidden)]
+    fn field_source(&self) -> &crate::views::source::SlotSource;
+
+    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.field_source().read_opt(crate::sfield::sfLedgerIndex)
+    }
+
+    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    fn ledger_entry_type(&self) -> crate::error::Result<u16> {
+        self.field_source().read(crate::sfield::sfLedgerEntryType)
+    }
+
+    /// `sfFlags` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    fn flags(&self) -> crate::error::Result<u32> {
+        self.field_source().read(crate::sfield::sfFlags)
+    }
+
+    /// `sfRemarks` — STArray, `soeOPTIONAL`.
+    ///
+    /// Writes the raw wire bytes to `out`.
+    /// Use `remarks_slot` on a slot-backed view to navigate the container.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    fn remarks_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.field_source()
+            .read_raw_opt(crate::sfield::sfRemarks.code(), out)
+    }
+
+    /// `sfRemarks` — STArray, `soeOPTIONAL`.
+    ///
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    fn remarks_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.field_source().subobject_opt(crate::sfield::sfRemarks)
+    }
+}
 
 /// View of the `NFTokenOffer` ledger object (`ltNFTOKEN_OFFER`, type code 0x0037, RPC
 /// name `nft_offer`).
@@ -114,51 +176,13 @@ impl NFTokenOffer {
     pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+#[cfg(feature = "all-amendments")]
+impl LedgerEntryCommonFields for NFTokenOffer {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -236,51 +260,12 @@ impl Cron {
     pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+impl LedgerEntryCommonFields for Cron {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -396,51 +381,12 @@ impl Check {
     pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+impl LedgerEntryCommonFields for Check {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -602,51 +548,12 @@ impl HookDefinition {
     pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfPreviousTxnLgrSeq)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+impl LedgerEntryCommonFields for HookDefinition {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -715,51 +622,12 @@ impl EmittedTxn {
     pub fn owner_node(&self) -> crate::error::Result<u64> {
         self.src.read(crate::sfield::sfOwnerNode)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+impl LedgerEntryCommonFields for EmittedTxn {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -840,51 +708,12 @@ impl Hook {
     ) -> crate::error::Result<crate::slot_obj::SlotObject<crate::types::STArray>> {
         self.src.subobject(crate::sfield::sfHooks)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+impl LedgerEntryCommonFields for Hook {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -953,51 +782,12 @@ impl ImportVLSequence {
     pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfPreviousTxnLgrSeq)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+impl LedgerEntryCommonFields for ImportVLSequence {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -1104,51 +894,12 @@ impl NegativeUNL {
     pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfPreviousTxnLgrSeq)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+impl LedgerEntryCommonFields for NegativeUNL {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -1238,51 +989,13 @@ impl NFTokenPage {
     pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+#[cfg(feature = "all-amendments")]
+impl LedgerEntryCommonFields for NFTokenPage {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -1384,51 +1097,12 @@ impl UNLReport {
     pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+impl LedgerEntryCommonFields for UNLReport {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -1517,51 +1191,12 @@ impl SignerList {
     pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+impl LedgerEntryCommonFields for SignerList {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -1627,51 +1262,12 @@ impl Ticket {
     pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+impl LedgerEntryCommonFields for Ticket {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -1769,51 +1365,12 @@ impl URIToken {
     pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+impl LedgerEntryCommonFields for URIToken {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -2132,51 +1689,12 @@ impl AccountRoot {
     pub fn amm_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfAMMID)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+impl LedgerEntryCommonFields for AccountRoot {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -2349,51 +1867,12 @@ impl DirectoryNode {
     pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfPreviousTxnLgrSeq)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+impl LedgerEntryCommonFields for DirectoryNode {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -2486,51 +1965,12 @@ impl Amendments {
     pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfPreviousTxnLgrSeq)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+impl LedgerEntryCommonFields for Amendments {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -2590,51 +2030,12 @@ impl LedgerHashes {
     pub fn hashes_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> crate::error::Result<usize> {
         self.src.read_raw(crate::sfield::sfHashes.code(), out)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+impl LedgerEntryCommonFields for LedgerHashes {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -2743,51 +2144,13 @@ impl Bridge {
     pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+#[cfg(feature = "all-amendments")]
+impl LedgerEntryCommonFields for Bridge {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -2885,51 +2248,12 @@ impl Offer {
     pub fn expiration(&self) -> crate::error::Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfExpiration)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+impl LedgerEntryCommonFields for Offer {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -3025,51 +2349,12 @@ impl DepositPreauth {
         self.src
             .subobject_opt(crate::sfield::sfAuthorizeCredentials)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+impl LedgerEntryCommonFields for DepositPreauth {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -3185,51 +2470,13 @@ impl XChainOwnedClaimID {
     pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+#[cfg(feature = "all-amendments")]
+impl LedgerEntryCommonFields for XChainOwnedClaimID {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -3413,51 +2660,12 @@ impl RippleState {
     ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
         self.src.subobject_opt(crate::sfield::sfLowReward)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+impl LedgerEntryCommonFields for RippleState {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -3591,51 +2799,12 @@ impl FeeSettings {
     pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfPreviousTxnLgrSeq)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+impl LedgerEntryCommonFields for FeeSettings {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -3740,51 +2909,13 @@ impl XChainOwnedCreateAccountClaimID {
     pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+#[cfg(feature = "all-amendments")]
+impl LedgerEntryCommonFields for XChainOwnedCreateAccountClaimID {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -3918,51 +3049,12 @@ impl Escrow {
     pub fn destination_node(&self) -> crate::error::Result<Option<u64>> {
         self.src.read_opt(crate::sfield::sfDestinationNode)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+impl LedgerEntryCommonFields for Escrow {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -4038,51 +3130,12 @@ impl HookState {
     pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfPreviousTxnLgrSeq)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+impl LedgerEntryCommonFields for HookState {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -4225,51 +3278,12 @@ impl PayChannel {
     pub fn destination_node(&self) -> crate::error::Result<Option<u64>> {
         self.src.read_opt(crate::sfield::sfDestinationNode)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+impl LedgerEntryCommonFields for PayChannel {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -4413,51 +3427,13 @@ impl AMM {
     pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+#[cfg(feature = "all-amendments")]
+impl LedgerEntryCommonFields for AMM {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -4581,51 +3557,12 @@ impl Oracle {
     pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+impl LedgerEntryCommonFields for Oracle {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -4739,51 +3676,13 @@ impl MPTokenIssuance {
     pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+#[cfg(feature = "all-amendments")]
+impl LedgerEntryCommonFields for MPTokenIssuance {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -4867,51 +3766,13 @@ impl MPToken {
     pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+#[cfg(feature = "all-amendments")]
+impl LedgerEntryCommonFields for MPToken {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -5020,51 +3881,13 @@ impl Credential {
     pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+#[cfg(feature = "all-amendments")]
+impl LedgerEntryCommonFields for Credential {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -5157,51 +3980,13 @@ impl PermissionedDomain {
     pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+#[cfg(feature = "all-amendments")]
+impl LedgerEntryCommonFields for PermissionedDomain {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }
 
@@ -5305,50 +4090,12 @@ impl DID {
     pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
+}
 
-    /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
+#[cfg(feature = "all-amendments")]
+impl LedgerEntryCommonFields for DID {
     #[inline(always)]
-    pub fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfLedgerIndex)
-    }
-
-    /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn ledger_entry_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfLedgerEntryType)
-    }
-
-    /// `sfFlags` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfFlags)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfRemarks.code(), out)
-    }
-
-    /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfRemarks)
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
     }
 }

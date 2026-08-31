@@ -19,8 +19,291 @@
 //! `…_slot` child-slot accessor on the slot-backed views only — navigating
 //! into a container is something `otxn_field` cannot do.
 //!
+//! The fields every transaction carries (`sfAccount`, `sfFee`, `sfMemos`, …)
+//! are served once, as [`TransactionCommonFields`] default methods — plus
+//! [`TransactionCommonSlotFields`] for their container navigation — rather
+//! than repeated on each view. Both traits are implemented for every view
+//! here and re-exported through `rshooks::prelude`; import one of those to
+//! call the common accessors.
+//!
 //! See [`crate::views`] for when to reach for a view at all, and
 //! [`crate::views::source`] for what one costs.
+
+use crate::views::source::FieldSource as _;
+
+/// Accessors shared by every generated transaction view.
+///
+/// This trait is implemented automatically; import it to call common-field
+/// methods on a transaction view.
+pub trait TransactionCommonFields {
+    /// The backing source used by this transaction view.
+    #[doc(hidden)]
+    type Source: crate::views::source::FieldSource;
+
+    /// Returns the backing field source.
+    #[doc(hidden)]
+    fn field_source(&self) -> &Self::Source;
+
+    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    fn transaction_type(&self) -> crate::error::Result<u16> {
+        self.field_source().read(crate::sfield::sfTransactionType)
+    }
+
+    /// `sfFlags` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    fn flags(&self) -> crate::error::Result<Option<u32>> {
+        self.field_source().read_opt(crate::sfield::sfFlags)
+    }
+
+    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+        self.field_source().read_opt(crate::sfield::sfSourceTag)
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+        self.field_source().read(crate::sfield::sfAccount)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    fn sequence(&self) -> crate::error::Result<u32> {
+        self.field_source().read(crate::sfield::sfSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.field_source().read_opt(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.field_source()
+            .read_opt(crate::sfield::sfLastLedgerSequence)
+    }
+
+    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+        self.field_source().read_opt(crate::sfield::sfAccountTxnID)
+    }
+
+    /// `sfFee` — Amount, `soeREQUIRED`.
+    #[inline(always)]
+    fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+        self.field_source().read(crate::sfield::sfFee)
+    }
+
+    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+        self.field_source()
+            .read_opt(crate::sfield::sfOperationLimit)
+    }
+
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Writes the raw wire bytes to `out`.
+    /// Use `memos_slot` on a slot-backed view to navigate the container.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    fn memos_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.field_source()
+            .read_raw_opt(crate::sfield::sfMemos.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
+    ///
+    /// Writes the raw wire bytes to `out`.
+    #[inline(always)]
+    fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<usize> {
+        self.field_source()
+            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.field_source()
+            .read_opt(crate::sfield::sfTicketSequence)
+    }
+
+    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
+    ///
+    /// Writes the raw wire bytes to `out`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.field_source()
+            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Writes the raw wire bytes to `out`.
+    /// Use `signers_slot` on a slot-backed view to navigate the container.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    fn signers_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.field_source()
+            .read_raw_opt(crate::sfield::sfSigners.code(), out)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Writes the raw wire bytes to `out`.
+    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.field_source()
+            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
+    }
+
+    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+        self.field_source()
+            .read_opt(crate::sfield::sfFirstLedgerSequence)
+    }
+
+    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    fn network_id(&self) -> crate::error::Result<Option<u32>> {
+        self.field_source().read_opt(crate::sfield::sfNetworkID)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Writes the raw wire bytes to `out`.
+    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.field_source()
+            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
+    }
+
+    /// `sfHookName` — Blob, `soeOPTIONAL`.
+    ///
+    /// Writes the raw wire bytes to `out`.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> crate::error::Result<Option<usize>> {
+        self.field_source()
+            .read_raw_opt(crate::sfield::sfHookName.code(), out)
+    }
+}
+
+/// Transaction-common container accessors available on slot-backed views.
+pub trait TransactionCommonSlotFields:
+    TransactionCommonFields<Source = crate::views::source::SlotSource>
+{
+    /// `sfMemos` — STArray, `soeOPTIONAL`.
+    ///
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    fn memos_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.field_source().subobject_opt(crate::sfield::sfMemos)
+    }
+
+    /// `sfSigners` — STArray, `soeOPTIONAL`.
+    ///
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    fn signers_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.field_source().subobject_opt(crate::sfield::sfSigners)
+    }
+
+    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
+    ///
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    fn emit_details_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+        self.field_source()
+            .subobject_opt(crate::sfield::sfEmitDetails)
+    }
+
+    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
+    ///
+    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
+    ///
+    /// `Ok(None)` when the field is absent.
+    #[inline(always)]
+    fn hook_parameters_slot(
+        &self,
+    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+        self.field_source()
+            .subobject_opt(crate::sfield::sfHookParameters)
+    }
+}
+
+impl<T> TransactionCommonSlotFields for T where
+    T: TransactionCommonFields<Source = crate::views::source::SlotSource>
+{
+}
 
 /// View of the `Payment` transaction (`ttPAYMENT`, type code 0).
 pub struct Payment<S: crate::views::source::FieldSource> {
@@ -54,54 +337,6 @@ impl Payment<crate::views::source::SlotSource> {
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
     }
 }
 
@@ -179,198 +414,14 @@ impl<S: crate::views::source::FieldSource> Payment<S> {
         self.src
             .read_raw_opt(crate::sfield::sfCredentialIDs.code(), out)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for Payment<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -406,54 +457,6 @@ impl EscrowCreate<crate::views::source::SlotSource> {
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
     }
 }
 
@@ -507,198 +510,14 @@ impl<S: crate::views::source::FieldSource> EscrowCreate<S> {
     pub fn destination_tag(&self) -> crate::error::Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfDestinationTag)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for EscrowCreate<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -734,54 +553,6 @@ impl EscrowFinish<crate::views::source::SlotSource> {
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
     }
 }
 
@@ -852,198 +623,14 @@ impl<S: crate::views::source::FieldSource> EscrowFinish<S> {
         self.src
             .read_raw_opt(crate::sfield::sfCredentialIDs.code(), out)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for EscrowFinish<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -1079,54 +666,6 @@ impl AccountSet<crate::views::source::SlotSource> {
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
     }
 }
 
@@ -1235,198 +774,14 @@ impl<S: crate::views::source::FieldSource> AccountSet<S> {
     pub fn hook_state_scale(&self) -> crate::error::Result<Option<u16>> {
         self.src.read_opt(crate::sfield::sfHookStateScale)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for AccountSet<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -1463,54 +818,6 @@ impl EscrowCancel<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> EscrowCancel<S> {
@@ -1535,198 +842,14 @@ impl<S: crate::views::source::FieldSource> EscrowCancel<S> {
     pub fn escrow_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfEscrowID)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for EscrowCancel<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -1763,54 +886,6 @@ impl SetRegularKey<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> SetRegularKey<S> {
@@ -1821,198 +896,14 @@ impl<S: crate::views::source::FieldSource> SetRegularKey<S> {
     pub fn regular_key(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfRegularKey)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for SetRegularKey<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -2048,54 +939,6 @@ impl OfferCreate<crate::views::source::SlotSource> {
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
     }
 }
 
@@ -2135,198 +978,14 @@ impl<S: crate::views::source::FieldSource> OfferCreate<S> {
     pub fn offer_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfOfferID)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for OfferCreate<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -2363,54 +1022,6 @@ impl OfferCancel<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> OfferCancel<S> {
@@ -2429,198 +1040,14 @@ impl<S: crate::views::source::FieldSource> OfferCancel<S> {
     pub fn offer_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfOfferID)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for OfferCancel<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -2657,54 +1084,6 @@ impl TicketCreate<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> TicketCreate<S> {
@@ -2713,198 +1092,14 @@ impl<S: crate::views::source::FieldSource> TicketCreate<S> {
     pub fn ticket_count(&self) -> crate::error::Result<u32> {
         self.src.read(crate::sfield::sfTicketCount)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for TicketCreate<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -2953,54 +1148,6 @@ impl SignerListSet<crate::views::source::SlotSource> {
     ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
         self.src.subobject_opt(crate::sfield::sfSignerEntries)
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> SignerListSet<S> {
@@ -3024,198 +1171,14 @@ impl<S: crate::views::source::FieldSource> SignerListSet<S> {
         self.src
             .read_raw_opt(crate::sfield::sfSignerEntries.code(), out)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for SignerListSet<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -3251,54 +1214,6 @@ impl PaymentChannelCreate<crate::views::source::SlotSource> {
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
     }
 }
 
@@ -3347,198 +1262,14 @@ impl<S: crate::views::source::FieldSource> PaymentChannelCreate<S> {
     pub fn destination_tag(&self) -> crate::error::Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfDestinationTag)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for PaymentChannelCreate<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -3575,54 +1306,6 @@ impl PaymentChannelFund<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> PaymentChannelFund<S> {
@@ -3645,198 +1328,14 @@ impl<S: crate::views::source::FieldSource> PaymentChannelFund<S> {
     pub fn expiration(&self) -> crate::error::Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfExpiration)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for PaymentChannelFund<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -3872,54 +1371,6 @@ impl PaymentChannelClaim<crate::views::source::SlotSource> {
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
     }
 }
 
@@ -3990,198 +1441,14 @@ impl<S: crate::views::source::FieldSource> PaymentChannelClaim<S> {
         self.src
             .read_raw_opt(crate::sfield::sfCredentialIDs.code(), out)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for PaymentChannelClaim<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -4217,54 +1484,6 @@ impl CheckCreate<crate::views::source::SlotSource> {
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
     }
 }
 
@@ -4304,198 +1523,14 @@ impl<S: crate::views::source::FieldSource> CheckCreate<S> {
     pub fn invoice_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfInvoiceID)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for CheckCreate<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -4532,54 +1567,6 @@ impl CheckCash<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> CheckCash<S> {
@@ -4604,198 +1591,14 @@ impl<S: crate::views::source::FieldSource> CheckCash<S> {
     pub fn deliver_min(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfDeliverMin)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for CheckCash<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -4832,54 +1635,6 @@ impl CheckCancel<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> CheckCancel<S> {
@@ -4888,198 +1643,14 @@ impl<S: crate::views::source::FieldSource> CheckCancel<S> {
     pub fn check_id(&self) -> crate::error::Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfCheckID)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for CheckCancel<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -5142,54 +1713,6 @@ impl DepositPreauth<crate::views::source::SlotSource> {
         self.src
             .subobject_opt(crate::sfield::sfUnauthorizeCredentials)
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> DepositPreauth<S> {
@@ -5238,198 +1761,14 @@ impl<S: crate::views::source::FieldSource> DepositPreauth<S> {
         self.src
             .read_raw_opt(crate::sfield::sfUnauthorizeCredentials.code(), out)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for DepositPreauth<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -5466,54 +1805,6 @@ impl TrustSet<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> TrustSet<S> {
@@ -5540,198 +1831,14 @@ impl<S: crate::views::source::FieldSource> TrustSet<S> {
     pub fn quality_out(&self) -> crate::error::Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfQualityOut)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for TrustSet<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -5768,54 +1875,6 @@ impl AccountDelete<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> AccountDelete<S> {
@@ -5849,198 +1908,14 @@ impl<S: crate::views::source::FieldSource> AccountDelete<S> {
         self.src
             .read_raw_opt(crate::sfield::sfCredentialIDs.code(), out)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for AccountDelete<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -6087,54 +1962,6 @@ impl SetHook<crate::views::source::SlotSource> {
     ) -> crate::error::Result<crate::slot_obj::SlotObject<crate::types::STArray>> {
         self.src.subobject(crate::sfield::sfHooks)
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> SetHook<S> {
@@ -6146,198 +1973,14 @@ impl<S: crate::views::source::FieldSource> SetHook<S> {
     pub fn hooks_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> crate::error::Result<usize> {
         self.src.read_raw(crate::sfield::sfHooks.code(), out)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for SetHook<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -6378,54 +2021,6 @@ impl NFTokenMint<crate::views::source::SlotSource> {
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
     }
 }
 
@@ -6489,198 +2084,15 @@ impl<S: crate::views::source::FieldSource> NFTokenMint<S> {
     pub fn expiration(&self) -> crate::error::Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfExpiration)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for NFTokenMint<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -6722,54 +2134,6 @@ impl NFTokenBurn<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 #[cfg(feature = "all-amendments")]
@@ -6787,198 +2151,15 @@ impl<S: crate::views::source::FieldSource> NFTokenBurn<S> {
     pub fn owner(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfOwner)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for NFTokenBurn<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -7021,54 +2202,6 @@ impl NFTokenCreateOffer<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 #[cfg(feature = "all-amendments")]
@@ -7108,198 +2241,15 @@ impl<S: crate::views::source::FieldSource> NFTokenCreateOffer<S> {
     pub fn expiration(&self) -> crate::error::Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfExpiration)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for NFTokenCreateOffer<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -7342,54 +2292,6 @@ impl NFTokenCancelOffer<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 #[cfg(feature = "all-amendments")]
@@ -7405,198 +2307,15 @@ impl<S: crate::views::source::FieldSource> NFTokenCancelOffer<S> {
         self.src
             .read_raw(crate::sfield::sfNFTokenOffers.code(), out)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for NFTokenCancelOffer<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -7639,54 +2358,6 @@ impl NFTokenAcceptOffer<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 #[cfg(feature = "all-amendments")]
@@ -7714,198 +2385,15 @@ impl<S: crate::views::source::FieldSource> NFTokenAcceptOffer<S> {
     pub fn nftoken_broker_fee(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfNFTokenBrokerFee)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for NFTokenAcceptOffer<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -7942,54 +2430,6 @@ impl Clawback<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> Clawback<S> {
@@ -8006,198 +2446,14 @@ impl<S: crate::views::source::FieldSource> Clawback<S> {
     pub fn holder(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfHolder)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for Clawback<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -8239,54 +2495,6 @@ impl AMMClawback<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 #[cfg(feature = "all-amendments")]
@@ -8316,198 +2524,15 @@ impl<S: crate::views::source::FieldSource> AMMClawback<S> {
     pub fn amount(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfAmount)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for AMMClawback<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -8549,54 +2574,6 @@ impl AMMCreate<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 #[cfg(feature = "all-amendments")]
@@ -8618,198 +2595,15 @@ impl<S: crate::views::source::FieldSource> AMMCreate<S> {
     pub fn trading_fee(&self) -> crate::error::Result<u16> {
         self.src.read(crate::sfield::sfTradingFee)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for AMMCreate<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -8850,54 +2644,6 @@ impl AMMDeposit<crate::views::source::SlotSource> {
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
     }
 }
 
@@ -8954,198 +2700,15 @@ impl<S: crate::views::source::FieldSource> AMMDeposit<S> {
     pub fn trading_fee(&self) -> crate::error::Result<Option<u16>> {
         self.src.read_opt(crate::sfield::sfTradingFee)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for AMMDeposit<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -9186,54 +2749,6 @@ impl AMMWithdraw<crate::views::source::SlotSource> {
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
     }
 }
 
@@ -9282,198 +2797,15 @@ impl<S: crate::views::source::FieldSource> AMMWithdraw<S> {
     pub fn lp_token_in(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfLPTokenIn)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for AMMWithdraw<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -9515,54 +2847,6 @@ impl AMMVote<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 #[cfg(feature = "all-amendments")]
@@ -9584,198 +2868,15 @@ impl<S: crate::views::source::FieldSource> AMMVote<S> {
     pub fn trading_fee(&self) -> crate::error::Result<u16> {
         self.src.read(crate::sfield::sfTradingFee)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for AMMVote<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -9829,54 +2930,6 @@ impl AMMBid<crate::views::source::SlotSource> {
     ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
         self.src.subobject_opt(crate::sfield::sfAuthAccounts)
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 #[cfg(feature = "all-amendments")]
@@ -9923,198 +2976,15 @@ impl<S: crate::views::source::FieldSource> AMMBid<S> {
         self.src
             .read_raw_opt(crate::sfield::sfAuthAccounts.code(), out)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for AMMBid<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -10156,54 +3026,6 @@ impl AMMDelete<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 #[cfg(feature = "all-amendments")]
@@ -10219,198 +3041,15 @@ impl<S: crate::views::source::FieldSource> AMMDelete<S> {
     pub fn asset2(&self) -> crate::error::Result<crate::slot_obj::IssueData> {
         self.src.read(crate::sfield::sfAsset2)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for AMMDelete<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -10447,54 +3086,6 @@ impl URITokenMint<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> URITokenMint<S> {
@@ -10529,198 +3120,14 @@ impl<S: crate::views::source::FieldSource> URITokenMint<S> {
     pub fn destination(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfDestination)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for URITokenMint<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -10757,54 +3164,6 @@ impl URITokenBurn<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> URITokenBurn<S> {
@@ -10813,198 +3172,14 @@ impl<S: crate::views::source::FieldSource> URITokenBurn<S> {
     pub fn uri_token_id(&self) -> crate::error::Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfURITokenID)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for URITokenBurn<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -11041,54 +3216,6 @@ impl URITokenBuy<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> URITokenBuy<S> {
@@ -11103,198 +3230,14 @@ impl<S: crate::views::source::FieldSource> URITokenBuy<S> {
     pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfAmount)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for URITokenBuy<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -11332,54 +3275,6 @@ impl URITokenCreateSellOffer<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> URITokenCreateSellOffer<S> {
@@ -11402,198 +3297,14 @@ impl<S: crate::views::source::FieldSource> URITokenCreateSellOffer<S> {
     pub fn destination(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfDestination)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for URITokenCreateSellOffer<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -11631,54 +3342,6 @@ impl URITokenCancelSellOffer<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> URITokenCancelSellOffer<S> {
@@ -11687,198 +3350,14 @@ impl<S: crate::views::source::FieldSource> URITokenCancelSellOffer<S> {
     pub fn uri_token_id(&self) -> crate::error::Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfURITokenID)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for URITokenCancelSellOffer<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -11921,54 +3400,6 @@ impl XChainCreateClaimID<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 #[cfg(feature = "all-amendments")]
@@ -11995,198 +3426,15 @@ impl<S: crate::views::source::FieldSource> XChainCreateClaimID<S> {
     pub fn other_chain_source(&self) -> crate::error::Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfOtherChainSource)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for XChainCreateClaimID<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -12228,54 +3476,6 @@ impl XChainCommit<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 #[cfg(feature = "all-amendments")]
@@ -12310,198 +3510,15 @@ impl<S: crate::views::source::FieldSource> XChainCommit<S> {
     pub fn other_chain_destination(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfOtherChainDestination)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for XChainCommit<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -12543,54 +3560,6 @@ impl XChainClaim<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 #[cfg(feature = "all-amendments")]
@@ -12631,198 +3600,15 @@ impl<S: crate::views::source::FieldSource> XChainClaim<S> {
     pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfAmount)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for XChainClaim<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -12865,54 +3651,6 @@ impl XChainAccountCreateCommit<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 #[cfg(feature = "all-amendments")]
@@ -12945,198 +3683,17 @@ impl<S: crate::views::source::FieldSource> XChainAccountCreateCommit<S> {
     pub fn signature_reward(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfSignatureReward)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields
+    for XChainAccountCreateCommit<S>
+{
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -13178,54 +3735,6 @@ impl XChainAddClaimAttestation<crate::views::source::SlotSource> {
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
     }
 }
 
@@ -13307,198 +3816,17 @@ impl<S: crate::views::source::FieldSource> XChainAddClaimAttestation<S> {
     pub fn destination(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfDestination)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields
+    for XChainAddClaimAttestation<S>
+{
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -13540,54 +3868,6 @@ impl XChainAddAccountCreateAttestation<crate::views::source::SlotSource> {
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
     }
 }
 
@@ -13673,198 +3953,17 @@ impl<S: crate::views::source::FieldSource> XChainAddAccountCreateAttestation<S> 
     pub fn signature_reward(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfSignatureReward)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields
+    for XChainAddAccountCreateAttestation<S>
+{
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -13907,54 +4006,6 @@ impl XChainModifyBridge<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 #[cfg(feature = "all-amendments")]
@@ -13987,198 +4038,15 @@ impl<S: crate::views::source::FieldSource> XChainModifyBridge<S> {
     ) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfMinAccountCreateAmount)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for XChainModifyBridge<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -14221,54 +4089,6 @@ impl XChainCreateBridge<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 #[cfg(feature = "all-amendments")]
@@ -14299,198 +4119,15 @@ impl<S: crate::views::source::FieldSource> XChainCreateBridge<S> {
     ) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfMinAccountCreateAmount)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for XChainCreateBridge<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -14531,54 +4168,6 @@ impl DIDSet<crate::views::source::SlotSource> {
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
     }
 }
 
@@ -14623,198 +4212,15 @@ impl<S: crate::views::source::FieldSource> DIDSet<S> {
     ) -> crate::error::Result<Option<usize>> {
         self.src.read_raw_opt(crate::sfield::sfData.code(), out)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for DIDSet<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -14856,249 +4262,18 @@ impl DIDDelete<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> DIDDelete<S> {
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> DIDDelete<S> {}
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for DIDDelete<S> {
+    type Source = S;
 
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -15144,54 +4319,6 @@ impl OracleSet<crate::views::source::SlotSource> {
         &self,
     ) -> crate::error::Result<crate::slot_obj::SlotObject<crate::types::STArray>> {
         self.src.subobject(crate::sfield::sfPriceDataSeries)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
     }
 }
 
@@ -15260,198 +4387,14 @@ impl<S: crate::views::source::FieldSource> OracleSet<S> {
         self.src
             .read_raw(crate::sfield::sfPriceDataSeries.code(), out)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for OracleSet<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -15488,54 +4431,6 @@ impl OracleDelete<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> OracleDelete<S> {
@@ -15544,198 +4439,14 @@ impl<S: crate::views::source::FieldSource> OracleDelete<S> {
     pub fn oracle_document_id(&self) -> crate::error::Result<u32> {
         self.src.read(crate::sfield::sfOracleDocumentID)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for OracleDelete<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -15777,54 +4488,6 @@ impl LedgerStateFix<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 #[cfg(feature = "all-amendments")]
@@ -15842,198 +4505,15 @@ impl<S: crate::views::source::FieldSource> LedgerStateFix<S> {
     pub fn owner(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfOwner)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for LedgerStateFix<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -16076,54 +4556,6 @@ impl MPTokenIssuanceCreate<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 #[cfg(feature = "all-amendments")]
@@ -16165,198 +4597,15 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceCreate<S> {
         self.src
             .read_raw_opt(crate::sfield::sfMPTokenMetadata.code(), out)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for MPTokenIssuanceCreate<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -16399,54 +4648,6 @@ impl MPTokenIssuanceDestroy<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 #[cfg(feature = "all-amendments")]
@@ -16462,198 +4663,15 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceDestroy<S> {
         self.src
             .read_raw(crate::sfield::sfMPTokenIssuanceID.code(), out)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for MPTokenIssuanceDestroy<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -16696,54 +4714,6 @@ impl MPTokenIssuanceSet<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 #[cfg(feature = "all-amendments")]
@@ -16767,198 +4737,15 @@ impl<S: crate::views::source::FieldSource> MPTokenIssuanceSet<S> {
     pub fn holder(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfHolder)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for MPTokenIssuanceSet<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -17001,54 +4788,6 @@ impl MPTokenAuthorize<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 #[cfg(feature = "all-amendments")]
@@ -17072,198 +4811,15 @@ impl<S: crate::views::source::FieldSource> MPTokenAuthorize<S> {
     pub fn holder(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfHolder)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for MPTokenAuthorize<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -17305,54 +4861,6 @@ impl CredentialCreate<crate::views::source::SlotSource> {
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
     }
 }
 
@@ -17396,198 +4904,15 @@ impl<S: crate::views::source::FieldSource> CredentialCreate<S> {
     ) -> crate::error::Result<Option<usize>> {
         self.src.read_raw_opt(crate::sfield::sfURI.code(), out)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for CredentialCreate<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -17630,54 +4955,6 @@ impl CredentialAccept<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 #[cfg(feature = "all-amendments")]
@@ -17699,198 +4976,15 @@ impl<S: crate::views::source::FieldSource> CredentialAccept<S> {
         self.src
             .read_raw(crate::sfield::sfCredentialType.code(), out)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for CredentialAccept<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -17933,54 +5027,6 @@ impl CredentialDelete<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 #[cfg(feature = "all-amendments")]
@@ -18012,198 +5058,15 @@ impl<S: crate::views::source::FieldSource> CredentialDelete<S> {
         self.src
             .read_raw(crate::sfield::sfCredentialType.code(), out)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for CredentialDelete<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -18245,54 +5108,6 @@ impl NFTokenModify<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 #[cfg(feature = "all-amendments")]
@@ -18323,198 +5138,15 @@ impl<S: crate::views::source::FieldSource> NFTokenModify<S> {
     ) -> crate::error::Result<Option<usize>> {
         self.src.read_raw_opt(crate::sfield::sfURI.code(), out)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for NFTokenModify<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -18567,54 +5199,6 @@ impl PermissionedDomainSet<crate::views::source::SlotSource> {
     ) -> crate::error::Result<crate::slot_obj::SlotObject<crate::types::STArray>> {
         self.src.subobject(crate::sfield::sfAcceptedCredentials)
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 #[cfg(feature = "all-amendments")]
@@ -18639,198 +5223,15 @@ impl<S: crate::views::source::FieldSource> PermissionedDomainSet<S> {
         self.src
             .read_raw(crate::sfield::sfAcceptedCredentials.code(), out)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for PermissionedDomainSet<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -18873,54 +5274,6 @@ impl PermissionedDomainDelete<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 #[cfg(feature = "all-amendments")]
@@ -18930,198 +5283,15 @@ impl<S: crate::views::source::FieldSource> PermissionedDomainDelete<S> {
     pub fn domain_id(&self) -> crate::error::Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfDomainID)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+#[cfg(feature = "all-amendments")]
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for PermissionedDomainDelete<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -19158,54 +5328,6 @@ impl Cron<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> Cron<S> {
@@ -19220,198 +5342,14 @@ impl<S: crate::views::source::FieldSource> Cron<S> {
     pub fn ledger_sequence(&self) -> crate::error::Result<u32> {
         self.src.read(crate::sfield::sfLedgerSequence)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for Cron<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -19448,54 +5386,6 @@ impl CronSet<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> CronSet<S> {
@@ -19522,198 +5412,14 @@ impl<S: crate::views::source::FieldSource> CronSet<S> {
     pub fn start_time(&self) -> crate::error::Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfStartTime)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for CronSet<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -19760,54 +5466,6 @@ impl SetRemarks<crate::views::source::SlotSource> {
     ) -> crate::error::Result<crate::slot_obj::SlotObject<crate::types::STArray>> {
         self.src.subobject(crate::sfield::sfRemarks)
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> SetRemarks<S> {
@@ -19828,198 +5486,14 @@ impl<S: crate::views::source::FieldSource> SetRemarks<S> {
     ) -> crate::error::Result<usize> {
         self.src.read_raw(crate::sfield::sfRemarks.code(), out)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for SetRemarks<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -20079,54 +5553,6 @@ impl Remit<crate::views::source::SlotSource> {
         &self,
     ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
         self.src.subobject_opt(crate::sfield::sfMintURIToken)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
     }
 }
 
@@ -20216,198 +5642,14 @@ impl<S: crate::views::source::FieldSource> Remit<S> {
     pub fn inform(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfInform)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for Remit<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -20454,54 +5696,6 @@ impl GenesisMint<crate::views::source::SlotSource> {
     ) -> crate::error::Result<crate::slot_obj::SlotObject<crate::types::STArray>> {
         self.src.subobject(crate::sfield::sfGenesisMints)
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> GenesisMint<S> {
@@ -20516,198 +5710,14 @@ impl<S: crate::views::source::FieldSource> GenesisMint<S> {
     ) -> crate::error::Result<usize> {
         self.src.read_raw(crate::sfield::sfGenesisMints.code(), out)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for GenesisMint<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -20744,54 +5754,6 @@ impl Import<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> Import<S> {
@@ -20810,198 +5772,14 @@ impl<S: crate::views::source::FieldSource> Import<S> {
     pub fn issuer(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfIssuer)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for Import<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -21038,54 +5816,6 @@ impl ClaimReward<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> ClaimReward<S> {
@@ -21104,198 +5834,14 @@ impl<S: crate::views::source::FieldSource> ClaimReward<S> {
     pub fn claim_currency(&self) -> crate::error::Result<Option<crate::slot_obj::IssueData>> {
         self.src.read_opt(crate::sfield::sfClaimCurrency)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for ClaimReward<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -21331,54 +5877,6 @@ impl Invoke<crate::views::source::SlotSource> {
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
     }
 }
 
@@ -21419,198 +5917,14 @@ impl<S: crate::views::source::FieldSource> Invoke<S> {
     pub fn destination_tag(&self) -> crate::error::Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfDestinationTag)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for Invoke<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -21647,54 +5961,6 @@ impl EnableAmendment<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> EnableAmendment<S> {
@@ -21709,198 +5975,14 @@ impl<S: crate::views::source::FieldSource> EnableAmendment<S> {
     pub fn amendment(&self) -> crate::error::Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfAmendment)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for EnableAmendment<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -21936,54 +6018,6 @@ impl SetFee<crate::views::source::SlotSource> {
     #[inline(always)]
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
     }
 }
 
@@ -22053,198 +6087,14 @@ impl<S: crate::views::source::FieldSource> SetFee<S> {
     ) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfReserveIncrementDrops)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for SetFee<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -22281,54 +6131,6 @@ impl UNLModify<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> UNLModify<S> {
@@ -22355,198 +6157,14 @@ impl<S: crate::views::source::FieldSource> UNLModify<S> {
         self.src
             .read_raw(crate::sfield::sfUNLModifyValidator.code(), out)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for UNLModify<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -22583,54 +6201,6 @@ impl EmitFailure<crate::views::source::SlotSource> {
     pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
         self.src.into_slot()
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> EmitFailure<S> {
@@ -22645,198 +6215,14 @@ impl<S: crate::views::source::FieldSource> EmitFailure<S> {
     pub fn transaction_hash(&self) -> crate::error::Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfTransactionHash)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for EmitFailure<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }
 
@@ -22897,54 +6283,6 @@ impl UNLReport<crate::views::source::SlotSource> {
     ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
         self.src.subobject_opt(crate::sfield::sfImportVLKey)
     }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfMemos)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfSigners)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
-        self.src.subobject_opt(crate::sfield::sfEmitDetails)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
-        self.src.subobject_opt(crate::sfield::sfHookParameters)
-    }
 }
 
 impl<S: crate::views::source::FieldSource> UNLReport<S> {
@@ -22983,197 +6321,13 @@ impl<S: crate::views::source::FieldSource> UNLReport<S> {
         self.src
             .read_raw_opt(crate::sfield::sfImportVLKey.code(), out)
     }
+}
 
-    /// `sfTransactionType` — UInt16, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn transaction_type(&self) -> crate::error::Result<u16> {
-        self.src.read(crate::sfield::sfTransactionType)
-    }
+impl<S: crate::views::source::FieldSource> TransactionCommonFields for UNLReport<S> {
+    type Source = S;
 
-    /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFlags)
-    }
-
-    /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfSourceTag)
-    }
-
-    /// `sfAccount` — AccountID, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
-        self.src.read(crate::sfield::sfAccount)
-    }
-
-    /// `sfSequence` — UInt32, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
-        self.src.read(crate::sfield::sfSequence)
-    }
-
-    /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfPreviousTxnID)
-    }
-
-    /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfLastLedgerSequence)
-    }
-
-    /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
-        self.src.read_opt(crate::sfield::sfAccountTxnID)
-    }
-
-    /// `sfFee` — Amount, `soeREQUIRED`.
-    #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
-        self.src.read(crate::sfield::sfFee)
-    }
-
-    /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfOperationLimit)
-    }
-
-    /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfMemos.code(), out)
-    }
-
-    /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
-        self.src
-            .read_raw(crate::sfield::sfSigningPubKey.code(), out)
-    }
-
-    /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfTicketSequence)
-    }
-
-    /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
-    }
-
-    /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfSigners.code(), out)
-    }
-
-    /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
-    }
-
-    /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
-    }
-
-    /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
-        self.src.read_opt(crate::sfield::sfNetworkID)
-    }
-
-    /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src
-            .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
-    }
-
-    /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
-    #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
-        self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
+    fn field_source(&self) -> &Self::Source {
+        &self.src
     }
 }

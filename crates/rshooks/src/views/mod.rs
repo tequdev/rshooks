@@ -19,6 +19,12 @@
 //! These modules are generated from xahaud's protocol format declarations;
 //! `cargo xtask gen-core --check` verifies that checked-in views are current.
 //!
+//! Fields shared by every format live once, on common-field traits
+//! ([`tx::TransactionCommonFields`], [`tx::TransactionCommonSlotFields`],
+//! [`ledger::LedgerEntryCommonFields`]) that every view implements. The
+//! prelude re-exports them, so `use rshooks::prelude::*` is enough to call
+//! the common accessors.
+//!
 //! # Which views exist
 //!
 //! Upstream's format tables include formats unavailable on Xahau mainnet.
