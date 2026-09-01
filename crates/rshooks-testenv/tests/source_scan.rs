@@ -4,7 +4,7 @@
 //!    set-equality between `crates/rshooks/testenv-call-sites.txt` and a
 //!    fresh grep of every direct `rshooks_core::<fn>(` call site under
 //!    `crates/rshooks/src/api/*.rs` (plus `xfl.rs`/`xfl_unchecked.rs`, and
-//!    `keylet.rs`'s `util_keylet_buf(` calls — see
+//!    `keylet.rs`'s `util_keylet_buf(`/`util_keylet(` calls — see
 //!    [`find_raw_call_in_keylet`]). This only keeps the inventory honest
 //!    against a fresh grep — it does not prove any call site is actually
 //!    intercepted under `testenv`, since a raw call and its own bridging
@@ -144,16 +144,32 @@ fn find_raw_call(line: &str) -> Option<String> {
     }
 }
 
-/// `api/keylet.rs`'s 26 typed helpers each intercept the backend with their
-/// own real slices before falling through to `util_keylet_buf` (a
-/// crate-local composing call, not a bare `rshooks_core::<fn>(` one).
-/// [`find_raw_call`]'s `"rshooks_core::"` needle never matches those calls,
-/// so this file's raw-call marker for keylet.rs is `util_keylet_buf(`
-/// instead.
+/// `api/keylet.rs`'s 26 typed helpers each have an independent `_into`
+/// twin (see the module doc comment's "`_into` twins" section for why the
+/// two don't delegate to each other) — the by-value form intercepts the
+/// backend with its own real slices before falling through to
+/// `util_keylet_buf`, the `_into` twin before falling through to
+/// `util_keylet`; neither is a bare `rshooks_core::<fn>(` call, so
+/// [`find_raw_call`]'s `"rshooks_core::"` needle never matches either.
+/// This file's raw-call marker for keylet.rs is therefore `util_keylet_buf(`
+/// (by-value) or a bare `util_keylet(` (`_into`) — excluding a
+/// `.util_keylet(` method call (the testenv-only backend dispatch inside
+/// `testenv_keylet` itself, `b.util_keylet(...)`, not a raw host call site)
+/// by requiring the character right before the bare-`util_keylet(` needle
+/// not be an identifier character or `.`.
 fn find_raw_call_in_keylet(line: &str) -> Option<String> {
-    const NEEDLE: &str = "util_keylet_buf(";
-    if line.contains(NEEDLE) {
-        Some("util_keylet_buf".to_string())
+    if line.contains("util_keylet_buf(") {
+        return Some("util_keylet_buf".to_string());
+    }
+    const NEEDLE: &str = "util_keylet(";
+    let idx = line.find(NEEDLE)?;
+    let prev_ok = idx == 0
+        || line.as_bytes().get(idx - 1).is_some_and(|b| {
+            let c = *b as char;
+            !c.is_alphanumeric() && c != '_' && c != '.'
+        });
+    if prev_ok {
+        Some("util_keylet".to_string())
     } else {
         None
     }

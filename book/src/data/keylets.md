@@ -5,7 +5,8 @@ the 32-byte hash-derived index the protocol uses to find that object in the
 ledger's state map. Almost every ledger read that isn't the originating
 transaction itself starts by computing a keylet, then loading the object it
 points at into a slot. This page covers `rshooks`'s 26 typed `keylet_xxx`
-helpers, a worked example that computes and stores them, and
+helpers (each with a `keylet_xxx_into` out-param twin — see "Why typed
+helpers" below), a worked example that computes and stores them, and
 `account_id!`, the companion macro for building compile-time r-address
 constants.
 
@@ -25,9 +26,26 @@ object.
 each taking exactly the arguments its own type needs as the real
 `rshooks::types` newtypes — `keylet_account` takes only an `&AccountId`,
 `keylet_line` takes two `&AccountId`s and a `&CurrencyCode`, `keylet_offer`
-takes an `&AccountId` and a `u32` sequence. Every one is a thin
-`#[inline(always)]` pass-through to the same underlying host call, so this
-costs nothing beyond the raw call itself.
+takes an `&AccountId` and a `u32` sequence. Each also has a
+`keylet_xxx_into(out: &mut Keylet, ...) -> Result<()>` out-param twin —
+writing straight into caller-supplied storage instead of returning a value
+— for a caller about to borrow the result into another buffer-taking call
+right away:
+
+```rust,ignore
+let mut keylet = Keylet::default();
+keylet_account_into(&mut keylet, &owner)?;
+state_set(keylet.as_ref(), &key.encode())?;
+```
+
+The by-value form's own scratch buffer has its address taken by the host
+call, which stops the optimizer from eliding the copy into the caller's
+actual destination on return; writing straight into the caller's own
+buffer has no such intermediate to copy from. The two forms are
+independent implementations rather than one delegating to the other —
+delegating measurably cost extra worst-case instructions at a call site
+that only used the by-value form, so `keylet_xxx` and `keylet_xxx_into`
+each call the host directly.
 
 ## The 26 typed helpers
 
