@@ -30,6 +30,13 @@
 
 use crate::error::{HookError, Result};
 
+/// Default scratch-buffer size for [`ToBytes::with_bytes`]'s generic default
+/// impl — matches `MAX_TYPED_STATE_LEN`'s codegen-safe ceiling (see
+/// `crate::state`'s doc comment for that constant): the largest local
+/// `[0u8; N]` zero-init this toolchain's wasm32v1-none codegen still lowers
+/// to a handful of inlined stores rather than an unguarded `memset` libcall.
+pub const DEFAULT_SCRATCH_LEN: usize = 32;
+
 /// Encode `Self` into the front of a caller-provided buffer.
 ///
 /// Mirrors this crate's caller-buffer convention (`state`, `hook_account`,
@@ -45,6 +52,36 @@ pub trait ToBytes {
     /// `0` if `buf` is shorter than `Self::MAX_LEN` (nothing is written in
     /// that case — never a partial write).
     fn write(&self, buf: &mut [u8]) -> usize;
+
+    /// Encodes `self` and hands the written prefix to `f`, returning
+    /// whatever `f` returns.
+    ///
+    /// # Cost
+    ///
+    /// The default impl below is the only option generic over an arbitrary
+    /// [`ToBytes`] `Self`: a single generic function can't size a local
+    /// buffer to `Self::MAX_LEN` on stable Rust — using an associated
+    /// constant as an array length needs `generic_const_exprs`, unstable on
+    /// this toolchain (the same restriction [`FixedRead::read_exact`]'s doc
+    /// comment describes) — so it encodes into a fixed
+    /// [`DEFAULT_SCRATCH_LEN`]-byte scratch buffer instead. A concrete,
+    /// non-generic `impl ToBytes for ConcreteType` can do better: in that
+    /// impl block `Self::MAX_LEN` is a literal, so `[0u8; Self::MAX_LEN]` is
+    /// ordinary stable Rust — every impl in this module overrides
+    /// `with_bytes` on exactly that basis, and `#[derive(HookData)]`'s
+    /// generated impl does the same for a hook-defined struct.
+    #[inline(always)]
+    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        let mut buf = [0u8; DEFAULT_SCRATCH_LEN];
+        let _ = self.write(&mut buf);
+        // Slice by the const `Self::MAX_LEN`, not `write`'s runtime return
+        // value: for a concrete `Self` this is a compile-time-constant
+        // range, letting the optimizer fold this to a direct, unchecked
+        // slice the same way `write`'s own `buf.get_mut(..Self::MAX_LEN)`
+        // does — `write`'s return value carries the same information but
+        // as a value the optimizer must first prove constant.
+        f(buf.get(..Self::MAX_LEN).unwrap_or(&[]))
+    }
 }
 
 /// Decode `Self` from a byte buffer.
@@ -71,6 +108,11 @@ impl ToBytes for u8 {
             None => 0,
         }
     }
+
+    #[inline(always)]
+    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        f(&self.to_le_bytes())
+    }
 }
 
 impl FromBytes for u8 {
@@ -95,6 +137,11 @@ impl ToBytes for u16 {
             }
             None => 0,
         }
+    }
+
+    #[inline(always)]
+    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        f(&self.to_le_bytes())
     }
 }
 
@@ -121,6 +168,11 @@ impl ToBytes for u32 {
             None => 0,
         }
     }
+
+    #[inline(always)]
+    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        f(&self.to_le_bytes())
+    }
 }
 
 impl FromBytes for u32 {
@@ -145,6 +197,11 @@ impl ToBytes for u64 {
             }
             None => 0,
         }
+    }
+
+    #[inline(always)]
+    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        f(&self.to_le_bytes())
     }
 }
 
@@ -171,6 +228,11 @@ impl ToBytes for i64 {
             None => 0,
         }
     }
+
+    #[inline(always)]
+    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        f(&self.to_le_bytes())
+    }
 }
 
 impl FromBytes for i64 {
@@ -191,6 +253,11 @@ impl ToBytes for crate::xfl::XFL {
     #[inline(always)]
     fn write(&self, buf: &mut [u8]) -> usize {
         self.raw_bits().write(buf)
+    }
+
+    #[inline(always)]
+    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        self.raw_bits().with_bytes(f)
     }
 }
 
@@ -225,6 +292,13 @@ impl<const N: usize> ToBytes for [u8; N] {
             }
             None => 0,
         }
+    }
+
+    #[inline(always)]
+    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        // `self` already *is* its own wire encoding — no scratch buffer
+        // needed at all.
+        f(self)
     }
 }
 
