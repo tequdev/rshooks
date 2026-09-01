@@ -121,7 +121,9 @@ cargo run -p rshooks-build -- build --manifest-path examples/19_param-signature/
 No extra flags — this hook has no compiler-generated loop at this
 optimization level (see `examples/README.md`'s "On `--auto-guard`"
 section). `rshooks check` on the built `0.increment.wasm`: worst-case
-instructions `280`, size `910` bytes, max nesting depth `1`.
+instructions `230`, size `799` bytes, max nesting depth `1` (see
+[`metrics.json`](./metrics.json), refreshed by `mise run
+record-example-metrics`).
 
 Because `increment` declares signature parameters, `rshooks build` emits a
 `HookParameters` block in `sethook.template.json` for this entry —

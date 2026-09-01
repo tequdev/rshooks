@@ -451,15 +451,17 @@ fn decode_read<T: FromBytes>(code: i64, raw: &[u8]) -> Result<Option<T>> {
 }
 
 /// Shared write path for [`state_set_loose`]/[`state_foreign_set_loose`]:
-/// encodes `value` into a [`MAX_TYPED_STATE_LEN`]-byte scratch buffer.
+/// encodes `value` and hands the written prefix to `f`, using each `T`'s own
+/// [`ToBytes::with_bytes`] — a right-sized buffer for a concrete `T` (a
+/// `#[derive(HookData)]` struct, a primitive, `[u8; N]`, ...) rather than
+/// always the full [`MAX_TYPED_STATE_LEN`]-byte scratch buffer the generic
+/// default falls back to.
 ///
 /// A compile-time check (monomorphized per `T`) rejects any `T` whose
 /// [`ToBytes::MAX_LEN`] does not fit — see [`MAX_TYPED_STATE_LEN`]'s doc
-/// comment for the escape hatch. Without this check a too-large `T` would
-/// silently encode to `0` bytes (`ToBytes::write`'s documented short-buffer
-/// behavior) and write an empty state entry instead of failing loudly.
+/// comment for the escape hatch.
 #[inline(always)]
-fn encode_write<T: ToBytes>(value: &T) -> [u8; MAX_TYPED_STATE_LEN] {
+fn with_encoded_value<T: ToBytes, R>(value: &T, f: impl FnOnce(&[u8]) -> R) -> R {
     const {
         assert!(
             T::MAX_LEN <= MAX_TYPED_STATE_LEN,
@@ -467,9 +469,7 @@ fn encode_write<T: ToBytes>(value: &T) -> [u8; MAX_TYPED_STATE_LEN] {
              — use api::state's raw functions directly for larger values"
         );
     }
-    let mut raw = [0u8; MAX_TYPED_STATE_LEN];
-    let _ = value.write(&mut raw);
-    raw
+    value.with_bytes(f)
 }
 
 /// Read this hook's own state entry for an already-[`EncodedStateKey`]d
@@ -513,9 +513,7 @@ pub fn state_get_typed<K: TypedStateKey>(key: &K) -> Result<Option<K::Value>> {
 /// this exists.
 #[inline(always)]
 pub(crate) fn state_set_encoded<T: ToBytes>(key: &EncodedStateKey, value: &T) -> Result<usize> {
-    let raw = encode_write(value);
-    let src = raw.get(..T::MAX_LEN).ok_or(HookError::TooBig)?;
-    crate::api::state::state_set(src, key)
+    with_encoded_value(value, |bytes| crate::api::state::state_set(bytes, key))
 }
 
 /// Write this hook's own state entry for `key`, encoding `value` as `T`.
@@ -664,9 +662,9 @@ pub(crate) fn state_foreign_set_encoded<T: ToBytes>(
     namespace: Option<&[u8]>,
     account: Option<&[u8]>,
 ) -> Result<usize> {
-    let raw = encode_write(value);
-    let src = raw.get(..T::MAX_LEN).ok_or(HookError::TooBig)?;
-    crate::api::state::state_foreign_set(src, key, namespace, account)
+    with_encoded_value(value, |bytes| {
+        crate::api::state::state_foreign_set(bytes, key, namespace, account)
+    })
 }
 
 /// Read-modify-write a state entry belonging to another namespace/account:
@@ -1045,9 +1043,9 @@ mod tests {
     }
 
     #[test]
-    fn encode_write_round_trips_through_from_bytes() {
-        let raw = encode_write(&0x1122_3344u32);
-        assert_eq!(u32::read(&raw), Ok(0x1122_3344));
+    fn with_encoded_value_round_trips_through_from_bytes() {
+        let decoded = with_encoded_value(&0x1122_3344u32, u32::read);
+        assert_eq!(decoded, Ok(0x1122_3344));
     }
 
     #[test]
