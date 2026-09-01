@@ -197,7 +197,6 @@ exist). For `AcceptAll`, `out/current/` contains:
   "HookOn": "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF7FFFFFFFFFFFFFFFFFFBFFFFF",
   "HookCanEmit": null,
   "HookName": "616363657074",
-  "sig_params": [],
   "HookHash": "12D34D6FE164F231503B564495565595F2246396497EBEC72606CC4FA2FAD28B",
   "WCE": {
     "hook": 14,
@@ -226,10 +225,11 @@ exist). For `AcceptAll`, `out/current/` contains:
 }
 ```
 
-  `sig_params` (the entry's declared typed signature parameters — empty
-  unless the `unstable-param-sig-interface` feature is on) and `builder`
-  (the toolchain provenance for this build) are additional fields this
-  sidecar carries; the full grammar for every field here is covered in
+  `builder` records the toolchain provenance for this build. A crate built
+  with the `unstable-param-sig-interface` feature additionally carries a
+  `sig_params` field (the entry's declared typed signature parameters);
+  on a stable build like this one the key is absent entirely. The full
+  grammar for every field here is covered in
   [Per-Hook Attributes](../build/metadata.md).
 
 - **`sethook.template.json`** / **`sethook.template.meta.json`** — a

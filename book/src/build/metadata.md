@@ -139,7 +139,6 @@ For `Governance`'s `govern` entry (index `0`, `on = [Invoke]`,
   "HookOn": "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF7FFFFFFFFFFFFFFFFFFBFFFFF",
   "HookCanEmit": "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF7FFFFFFFFFFFFFFFFFF9FFFFD",
   "HookName": "676F7665726E",
-  "sig_params": [],
   "HookHash": "…64 hex chars…",
   "WCE": { "hook": 27751, "cbak": 0 },
   "builder": {
@@ -185,8 +184,10 @@ Fields not covered already on this page:
   fields when constructing an actual `SetHook` transaction.
 - **`sig_params`** — this entry's declared signature parameters ([Hook and
   Transaction Parameters](../data/parameters.md#signature-parameters-fn-arguments)),
-  in wire-index order: `null`-free array, empty for an entry with no
-  signature-parameter fn arguments (as `govern` is here). Each element is
+  in wire-index order. Present only when the hook crate is built with the
+  `unstable-param-sig-interface` feature — absent otherwise (as for
+  `govern` here). When present, it is a `null`-free array, empty for an
+  entry with no signature-parameter fn arguments. Each element is
   `{ "field", "type_byte", "name_hex" }` — the argument's own identifier,
   its `STI_*` type byte, and the full declared `HookParameterName` as
   uppercase hex, the same value the generated `HookParameters` declaration
