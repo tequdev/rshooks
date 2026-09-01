@@ -52,6 +52,10 @@ enum Cmd {
         /// SetHook limit (clearly marked invalid).
         #[arg(long)]
         allow_oversize: bool,
+        /// Skip the Binaryen `wasm-opt` `-Oz` size-optimization pass that
+        /// otherwise runs on each entry's raw wasm before cleaning.
+        #[arg(long)]
+        no_optimize: bool,
         /// SetHook `Account` placeholder value for the generated template
         /// (default: the literal placeholder `<ACCOUNT>`).
         #[arg(long, value_parser = rshooks_build::sethook_template::validate_account)]
@@ -120,6 +124,7 @@ fn main() -> Result<()> {
             default_maxiter,
             out,
             allow_oversize,
+            no_optimize,
             account,
             namespace,
             override_flag,
@@ -132,6 +137,7 @@ fn main() -> Result<()> {
                 default_maxiter,
                 out,
                 allow_oversize,
+                no_optimize,
                 account,
                 namespace,
                 override_flag,
@@ -151,6 +157,7 @@ fn main() -> Result<()> {
                 auto_guard,
                 default_maxiter,
                 allow_oversize,
+                ..Options::default()
             };
             cmd_clean(&input, out, &opts)
         }
