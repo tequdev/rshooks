@@ -148,8 +148,8 @@ doc comments for the full rationale (the machinery the `#[hooks]`-generated
 marker types build on), and `rshooks::HookKey`'s doc comment for a
 `compile_fail` example pinning the mismatch case. The typed layer costs
 nothing beyond the loose functions it replaces, *for a plain-tag
-parameter name* — measured at 441 worst-case instructions either way, the
-same as this hook's logic minus the `AdminName` pause switch covered next
+parameter name* — measured at identical worst-case instructions either
+way, the same as this hook's logic minus the `AdminName` pause switch covered next
 (see that section for the one place this hook's cost *does* go up, and
 why).
 
@@ -244,24 +244,22 @@ the only way to *prove* that is to build both versions through
 `rshooks-build` and compare `rshooks check`'s reported worst-case
 instruction count.
 
-This table is a real `rshooks build`/`check` measurement, at this
+This is a real `rshooks build`/`check` measurement, at this
 workspace's `opt-level = 3` default (`examples/Cargo.toml`, `docs/
 DESIGN.md`'s §2 C6), of this hook's core deposit-ledger logic (the state
 key/value pairing plus the plain-tag `CFG`/`INS` parameters; not yet
 counting the `AdminName` composite parameter name covered below), built
 twice — once with the derives (`DepositKey`/`DepositValue`/`Config`/
 `Instruction`, as committed), once with all four replaced by the
-hand-packed functions above (everything else byte-for-byte identical):
+hand-packed functions above (everything else byte-for-byte identical).
+The derived build measures noticeably fewer worst-case instructions and
+fewer bytes than the hand-packed one; current values for the committed
+hook live in [`metrics.json`](./metrics.json).
 
-| version | worst-case instructions | wasm size |
-|---|---|---|
-| derived (this crate, as committed) | 441 | 1504 bytes |
-| hand-packed (`.get()`/`.get_mut()` per field, as most hooks write it today) | 525 | 1674 bytes |
-
-(This table covers `DepositKey`/`DepositValue`/`Config`/`Instruction`
+(This comparison covers `DepositKey`/`DepositValue`/`Config`/`Instruction`
 only — not the `AdminName` composite parameter name, and not the
 delete-on-withdrawal branch added later. See "Measured cost of a composite
-name" below for the full hook's numbers, including both.)
+name" below for what each of those adds.)
 
 The derive isn't just *as cheap as* hand-packing here — it measures
 **cheaper**: the generated `write`/`read` check the struct's total length
@@ -450,24 +448,17 @@ runtime (Rust has no stable way to run a trait method at compile time —
 see `rshooks::convert::TypedParamName`'s doc comment). Measured by
 building this exact hook twice — once as committed (with the
 `AdminName`/`PauseSwitch` pause switch), once with that whole feature
-removed (everything else byte-for-byte identical):
-
-| version | worst-case instructions | wasm size |
-|---|---|---|
-| without the `AdminName` pause switch | 441 | 1504 bytes |
-| with the `AdminName` pause switch | 470 | 1611 bytes |
-| + deleting the record on a full withdrawal (as committed) | 504 | 1685 bytes |
-
-+29 instructions, +107 bytes for `AdminName` over the no-`AdminName`
+removed (everything else byte-for-byte identical). The pause switch adds
+a few dozen instructions and about a hundred bytes over the no-`AdminName`
 baseline — the unavoidable cost of one composite-name-keyed `hook_param`
 lookup (the struct encode itself, plus the extra branch/rollback path
 checking it).
 
-The third row is a **behavior** change, not an abstraction cost: the
+The delete-on-withdrawal step is a **behavior** change, not an abstraction cost: the
 withdraw branch calls `deposit.delete()` and accepts from inside the
 branch instead of falling through to the shared `deposit.set(&next)`,
 so the hook now carries two distinct terminating state writes rather than
-one. +34 instructions, +74 bytes buys the reserve refund a deleted entry
+one. A few dozen more instructions and bytes buy the reserve refund a deleted entry
 gets and an all-zero stored entry does not. (Both earlier rows were
 measured before that change, on otherwise byte-identical sources; they
 remain a valid A/B for the `AdminName` question they were built to answer.)

@@ -66,28 +66,24 @@ multi-hop `slot_path!` clears its intermediates automatically.
 ## Typed vs raw: measured
 
 This example was rewritten from the raw numbered API (`otxn_slot` →
-`slot_subfield` → `slot_exact`) to the typed one. Four variants, all built
-through `rshooks-build` at this workspace's `opt-level = 3`:
+`slot_subfield` → `slot_exact`) to the typed one, and four variants were
+built through `rshooks-build` at this workspace's `opt-level = 3`: raw
+and typed, each with and without slot clearing. Current values for the
+committed variant live in [`metrics.json`](./metrics.json), refreshed by
+`mise run record-example-metrics`.
 
-| version | worst-case instructions | wasm size |
-|---|---|---|
-| raw, numbered slots, no clears | 197 | 925 bytes |
-| **typed, no clears — as committed** | **197** | **925 bytes** |
-| raw, numbered slots + 3 `slot_clear` | 209 | 965 bytes |
-| typed + 3 clears via `take_*` | 219 | 980 bytes |
-
-**The first two rows are the zero-cost result**, and they are the only pair
+**The no-clears pair is the zero-cost result**, and it is the only pair
 that is apples-to-apples: the same host calls, in the same order, with the
-same cleanup policy (none). They are **identical** — every wrapper is
-`#[inline(always)]` over the same call, so the typed layer adds no
-instructions and no bytes at all.
+same cleanup policy (none). Raw and typed measure **identical** — every
+wrapper is `#[inline(always)]` over the same call, so the typed layer adds
+no instructions and no bytes at all.
 
-The bottom two rows compare the *clearing* variants, and they are **not**
+The clearing pair compares the *clearing* variants, and they are **not**
 equivalent to each other: `take_*` clears on the failure path as well as the
 success path, while the raw code's three `slot_clear` calls sit after every
-rollback and so run only on success. The +10 instructions buy that stronger
-cleanup; they are not overhead the typed layer imposes on the same
-behavior. If you want raw's exact semantics through the typed API, read with
+rollback and so run only on success. The handful of extra instructions
+buys that stronger cleanup; it is not overhead the typed layer imposes on
+the same behavior. If you want raw's exact semantics through the typed API, read with
 `value()`/`raw_exact()` and clear explicitly — that is the first two rows.
 
 Why the committed version clears nothing at all is the previous section.

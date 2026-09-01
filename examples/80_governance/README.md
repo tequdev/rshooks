@@ -125,8 +125,8 @@ extracting `govern`'s own four top-level reads into separate
 `#[inline(never)]` helpers, which made no measurable difference, confirming
 the cost comes from call-site density *within* whichever function holds
 them, not cross-function fusion. Reverting those dense paths to raw calls
-(this crate's current state) brought `govern` down to nesting 23 and
-`reward` to 22.
+(this crate's current state) brought both entries back under the 32-level
+limit — current values live in [`metrics.json`](./metrics.json).
 
 **This is flagged as a candidate `rshooks`/`decl.rs` finding** for the
 orchestrator/library maintainers: the declarative `#[state(..)]`/

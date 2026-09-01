@@ -16,6 +16,7 @@ mod guard;
 mod guard_native;
 mod ir;
 pub mod metadata;
+mod optimizer;
 pub mod sethook_template;
 mod unnest;
 mod validator;
@@ -50,6 +51,9 @@ pub struct Options {
     pub default_maxiter: u32,
     /// Permit oversized output from build operations. Validation still reports it.
     pub allow_oversize: bool,
+    /// Run Binaryen's `wasm-opt` `-Oz` size optimization as the first
+    /// pipeline step, before cleaning. On by default.
+    pub optimize: bool,
 }
 
 impl Default for Options {
@@ -59,6 +63,7 @@ impl Default for Options {
             auto_guard: false,
             default_maxiter: 16,
             allow_oversize: false,
+            optimize: true,
         }
     }
 }
@@ -68,7 +73,14 @@ impl Default for Options {
 /// Version 0 modules are flattened and unnested before guard processing.
 /// Returns the transformed bytes and their validation report.
 pub fn run_pipeline(wasm: &[u8], opts: &Options) -> anyhow::Result<(Vec<u8>, ValidationReport)> {
-    let cleaned = cleaner::clean(wasm, opts)?;
+    // wasm-opt runs first, on the raw wasm, before cleaning: see
+    // `optimizer` for why this ordering is load-bearing.
+    let optimized = if opts.optimize {
+        optimizer::optimize(wasm)?
+    } else {
+        wasm.to_vec()
+    };
+    let cleaned = cleaner::clean(&optimized, opts)?;
     let flattened = if opts.api_version == ApiVersion::V0 {
         let (bytes, report) = flatten::flatten(&cleaned)?;
         for note in &report.notes {
@@ -174,6 +186,7 @@ mod tests {
         assert!(!o.auto_guard);
         assert_eq!(o.default_maxiter, 16);
         assert!(!o.allow_oversize);
+        assert!(o.optimize);
     }
 
     #[test]
@@ -189,6 +202,10 @@ mod tests {
         "#;
         let opts = Options {
             api_version: ApiVersion::V1,
+            // Disabled here so `out` can be compared byte-for-byte against
+            // `cleaner::clean`'s direct output below; optimization is
+            // orthogonal to this test's flatten/unnest-skip assertion.
+            optimize: false,
             ..Options::default()
         };
         let (out, _report) = run_pipeline(&wasm(src), &opts).expect("V1 pipeline succeeds");
