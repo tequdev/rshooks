@@ -15,7 +15,7 @@ numbers from this repo's own toolchain, not just prose.
    verified by deliberately breaking it and observing what does (and does
    not) catch the mistake.
 4. How a loop's `maxiter` shows up in `rshooks-build`'s reported worst-case
-   instruction count (WCE), with this crate's own measured numbers.
+   instruction count (WCE), measured on this crate itself.
 
 ## The hook, briefly
 
@@ -120,21 +120,17 @@ even though nothing here will stop you if you don't.
 
 ## Measured worst-case instruction count
 
-Numbers from this repo's own `rshooks build` output (they'll drift a
-little across compiler and `rshooks-build` pipeline versions — these are
-current-toolchain measurements, not a guarantee). The `#[hooks]` per-index
+Current WCE and wasm size live in [`metrics.json`](./metrics.json),
+refreshed by `mise run record-example-metrics`. The `#[hooks]` per-index
 build pipeline compiles each entry in isolation via a dedicated
 `--cfg`-selected build, at this workspace's `opt-level = 3` default
-(`examples/Cargo.toml`, see `docs/DESIGN.md` §2 C6):
+(`examples/Cargo.toml`, see `docs/DESIGN.md` §2 C6).
 
-| Build | worst-case instructions (`hook=`) | size |
-|---|---:|---:|
-| `accounts_equal` only (the two `guard_m!` loops removed) | 230 | 746 bytes |
-| Full hook (`accounts_equal` + both `guard_m!` loops) | **352** | **1015 bytes** |
-
-The two `maxiter = 8` demonstration loops together add **122**
-instructions to the worst case (`352 - 230`) at this optimization level.
-The reason is `opt-level = 3` itself: LLVM unrolls a small, compile-time-bounded loop like these
+Building this hook with the two `guard_m!` demonstration loops removed
+and comparing against the committed version shows the two `maxiter = 8`
+loops add only a modest constant number of instructions to the worst
+case at this optimization level — nowhere near a body-cost-times-8
+multiple. The reason is `opt-level = 3` itself: LLVM unrolls a small, compile-time-bounded loop like these
 (`maxiter = 8`) into straight-line code rather than leaving it as a real
 `loop` construct, so the guard checker's worst-case analysis no longer has
 to multiply the loop body's cost by `maxiter` — it just counts the
