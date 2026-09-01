@@ -5,9 +5,9 @@
       "artifact": "0.deposit.wasm",
       "index": 0,
       "hook_fn": "deposit",
-      "bytes": 581,
+      "bytes": 574,
       "wce": {
-        "hook": 134,
+        "hook": 131,
         "cbak": 0
       },
       "max_nesting": 1

@@ -357,10 +357,15 @@ fn value_or_absent<T>(code: i64, decode: impl FnOnce(i64) -> Result<T>) -> Resul
 /// closure), since this function only makes the raw code available before
 /// any [`HookError`] is constructed.
 #[inline(always)]
-fn state_raw_code_buf<const N: usize, K: AsRef<[u8]> + ?Sized>(key: &K) -> (i64, [u8; N]) {
-    let mut buf = [0u8; N];
-    let code = state_raw_code(&mut buf, key);
-    (code, buf)
+fn state_raw_code_buf<const N: usize, K: AsRef<[u8]> + ?Sized>(
+    key: &K,
+) -> (i64, core::mem::MaybeUninit<[u8; N]>) {
+    let mut storage = core::mem::MaybeUninit::<[u8; N]>::uninit();
+    // SAFETY: every caller only reads `storage` (via `assume_init`) after
+    // checking the host reported writing exactly `N` bytes.
+    let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
+    let code = state_raw_code(buf, key);
+    (code, storage)
 }
 
 /// Read-modify-write this hook's own state entry for `key` as a `u64`
@@ -393,7 +398,8 @@ pub fn state_update_u32<K: AsRef<[u8]> + ?Sized>(
     let current = value_or_absent(code, |c| {
         let written = res(c)? as usize;
         if written == 4 {
-            Ok(u32::from_le_bytes(buf))
+            // SAFETY: `written == 4` proves the host wrote all 4 bytes.
+            Ok(u32::from_le_bytes(unsafe { buf.assume_init() }))
         } else {
             Err(HookError::TooSmall)
         }
@@ -415,7 +421,8 @@ pub fn state_update_i64<K: AsRef<[u8]> + ?Sized>(
     let current = value_or_absent(code, |c| {
         let written = res(c)? as usize;
         if written == 8 {
-            Ok(i64::from_le_bytes(buf))
+            // SAFETY: `written == 8` proves the host wrote all 8 bytes.
+            Ok(i64::from_le_bytes(unsafe { buf.assume_init() }))
         } else {
             Err(HookError::TooSmall)
         }
@@ -437,7 +444,10 @@ pub fn state_update_xfl<K: AsRef<[u8]> + ?Sized>(
     let current = value_or_absent(code, |c| {
         let written = res(c)? as usize;
         if written == 8 {
-            Ok(XFL::from_raw_bits(i64::from_le_bytes(buf)))
+            // SAFETY: `written == 8` proves the host wrote all 8 bytes.
+            Ok(XFL::from_raw_bits(i64::from_le_bytes(unsafe {
+                buf.assume_init()
+            })))
         } else {
             Err(HookError::TooSmall)
         }

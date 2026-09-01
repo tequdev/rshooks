@@ -28,12 +28,7 @@
 //! a thin, `#[inline(always)]` pass-through to [`util_keylet_buf`]
 //! (computing each pointer/length pair via `.as_ptr()`/`.len()` on the
 //! newtype argument, `0` for every unused `a`..`f` slot), so none of this
-//! costs anything beyond the raw host call itself. See
-//! [`util_keylet_buf`]'s own doc comment for a toolchain note every caller
-//! of any function in this module needs: a 34-byte `Keylet` scratch buffer
-//! needs `--auto-guard --default-maxiter 34` to build past the guard
-//! checker at `opt-level = "z"`/`"s"` (not at `opt-level = 1`/`2`/`3`,
-//! where 34 bytes already builds clean; see `docs/DESIGN.md`'s §2 C6).
+//! costs anything beyond the raw host call itself.
 //!
 //! # `_into` twins
 //!

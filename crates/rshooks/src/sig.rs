@@ -273,10 +273,14 @@ macro_rules! be_int_sig {
 
             #[inline(always)]
             fn read_sig(read: impl FnOnce(&mut [u8]) -> Result<usize>) -> Result<Self> {
-                let mut buf = [0u8; $len];
-                let written = read(&mut buf)?;
+                let mut storage = core::mem::MaybeUninit::<[u8; $len]>::uninit();
+                // SAFETY: only read via `assume_init` below, once
+                // `written == $len` proves `read` wrote every byte.
+                let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
+                let written = read(buf)?;
                 if written == $len {
-                    Ok(<$ty>::from_be_bytes(buf))
+                    // SAFETY: `written == $len` proves `read` wrote every byte.
+                    Ok(<$ty>::from_be_bytes(unsafe { storage.assume_init() }))
                 } else {
                     Err(HookError::TooSmall)
                 }
@@ -291,10 +295,15 @@ impl SigParamType for u8 {
 
     #[inline(always)]
     fn read_sig(read: impl FnOnce(&mut [u8]) -> Result<usize>) -> Result<Self> {
-        let mut buf = [0u8; 1];
-        let written = read(&mut buf)?;
+        let mut storage = core::mem::MaybeUninit::<[u8; 1]>::uninit();
+        // SAFETY: only read via `assume_init` below, once `written == 1`
+        // proves `read` wrote the byte.
+        let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
+        let written = read(buf)?;
         if written == 1 {
-            buf.first().copied().ok_or(HookError::TooSmall)
+            // SAFETY: `written == 1` proves `read` wrote the byte.
+            let byte: [u8; 1] = unsafe { storage.assume_init() };
+            byte.first().copied().ok_or(HookError::TooSmall)
         } else {
             Err(HookError::TooSmall)
         }
@@ -340,8 +349,11 @@ impl SigParamType for AmountBytes {
     /// [`AmountBytes`]'s own doc comment).
     #[inline(always)]
     fn read_sig(read: impl FnOnce(&mut [u8]) -> Result<usize>) -> Result<Self> {
-        let mut buf = [0u8; crate::types::IOU_AMOUNT_LEN];
-        let written = read(&mut buf)?;
+        let mut storage = core::mem::MaybeUninit::<[u8; crate::types::IOU_AMOUNT_LEN]>::uninit();
+        // SAFETY: only the `..written` prefix `read` reports writing is
+        // ever read below.
+        let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
+        let written = read(buf)?;
         let bytes = buf.get(..written).ok_or(HookError::TooBig)?;
         classify_amount(bytes)
     }
@@ -460,8 +472,11 @@ impl SigParamType for IssueBytes {
         const IOU_LEN: usize = CURRENCY_CODE_LEN + ACC_ID_LEN;
         // Buffer is `ISSUE_MAX_READ_LEN` (44), not the 40 an IOU issue
         // needs — see the doc comment above.
-        let mut buf = [0u8; ISSUE_MAX_READ_LEN];
-        let written = read(&mut buf)?;
+        let mut storage = core::mem::MaybeUninit::<[u8; ISSUE_MAX_READ_LEN]>::uninit();
+        // SAFETY: only the `..written` prefix `read` reports writing is
+        // ever read below.
+        let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
+        let written = read(buf)?;
         match written {
             CURRENCY_CODE_LEN => {
                 let native: [u8; CURRENCY_CODE_LEN] = buf
