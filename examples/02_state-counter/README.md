@@ -107,9 +107,9 @@ right-sized instead — `u64`'s `ToBytes::with_bytes` override encodes into
 its own 8-byte buffer, not the full 32-byte scratch — so only the read path
 still pays the generic-buffer cost. Current WCE and wasm size live in
 [`metrics.json`](./metrics.json) (refreshed by `mise run
-record-example-metrics`). A hand-rolled-buffer version of this same hook
-measured 58 worst-case instructions / 349 bytes — close to parity, not a
-dramatic gap. Still guard-clean at the source level — no
+record-example-metrics`); a hand-rolled-buffer version of this same hook
+measures close to parity — not a dramatic gap. Still guard-clean at the
+source level — no
 `--auto-guard`/`--default-maxiter` needed. For a hook this simple (one
 `u64` counter, one key), the raw layer is the cheaper choice; this
 example uses the typed layer anyway because its purpose is to be the
