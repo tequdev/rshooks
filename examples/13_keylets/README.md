@@ -71,34 +71,15 @@ None.
 cargo run -p rshooks-build -- build --manifest-path examples/13_keylets/Cargo.toml
 ```
 
-No extra flags — see "Toolchain note" below for why this needs neither
-`--auto-guard` nor a per-package `opt-level` override.
+No extra flags needed: `util_keylet_buf` (which every `keylet_xxx` helper
+is built on) reads into an uninitialized scratch buffer rather than a
+local zero-init, so the `wasm32v1-none` `memset`-lowering threshold
+`docs/DESIGN.md`'s §2 C6 describes (for a hook-author-owned zero-init
+buffer) never applies to it, at any `opt-level`.
 
-## Toolchain note: `Keylet`'s 34 bytes, at this workspace's `opt-level = 3`
-
-`util_keylet_buf` (which every `keylet_xxx` helper is built on)
-zero-initializes a local `Keylet::default()` scratch buffer — 34 bytes —
-before the host call fills it. `wasm32v1-none` codegen only keeps a local
-zero-init as plain inlined stores up to a fixed byte threshold that
-depends on `opt-level`: **32 bytes** at `"z"`/`"s"`, but **64 bytes** at
-`1`/`2`/`3` (see `docs/DESIGN.md`'s §2 C6 for the full measurement and
-rationale). `examples/Cargo.toml`'s workspace-wide `opt-level = 3`
-default puts `Keylet`'s 34 bytes comfortably under that 64-byte ceiling,
-so the zero-init lowers to plain stores — never the unguarded `memset`
-call a `"z"`/`"s"` build of the same source would need
-`--auto-guard --default-maxiter 34` to guard (see
-`rshooks::api::util::util_keylet_buf`'s own doc comment for that case).
-
-Measured (25 of the 26 `keylet_xxx` calls actually exercised — see "e2e
-verification scope" below for why not all 26): **4150** worst-case
-instructions, 1 nesting level after `rshooks-build`'s own ladder-flattening
-pass, 9638 bytes. This workspace builds every crate — including
-`rshooks`/`rshooks-core` — at `opt-level = 3` (`docs/DESIGN.md`'s §2 C6);
-this hook's 25 near-identical `compute`/`store` call sites make its
-inlining more sensitive to that setting than most examples. Still
-comfortably under the 65,535-byte `SetHook` limit, and still guard-clean
-(no `--auto-guard` needed) — see the workspace root's `docs/DESIGN.md` §2
-C6 for the full instruction-count table across all examples.
+Current WCE, wasm size, and max nesting depth (25 of the 26 `keylet_xxx`
+calls actually exercised — see "e2e verification scope" below for why not
+all 26) live in `metrics.json`.
 
 ## Expected behavior
 

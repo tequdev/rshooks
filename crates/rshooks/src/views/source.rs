@@ -212,8 +212,11 @@ impl ViewValue for Amount {
 
     #[inline(always)]
     fn read_otxn_opt(field: SField<Self>) -> Result<Option<AmountBytes>> {
-        let mut buf = [0u8; IOU_AMOUNT_LEN];
-        let code = otxn::otxn_field_raw_code(&mut buf, field.code());
+        let mut storage = core::mem::MaybeUninit::<[u8; IOU_AMOUNT_LEN]>::uninit();
+        // SAFETY: only the `..written` prefix `otxn_field_raw_code` reports
+        // writing is ever read below.
+        let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
+        let code = otxn::otxn_field_raw_code(buf, field.code());
         if code == rshooks_core::DOESNT_EXIST {
             return Ok(None);
         }
@@ -242,8 +245,12 @@ impl ViewValue for Issue {
     /// and report `ParseError` instead of failing early as `TooSmall`.
     #[inline(always)]
     fn read_otxn_opt(field: SField<Self>) -> Result<Option<IssueData>> {
-        let mut buf = [0u8; crate::slot_obj::ISSUE_MAX_READ_LEN];
-        let code = otxn::otxn_field_raw_code(&mut buf, field.code());
+        let mut storage =
+            core::mem::MaybeUninit::<[u8; crate::slot_obj::ISSUE_MAX_READ_LEN]>::uninit();
+        // SAFETY: only the `..written` prefix `otxn_field_raw_code` reports
+        // writing is ever read below.
+        let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
+        let code = otxn::otxn_field_raw_code(buf, field.code());
         if code == rshooks_core::DOESNT_EXIST {
             return Ok(None);
         }

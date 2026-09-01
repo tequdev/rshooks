@@ -7,7 +7,7 @@
 //! rejected negative values), while calls with no error code
 //! (`etxn_generation`) return plain values.
 
-use crate::error::{Result, res};
+use crate::error::{HookError, Result, res};
 use crate::types::{Hash, Nonce};
 
 /// Burden of this hook's own emitted transactions so far.
@@ -119,9 +119,17 @@ pub fn emit<B: AsMut<[u8]> + ?Sized>(out: &mut B, tx_blob: &[u8]) -> Result<usiz
 /// call. Returns the emitted transaction's hash.
 #[inline(always)]
 pub fn emit_buf(tx_blob: &[u8]) -> Result<Hash> {
-    let mut buf = Hash::default();
-    let _ = emit(buf.as_mut(), tx_blob)?;
-    Ok(buf)
+    let mut storage = core::mem::MaybeUninit::<[u8; crate::types::HASH_LEN]>::uninit();
+    // SAFETY: only read via `assume_init` below, once `written == HASH_LEN`
+    // proves the host wrote every byte.
+    let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
+    let written = emit(buf, tx_blob)?;
+    if written == crate::types::HASH_LEN {
+        // SAFETY: `written == HASH_LEN` proves the host wrote every byte.
+        Ok(Hash(unsafe { storage.assume_init() }))
+    } else {
+        Err(HookError::TooSmall)
+    }
 }
 
 /// Prepare a transaction template (`template`) into `out`, substituting

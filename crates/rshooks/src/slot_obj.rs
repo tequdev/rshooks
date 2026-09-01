@@ -74,27 +74,21 @@
 //! (`rshooks::api::slot::slot_clear`, `rshooks::api::otxn::otxn_slot`), so
 //! mixing them stays visible at the call site.
 //!
-//! # Stack buffers and the optimization profile
+//! # Stack buffers, never zero-initialized
 //!
-//! The `Amount`/`Issue` decoders use a fixed, zero-initialized stack buffer
-//! of at most 48 bytes — the widest thing this layer decodes is an IOU
-//! amount, and the issue path reads 44. At `opt-level` 1–3 rustc lowers a
-//! `[0u8; 48]` zero-init to inlined stores; below that it can emit a
-//! `memset` call, an unguarded loop the guard checker rejects. Examples in
-//! this repo build at `opt-level = 3`; a crate that lowers its profile needs
-//! to re-check its own output, the same caveat [`crate::api::keylet`]
-//! documents.
-//!
-//! Every other fixed-size read here — [`raw_exact::<N>`](SlotObject::raw_exact),
+//! Every fixed-size read here — the `Amount`/`Issue` decoders (at most 48
+//! bytes, the widest thing this layer decodes: an IOU amount; the issue path
+//! reads 44), [`raw_exact::<N>`](SlotObject::raw_exact),
 //! [`take_raw_exact::<N>`](SlotObject::take_raw_exact), and the built-in
 //! `u64`/`Hash`/`AccountId`/`CurrencyCode` reads — reads into an
-//! uninitialized scratch buffer instead: the host always overwrites what
-//! it's handed, and the result is accepted only when it reports writing the
-//! buffer's *entire* length, so nothing here is ever read uninitialized. No
-//! zero-init, no `memset` risk at any `N` or optimization level.
-//! [`raw`](SlotObject::raw) and [`take_raw`](SlotObject::take_raw) write
-//! into a caller-supplied buffer, so any zero-init cost there is the
-//! caller's own to manage.
+//! uninitialized scratch buffer: the host always overwrites what it's
+//! handed, and the result is accepted only when it reports writing the
+//! buffer's *entire* length (the `Amount`/`Issue` decoders instead accept
+//! only the reported prefix, since a native/IOU/MPT-shaped value's length
+//! varies), so nothing here is ever read uninitialized. No zero-init, no
+//! `memset` risk at any `N` or optimization level. [`raw`](SlotObject::raw)
+//! and [`take_raw`](SlotObject::take_raw) write into a caller-supplied
+//! buffer, so any zero-init cost there is the caller's own to manage.
 
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
@@ -650,8 +644,11 @@ impl SlotObject<Issue> {
 /// Reads and classifies an amount slot.
 #[inline(always)]
 fn decode_amount(no: u32) -> Result<AmountBytes> {
-    let mut buf = [0u8; crate::types::IOU_AMOUNT_LEN];
-    let written = api::slot::slot(&mut buf, no)?;
+    let mut storage = MaybeUninit::<[u8; crate::types::IOU_AMOUNT_LEN]>::uninit();
+    // SAFETY: only the `..written` prefix `api::slot::slot` reports writing
+    // is ever read below.
+    let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
+    let written = api::slot::slot(buf, no)?;
     let bytes = buf.get(..written).ok_or(HookError::TooBig)?;
     classify_amount(bytes)
 }
@@ -688,11 +685,14 @@ pub(crate) fn classify_amount(bytes: &[u8]) -> Result<AmountBytes> {
 /// 40-byte buffer the host would report `TooSmall` before
 /// [`HookError::ParseError`] (the documented answer for an out-of-scope
 /// encoding) is reachable. 44 is the largest encoding xahaud's shared code
-/// defines for this field, still under the 64-byte zero-init threshold.
+/// defines for this field.
 #[inline(always)]
 fn decode_issue(no: u32) -> Result<IssueData> {
-    let mut buf = [0u8; ISSUE_MAX_READ_LEN];
-    let written = api::slot::slot(&mut buf, no)?;
+    let mut storage = MaybeUninit::<[u8; ISSUE_MAX_READ_LEN]>::uninit();
+    // SAFETY: only the `..written` prefix `api::slot::slot` reports writing
+    // is ever read below.
+    let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
+    let written = api::slot::slot(buf, no)?;
     let bytes = buf.get(..written).ok_or(HookError::TooBig)?;
     classify_issue(bytes)
 }
