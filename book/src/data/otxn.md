@@ -213,6 +213,29 @@ issue entirely regardless of type. `blocked_account()` reads a Hook
 parameter declared on the `Firewall` struct — see [Hook and Transaction
 Parameters](parameters.md).
 
+## Reading several fields of a known format: views
+
+Once the transaction's type is established (by `otxn_type()`, or by the
+hook's own `on`/`on_incoming`+`on_outgoing` list), `rshooks::views::tx` gives
+named accessors for every field the protocol declares on that format instead
+of one `otxn_field_typed(sfXxx)` call per field:
+
+```rust,ignore
+use rshooks::views::tx;
+
+let Ok(payment) = tx::Payment::otxn() else {
+    rollback!(b"not a Payment", ...)
+};
+let dest = payment.destination()?;   // sfDestination
+let amount = payment.amount()?;      // sfAmount, as AmountBytes
+```
+
+`Payment::otxn()` itself is one `otxn_type` call plus an integer compare, and
+every accessor after it is exactly the `otxn_field_typed` call it would
+otherwise take by hand — the view adds named fields, not a different read
+path. See [Typed Views](views.md) for the full picture, including which
+formats need the `active-amendments`/`all-amendments` feature.
+
 ## Nested fields: slots
 
 Everything on this page reads a *top-level* field of the originating

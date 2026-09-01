@@ -87,10 +87,10 @@ pub struct Governance {
 
 #[hooks]
 impl Governance {
-    #[hook(0, name = "govern", on = [Invoke], can_emit = [Invoke, SetHook])]
+    #[hook(0, on = [Invoke], can_emit = [Invoke, SetHook])]
     fn govern(&self) -> HookResult { /* ... reads and writes self.state.reward_rate/self.state.reward_delay */ }
 
-    #[hook(1, name = "reward", on = [Invoke, ClaimReward], can_emit = [GenesisMint])]
+    #[hook(1, on = [Invoke, ClaimReward], can_emit = [GenesisMint])]
     fn reward(&self) -> HookResult { /* ... reads self.state.reward_rate/self.state.reward_delay */ }
 }
 ```
@@ -117,7 +117,8 @@ on the parameter's *shape*, not that they were configured identically.
 
 `rshooks build` compiles a multi-Hook crate once per declared index (see
 [Building a Hook](../getting-started/building.md) for the discovery-plus-
-per-index pipeline), producing, for `Governance` above:
+per-index pipeline), producing, for `Governance` above (with `--out out`
+passed, per [Your First Hook](../getting-started/first-hook.md#what-lands-in-out)):
 
 ```text
 out/current/
@@ -138,10 +139,11 @@ enforces, apply **per index**, not to the crate as a whole. A chain of ten
 entries effectively has ten times the budget of one entry, split across ten
 independent artifacts, rather than one shared pool.
 
-The output directory itself is generation-numbered
-(`out/gen-<N>/`, with `out/current` a symlink to the latest complete,
-validated one) so a build in progress, or one that fails partway through,
-never leaves `current` pointing at a half-written result.
+The output root itself is generation-numbered (`<root>/gen-<N>/`, with
+`<root>/current` a symlink to the latest complete, validated one — `out/`
+above, or `<target>/rshooks/<crate-name>` if `--out` is omitted) so a
+build in progress, or one that fails partway through, never leaves
+`current` pointing at a half-written result.
 
 ## The `SetHook` template: an owned-position patch, not a full chain
 

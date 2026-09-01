@@ -20,10 +20,12 @@ covers instead.
 | `raw::host` | `HookHost`: the same 75 functions again, as trait methods with identical names/signatures — an indirection point for a future native test host. Not used by `rshooks` or the examples today; the flat free-function API above remains the public surface they call. |
 | `raw::sfcodes` | Every `sfXxx` serialized-field code (325 fields), each a `u32` packing `(type << 16) + index`, mirrored verbatim from `sfcodes.h`. |
 | `raw::tts` | Every `ttXxx` transaction-type code (`ttPAYMENT`, `ttHOOK_SET`, ...), from `tts.h`. |
+| `raw::lets` | Every `ltXxx` ledger-entry-type code (`ltACCOUNT_ROOT`, `ltHOOK`, ...) — what `rshooks::ledger_entry_type::LedgerEntryType` decodes and `sfLedgerEntryType` carries — from the vendored `ledger_entries.macro`. |
 | `raw::consts` | `KEYLET_*` and `COMPARE_*` constants from `hookapi.h`, plus `tfCANONICAL`, the `atACCOUNT` family, and the `amAMOUNT` family from `macro.h`. |
 | `raw::ls_flags` | Every `lsfXxx` ledger-entry flag from `ls_flags.h`, flattened from the header's per-ledger-entry-type C enums into one list (no name collides across enums). |
 | `raw::tx_flags` | Every `tfXxx` transaction flag and `asfXxx` account flag from `tx_flags.h`, flattened the same way. A few `MPTokenIssuanceCreateFlags` members alias `ls_flags` values in the C header and are kept as references to the `ls_flags` const rather than re-typed literals, so the two stay in sync by construction. |
 | `raw::error` | Every Hook API error code (`SUCCESS = 0`, `OUT_OF_BOUNDS = -1`, ..., `NOT_IMPLEMENTED = -14`, `INVALID_FLOAT = -10024`), kept verbatim from `error.h`. |
+| `raw::backend` | `#[doc(hidden)]`, native-only: the `HostBackend` trait `rshooks-testenv`'s mock host implements, plus `install()` to swap one in for the duration of a scope. An unstable internal contract between `rshooks`/`rshooks-core`/`rshooks-testenv`, not a stable public API — but reachable, and occasionally useful directly in a test that needs to stub one specific host call (`float_sto`, say) without pulling in the whole `TestEnv` model; see `rshooks::sto_writer`'s own `testenv_tests` module or `examples/17_sto-writer`'s in-crate tests for the pattern. |
 
 Every constant module is `@generated` from the vendored xahaud headers under
 `crates/rshooks-core/vendor/xahaud-hook/` — not hand-maintained — so a name

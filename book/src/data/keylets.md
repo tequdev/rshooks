@@ -60,6 +60,12 @@ costs nothing beyond the raw call itself.
 | `keylet_hook_state_dir(account, namespace)` | `KEYLET_HOOK_STATE_DIR` (25) | the directory of `account`'s hook-state entries under `namespace` |
 | `keylet_cron(account, start_time)` | `KEYLET_CRON` (26) | `account`'s `Cron` entry firing at `start_time` |
 
+`keylet_line_for_asset(account, &asset)` is a convenience wrapper over
+`keylet_line` for when the currency/issuer pair is already an `IssuedAsset`
+(the type `IouAmount::asset()` produces — see [Slots and Ledger
+Objects](slots.md)) rather than two separate arguments: the trust line
+between `account` and `asset.issuer` in `asset.currency`.
+
 Every function returns `Result<Keylet>`. `keylet_hook` addresses the
 *account's* installed hook chain; `keylet_hook_definition` addresses a
 single hook's own account-independent definition — the two are easy to
