@@ -334,7 +334,7 @@ src/
     ├── sto.rs     # sto_subfield, sto_subarray, sto_emplace, sto_erase, sto_validate
     ├── float.rs   # thin fns backing XFL (float_sto, float_sto_set, slot_float)
     ├── util.rs    # util_accid, util_raddr, util_sha512h, util_verify, util_keylet(_buf)
-    ├── keylet.rs  # one typed keylet_xxx() per KEYLET_* constant, built on util_keylet_buf
+    ├── keylet.rs  # one typed keylet_xxx() + keylet_xxx_into() per KEYLET_* constant; keylet_xxx delegates to keylet_xxx_into, built on util_keylet
     └── trace.rs   # trace, trace_num, trace_float
 ```
 
@@ -486,6 +486,20 @@ pub fn hook_account_buf() -> Result<AccountId>;   // fixed-size convenience
   TOO_SMALL/OUT_OF_BOUNDS handling applies to whatever slice is passed. The
   `_buf` form delegates to the standard form so each raw call site exists
   once.
+- **Deviation: `api/keylet.rs`'s 26 typed `keylet_xxx` helpers use `_into`,
+  not `_buf`, for their caller-buffer twin** (`keylet_xxx_into(out: &mut
+  Keylet, ...) -> Result<()>`), and delegation runs the *opposite* direction
+  from the rule above: the value-returning `keylet_xxx(...) -> Result<Keylet>`
+  is this layer's primary, best-documented API, and it delegates to
+  `keylet_xxx_into` — not the other way around. Reason: at the raw-wrapper
+  layer above, the caller-buffer form is the primitive every convenience
+  wrapper is built on, so it earns the plain name; at this typed layer, the
+  value-returning form is what callers reach for by default, and the
+  caller-buffer form exists specifically as an opt-in escape hatch for a
+  caller about to borrow the result into another buffer-taking call right
+  away (every call in `examples/13_keylets`, into `state_set`) — `_into`
+  names that escape hatch without reusing `_buf`'s "the caller-buffer form
+  is the standard one" connotation.
 - **"as-int64" mode** (`state`, `state_foreign`, `otxn_field`, `slot`):
   the host treats `write_ptr = 0, write_len = 0` as a request to return
   the data itself, packed **big-endian** into the non-negative `i64`

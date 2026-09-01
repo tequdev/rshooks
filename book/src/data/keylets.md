@@ -5,7 +5,8 @@ the 32-byte hash-derived index the protocol uses to find that object in the
 ledger's state map. Almost every ledger read that isn't the originating
 transaction itself starts by computing a keylet, then loading the object it
 points at into a slot. This page covers `rshooks`'s 26 typed `keylet_xxx`
-helpers, a worked example that computes and stores them, and
+helpers (each with a `keylet_xxx_into` out-param twin — see "Why typed
+helpers" below), a worked example that computes and stores them, and
 `account_id!`, the companion macro for building compile-time r-address
 constants.
 
@@ -25,9 +26,14 @@ object.
 each taking exactly the arguments its own type needs as the real
 `rshooks::types` newtypes — `keylet_account` takes only an `&AccountId`,
 `keylet_line` takes two `&AccountId`s and a `&CurrencyCode`, `keylet_offer`
-takes an `&AccountId` and a `u32` sequence. Every one is a thin
-`#[inline(always)]` pass-through to the same underlying host call, so this
-costs nothing beyond the raw call itself.
+takes an `&AccountId` and a `u32` sequence. Each has a `keylet_xxx_into`
+out-param twin — a thin `#[inline(always)]` pass-through to the same
+underlying host call, costing nothing beyond the raw call itself — that the
+by-value `keylet_xxx` form delegates to (zero-init a local `Keylet`, call
+the twin, return it). Reach for `_into` directly when the result is about
+to be borrowed into another buffer-taking call right away, as the worked
+example below does: writing straight into the caller's own storage avoids
+a copy the by-value form's own scratch buffer would otherwise need.
 
 ## The 26 typed helpers
 
@@ -98,19 +104,23 @@ let Ok(dest) = otxn_field_typed(sfDestination) else {
     rollback!(b"keylets: sfDestination missing from the originating transaction", ...)
 };
 
-let Ok(keylet) = keylet_account(&owner) else {
-    rollback!(b"keylets: a keylet_xxx call failed", ...)
-};
-if state_set(keylet.as_ref(), &KeyletKey::Account.encode()).is_err() {
-    rollback!(b"keylets: state_set failed", ...);
-}
+let mut keylet = Keylet::default();
+check(KEYLET_ACCOUNT, keylet_account_into(&mut keylet, &owner));
+store(&KeyletKey::Account, &keylet);
 ```
 
 (condensed from `examples/13_keylets/src/lib.rs`, which repeats this shape
-once per keylet type using a small `compute`/`store` helper pair). Every
-keylet here is computed entirely from inputs already available at compile
-time or read directly off the invoking transaction — no other ledger object
-has to exist first, so the hook works against a bare node with no setup.
+once per keylet type against one `keylet` local declared once and reused
+for all 25, using a small `check`/`store` helper pair — `check` rolls back
+with `100 + keylet_type` on failure, `store` writes the already-filled
+`keylet` to state). It reaches for `keylet_account_into` rather than
+`keylet_account` precisely because `keylet` is about to be borrowed into
+`state_set` right away, and reusing one buffer across every call — instead
+of zero-initializing a fresh one per type — is what collapses this hook's
+WCE (see the example's own README). Every keylet here is computed entirely
+from inputs already available at compile time or read directly off the
+invoking transaction — no other ledger object has to exist first, so the
+hook works against a bare node with no setup.
 
 To go from a keylet to the object it addresses, load it into a slot (see
 [Slots and Ledger Objects](slots.md)):
