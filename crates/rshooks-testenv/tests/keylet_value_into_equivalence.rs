@@ -1,23 +1,24 @@
-//! Equivalence check for `rshooks::api::keylet`'s `_into` delegation: for
-//! every one of the 26 typed keylet helpers, the by-value `keylet_xxx(...)`
-//! form and its `keylet_xxx_into(&mut out, ...)` twin must compute the
-//! exact same `Result<Keylet>` for the same arguments (the by-value form
-//! zero-inits a local `Keylet` and calls its `_into` twin — see
-//! `rshooks::api::keylet`'s module doc comment's "`_into` twins" section).
-//! Driven under an installed backend with **real** keylet semantics —
-//! `rshooks-testenv`'s own host implementation
+//! Equivalence check for `rshooks::api::keylet`'s `_into` twins: for every
+//! one of the 26 typed keylet helpers, the by-value `keylet_xxx(...)` form
+//! and its `keylet_xxx_into(&mut out, ...)` twin must compute the exact
+//! same `Result<Keylet>` for the same arguments, even though the two are
+//! independent implementations that don't call each other (see
+//! `rshooks::api::keylet`'s module doc comment's "`_into` twins" section
+//! for why). Driven under an installed backend with **real** keylet
+//! semantics — `rshooks-testenv`'s own host implementation
 //! (`crates/rshooks-testenv/src/host/keylet.rs`), reached the same way
 //! `examples/13_keylets/tests/keylets.rs` reaches it, through
 //! [`TestEnv::invoke`] — not `spy_backend_audit.rs`'s call-counting
 //! `SpyBackend`, whose `util_keylet` always returns zeroed bytes regardless
 //! of arguments and so could never distinguish the two call paths.
 //!
-//! Guards specifically against the two paths silently threading a
-//! different argument to the underlying host call — a plain "both compile"
-//! check would miss that; this drives real host-side keylet computation
-//! and compares the two outcomes byte-for-byte (`Result<Keylet>:
-//! PartialEq`, `HookError` included, so an `Ok`/`Err` disagreement is
-//! caught too, not just a value mismatch).
+//! Guards specifically against the two independent implementations
+//! silently drifting apart — passing a different argument to the
+//! underlying host call, or diverging on which errors map to which
+//! `HookError` — something a plain "both compile" check would miss; this
+//! drives real host-side keylet computation and compares the two outcomes
+//! byte-for-byte (`Result<Keylet>: PartialEq`, `HookError` included, so an
+//! `Ok`/`Err` disagreement is caught too, not just a value mismatch).
 
 #![allow(
     clippy::unwrap_used,

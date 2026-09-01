@@ -2,17 +2,6 @@
 //!
 //! `Ticket` remains in [`KeyletKey`] to preserve key ordering, but is not
 //! computed because the host does not support `keylet_ticket`.
-//!
-//! Every keylet is computed through its `_into` out-param twin (e.g.
-//! [`keylet_hook_into`]) into one `Keylet` local declared once and reused
-//! for all 25 computed types, rather than the by-value `keylet_xxx` form or
-//! a fresh local per call: the result is immediately borrowed into
-//! [`state_set`] anyway, so writing straight into a caller-owned buffer
-//! avoids the by-value form's own scratch-buffer copy (see
-//! `rshooks::api::keylet`'s module doc comment's "`_into` twins" section),
-//! and reusing one buffer across every call — instead of zero-initializing
-//! a fresh one per type — is what actually collapses this hook's WCE (see
-//! `metrics.json`).
 
 #![no_std]
 
@@ -95,17 +84,16 @@ const QUALITY_LOW: u32 = 20;
 const PAGE_INDEX_HIGH: u32 = 1;
 const PAGE_INDEX_LOW: u32 = 2;
 
-/// Rolls back with `100 + keylet_type` if `result` (a `keylet_xxx_into`
-/// call's own outcome) failed — the shared buffer it wrote into is only
-/// meaningful to read afterward.
+/// Returns a keylet or rolls back with `100 + keylet_type`.
 #[inline(always)]
-fn check(keylet_type: u32, result: Result<()>) {
-    let Ok(()) = result else {
+fn compute(keylet_type: u32, result: Result<Keylet>) -> Keylet {
+    let Ok(k) = result else {
         rollback!(
             b"keylets: a keylet_xxx call failed",
             100i64.wrapping_add(keylet_type as i64)
         )
     };
+    k
 }
 
 /// Stores a keylet in Hook state.
@@ -137,115 +125,112 @@ impl Keylets {
             )
         };
 
-        let mut k = Keylet::default();
-
-        check(KEYLET_HOOK, keylet_hook_into(&mut k, &owner));
-        store(&KeyletKey::Hook, &k);
-
-        check(
-            KEYLET_HOOK_STATE,
-            keylet_hook_state_into(&mut k, &owner, &TEST_STATE_KEY, &TEST_NAMESPACE),
+        store(&KeyletKey::Hook, &compute(KEYLET_HOOK, keylet_hook(&owner)));
+        store(
+            &KeyletKey::HookState,
+            &compute(
+                KEYLET_HOOK_STATE,
+                keylet_hook_state(&owner, &TEST_STATE_KEY, &TEST_NAMESPACE),
+            ),
         );
-        store(&KeyletKey::HookState, &k);
-
-        check(KEYLET_ACCOUNT, keylet_account_into(&mut k, &owner));
-        store(&KeyletKey::Account, &k);
-
-        check(KEYLET_AMENDMENTS, keylet_amendments_into(&mut k));
-        store(&KeyletKey::Amendments, &k);
-
-        check(KEYLET_CHILD, keylet_child_into(&mut k, &TEST_HASH));
-        store(&KeyletKey::Child, &k);
-
-        check(KEYLET_SKIP, keylet_skip_into(&mut k, None));
-        store(&KeyletKey::Skip, &k);
-
-        check(KEYLET_FEES, keylet_fees_into(&mut k));
-        store(&KeyletKey::Fees, &k);
-
-        check(KEYLET_NEGATIVE_UNL, keylet_negative_unl_into(&mut k));
-        store(&KeyletKey::NegativeUnl, &k);
-
-        check(
-            KEYLET_LINE,
-            keylet_line_into(&mut k, &owner, &dest, &TEST_CURRENCY),
+        store(
+            &KeyletKey::Account,
+            &compute(KEYLET_ACCOUNT, keylet_account(&owner)),
         );
-        store(&KeyletKey::Line, &k);
-
-        check(KEYLET_OFFER, keylet_offer_into(&mut k, &owner, OFFER_SEQ));
-        store(&KeyletKey::Offer, &k);
-
-        check(
-            KEYLET_QUALITY,
-            keylet_quality_into(&mut k, &TEST_DIR, QUALITY_HIGH, QUALITY_LOW),
+        store(
+            &KeyletKey::Amendments,
+            &compute(KEYLET_AMENDMENTS, keylet_amendments()),
         );
-        store(&KeyletKey::Quality, &k);
-
-        check(KEYLET_EMITTED_DIR, keylet_emitted_dir_into(&mut k));
-        store(&KeyletKey::EmittedDir, &k);
-
-        check(KEYLET_SIGNERS, keylet_signers_into(&mut k, &owner));
-        store(&KeyletKey::Signers, &k);
-
-        check(KEYLET_CHECK, keylet_check_into(&mut k, &owner, CHECK_SEQ));
-        store(&KeyletKey::Check, &k);
-
-        check(
-            KEYLET_DEPOSIT_PREAUTH,
-            keylet_deposit_preauth_into(&mut k, &owner, &dest),
+        store(
+            &KeyletKey::Child,
+            &compute(KEYLET_CHILD, keylet_child(&TEST_HASH)),
         );
-        store(&KeyletKey::DepositPreauth, &k);
-
-        check(KEYLET_UNCHECKED, keylet_unchecked_into(&mut k, &TEST_HASH));
-        store(&KeyletKey::Unchecked, &k);
-
-        check(KEYLET_OWNER_DIR, keylet_owner_dir_into(&mut k, &owner));
-        store(&KeyletKey::OwnerDir, &k);
-
-        check(
-            KEYLET_PAGE,
-            keylet_page_into(&mut k, &TEST_HASH, PAGE_INDEX_HIGH, PAGE_INDEX_LOW),
+        store(&KeyletKey::Skip, &compute(KEYLET_SKIP, keylet_skip(None)));
+        store(&KeyletKey::Fees, &compute(KEYLET_FEES, keylet_fees()));
+        store(
+            &KeyletKey::NegativeUnl,
+            &compute(KEYLET_NEGATIVE_UNL, keylet_negative_unl()),
         );
-        store(&KeyletKey::Page, &k);
-
-        check(
-            KEYLET_ESCROW,
-            keylet_escrow_into(&mut k, &owner, ESCROW_SEQ),
+        store(
+            &KeyletKey::Line,
+            &compute(KEYLET_LINE, keylet_line(&owner, &dest, &TEST_CURRENCY)),
         );
-        store(&KeyletKey::Escrow, &k);
-
-        check(
-            KEYLET_PAYCHAN,
-            keylet_paychan_into(&mut k, &owner, &dest, PAYCHAN_SEQ),
+        store(
+            &KeyletKey::Offer,
+            &compute(KEYLET_OFFER, keylet_offer(&owner, OFFER_SEQ)),
         );
-        store(&KeyletKey::Paychan, &k);
-
-        check(KEYLET_EMITTED, keylet_emitted_into(&mut k, &TEST_HASH));
-        store(&KeyletKey::Emitted, &k);
-
-        check(
-            KEYLET_NFT_OFFER,
-            keylet_nft_offer_into(&mut k, &owner, NFT_OFFER_SEQ),
+        store(
+            &KeyletKey::Quality,
+            &compute(
+                KEYLET_QUALITY,
+                keylet_quality(&TEST_DIR, QUALITY_HIGH, QUALITY_LOW),
+            ),
         );
-        store(&KeyletKey::NftOffer, &k);
-
-        check(
-            KEYLET_HOOK_DEFINITION,
-            keylet_hook_definition_into(&mut k, &TEST_HASH),
+        store(
+            &KeyletKey::EmittedDir,
+            &compute(KEYLET_EMITTED_DIR, keylet_emitted_dir()),
         );
-        store(&KeyletKey::HookDefinition, &k);
-
-        check(
-            KEYLET_HOOK_STATE_DIR,
-            keylet_hook_state_dir_into(&mut k, &owner, &TEST_NAMESPACE),
+        store(
+            &KeyletKey::Signers,
+            &compute(KEYLET_SIGNERS, keylet_signers(&owner)),
         );
-        store(&KeyletKey::HookStateDir, &k);
-
-        check(
-            KEYLET_CRON,
-            keylet_cron_into(&mut k, &owner, CRON_START_TIME),
+        store(
+            &KeyletKey::Check,
+            &compute(KEYLET_CHECK, keylet_check(&owner, CHECK_SEQ)),
         );
-        store(&KeyletKey::Cron, &k);
+        store(
+            &KeyletKey::DepositPreauth,
+            &compute(
+                KEYLET_DEPOSIT_PREAUTH,
+                keylet_deposit_preauth(&owner, &dest),
+            ),
+        );
+        store(
+            &KeyletKey::Unchecked,
+            &compute(KEYLET_UNCHECKED, keylet_unchecked(&TEST_HASH)),
+        );
+        store(
+            &KeyletKey::OwnerDir,
+            &compute(KEYLET_OWNER_DIR, keylet_owner_dir(&owner)),
+        );
+        store(
+            &KeyletKey::Page,
+            &compute(
+                KEYLET_PAGE,
+                keylet_page(&TEST_HASH, PAGE_INDEX_HIGH, PAGE_INDEX_LOW),
+            ),
+        );
+        store(
+            &KeyletKey::Escrow,
+            &compute(KEYLET_ESCROW, keylet_escrow(&owner, ESCROW_SEQ)),
+        );
+        store(
+            &KeyletKey::Paychan,
+            &compute(KEYLET_PAYCHAN, keylet_paychan(&owner, &dest, PAYCHAN_SEQ)),
+        );
+        store(
+            &KeyletKey::Emitted,
+            &compute(KEYLET_EMITTED, keylet_emitted(&TEST_HASH)),
+        );
+        store(
+            &KeyletKey::NftOffer,
+            &compute(KEYLET_NFT_OFFER, keylet_nft_offer(&owner, NFT_OFFER_SEQ)),
+        );
+        store(
+            &KeyletKey::HookDefinition,
+            &compute(KEYLET_HOOK_DEFINITION, keylet_hook_definition(&TEST_HASH)),
+        );
+        store(
+            &KeyletKey::HookStateDir,
+            &compute(
+                KEYLET_HOOK_STATE_DIR,
+                keylet_hook_state_dir(&owner, &TEST_NAMESPACE),
+            ),
+        );
+        store(
+            &KeyletKey::Cron,
+            &compute(KEYLET_CRON, keylet_cron(&owner, CRON_START_TIME)),
+        );
 
         Ok(Accept::new(b"keylets: ok", 0))
     }

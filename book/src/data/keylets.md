@@ -26,14 +26,26 @@ object.
 each taking exactly the arguments its own type needs as the real
 `rshooks::types` newtypes — `keylet_account` takes only an `&AccountId`,
 `keylet_line` takes two `&AccountId`s and a `&CurrencyCode`, `keylet_offer`
-takes an `&AccountId` and a `u32` sequence. Each has a `keylet_xxx_into`
-out-param twin — a thin `#[inline(always)]` pass-through to the same
-underlying host call, costing nothing beyond the raw call itself — that the
-by-value `keylet_xxx` form delegates to (zero-init a local `Keylet`, call
-the twin, return it). Reach for `_into` directly when the result is about
-to be borrowed into another buffer-taking call right away, as the worked
-example below does: writing straight into the caller's own storage avoids
-a copy the by-value form's own scratch buffer would otherwise need.
+takes an `&AccountId` and a `u32` sequence. Each also has a
+`keylet_xxx_into(out: &mut Keylet, ...) -> Result<()>` out-param twin —
+writing straight into caller-supplied storage instead of returning a value
+— for a caller about to borrow the result into another buffer-taking call
+right away:
+
+```rust,ignore
+let mut keylet = Keylet::default();
+keylet_account_into(&mut keylet, &owner)?;
+state_set(keylet.as_ref(), &key.encode())?;
+```
+
+The by-value form's own scratch buffer has its address taken by the host
+call, which stops the optimizer from eliding the copy into the caller's
+actual destination on return; writing straight into the caller's own
+buffer has no such intermediate to copy from. The two forms are
+independent implementations rather than one delegating to the other —
+delegating measurably cost extra worst-case instructions at a call site
+that only used the by-value form, so `keylet_xxx` and `keylet_xxx_into`
+each call the host directly.
 
 ## The 26 typed helpers
 
@@ -104,23 +116,19 @@ let Ok(dest) = otxn_field_typed(sfDestination) else {
     rollback!(b"keylets: sfDestination missing from the originating transaction", ...)
 };
 
-let mut keylet = Keylet::default();
-check(KEYLET_ACCOUNT, keylet_account_into(&mut keylet, &owner));
-store(&KeyletKey::Account, &keylet);
+let Ok(keylet) = keylet_account(&owner) else {
+    rollback!(b"keylets: a keylet_xxx call failed", ...)
+};
+if state_set(keylet.as_ref(), &KeyletKey::Account.encode()).is_err() {
+    rollback!(b"keylets: state_set failed", ...);
+}
 ```
 
 (condensed from `examples/13_keylets/src/lib.rs`, which repeats this shape
-once per keylet type against one `keylet` local declared once and reused
-for all 25, using a small `check`/`store` helper pair — `check` rolls back
-with `100 + keylet_type` on failure, `store` writes the already-filled
-`keylet` to state). It reaches for `keylet_account_into` rather than
-`keylet_account` precisely because `keylet` is about to be borrowed into
-`state_set` right away, and reusing one buffer across every call — instead
-of zero-initializing a fresh one per type — is what collapses this hook's
-WCE (see the example's own README). Every keylet here is computed entirely
-from inputs already available at compile time or read directly off the
-invoking transaction — no other ledger object has to exist first, so the
-hook works against a bare node with no setup.
+once per keylet type using a small `compute`/`store` helper pair). Every
+keylet here is computed entirely from inputs already available at compile
+time or read directly off the invoking transaction — no other ledger object
+has to exist first, so the hook works against a bare node with no setup.
 
 To go from a keylet to the object it addresses, load it into a slot (see
 [Slots and Ledger Objects](slots.md)):
