@@ -970,7 +970,7 @@ mod tests {
             on: omitted_on(),
             hook_can_emit: None,
             description: None,
-            sig_params: Vec::new(),
+            sig_params: None,
         }
     }
 
