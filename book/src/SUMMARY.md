@@ -25,10 +25,12 @@
 - [XFL: Decimal Floating Point](data/xfl.md)
 - [Slots and Ledger Objects](data/slots.md)
 - [Keylets](data/keylets.md)
+- [Typed Views](data/views.md)
 
 # Emitting Transactions
 
 - [Emitting Transactions](emit/emitting.md)
+- [The StoWriter API](emit/sto-writer.md)
 
 # Build Toolchain
 

@@ -157,19 +157,22 @@ plus `SigName<V: SigParamType>` implementing `TypedParamName` so
 
 ### Carrier (`rshooks-macros` → `rshooks-build/src/carriers.rs`)
 
-`EntryDecl` gains a field (serde `default`, so wasm built before this
-feature still parses):
+The macro emits the `sig_params` carrier key only when `rshooks-macros` is
+built with `unstable-param-sig-interface`; the feature flows
+`rshooks` → `rshooks-macros`. `EntryDecl` mirrors that as an `Option`
+(serde `default`, so a carrier with no key still parses):
 
 ```rust
-sig_params: Vec<SigParamDecl>,
+sig_params: Option<Vec<SigParamDecl>>,
 // SigParamDecl { field: String, type_byte: u8, name_hex: String }
 ```
 
-`name_hex` is the full resolved declared name (8..=23 bytes) as uppercase
-hex — resolved at macro time so the build tool never re-derives it. Index
-is the vec position. Both `encode_*_json` in the macro crate and
-`carriers.rs` change together (`deny_unknown_fields` +
-`assert_carriers_match` police drift).
+`None` means the key is absent (the hook was built without the feature);
+`Some(list)`, possibly empty, means the key is present. `name_hex` is the
+full resolved declared name (8..=23 bytes) as uppercase hex — resolved at
+macro time so the build tool never re-derives it. Index is the vec
+position. Both `encode_*_json` in the macro crate and `carriers.rs` change
+together (`deny_unknown_fields` + `assert_carriers_match` police drift).
 
 ### SetHook template (`rshooks-build/src/sethook_template.rs`)
 
@@ -191,8 +194,9 @@ is exactly the reopen condition recorded as open question D5 ("extraction
 via the wasm carrier"). Ordinary `#[hook_param]`/`#[otxn_param]` fields are
 still never emitted. Update MULTI_HOOK_STRUCT_DESIGN.md accordingly.
 
-The sidecar metadata JSON (`entry_sidecar.rs`) carries the same
-`sig_params` verbatim.
+The sidecar metadata JSON (`entry_sidecar.rs`) emits the same `sig_params`
+verbatim, and only when the carrier has one — the key is present iff the
+hook was built with `unstable-param-sig-interface`.
 
 ## 5. Example changes
 

@@ -151,10 +151,13 @@ pub struct EntryDecl {
     pub description: Option<String>,
     /// Declared signature parameters (`docs/PARAM_SIGNATURE_DESIGN.md`
     /// §1/§4) — extra `ident: Type` arguments on the `#[hook(..)]` fn, in
-    /// wire-index order. `#[serde(default)]` so a carrier with no
-    /// `sig_params` key still parses, as an empty list.
+    /// wire-index order. The carrier key is present iff the emitting macro
+    /// was built with `unstable-param-sig-interface`: `None` means the key
+    /// is absent (the interface was not compiled in); `Some(list)`,
+    /// possibly empty, means the key is present. `#[serde(default)]` so a
+    /// carrier with no `sig_params` key parses as `None`.
     #[serde(default)]
-    pub sig_params: Vec<SigParamDecl>,
+    pub sig_params: Option<Vec<SigParamDecl>>,
 }
 
 /// One declared signature parameter (`docs/PARAM_SIGNATURE_DESIGN.md`
@@ -714,11 +717,11 @@ mod tests {
     // --- `sig_params` (docs/PARAM_SIGNATURE_DESIGN.md §1/§4) ---
 
     #[test]
-    fn entry_decl_without_sig_params_key_defaults_to_empty() {
+    fn entry_decl_without_sig_params_key_parses_as_none() {
         let on = r#"{"form":"omitted","HookOn":null,"HookOnIncoming":null,"HookOnOutgoing":null}"#;
         let wasm = wasm_with_carriers(CHAIN_JSON, &entries_json(on, "null"));
         let carriers = extract_chain_carriers(&wasm, "vault").expect("extraction succeeds");
-        assert!(carriers.hooks.entries[0].sig_params.is_empty());
+        assert!(carriers.hooks.entries[0].sig_params.is_none());
     }
 
     #[test]
@@ -729,7 +732,10 @@ mod tests {
         );
         let wasm = wasm_with_carriers(CHAIN_JSON, &hooks);
         let carriers = extract_chain_carriers(&wasm, "vault").expect("extraction succeeds");
-        let sig_params = &carriers.hooks.entries[0].sig_params;
+        let sig_params = carriers.hooks.entries[0]
+            .sig_params
+            .as_ref()
+            .expect("sig_params key present");
         assert_eq!(sig_params.len(), 2);
         assert_eq!(sig_params[0].field, "account");
         assert_eq!(sig_params[0].type_byte, 8);

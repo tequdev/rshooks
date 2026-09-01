@@ -107,8 +107,12 @@ impl Serialize for EntrySidecarDocument {
         )?;
         map.serialize_entry("HookName", &self.entry.hook_name.as_deref().map(utf8_hex))?;
         // Declared signature parameters (`docs/PARAM_SIGNATURE_DESIGN.md`
-        // §1/§4), carried verbatim from the carrier.
-        map.serialize_entry("sig_params", &self.entry.sig_params)?;
+        // §1/§4), carried verbatim from the carrier. The key is present iff
+        // the carrier has one, i.e. the hook was built with
+        // `unstable-param-sig-interface`.
+        if let Some(sig_params) = &self.entry.sig_params {
+            map.serialize_entry("sig_params", sig_params)?;
+        }
         map.serialize_entry("HookHash", &self.hook_hash)?;
         map.serialize_entry("WCE", &self.wce)?;
         map.serialize_entry("builder", &self.builder)?;
@@ -177,7 +181,7 @@ mod tests {
             on,
             hook_can_emit: Some(vec!["Payment".to_string()]),
             description: Some("records a deposit".to_string()),
-            sig_params: Vec::new(),
+            sig_params: None,
         }
     }
 
@@ -245,7 +249,7 @@ mod tests {
         use crate::carriers::SigParamDecl;
 
         let mut e = entry(omitted_on());
-        e.sig_params = vec![
+        e.sig_params = Some(vec![
             SigParamDecl {
                 field: "account".to_string(),
                 type_byte: 0x08,
@@ -256,7 +260,7 @@ mod tests {
                 type_byte: 0x01,
                 name_hex: "5F505300010105636F756E74".to_string(),
             },
-        ];
+        ]);
         let report = ValidationReport::default();
         let built =
             build_entry_sidecar(&e, &chain(), b"AAAA", &report, None).expect("sidecar builds");
@@ -272,10 +276,21 @@ mod tests {
     }
 
     #[test]
-    fn sig_params_empty_by_default_in_sidecar() {
+    fn sig_params_key_absent_when_carrier_has_none() {
         let report = ValidationReport::default();
         let built = build_entry_sidecar(&entry(omitted_on()), &chain(), b"AAAA", &report, None)
             .expect("sidecar builds");
+        let value: serde_json::Value = serde_json::from_slice(&built.bytes).expect("valid json");
+        assert!(value.get("sig_params").is_none());
+    }
+
+    #[test]
+    fn sig_params_empty_array_preserved_when_carrier_has_empty_list() {
+        let mut e = entry(omitted_on());
+        e.sig_params = Some(Vec::new());
+        let report = ValidationReport::default();
+        let built =
+            build_entry_sidecar(&e, &chain(), b"AAAA", &report, None).expect("sidecar builds");
         let value: serde_json::Value = serde_json::from_slice(&built.bytes).expect("valid json");
         assert_eq!(value["sig_params"], serde_json::json!([]));
     }

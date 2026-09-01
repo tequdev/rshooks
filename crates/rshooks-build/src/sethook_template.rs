@@ -211,8 +211,12 @@ fn build_entry_template(
         hook_can_emit,
         hook_namespace: namespace.map_or_else(|| "<NAMESPACE>".to_string(), str::to_string),
         hook_api_version: 0,
-        hook_parameters: build_hook_parameters(entry.index, &entry.sig_params, si_decls)
-            .with_context(|| format!("entry {} (`{}`)", entry.index, entry.hook_fn))?,
+        hook_parameters: build_hook_parameters(
+            entry.index,
+            entry.sig_params.as_deref().unwrap_or(&[]),
+            si_decls,
+        )
+        .with_context(|| format!("entry {} (`{}`)", entry.index, entry.hook_fn))?,
         hook_name: entry.hook_name.as_deref().map(utf8_hex),
         flags: override_flag.then_some(HSF_OVERRIDE),
     })
@@ -406,7 +410,7 @@ mod tests {
             on,
             hook_can_emit: None,
             description: None,
-            sig_params: Vec::new(),
+            sig_params: None,
         }
     }
 
@@ -692,10 +696,10 @@ mod tests {
     #[test]
     fn entry_with_sig_params_emits_hook_parameters_in_index_order_with_zero_value() {
         let mut e = entry(0, "increment", omitted_on(), None);
-        e.sig_params = vec![
+        e.sig_params = Some(vec![
             sig_param("account", 0x08, "5F5053000008076163636F756E74"),
             sig_param("count", 0x01, "5F505300010105636F756E74"),
-        ];
+        ]);
         let wasm = b"AA".as_slice();
         let declared: Vec<TemplateInput<'_>> = vec![(0, &e, wasm)];
         let bytes =
@@ -720,7 +724,7 @@ mod tests {
     #[test]
     fn hook_parameters_key_sits_between_hook_api_version_and_hook_name() {
         let mut e = entry(0, "increment", omitted_on(), Some("inc"));
-        e.sig_params = vec![sig_param("count", 0x01, "5F505300010105636F756E74")];
+        e.sig_params = Some(vec![sig_param("count", 0x01, "5F505300010105636F756E74")]);
         let wasm = b"AA".as_slice();
         let declared: Vec<TemplateInput<'_>> = vec![(0, &e, wasm)];
         let bytes =
@@ -744,7 +748,7 @@ mod tests {
         // gain `HookParameters` just because a sibling entry has one.
         let e0 = entry(0, "deposit", omitted_on(), None);
         let mut e2 = entry(2, "increment", omitted_on(), None);
-        e2.sig_params = vec![sig_param("count", 0x01, "5F505300010105636F756E74")];
+        e2.sig_params = Some(vec![sig_param("count", 0x01, "5F505300010105636F756E74")]);
         let wasm = b"AA".as_slice();
         let declared: Vec<TemplateInput<'_>> = vec![(0, &e0, wasm), (2, &e2, wasm)];
         let bytes =
@@ -817,7 +821,7 @@ mod tests {
     #[test]
     fn si_declarations_follow_sig_param_declarations_on_the_same_entry() {
         let mut e = entry(0, "increment", omitted_on(), None);
-        e.sig_params = vec![sig_param("count", 0x01, "5F5F015F015F636F756E74")];
+        e.sig_params = Some(vec![sig_param("count", 0x01, "5F5F015F015F636F756E74")]);
         let wasm = b"AA".as_slice();
         let declared: Vec<TemplateInput<'_>> = vec![(0, &e, wasm)];
         let si = vec![si_decl("balances", 0, "AABB", "CCDD")];
@@ -859,7 +863,7 @@ mod tests {
     #[test]
     fn sixteen_combined_hook_parameters_is_the_boundary_that_still_builds() {
         let mut e = entry(0, "deposit", omitted_on(), None);
-        e.sig_params = vec![sig_param("count", 0x01, "5F5F015F015F636F756E74")];
+        e.sig_params = Some(vec![sig_param("count", 0x01, "5F5F015F015F636F756E74")]);
         let wasm = b"AA".as_slice();
         let declared: Vec<TemplateInput<'_>> = vec![(0, &e, wasm)];
         // 1 sig param + 15 SI declarations = 16, exactly at the limit.
@@ -878,7 +882,7 @@ mod tests {
     #[test]
     fn seventeen_combined_hook_parameters_is_rejected_naming_entry_counts_and_limit() {
         let mut e = entry(0, "deposit", omitted_on(), None);
-        e.sig_params = vec![sig_param("count", 0x01, "5F5F015F015F636F756E74")];
+        e.sig_params = Some(vec![sig_param("count", 0x01, "5F5F015F015F636F756E74")]);
         let wasm = b"AA".as_slice();
         let declared: Vec<TemplateInput<'_>> = vec![(0, &e, wasm)];
         // 1 sig param + 16 SI declarations = 17, one over the limit.

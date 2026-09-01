@@ -219,6 +219,23 @@ no slot numbers. `XFL::sto`/`XFL::sto_set` are the corresponding
 encode/decode pair for a serialized `Amount` buffer that isn't already in a
 slot (e.g. building a transaction's own `Amount` field by hand).
 
+When the amount already came back as an `AmountBytes::Iou` — from
+`otxn_field_typed(sfAmount)` or a `views::tx` accessor (see [Typed
+Views](views.md)) — `IouAmount::xfl()` decodes its value straight from those
+bytes, with no slot at all:
+
+```rust,ignore
+let AmountBytes::Iou(iou) = otxn_field_typed(sfAmount)? else {
+    accept!(); // native, not handled here
+};
+let value: XFL = iou.xfl()?;
+```
+
+It hands the host exactly the amount's 8-byte value component via
+`XFL::sto_set`, never the full 48 bytes and never a local bit-reinterpret —
+the wire value component sets an always-on "not native" flag bit a real XFL
+never sets, so either shortcut would produce a wrong result.
+
 ## `XFLUnchecked` for hot paths
 
 `rshooks::xfl_unchecked::XFLUnchecked` is the deferred-validation

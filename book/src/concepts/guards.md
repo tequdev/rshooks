@@ -49,29 +49,24 @@ so you supply the true iteration bound, not an off-by-one-adjusted value.
 Choosing `maxiter` well means working from a bound you can actually justify
 from the data's shape: a fixed array's length, a documented protocol
 limit, or a value read from `hook_param` and validated before use — never
-"a number that felt safe." From `examples/06_guard-patterns`:
+"a number that felt safe." From `examples/80_governance`:
 
 ```rust,ignore
-fn accounts_equal(a: &AccountId, b: &AccountId) -> bool {
-    let mut i: usize = 0;
-    loop {
-        guard!(ACC_ID_LEN as u32); // maxiter = 20, exact
-        if i >= ACC_ID_LEN {
-            break true;
-        }
-        if a.get(i) != b.get(i) {
-            break false;
-        }
-        i = i.wrapping_add(1);
-    }
+let mut i = 0u8;
+while i < member_count {
+    guard!(u32::from(SEAT_COUNT)); // maxiter = 20, exact
+    let this_seat = i;
+    i = i.wrapping_add(1);
+    // ... reads the `IS<seat>` hook parameter for this seat ...
 }
 ```
 
-`ACC_ID_LEN` is `20`, a compile-time fact about a fixed-size array — so
-`maxiter = 20` is not just *a* safe bound, it's the exact worst case. A
-smaller value would be wrong (this loop really can run 20 times, e.g. two
-account IDs differing only in their last byte); a larger value would just
-inflate the hook's reported worst-case instruction count for no benefit.
+`SEAT_COUNT` is `20`, a compile-time governance constant, and an earlier
+check already rejects any `member_count` greater than it — so
+`maxiter = u32::from(SEAT_COUNT)` is not just *a* safe bound, it's the
+exact worst case this loop can ever reach. A smaller value would be wrong
+(a chain can configure up to 20 seats); a larger value would just inflate
+the hook's reported worst-case instruction count for no benefit.
 
 `guard_m!(maxiter, n)` is for the rare case where two textually distinct
 loops share one physical source line — `guard!`'s id formula,

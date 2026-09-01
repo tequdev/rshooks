@@ -2121,19 +2121,25 @@ fn encode_entries_json(struct_name: &str, entries: &[EntryJson]) -> Result<Vec<u
 
         // Only `field`/`type_byte`/`name_hex` are part of the wire carrier
         // (`docs/PARAM_SIGNATURE_DESIGN.md` §4) — `SigParamJson::type_text`
-        // is codegen-only and deliberately not serialized here.
-        let sig_params: Vec<serde_json::Value> = e
-            .sig_params
-            .iter()
-            .map(|p| {
-                let mut sp = serde_json::Map::new();
-                sp.insert("field".into(), p.field.clone().into());
-                sp.insert("type_byte".into(), u64::from(p.type_byte).into());
-                sp.insert("name_hex".into(), p.name_hex.clone().into());
-                serde_json::Value::Object(sp)
-            })
-            .collect();
-        obj.insert("sig_params".into(), sig_params.into());
+        // is codegen-only and deliberately not serialized here. The
+        // `sig_params` key itself is emitted only when this macro crate is
+        // built with `unstable-param-sig-interface`; its presence in the
+        // carrier is what signals to `rshooks-build` that the interface was
+        // compiled in.
+        if cfg!(feature = "unstable-param-sig-interface") {
+            let sig_params: Vec<serde_json::Value> = e
+                .sig_params
+                .iter()
+                .map(|p| {
+                    let mut sp = serde_json::Map::new();
+                    sp.insert("field".into(), p.field.clone().into());
+                    sp.insert("type_byte".into(), u64::from(p.type_byte).into());
+                    sp.insert("name_hex".into(), p.name_hex.clone().into());
+                    serde_json::Value::Object(sp)
+                })
+                .collect();
+            obj.insert("sig_params".into(), sig_params.into());
+        }
 
         arr.push(serde_json::Value::Object(obj));
     }
@@ -2714,6 +2720,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "unstable-param-sig-interface")]
     fn entries_json_includes_sig_params_field_type_byte_and_name_hex_only() {
         let mut entry = sample();
         entry.sig_params = vec![
@@ -2736,10 +2743,24 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "unstable-param-sig-interface")]
     fn entries_json_sig_params_empty_by_default() {
         let bytes = encode_entries_json("Vault", &[sample()]).expect("json");
         let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
         assert_eq!(value["entries"][0]["sig_params"], serde_json::json!([]));
+    }
+
+    #[test]
+    #[cfg(not(feature = "unstable-param-sig-interface"))]
+    fn entries_json_omits_sig_params_key_when_feature_is_off() {
+        let mut entry = sample();
+        entry.sig_params = vec![
+            sig_param("account", "AccountId", 0x08, 0),
+            sig_param("count", "u16", 0x01, 1),
+        ];
+        let bytes = encode_entries_json("Vault", &[entry]).expect("json");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
+        assert!(value["entries"][0].get("sig_params").is_none());
     }
 
     #[test]

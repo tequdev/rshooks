@@ -7,7 +7,7 @@ release profile that must not leak into `rshooks-core`/`rshooks`/
 `rshooks-build`, and they don't build for host targets. Every code sample in
 this book is adapted from one of these.
 
-## Reading order: 01–16
+## Reading order: 01–19
 
 Numbered in **suggested reading order** — start at `01_accept-all` and work
 down; each one builds on ideas from the examples before it. The `example`
@@ -31,13 +31,13 @@ with a digit, so only the directory is prefixed).
 | 14 | `account-id-macro` | `rshooks::account_id!`: compile-time r-address → `AccountId` decode, cross-checked against `hook_account`/`util_accid`/`util_raddr` | [Reading the Originating Transaction](../data/otxn.md) |
 | 15 | `slot-objects` | the typed slot layer's live acceptance harness: account-root walk, native-amount drops round-trip, parent-clear/child-read, and two 300-iteration loops proving `take_*` recycling and leak-free `slot_path!` failures | [Slots and Ledger Objects](../data/slots.md) |
 | 16 | `typed-results` | typed entry returns (`HookResult`): an idiomatic `?`/`Ok` entry with a `hook_errors!` message clause, alongside a raw `accept!`/`rollback!`-style entry in the same chain | [Accept, Rollback, and Errors](../concepts/errors.md#typed-entry-returns-hookresult) |
-| 19 | `param-signature` | the Hook Parameter Signature Interface: `#[hook(..)]` fn arguments (`increment(account: AccountID, count: UInt16)`) as declared, typed, machine-readable Hook parameters | [Hook and Transaction Parameters](../data/parameters.md#signature-parameters-fn-arguments) |
-| 20 | `state-interface` | the Hook State Interface: `#[state_interface(id = .., key(..), value(..))]` chain-struct fields as a declared, typed, machine-readable on-ledger state schema | [Hook State](../data/state.md#state-interface-typed-on-ledger-schema) |
+| 17 | `sto-writer` | `rshooks::sto_writer::StoWriter`: a runtime-shaped Remit — a native `sfAmounts` entry always, an issued one when hook parameters supply it — built field-by-field and emitted via `prepare_for_emit()`/`Prepared::emit()` | [The `StoWriter` API](../emit/sto-writer.md) |
+| 18 | `typed-views` | `rshooks::views`: generated, type-checked read views — an incoming-IOU gate reading `tx::Payment`, then `ledger::RippleState`'s freeze flags and `ledger::AccountRoot`'s optional `sfTransferRate`, with a per-read cost table | [Typed Views](../data/views.md) |
+| 19 | `param-signature` | the Hook Parameter Signature Interface: `#[hook(..)]` fn arguments (`increment(account: AccountID, count: UInt16)`) as declared, typed, machine-readable Hook parameters — requires the `unstable-param-sig-interface` cargo feature on `rshooks` (see the example's own `Cargo.toml`) | [Hook and Transaction Parameters](../data/parameters.md#signature-parameters-fn-arguments) |
+| 20 | `state-interface` | the Hook State Interface: `#[state_interface(id = .., key(..), value(..))]` chain-struct fields as a declared, typed, machine-readable on-ledger state schema — requires the `unstable-state-interface` cargo feature on `rshooks` (see the example's own `Cargo.toml`) | [Hook State](../data/state.md#state-interface-typed-on-ledger-schema) |
 
 There is no `11` in the numbering — the numbering follows the historical
-example order, with gaps where an example was retired. `17_sto-writer`
-and `18_typed-views` exist in `examples/` (see their own READMEs) but
-have no book chapter yet.
+example order, with gaps where an example was retired.
 
 ## 80+: production hooks in Rust
 

@@ -40,6 +40,12 @@ Four constructors load a **root** slot:
   (see [Keylets](keylets.md))
 - `SlotObject::from_txn_hash(&hash)` — a transaction looked up by hash
 
+Once the loaded object's ledger-entry or transaction type is known,
+`rshooks::views::ledger`/`rshooks::views::tx` give named field accessors
+built on top of exactly this constructor set (`RippleState::from_keylet`,
+`Payment::from_slot`, ...) instead of a `.get(sfXxx)` call per field — see
+[Typed Views](views.md).
+
 ### `.get(sfXxx)` and subfield navigation
 
 `.get(key)` derives a child slot and borrows the parent, so one loaded
@@ -105,6 +111,21 @@ amendment for them yet. `SlotObject<Amount>::as_xfl()` (see
 [XFL](xfl.md)) is the more common route when what you actually want is the
 numeric value rather than the raw bytes, and it works identically for
 native and IOU amounts.
+
+`IouAmount` itself gives back its `(currency, issuer)` identity without a
+separate decode step: `.currency()`, `.issuer()`, and `.asset()` (the pair,
+as an `IssuedAsset`) all borrow the wire bytes in place rather than parsing
+them. `.matches_asset(&asset)` compares an amount's currency/issuer against
+an already-known `IssuedAsset` the same way — via `buf_eq_20`, never a
+`memcmp` loop — without constructing an intermediate `IssuedAsset` to do it:
+
+```rust,ignore
+let AmountBytes::Iou(iou) = payment.amount()? else {
+    accept!(); // native, out of scope for this check
+};
+let asset = iou.asset(); // IssuedAsset { currency, issuer }
+if iou.matches_asset(&expected) { /* ... */ }
+```
 
 `try_cast::<U>()` retypes a handle after checking the slot's serialized
 type ID against `U`'s `CastTarget` implementation — `STObject`, `STArray`,
@@ -208,7 +229,6 @@ an explicit path (`rshooks::api::slot::slot_clear`,
 always visible at the call site.
 
 Reach for the raw layer only when a hook genuinely wants to place things in
-specific numbered slots and manage them itself — `examples/80_reward` and
-`examples/81_govern` both do this deliberately. Otherwise, default to
+specific numbered slots and manage them itself. Otherwise, default to
 `SlotObject`: it costs nothing extra and the type system catches mistakes
 the raw layer can't.
