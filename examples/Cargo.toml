@@ -24,6 +24,11 @@ members = [
 ]
 
 [workspace.package]
+# Single source of truth for every example crate's version (each member
+# inherits it via `version.workspace = true`); it tracks the root
+# workspace's `[workspace.package] version`, so a release bump touches this
+# one line here instead of every example manifest.
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.85"
 publish = false
