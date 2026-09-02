@@ -62,30 +62,12 @@
 
 /// Whether `name` matches the interface draft's charset:
 /// `[A-Za-z][A-Za-z0-9]*`, 1..=16 bytes — the macro-time twin of this
-/// function lives in `crates/rshooks-macros/src/hooks_struct.rs` (field
-/// names are validated at `#[state_interface(..)]` parse time, never at
-/// runtime), mirroring [`crate::sig`]'s `is_valid_name`.
-#[allow(clippy::indexing_slicing)] // in-bounds by the `i < name.len()` loop condition, const-evaluated only
-#[must_use]
-pub const fn is_valid_name(name: &[u8]) -> bool {
-    if name.is_empty() || name.len() > 16 {
-        return false;
-    }
-    let mut i = 0;
-    while i < name.len() {
-        let b = name[i];
-        let ok = if i == 0 {
-            b.is_ascii_alphabetic()
-        } else {
-            b.is_ascii_alphanumeric()
-        };
-        if !ok {
-            return false;
-        }
-        i = i.wrapping_add(1);
-    }
-    true
-}
+/// function is `is_valid_interface_name` in
+/// `crates/rshooks-macros/src/hooks_shared.rs` (field names are validated
+/// at `#[state_interface(..)]` parse time, never at runtime). The charset
+/// rule itself is shared with the Hook Parameter Signature Interface — the
+/// one shared copy lives in `crate::interface_name`.
+pub use crate::interface_name::is_valid_name;
 
 /// Length in bytes of the key's leading State ID byte (§1.6 of the design
 /// doc) — key field encoding starts at this offset.

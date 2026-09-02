@@ -26,8 +26,8 @@ use std::collections::BTreeSet;
 use proc_macro::{Delimiter, Group, Ident, Punct, Spacing, Span, TokenStream, TokenTree};
 
 use crate::hooks_shared::{
-    AttrEntry, is_punct, parse_attr_entries, parse_balanced_angle, parse_string_value,
-    split_top_level_commas,
+    AttrEntry, classify_fixed_sti_type_text, is_punct, is_valid_interface_name, parse_attr_entries,
+    parse_balanced_angle, parse_string_value, split_top_level_commas,
 };
 use crate::shape::tokens_to_string;
 use crate::{err, sha256};
@@ -290,7 +290,7 @@ const SIG_TYPE_MSG: &str = "#[hooks]: unsupported signature parameter type — s
                              bare name — a path-qualified or aliased spelling is not resolved)";
 
 /// The interface draft's display-name diagnostic — shared by every
-/// rejection [`is_valid_sig_arg_name`] backs.
+/// rejection [`is_valid_interface_name`] backs.
 const SIG_NAME_MSG: &str = "#[hooks]: a signature parameter name must be 1..=16 ASCII bytes \
                              matching [A-Za-z][A-Za-z0-9]* (the Hook Parameter Signature \
                              Interface's display-name rule) — rename the argument";
@@ -328,25 +328,6 @@ struct SigArg {
     type_byte: u8,
 }
 
-/// Whether `name` matches the interface draft's display-name charset:
-/// `[A-Za-z][A-Za-z0-9]*`, 1..=16 bytes — the macro-time twin of
-/// [`crate::sig`]'s (rshooks crate) `is_valid_name` const fn, checked here
-/// so a bad name is a diagnostic at the argument's own span rather than a
-/// `const`-eval failure blamed on the generated prologue.
-fn is_valid_sig_arg_name(name: &str) -> bool {
-    let bytes = name.as_bytes();
-    if bytes.is_empty() || bytes.len() > 16 {
-        return false;
-    }
-    bytes.iter().enumerate().all(|(i, &b)| {
-        if i == 0 {
-            b.is_ascii_alphabetic()
-        } else {
-            b.is_ascii_alphanumeric()
-        }
-    })
-}
-
 /// Classifies a signature-parameter argument's type tokens into its
 /// `STI_*` type byte (`docs/PARAM_SIGNATURE_DESIGN.md` §1's table),
 /// matching on the token *shape* (a whitespace-normalized textual
@@ -371,21 +352,15 @@ fn classify_sig_type(tokens: &[TokenTree]) -> Option<u8> {
 /// The non-`Blob<N>` half of [`classify_sig_type`]'s table, over an already
 /// whitespace-stripped flattened type string — `TokenTree`-free purely for
 /// unit-testability, following this crate's standard "kind tag" boundary
-/// pattern (see [`qualifier_token_kind`]'s doc comment).
+/// pattern (see [`qualifier_token_kind`]'s doc comment). Checks this
+/// interface's two variable-width extra rows first, then falls back to
+/// [`classify_fixed_sti_type_text`]'s fixed-width table shared with
+/// `#[state_interface]`.
 fn classify_sig_type_text(flat: &str) -> Option<u8> {
     match flat {
-        "u8" => Some(0x10),               // STI_UINT8
-        "u16" => Some(0x01),              // STI_UINT16
-        "u32" => Some(0x02),              // STI_UINT32
-        "u64" => Some(0x03),              // STI_UINT64
-        "[u8;16]" => Some(0x04),          // STI_UINT128
-        "[u8;32]" | "Hash" => Some(0x05), // STI_UINT256
-        "AmountBytes" => Some(0x06),      // STI_AMOUNT
-        "AccountId" => Some(0x08),        // STI_ACCOUNT
-        "[u8;20]" => Some(0x11),          // STI_UINT160
-        "IssueBytes" => Some(0x18),       // STI_ISSUE
-        "CurrencyCode" => Some(0x1A),     // STI_CURRENCY
-        _ => None,
+        "AmountBytes" => Some(0x06), // STI_AMOUNT
+        "IssueBytes" => Some(0x18),  // STI_ISSUE
+        _ => classify_fixed_sti_type_text(flat).map(|(byte, _width)| byte),
     }
 }
 
@@ -445,7 +420,7 @@ fn parse_sig_args(extra_args: &[TokenTree], entry_span: Span) -> Result<Vec<SigA
         }
 
         let name = name_id.to_string();
-        if !is_valid_sig_arg_name(&name) {
+        if !is_valid_interface_name(&name) {
             return Err(err(name_id.span(), SIG_NAME_MSG));
         }
 
@@ -2653,20 +2628,20 @@ mod tests {
 
     #[test]
     fn sig_arg_name_accepts_the_interface_charset() {
-        assert!(is_valid_sig_arg_name("account"));
-        assert!(is_valid_sig_arg_name("count"));
-        assert!(is_valid_sig_arg_name("a"));
-        assert!(is_valid_sig_arg_name("abcdefghijklmnop")); // exactly 16
-        assert!(is_valid_sig_arg_name("A1"));
+        assert!(is_valid_interface_name("account"));
+        assert!(is_valid_interface_name("count"));
+        assert!(is_valid_interface_name("a"));
+        assert!(is_valid_interface_name("abcdefghijklmnop")); // exactly 16
+        assert!(is_valid_interface_name("A1"));
     }
 
     #[test]
     fn sig_arg_name_rejects_underscore_digit_start_and_overlength() {
-        assert!(!is_valid_sig_arg_name("my_count")); // underscore
-        assert!(!is_valid_sig_arg_name("_count")); // leading underscore
-        assert!(!is_valid_sig_arg_name("1count")); // leading digit
-        assert!(!is_valid_sig_arg_name("")); // empty
-        assert!(!is_valid_sig_arg_name("abcdefghijklmnopq")); // 17 bytes
+        assert!(!is_valid_interface_name("my_count")); // underscore
+        assert!(!is_valid_interface_name("_count")); // leading underscore
+        assert!(!is_valid_interface_name("1count")); // leading digit
+        assert!(!is_valid_interface_name("")); // empty
+        assert!(!is_valid_interface_name("abcdefghijklmnopq")); // 17 bytes
     }
 
     #[test]

@@ -33,6 +33,8 @@ use crate::hooks_shared::{
     AttrEntry, is_punct, parse_attr_entries, parse_balanced_angle, parse_byte_string_value,
     parse_string_value, split_top_level_commas, step_angle_depth, to_upper_camel,
 };
+#[cfg(feature = "unstable-state-interface")]
+use crate::hooks_shared::{classify_fixed_sti_type_text, is_valid_interface_name};
 use crate::shape::tokens_to_string;
 use crate::{err, sha256};
 
@@ -909,7 +911,7 @@ const SI_TYPE_MSG: &str = "#[state_interface]: unsupported field type — suppor
                             aliased spelling is not resolved)";
 
 /// The interface draft's field-name diagnostic — shared by every rejection
-/// [`is_valid_si_field_name`] backs.
+/// [`is_valid_interface_name`] backs.
 #[cfg(feature = "unstable-state-interface")]
 const SI_NAME_MSG: &str = "#[state_interface]: a key/value field name must be 1..=16 ASCII \
                             bytes matching [A-Za-z][A-Za-z0-9]* (the Hook State Interface's \
@@ -926,26 +928,6 @@ const SI_MAX_KEY_PAYLOAD: usize = 31;
 #[cfg(feature = "unstable-state-interface")]
 const SI_MAX_VALUE_LEN: usize = 256;
 
-/// Whether `name` matches the interface draft's field-name charset:
-/// `[A-Za-z][A-Za-z0-9]*`, 1..=16 bytes — the macro-time twin of
-/// `rshooks::si::is_valid_name`, checked here so a bad name is a diagnostic
-/// at the field's own span rather than a `const`-eval failure blamed on
-/// generated code.
-#[cfg(feature = "unstable-state-interface")]
-fn is_valid_si_field_name(name: &str) -> bool {
-    let bytes = name.as_bytes();
-    if bytes.is_empty() || bytes.len() > 16 {
-        return false;
-    }
-    bytes.iter().enumerate().all(|(i, &b)| {
-        if i == 0 {
-            b.is_ascii_alphabetic()
-        } else {
-            b.is_ascii_alphanumeric()
-        }
-    })
-}
-
 /// Classifies a `#[state_interface]` key/value field's type tokens into its
 /// `(STI_* type byte, byte width)` pair (`docs/STATE_INTERFACE_DESIGN.md`
 /// §1.5's table), matching on the token *shape* (a whitespace-normalized
@@ -954,27 +936,7 @@ fn is_valid_si_field_name(name: &str) -> bool {
 /// emits alongside these values.
 #[cfg(feature = "unstable-state-interface")]
 fn classify_si_type(tokens: &[TokenTree]) -> Option<(u8, usize)> {
-    classify_si_type_text(&tokens_to_string(tokens).replace(' ', ""))
-}
-
-/// [`classify_si_type`]'s `TokenTree`-free half, over an already
-/// whitespace-stripped flattened type string — kept separate purely for
-/// unit-testability, following this crate's standard "kind tag" boundary
-/// pattern.
-#[cfg(feature = "unstable-state-interface")]
-fn classify_si_type_text(flat: &str) -> Option<(u8, usize)> {
-    match flat {
-        "u8" => Some((0x10, 1)),                // STI_UINT8
-        "u16" => Some((0x01, 2)),               // STI_UINT16
-        "u32" => Some((0x02, 4)),               // STI_UINT32
-        "u64" => Some((0x03, 8)),               // STI_UINT64
-        "[u8;16]" => Some((0x04, 16)),          // STI_UINT128
-        "[u8;32]" | "Hash" => Some((0x05, 32)), // STI_UINT256
-        "AccountId" => Some((0x08, 20)),        // STI_ACCOUNT
-        "[u8;20]" => Some((0x11, 20)),          // STI_UINT160
-        "CurrencyCode" => Some((0x1A, 20)),     // STI_CURRENCY
-        _ => None,
-    }
+    classify_fixed_sti_type_text(&tokens_to_string(tokens).replace(' ', ""))
 }
 
 /// Parses one `key(..)`/`value(..)` group's inner `name: Type, ..` list.
@@ -1030,7 +992,7 @@ fn parse_si_field_list(
         }
 
         let name = name_id.to_string();
-        if !is_valid_si_field_name(&name) {
+        if !is_valid_interface_name(&name) {
             return Err(err(name_id.span(), SI_NAME_MSG));
         }
         if seen_names.iter().any(|n| n == &name) {
@@ -2283,24 +2245,29 @@ mod tests {
 
     // --- `#[state_interface(..)]` (docs/STATE_INTERFACE_DESIGN.md) ---
 
-    // `classify_si_type_text`/`is_valid_si_field_name` are themselves
+    // This module's own import of the shared `classify_fixed_sti_type_text`/
+    // `is_valid_interface_name` helpers (`crate::hooks_shared`) is
     // `#[cfg(feature = "unstable-state-interface")]`-gated (their only
-    // caller, `parse_state_interface_decl`, is too) — mirror that gate here
-    // rather than on the whole module, so these three tests still exist in
-    // both feature configurations at least as source, cfg'd out cleanly.
+    // caller here, `parse_state_interface_decl`, is too) — mirror that gate
+    // here rather than on the whole module, so these three tests still
+    // exist in both feature configurations at least as source, cfg'd out
+    // cleanly.
     #[cfg(feature = "unstable-state-interface")]
     #[test]
     fn si_type_table_matches_the_design_docs_nine_rows() {
-        assert_eq!(classify_si_type_text("u8"), Some((0x10, 1)));
-        assert_eq!(classify_si_type_text("u16"), Some((0x01, 2)));
-        assert_eq!(classify_si_type_text("u32"), Some((0x02, 4)));
-        assert_eq!(classify_si_type_text("u64"), Some((0x03, 8)));
-        assert_eq!(classify_si_type_text("[u8;16]"), Some((0x04, 16)));
-        assert_eq!(classify_si_type_text("[u8;32]"), Some((0x05, 32)));
-        assert_eq!(classify_si_type_text("Hash"), Some((0x05, 32)));
-        assert_eq!(classify_si_type_text("AccountId"), Some((0x08, 20)));
-        assert_eq!(classify_si_type_text("[u8;20]"), Some((0x11, 20)));
-        assert_eq!(classify_si_type_text("CurrencyCode"), Some((0x1A, 20)));
+        assert_eq!(classify_fixed_sti_type_text("u8"), Some((0x10, 1)));
+        assert_eq!(classify_fixed_sti_type_text("u16"), Some((0x01, 2)));
+        assert_eq!(classify_fixed_sti_type_text("u32"), Some((0x02, 4)));
+        assert_eq!(classify_fixed_sti_type_text("u64"), Some((0x03, 8)));
+        assert_eq!(classify_fixed_sti_type_text("[u8;16]"), Some((0x04, 16)));
+        assert_eq!(classify_fixed_sti_type_text("[u8;32]"), Some((0x05, 32)));
+        assert_eq!(classify_fixed_sti_type_text("Hash"), Some((0x05, 32)));
+        assert_eq!(classify_fixed_sti_type_text("AccountId"), Some((0x08, 20)));
+        assert_eq!(classify_fixed_sti_type_text("[u8;20]"), Some((0x11, 20)));
+        assert_eq!(
+            classify_fixed_sti_type_text("CurrencyCode"),
+            Some((0x1A, 20))
+        );
     }
 
     #[cfg(feature = "unstable-state-interface")]
@@ -2308,22 +2275,22 @@ mod tests {
     fn si_type_table_rejects_variable_width_and_unknown_types() {
         // `AmountBytes`/`Blob<N>`/`IssueBytes` are in the *signature*
         // parameter table but deliberately not this one (§1.5).
-        assert_eq!(classify_si_type_text("AmountBytes"), None);
-        assert_eq!(classify_si_type_text("IssueBytes"), None);
-        assert_eq!(classify_si_type_text("i64"), None);
-        assert_eq!(classify_si_type_text("String"), None);
+        assert_eq!(classify_fixed_sti_type_text("AmountBytes"), None);
+        assert_eq!(classify_fixed_sti_type_text("IssueBytes"), None);
+        assert_eq!(classify_fixed_sti_type_text("i64"), None);
+        assert_eq!(classify_fixed_sti_type_text("String"), None);
     }
 
     #[cfg(feature = "unstable-state-interface")]
     #[test]
     fn si_field_name_validation_matches_the_signature_interfaces_charset() {
-        assert!(is_valid_si_field_name("account"));
-        assert!(is_valid_si_field_name("token"));
-        assert!(is_valid_si_field_name("abcdefghijklmnop")); // exactly 16
-        assert!(!is_valid_si_field_name("min_amount")); // underscore
-        assert!(!is_valid_si_field_name("1field")); // leading digit
-        assert!(!is_valid_si_field_name("")); // empty
-        assert!(!is_valid_si_field_name("abcdefghijklmnopq")); // 17 bytes
+        assert!(is_valid_interface_name("account"));
+        assert!(is_valid_interface_name("token"));
+        assert!(is_valid_interface_name("abcdefghijklmnop")); // exactly 16
+        assert!(!is_valid_interface_name("min_amount")); // underscore
+        assert!(!is_valid_interface_name("1field")); // leading digit
+        assert!(!is_valid_interface_name("")); // empty
+        assert!(!is_valid_interface_name("abcdefghijklmnopq")); // 17 bytes
     }
 
     /// Builds a test-only `SiFieldSpec` with no type tokens — constructing
