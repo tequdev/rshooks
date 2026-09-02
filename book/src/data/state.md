@@ -422,12 +422,12 @@ Template](../build/metadata.md)).
 
 ### Supported types
 
-Version 0 of the interface supports only fixed-width types — the same nine
-rows the signature-parameter interface's own table draws from, minus the
+Version 0 of the interface supports only fixed-width types — the rows the
+signature-parameter interface's own table draws from, minus the
 variable-width ones (`AmountBytes`, `Blob<N>`, `IssueBytes`) that interface
 supports and this one does not:
 
-| Rust type | `STI_*` byte | width |
+| Rust type | type code | width |
 |---|---|---|
 | `u8` | `0x10` (`STI_UINT8`) | 1 |
 | `u16` | `0x01` (`STI_UINT16`) | 2 |
@@ -438,6 +438,14 @@ supports and this one does not:
 | `AccountId` | `0x08` (`STI_ACCOUNT`) | 20 |
 | `[u8; 20]` | `0x11` (`STI_UINT160`) | 20 |
 | `CurrencyCode` | `0x1A` (`STI_CURRENCY`) | 20 |
+| `XFL` | `0x80` (`XFL`) | 8 |
+
+`XFL`'s value is the Hook API's `int64_t` XFL bit pattern, big-endian —
+`XFL::raw_bits()` — decoded via `XFL::from_raw_bits` with no validity
+check; the type codes themselves come from XAS-010d (Hook Type Codes),
+which both this interface and the Hook Parameter Signature Interface
+reference for their type codes. `XFL` is fixed-width, so it is usable as
+a key field as well as a value field.
 
 Every key/value field's type is pinned against alias drift by a
 monomorphized `const` assert on `rshooks::si::SiFieldType::TYPE_BYTE`

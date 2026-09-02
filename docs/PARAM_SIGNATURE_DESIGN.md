@@ -14,12 +14,19 @@ The wire convention (normative, from the interface draft):
 HookParameterName = 0x5F 0x50 0x53       ; "_PS" interface identifier
                   | 0x00                  ; version
                   | index    (1 byte, 0x00..=0x0F, raw binary)
-                  | type     (1 byte, an STI_* code, raw binary)
+                  | type     (1 byte, an XAS-010d type code, raw binary)
                   | name_len (1 byte, 0x01..=0x10 = name.len())
                   | name     (1..=16 bytes, [A-Za-z][A-Za-z0-9]*)
 ```
 
-Total 8..=23 octets. Declaration entries (on the `Hook`/`HookDefinition`
+Total 8..=23 octets. The type byte is a **type code as defined by XAS-010d
+(Hook Type Codes, <https://github.com/Xahau/xahaud/discussions/798>)**: codes
+`0x00..=0x7F` are standard types mirroring `SField.h`'s `STI_*` serialized
+type codes; `0x80..=0xFF` are Hook-specific non-standard types with no
+`SField.h` counterpart (currently only `0x80` `XFL`). XAS-010d also fixes
+each type's canonical value encoding — the value bytes alone, with no field
+ID, type prefix, or length prefix; the interface draft lists the supported
+subset (§2). Declaration entries (on the `Hook`/`HookDefinition`
 object, i.e. in the SetHook JSON) carry `HookParameterValue = 0x00`.
 Invocation entries (transaction common `HookParameters`) carry the typed
 argument value, read inside the hook via `otxn_param` with the full declared
@@ -48,7 +55,7 @@ impl Increment {
 - **display name** = the argument identifier, validated at macro time
   against `[A-Za-z][A-Za-z0-9]*` and 1..=16 octets (so a Rust ident with
   `_` is a compile error at the attribute's span).
-- **type byte** = derived from the argument type (table below). The macro
+- **type code** = derived from the argument type (table below). The macro
   maps the *type token* to the byte at macro time (for the carrier) and
   additionally emits a monomorphized `const` assert that the token-level
   byte equals `<Ty as SigParamType>::TYPE_BYTE`, so a type alias or drift
@@ -98,7 +105,7 @@ New trait in `crates/rshooks/src/sig.rs`:
 
 ```rust
 pub trait SigParamType: Sized {
-    /// The STI_* type byte advertised in the declared name.
+    /// The XAS-010d type code advertised in the declared name.
     const TYPE_BYTE: u8;
     /// Decodes the invocation value payload (already length-delimited by
     /// the host). Err on wrong length / undecodable payload.
@@ -106,7 +113,7 @@ pub trait SigParamType: Sized {
 }
 ```
 
-| Rust type | Type byte | Payload |
+| Rust type | Type code | Payload |
 |---|---|---|
 | `u8` | `0x10` STI_UINT8 | 1 byte |
 | `u16` | `0x01` STI_UINT16 | 2 bytes BE |
@@ -120,6 +127,21 @@ pub trait SigParamType: Sized {
 | `[u8; 20]` | `0x11` STI_UINT160 | 20 bytes |
 | `IssueBytes` (new) | `0x18` STI_ISSUE | 20 bytes (all-zero = native) or 40 (currency+issuer) |
 | `CurrencyCode` | `0x1A` STI_CURRENCY | 20 bytes |
+| `XFL` (`rshooks::xfl::XFL`) | `0x80` XFL | 8 bytes BE (raw `int64` bits) |
+
+`XFL` is XAS-010d's one non-standard code. Its value encoding is the Hook
+API's `int64_t` XFL bit pattern, big-endian — i.e. `XFL::raw_bits()` as
+`to_be_bytes()`; the canonical zero is eight `0x00` bytes, which is exactly
+`XFL::from_raw_bits(0)`. The decode is `XFL::from_raw_bits(i64::from_be_bytes(..))`
+on an exactly-8-byte payload (any other length is `TooSmall`), with **no
+validity check** of the bit pattern — the same opaque-bits contract
+`XFL::from_raw_bits` itself documents; validating would cost a host call.
+This impl deliberately does **not** reuse `XFL`'s `FixedRead`/`FromBytes`
+impls: those are the hook-private little-endian memory-image convention
+(`convert.rs`), the wrong byte order for this protocol-facing boundary. The
+macro recognizes the bare token `XFL` (the user imports `rshooks::xfl::XFL`;
+the `XFL!` literal macro lives in a different namespace, so both imports
+coexist).
 
 New types in `crates/rshooks/src/sig.rs` (or `types.rs`, implementer's
 call, following the module doc conventions):
@@ -131,7 +153,7 @@ call, following the module doc conventions):
   to `Native`; 20 non-zero bytes are an error (per the draft, native issue
   is exactly 20 zero bytes); 40 bytes decode to `Issued`.
 
-Unsupported STI codes (`STI_NUMBER` etc.) simply have no `SigParamType`
+Unsupported type codes (`STI_NUMBER` etc.) simply have no `SigParamType`
 impl; using such a type as an entry-fn argument is a macro-time error
 (unknown token) or a trait-bound error.
 
@@ -232,7 +254,9 @@ hook was built with `unstable-param-sig-interface`.
   precisely so a 44-byte value is read and rejected as `ParseError` rather
   than surfacing as a host-call `TooSmall`, the same rationale
   `decode_issue`'s doc comment gives for the slot-read path this mirrors),
-  Blob bounds.
+  Blob bounds, `XFL` (8 BE bytes ↔ `raw_bits`, `XFL!(1)`'s
+  `0x54838D7EA4C68000` → `54 83 8D 7E A4 C6 80 00`; zero ↔ eight `0x00`;
+  7 or 9 bytes → `TooSmall`).
 - testenv: seed `Otxn::param` with encoded names/values; absence and
   wrong-length paths assert the generated rollback (message + index code).
 - Parity probe + WCE/size/nesting before/after numbers, measured during

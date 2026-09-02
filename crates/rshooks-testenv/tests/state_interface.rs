@@ -9,6 +9,7 @@
 
 use rshooks::exit::HookResult;
 use rshooks::types::AccountId;
+use rshooks::xfl::XFL;
 use rshooks::{accept, hooks};
 use rshooks_testenv::prelude::*;
 
@@ -25,6 +26,10 @@ pub struct Treasury {
     /// Singleton declaration — no key fields.
     #[state_interface(id = 1, value(paused: u8))]
     paused: State<Config>,
+
+    /// Singleton declaration with an `XFL` value field (XAS-010d `0x80`).
+    #[state_interface(id = 2, value(rate: XFL))]
+    rate: State<Rate>,
 }
 
 #[hooks]
@@ -37,6 +42,9 @@ impl Treasury {
             updated: 12345,
         });
         let _ = self.state.paused.set(&Config { paused: 1 });
+        let _ = self.state.rate.set(&Rate {
+            rate: XFL::from_raw_bits(0x54838D7EA4C68000u64 as i64),
+        });
         accept!(b"treasury", 0)
     }
 }
@@ -69,6 +77,18 @@ const SINGLETON_KEY: [u8; 32] = {
     key[0] = 0x01;
     key
 };
+
+/// The `rate` singleton declaration's key: State ID `0x02` followed by 31
+/// zero bytes.
+const RATE_KEY: [u8; 32] = {
+    let mut key = [0u8; 32];
+    key[0] = 0x02;
+    key
+};
+
+/// `XFL!(1)`'s raw bits (`0x54838D7EA4C68000`), big-endian — the value
+/// [`Treasury::main`] writes to the `rate` field.
+const RATE_VALUE: [u8; 8] = [0x54, 0x83, 0x8D, 0x7E, 0xA4, 0xC6, 0x80, 0x00];
 
 fn env() -> TestEnv {
     TestEnv::new()
@@ -115,6 +135,18 @@ fn typed_accessors_round_trip_through_the_generated_value_structs() {
         .state_typed::<Config>(&SINGLETON_KEY)
         .expect("entry present");
     assert_eq!(config.paused, 1);
+}
+
+#[test]
+fn xfl_field_stores_big_endian_raw_bits_and_typed_get_round_trips() {
+    let e = env();
+    let exit = e.invoke::<Treasury>(0);
+    assert_eq!(exit.exit, ExitType::Accept, "{exit:?}");
+
+    assert_eq!(e.state(&RATE_KEY), Some(RATE_VALUE.to_vec()));
+
+    let rate = e.state_typed::<Rate>(&RATE_KEY).expect("entry present");
+    assert_eq!(rate.rate.raw_bits(), 0x54838D7EA4C68000u64 as i64);
 }
 
 #[test]

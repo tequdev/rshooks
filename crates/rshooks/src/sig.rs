@@ -9,7 +9,7 @@
 //! HookParameterName = 0x5F 0x50 0x53        ; "_PS" interface identifier
 //!                   | 0x00                  ; version
 //!                   | index    (1 byte, 0x00..=0x0F, raw binary)
-//!                   | type     (1 byte, an STI_* code, raw binary)
+//!                   | type     (1 byte, an XAS-010d type code, raw binary)
 //!                   | name_len (1 byte, 0x01..=0x10 = name.len())
 //!                   | name     (1..=16 bytes, [A-Za-z][A-Za-z0-9]*)
 //! ```
@@ -20,7 +20,7 @@
 //!
 //! Two independent layers:
 //!
-//! - [`SigParamType`]: pairs a Rust type with its `STI_*` type byte and
+//! - [`SigParamType`]: pairs a Rust type with its XAS-010d type code and
 //!   invocation-value decode, mirroring [`crate::convert::FixedRead`]'s
 //!   closure-based shape but decoding integers **big-endian** (see "Why
 //!   big-endian" below), unlike this crate's hook-private little-endian
@@ -76,7 +76,7 @@ use crate::types::{ACC_ID_LEN, AccountId, CURRENCY_CODE_LEN, CurrencyCode, Hash,
 /// `0x5F 0x50 0x53 | 0x00 | index | type | name_len` is 7 bytes.
 const FIXED_LEN: usize = 7;
 
-/// The twelve `STI_*` type bytes [`SigParamType`] has an impl for — see
+/// The XAS-010d type codes [`SigParamType`] has an impl for — see
 /// `docs/PARAM_SIGNATURE_DESIGN.md` §2's table.
 #[inline(always)]
 const fn is_supported_type_byte(b: u8) -> bool {
@@ -94,6 +94,7 @@ const fn is_supported_type_byte(b: u8) -> bool {
         | 0x11 // STI_UINT160 ([u8; 20])
         | 0x18 // STI_ISSUE (IssueBytes)
         | 0x1A // STI_CURRENCY (CurrencyCode)
+        | 0x80 // XFL (rshooks::xfl::XFL)
     )
 }
 
@@ -107,7 +108,7 @@ const fn is_supported_type_byte(b: u8) -> bool {
 /// a silently-malformed name:
 ///
 /// - `index <= 0x0F`
-/// - `type_byte` is one of the twelve codes [`SigParamType`] implements
+/// - `type_byte` is a code [`SigParamType`] implements
 /// - `name` is 1..=16 bytes matching `[A-Za-z][A-Za-z0-9]*`
 /// - `N == 7 + name.len()`
 ///
@@ -151,7 +152,7 @@ pub const fn sig_param_name<const N: usize>(index: u8, type_byte: u8, name: &[u8
     assert!(index <= 0x0F, "rshooks::sig: index must be in 0x00..=0x0F");
     assert!(
         is_supported_type_byte(type_byte),
-        "rshooks::sig: unsupported type byte (must be one of the 12 SigParamType codes)"
+        "rshooks::sig: unsupported type byte (must be a SigParamType code)"
     );
     assert!(
         is_valid_name(name),
@@ -215,16 +216,17 @@ macro_rules! sig_name {
 // ---------------------------------------------------------------------------
 
 /// A Rust type readable as one signature parameter's invocation value —
-/// pairs an `STI_*` wire type byte with a decode of the type-delimited
-/// payload the host hands back (already length-delimited by
-/// `otxn_param`/`hook_param`'s own "bytes written" return, exactly like
+/// pairs an XAS-010d type code with a decode of the type-delimited payload
+/// the host hands back (already length-delimited by `otxn_param`/
+/// `hook_param`'s own "bytes written" return, exactly like
 /// [`crate::convert::FixedRead::read_exact`]'s `read` closure).
 ///
 /// See the module doc's "Why big-endian" section for why this trait's
 /// integer impls decode big-endian, unlike [`crate::convert::FromBytes`].
 pub trait SigParamType: Sized {
-    /// The `STI_*` type byte advertised in the declared name (see
-    /// `docs/PARAM_SIGNATURE_DESIGN.md` §2's table).
+    /// The XAS-010d type code advertised in the declared name (see
+    /// `docs/PARAM_SIGNATURE_DESIGN.md` §2's table): an `STI_*` code or
+    /// `0x80` `XFL`.
     const TYPE_BYTE: u8;
 
     /// Decodes the invocation value payload. `read` is handed a buffer and
@@ -313,6 +315,33 @@ fixed_read_sig!(Hash, 0x05); // STI_UINT256
 fixed_read_sig!(AccountId, 0x08); // STI_ACCOUNT
 fixed_read_sig!([u8; 20], 0x11); // STI_UINT160
 fixed_read_sig!(CurrencyCode, 0x1A); // STI_CURRENCY
+
+impl SigParamType for crate::xfl::XFL {
+    /// XAS-010d `XFL` — big-endian raw `int64` bit pattern, no validity
+    /// check.
+    ///
+    /// Deliberately not built on `fixed_read_sig!`/[`FixedRead`]: that impl
+    /// is this crate's own hook-private little-endian state convention, the
+    /// wrong byte order for this protocol-facing boundary (see the module
+    /// doc's "Why big-endian" section).
+    const TYPE_BYTE: u8 = 0x80;
+
+    #[inline(always)]
+    fn read_sig(read: impl FnOnce(&mut [u8]) -> Result<usize>) -> Result<Self> {
+        let mut storage = core::mem::MaybeUninit::<[u8; 8]>::uninit();
+        // SAFETY: only read via `assume_init` below, once `written == 8`
+        // proves `read` wrote every byte.
+        let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
+        let written = read(buf)?;
+        if written == 8 {
+            // SAFETY: `written == 8` proves `read` wrote every byte.
+            let bytes: [u8; 8] = unsafe { storage.assume_init() };
+            Ok(crate::xfl::XFL::from_raw_bits(i64::from_be_bytes(bytes)))
+        } else {
+            Err(HookError::TooSmall)
+        }
+    }
+}
 
 impl SigParamType for AmountBytes {
     /// `STI_AMOUNT`.
@@ -848,6 +877,45 @@ mod tests {
             Ok(20)
         });
         assert_eq!(v, Ok(CurrencyCode([4u8; 20])));
+    }
+
+    #[test]
+    fn xfl_decodes_big_endian_worked_example_one() {
+        let v: Result<crate::xfl::XFL> = crate::xfl::XFL::read_sig(|buf| {
+            buf.copy_from_slice(&[0x54, 0x83, 0x8D, 0x7E, 0xA4, 0xC6, 0x80, 0x00]);
+            Ok(8)
+        });
+        assert_eq!(
+            v.map(crate::xfl::XFL::raw_bits),
+            Ok(0x54838D7EA4C68000u64 as i64)
+        );
+    }
+
+    #[test]
+    fn xfl_decodes_zero() {
+        let v: Result<crate::xfl::XFL> = crate::xfl::XFL::read_sig(|buf| {
+            buf.copy_from_slice(&[0u8; 8]);
+            Ok(8)
+        });
+        assert_eq!(v.map(crate::xfl::XFL::raw_bits), Ok(0));
+    }
+
+    #[test]
+    fn xfl_seven_bytes_is_too_small() {
+        let v: Result<crate::xfl::XFL> = crate::xfl::XFL::read_sig(|_buf| Ok(7));
+        assert_eq!(v, Err(HookError::TooSmall));
+    }
+
+    #[test]
+    fn xfl_nine_bytes_is_too_small() {
+        let v: Result<crate::xfl::XFL> = crate::xfl::XFL::read_sig(|_buf| Ok(9));
+        assert_eq!(v, Err(HookError::TooSmall));
+    }
+
+    #[test]
+    fn xfl_read_error_propagates() {
+        let v: Result<crate::xfl::XFL> = crate::xfl::XFL::read_sig(|_buf| Err(HookError::TooSmall));
+        assert_eq!(v, Err(HookError::TooSmall));
     }
 
     #[test]

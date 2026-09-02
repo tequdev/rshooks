@@ -14,6 +14,7 @@
 use rshooks::exit::HookResult;
 use rshooks::sig_name;
 use rshooks::types::AccountId;
+use rshooks::xfl::XFL;
 use rshooks::{accept, hooks};
 use rshooks_testenv::prelude::*;
 
@@ -31,10 +32,19 @@ impl Increment {
         let _ = account;
         accept!(b"incremented", i64::from(count))
     }
+
+    /// `rate`(0): `XFL` (XAS-010d `0x80`) — a second entry on the same
+    /// chain struct (only one `#[hooks]` struct per crate is allowed, per
+    /// its `#[no_mangle]` link marker), rather than a second struct.
+    #[hook(1, on = [Invoke])]
+    fn set_rate(&self, rate: XFL) -> HookResult {
+        accept!(b"rate", rate.raw_bits())
+    }
 }
 
 const ACCOUNT_NAME: [u8; 14] = sig_name!(0, AccountId, b"account");
 const COUNT_NAME: [u8; 12] = sig_name!(1, u16, b"count");
+const RATE_NAME: [u8; 11] = sig_name!(0, XFL, b"rate");
 
 const SENDER: [u8; 20] = [9u8; 20];
 const TARGET_ACCOUNT: [u8; 20] = [7u8; 20];
@@ -101,4 +111,23 @@ fn wrong_length_account_value_rolls_back_with_index_zero() {
     assert_eq!(exit.exit, ExitType::Rollback, "{exit:?}");
     assert_eq!(exit.code, 0);
     assert_eq!(exit.msg, b"rshooks: bad sig param 'account'");
+}
+
+#[test]
+fn xfl_param_decodes_and_reaches_the_body_as_the_accept_code() {
+    let env = env_with_params(&[(&RATE_NAME, &0x54838D7EA4C68000u64.to_be_bytes())]);
+    let exit = env.invoke::<Increment>(1);
+    assert_eq!(exit.exit, ExitType::Accept, "{exit:?}");
+    assert_eq!(exit.code, 0x54838D7EA4C68000u64 as i64);
+    assert_eq!(exit.msg, b"rate");
+}
+
+#[test]
+fn xfl_param_wrong_length_rolls_back_with_its_own_index_as_the_code() {
+    // `rate` is present but only 7 bytes (it decodes as `XFL`, 8 bytes BE).
+    let env = env_with_params(&[(&RATE_NAME, &0x54838D7EA4C68000u64.to_be_bytes()[..7])]);
+    let exit = env.invoke::<Increment>(1);
+    assert_eq!(exit.exit, ExitType::Rollback, "{exit:?}");
+    assert_eq!(exit.code, 0);
+    assert_eq!(exit.msg, b"rshooks: bad sig param 'rate'");
 }

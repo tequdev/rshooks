@@ -1,4 +1,4 @@
-error: #[hooks]: unsupported signature parameter type — supported types are u8, u16, u32, u64, [u8; 16], [u8; 32], Hash, AccountId, [u8; 20], CurrencyCode, AmountBytes, IssueBytes, Blob<N> (write the type as a bare name — a path-qualified or aliased spelling is not resolved)
+error: #[hooks]: unsupported signature parameter type — supported types are u8, u16, u32, u64, [u8; 16], [u8; 32], Hash, AccountId, [u8; 20], CurrencyCode, XFL, AmountBytes, IssueBytes, Blob<N> (write the type as a bare name — a path-qualified or aliased spelling is not resolved)
   --> tests/ui/sig/fail/hooks_sig_unsupported_type.rs:11:1
    |
 11 | #[hooks]
