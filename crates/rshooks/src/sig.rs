@@ -76,7 +76,7 @@ use crate::types::{ACC_ID_LEN, AccountId, CURRENCY_CODE_LEN, CurrencyCode, Hash,
 /// `0x5F 0x50 0x53 | 0x00 | index | type | name_len` is 7 bytes.
 const FIXED_LEN: usize = 7;
 
-/// The thirteen XAS-010d type codes [`SigParamType`] has an impl for — see
+/// The XAS-010d type codes [`SigParamType`] has an impl for — see
 /// `docs/PARAM_SIGNATURE_DESIGN.md` §2's table.
 #[inline(always)]
 const fn is_supported_type_byte(b: u8) -> bool {
@@ -108,7 +108,7 @@ const fn is_supported_type_byte(b: u8) -> bool {
 /// a silently-malformed name:
 ///
 /// - `index <= 0x0F`
-/// - `type_byte` is one of the thirteen codes [`SigParamType`] implements
+/// - `type_byte` is a code [`SigParamType`] implements
 /// - `name` is 1..=16 bytes matching `[A-Za-z][A-Za-z0-9]*`
 /// - `N == 7 + name.len()`
 ///
@@ -152,7 +152,7 @@ pub const fn sig_param_name<const N: usize>(index: u8, type_byte: u8, name: &[u8
     assert!(index <= 0x0F, "rshooks::sig: index must be in 0x00..=0x0F");
     assert!(
         is_supported_type_byte(type_byte),
-        "rshooks::sig: unsupported type byte (must be one of the 13 SigParamType codes)"
+        "rshooks::sig: unsupported type byte (must be a SigParamType code)"
     );
     assert!(
         is_valid_name(name),

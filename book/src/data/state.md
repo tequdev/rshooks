@@ -422,8 +422,8 @@ Template](../build/metadata.md)).
 
 ### Supported types
 
-Version 0 of the interface supports only fixed-width types — the same ten
-rows the signature-parameter interface's own table draws from, minus the
+Version 0 of the interface supports only fixed-width types — the rows the
+signature-parameter interface's own table draws from, minus the
 variable-width ones (`AmountBytes`, `Blob<N>`, `IssueBytes`) that interface
 supports and this one does not:
 
