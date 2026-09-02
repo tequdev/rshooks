@@ -19,6 +19,7 @@ members = [
     "17_sto-writer",
     "18_typed-views",
     "19_param-signature",
+    "20_state-interface",
     "80_governance",
 ]
 

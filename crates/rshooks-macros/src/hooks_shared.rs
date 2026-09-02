@@ -322,6 +322,48 @@ pub(crate) fn parse_byte_string_value(
     Ok((tt, decoded_len))
 }
 
+/// Whether `name` matches the interface drafts' shared display/field-name
+/// charset: `[A-Za-z][A-Za-z0-9]*`, 1..=16 bytes — the macro-time twin of
+/// the `rshooks` crate's shared `is_valid_name` const fn
+/// (`crates/rshooks/src/interface_name.rs`). Both interface drafts
+/// (`docs/PARAM_SIGNATURE_DESIGN.md` and `docs/STATE_INTERFACE_DESIGN.md`)
+/// define this same rule for a declared name/field name.
+pub(crate) fn is_valid_interface_name(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    if bytes.is_empty() || bytes.len() > 16 {
+        return false;
+    }
+    bytes.iter().enumerate().all(|(i, &b)| {
+        if i == 0 {
+            b.is_ascii_alphabetic()
+        } else {
+            b.is_ascii_alphanumeric()
+        }
+    })
+}
+
+/// Classifies a whitespace-stripped, flattened type spelling into its
+/// `(STI_* type byte, encoded width)` pair, for the fixed-width type subset
+/// both interface drafts share (`docs/PARAM_SIGNATURE_DESIGN.md` §2 and
+/// `docs/STATE_INTERFACE_DESIGN.md` §1.5). Variable-width types
+/// (`AmountBytes`/`IssueBytes`/`Blob<N>`) are outside this table — the
+/// Signature Interface, the only draft that supports them, classifies those
+/// itself.
+pub(crate) fn classify_fixed_sti_type_text(flat: &str) -> Option<(u8, usize)> {
+    match flat {
+        "u8" => Some((0x10, 1)),                // STI_UINT8
+        "u16" => Some((0x01, 2)),               // STI_UINT16
+        "u32" => Some((0x02, 4)),               // STI_UINT32
+        "u64" => Some((0x03, 8)),               // STI_UINT64
+        "[u8;16]" => Some((0x04, 16)),          // STI_UINT128
+        "[u8;32]" | "Hash" => Some((0x05, 32)), // STI_UINT256
+        "AccountId" => Some((0x08, 20)),        // STI_ACCOUNT
+        "[u8;20]" => Some((0x11, 20)),          // STI_UINT160
+        "CurrencyCode" => Some((0x1A, 20)),     // STI_CURRENCY
+        _ => None,
+    }
+}
+
 /// Splits a token slice on top-level commas — i.e. commas not nested inside
 /// a [`proc_macro::Group`] or a manually-tracked `< .. >` pair. Used to
 /// split a generic-argument list (`V,` / `V`) and, in `hooks_impl`, a

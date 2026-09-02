@@ -159,6 +159,7 @@ pub fn run(args: &ChainBuildArgs) -> Result<()> {
         .collect();
     let template_bytes = sethook_template::build_template_json(
         &template_inputs,
+        &discovery_carriers.chain.decls.state_interface,
         args.account.as_deref(),
         args.namespace.as_deref(),
         args.override_flag,

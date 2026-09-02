@@ -33,6 +33,8 @@ use crate::hooks_shared::{
     AttrEntry, is_punct, parse_attr_entries, parse_balanced_angle, parse_byte_string_value,
     parse_string_value, split_top_level_commas, step_angle_depth, to_upper_camel,
 };
+#[cfg(feature = "unstable-state-interface")]
+use crate::hooks_shared::{classify_fixed_sti_type_text, is_valid_interface_name};
 use crate::shape::tokens_to_string;
 use crate::{err, sha256};
 
@@ -133,6 +135,35 @@ enum FieldDecl {
         param_kind: ParamKind,
         spec: ParamSpecDecl,
     },
+    /// `#[state_interface(id = .., key(..), value(..))]` — gated behind the
+    /// `unstable-state-interface` feature; see
+    /// `docs/STATE_INTERFACE_DESIGN.md`. Lives in the same `State`
+    /// namespace as an ordinary `#[state]` field. Never constructed when
+    /// the feature is off (`parse_state_interface_decl`, its only
+    /// constructor, is itself feature-gated) — `allow(dead_code)` in that
+    /// configuration instead of contorting the feature-gate rejection into
+    /// an always-taken-when-off `if`, the way `hooks_impl.rs`'s
+    /// `SIG_FEATURE_GATE_MSG` check does, since there is no comparable
+    /// data-dependent condition here to hang that `if` on.
+    #[cfg_attr(not(feature = "unstable-state-interface"), allow(dead_code))]
+    StateInterface {
+        id: u8,
+        id_span: Span,
+        key_fields: Vec<SiFieldSpec>,
+        value_fields: Vec<SiFieldSpec>,
+    },
+}
+
+/// One `name: Type` entry in a `#[state_interface(..)]` `key(..)`/`value(..)`
+/// list, already classified against the version-0 fixed-width type table
+/// (`docs/STATE_INTERFACE_DESIGN.md` §1.5).
+struct SiFieldSpec {
+    name: String,
+    /// The type token(s) exactly as written, for splicing into the
+    /// generated value struct's field and the marker's key-encoding code.
+    ty_tokens: Vec<TokenTree>,
+    type_byte: u8,
+    width: usize,
 }
 
 /// The three per-kind namespaces a declared field is grouped into on the
@@ -182,7 +213,7 @@ impl Namespace {
 impl FieldDecl {
     fn namespace(&self) -> Namespace {
         match self {
-            FieldDecl::State { .. } => Namespace::State,
+            FieldDecl::State { .. } | FieldDecl::StateInterface { .. } => Namespace::State,
             FieldDecl::Param {
                 param_kind: ParamKind::HookParam,
                 ..
@@ -404,14 +435,14 @@ fn parse_named_fields(stream: TokenStream) -> Result<Vec<ParsedField>, TokenStre
                 Some(TokenTree::Ident(id))
                     if matches!(
                         id.to_string().as_str(),
-                        "state" | "hook_param" | "otxn_param"
+                        "state" | "hook_param" | "otxn_param" | "state_interface"
                     ) =>
                 {
                     if decl_attr.is_some() {
                         return Err(err(
                             id.span(),
                             "#[hooks]: a field must carry exactly one of `#[state]`, \
-                             `#[hook_param]`, `#[otxn_param]`",
+                             `#[hook_param]`, `#[otxn_param]`, `#[state_interface]`",
                         ));
                     }
                     let args = match inner.get(1) {
@@ -430,6 +461,7 @@ fn parse_named_fields(stream: TokenStream) -> Result<Vec<ParsedField>, TokenStre
                     let kind: &'static str = match id.to_string().as_str() {
                         "state" => "state",
                         "hook_param" => "hook_param",
+                        "state_interface" => "state_interface",
                         _ => "otxn_param",
                     };
                     decl_attr = Some((kind, TokenTree::Ident(id.clone()), args));
@@ -502,12 +534,25 @@ fn parse_named_fields(stream: TokenStream) -> Result<Vec<ParsedField>, TokenStre
             return Err(err(
                 field_name.span(),
                 "#[hooks]: every chain-struct field must carry exactly one of \
-                 `#[state(..)]`, `#[hook_param(..)]`, `#[otxn_param(..)]`",
+                 `#[state(..)]`, `#[hook_param(..)]`, `#[otxn_param(..)]`, \
+                 `#[state_interface(..)]`",
             ));
         };
 
         let (wrapper, value_ty) = parse_field_type(&ty_tokens, kind, &field_name)?;
+        // `parse_field_decl` first, so its feature-gate rejection (kind ==
+        // "state_interface" with `unstable-state-interface` off) wins over
+        // this shape check — same gate-ordering rule the sig interface
+        // follows for `#[cbak(..)]` extra arguments (its own unconditional
+        // rejection is checked first, the feature gate second).
         let decl = parse_field_decl(kind, &args, &attr_ident, wrapper)?;
+        if kind == "state_interface" && !matches!(value_ty.as_slice(), [TokenTree::Ident(_)]) {
+            return Err(err(
+                field_name.span(),
+                "#[state_interface]: the field type must be `State<VName>` where `VName` is a \
+                 bare identifier — the macro generates `struct VName` from the `value(..)` schema",
+            ));
+        }
 
         fields.push(ParsedField {
             other_attrs,
@@ -531,7 +576,7 @@ fn parse_field_type<'a>(
     field_name: &Ident,
 ) -> Result<(&'a str, Vec<TokenTree>), TokenStream> {
     let expected_wrapper = match kind {
-        "state" => "State",
+        "state" | "state_interface" => "State",
         "hook_param" => "HookParam",
         _ => "OtxnParam",
     };
@@ -570,6 +615,7 @@ fn parse_field_type<'a>(
                 attr = match kind {
                     "state" => "state",
                     "hook_param" => "hook_param",
+                    "state_interface" => "state_interface",
                     _ => "otxn_param",
                 },
                 found = wrapper_id,
@@ -620,7 +666,8 @@ fn bad_field_type(field_name: &Ident) -> TokenStream {
     )
 }
 
-/// Parses a `#[state(..)]`/`#[hook_param(..)]`/`#[otxn_param(..)]`
+/// Parses a
+/// `#[state(..)]`/`#[hook_param(..)]`/`#[otxn_param(..)]`/`#[state_interface(..)]`
 /// argument list into a [`FieldDecl`].
 fn parse_field_decl(
     kind: &str,
@@ -628,6 +675,21 @@ fn parse_field_decl(
     attr_ident: &TokenTree,
     _wrapper: &str,
 ) -> Result<FieldDecl, TokenStream> {
+    // `#[state_interface(id = .., key(..), value(..))]`'s `key(..)`/
+    // `value(..)` arguments are groups, not `key = value` pairs, so it
+    // cannot share `parse_attr_entries`'s flat `key = value` grammar —
+    // branch out before that call rather than after.
+    if kind == "state_interface" {
+        #[cfg(not(feature = "unstable-state-interface"))]
+        {
+            return Err(err(attr_ident.span(), SI_FEATURE_GATE_MSG));
+        }
+        #[cfg(feature = "unstable-state-interface")]
+        {
+            return parse_state_interface_decl(args, attr_ident);
+        }
+    }
+
     let mac = &format!("#[{kind}]");
     let entries = parse_attr_entries(args, mac)?;
 
@@ -822,6 +884,334 @@ fn parse_field_decl(
     })
 }
 
+// ---------------------------------------------------------------------
+// `#[state_interface(id = .., key(..), value(..))]` — see
+// `docs/STATE_INTERFACE_DESIGN.md`. Gated behind the
+// `unstable-state-interface` feature; the feature-off rejection lives in
+// `parse_field_decl`'s `kind == "state_interface"` branch, mirroring
+// `hooks_impl.rs`'s `SIG_FEATURE_GATE_MSG` pattern for signature
+// parameters.
+// ---------------------------------------------------------------------
+
+/// Diagnostic for `#[state_interface(..)]` when the `unstable-state-interface`
+/// feature is off.
+#[cfg(not(feature = "unstable-state-interface"))]
+const SI_FEATURE_GATE_MSG: &str = "#[hooks]: `#[state_interface(..)]` declares Hook State \
+                                    Interface fields (draft spec) — enable rshooks's \
+                                    `unstable-state-interface` feature to use them (the \
+                                    interface may change while the spec is a draft)";
+
+/// The diagnostic listing every supported `#[state_interface]` field type —
+/// shared by [`classify_si_type`]'s only call site so the list can't drift
+/// out of sync with the match arms below it.
+#[cfg(feature = "unstable-state-interface")]
+const SI_TYPE_MSG: &str = "#[state_interface]: unsupported field type — supported types are u8, \
+                            u16, u32, u64, [u8; 16], [u8; 32], Hash, AccountId, [u8; 20], \
+                            CurrencyCode (write the type as a bare name — a path-qualified or \
+                            aliased spelling is not resolved)";
+
+/// The interface draft's field-name diagnostic — shared by every rejection
+/// [`is_valid_interface_name`] backs.
+#[cfg(feature = "unstable-state-interface")]
+const SI_NAME_MSG: &str = "#[state_interface]: a key/value field name must be 1..=16 ASCII \
+                            bytes matching [A-Za-z][A-Za-z0-9]* (the Hook State Interface's \
+                            field-name rule) — rename the field";
+
+/// Maximum total encoded width, in bytes, of a state interface key's field
+/// payload (`docs/STATE_INTERFACE_DESIGN.md` §1.6) — the 32-byte key minus
+/// the 1-byte State ID prefix.
+#[cfg(feature = "unstable-state-interface")]
+const SI_MAX_KEY_PAYLOAD: usize = 31;
+
+/// The protocol's `HookParameterValue` byte-length limit — xahaud
+/// `include/xrpl/hook/Enum.h`'s `maxHookParameterValueSize()`.
+#[cfg(feature = "unstable-state-interface")]
+const SI_MAX_VALUE_LEN: usize = 256;
+
+/// Classifies a `#[state_interface]` key/value field's type tokens into its
+/// `(STI_* type byte, byte width)` pair (`docs/STATE_INTERFACE_DESIGN.md`
+/// §1.5's table), matching on the token *shape* (a whitespace-normalized
+/// textual comparison). Does not resolve type aliases: an aliased type is
+/// caught later by the monomorphized `const` assert the generated code
+/// emits alongside these values.
+#[cfg(feature = "unstable-state-interface")]
+fn classify_si_type(tokens: &[TokenTree]) -> Option<(u8, usize)> {
+    classify_fixed_sti_type_text(&tokens_to_string(tokens).replace(' ', ""))
+}
+
+/// Parses one `key(..)`/`value(..)` group's inner `name: Type, ..` list.
+/// `list_kind` (`"key"`/`"value"`) only feeds diagnostics.
+#[cfg(feature = "unstable-state-interface")]
+/// Returns each field paired with its name identifier's own span — kept
+/// alongside, rather than inside, [`SiFieldSpec`] (which stays
+/// `proc_macro`-`Span`-free so it can be built directly in unit tests,
+/// mirroring [`ChainFieldJson`]'s own "kept `TokenTree`-free where testable"
+/// boundary) — callers that need to blame a size-limit diagnostic on a
+/// specific field (`parse_state_interface_decl`'s key-payload/name-length
+/// checks) use the span; callers that don't (`value(..)`) just discard it.
+fn parse_si_field_list(
+    tokens: &[TokenTree],
+    list_kind: &'static str,
+) -> Result<Vec<(SiFieldSpec, Span)>, TokenStream> {
+    let groups = split_top_level_commas(tokens);
+    let mut out = Vec::with_capacity(groups.len());
+    let mut seen_names: Vec<String> = Vec::new();
+
+    for group in &groups {
+        let (name_id, after_name) = match group.split_first() {
+            Some((TokenTree::Ident(id), rest)) => (id.clone(), rest),
+            Some((other, _)) => {
+                return Err(err(
+                    other.span(),
+                    &format!(
+                        "#[state_interface]: expected a {list_kind} field here, e.g. `amount: u64`"
+                    ),
+                ));
+            }
+            None => {
+                return Err(err(
+                    Span::call_site(),
+                    &format!("#[state_interface]: expected a {list_kind} field"),
+                ));
+            }
+        };
+        let after_colon = match after_name.split_first() {
+            Some((tt, after)) if is_punct(tt, ':') => after,
+            _ => {
+                return Err(err(
+                    name_id.span(),
+                    "#[state_interface]: expected `: Type` after the field name",
+                ));
+            }
+        };
+        if after_colon.is_empty() {
+            return Err(err(
+                name_id.span(),
+                "#[state_interface]: expected a type after `:`",
+            ));
+        }
+
+        let name = name_id.to_string();
+        if !is_valid_interface_name(&name) {
+            return Err(err(name_id.span(), SI_NAME_MSG));
+        }
+        if seen_names.iter().any(|n| n == &name) {
+            return Err(err(
+                name_id.span(),
+                &format!("#[state_interface]: duplicate {list_kind} field name `{name}`"),
+            ));
+        }
+        seen_names.push(name.clone());
+
+        let Some((type_byte, width)) = classify_si_type(after_colon) else {
+            let span = after_colon.first().map_or(name_id.span(), TokenTree::span);
+            return Err(err(span, SI_TYPE_MSG));
+        };
+
+        out.push((
+            SiFieldSpec {
+                name,
+                ty_tokens: after_colon.to_vec(),
+                type_byte,
+                width,
+            },
+            name_id.span(),
+        ));
+    }
+    Ok(out)
+}
+
+/// Parses `id = <0..=255>`'s value tokens.
+#[cfg(feature = "unstable-state-interface")]
+fn parse_si_id(tokens: &[TokenTree], span: Span) -> Result<u8, TokenStream> {
+    let bad = || {
+        err(
+            span,
+            "#[state_interface]: `id` must be an integer literal 0..=255",
+        )
+    };
+    let [TokenTree::Literal(lit)] = tokens else {
+        return Err(bad());
+    };
+    let mut stream = TokenStream::new();
+    stream.extend([TokenTree::Literal(lit.clone())]);
+    syn::parse::<syn::LitInt>(stream)
+        .ok()
+        .and_then(|l| l.base10_parse::<u8>().ok())
+        .ok_or_else(bad)
+}
+
+/// Parses a `#[state_interface(id = .., key(..), value(..))]` argument list
+/// into a [`FieldDecl::StateInterface`].
+#[cfg(feature = "unstable-state-interface")]
+fn parse_state_interface_decl(
+    args: &[TokenTree],
+    attr_ident: &TokenTree,
+) -> Result<FieldDecl, TokenStream> {
+    let groups = split_top_level_commas(args);
+
+    let mut id: Option<(u8, Span)> = None;
+    let mut key_fields: Vec<SiFieldSpec> = Vec::new();
+    // Parallel to `key_fields` — each field's own name span, so the
+    // key-payload/declared-name-length overflow checks below can blame the
+    // specific field that pushed the running total over the limit.
+    let mut key_field_spans: Vec<Span> = Vec::new();
+    let mut key_seen = false;
+    let mut value_fields: Vec<SiFieldSpec> = Vec::new();
+    let mut value_seen = false;
+
+    for group in &groups {
+        let Some((TokenTree::Ident(head), rest)) = group.split_first() else {
+            let span = group
+                .first()
+                .map_or_else(|| attr_ident.span(), TokenTree::span);
+            return Err(err(
+                span,
+                "#[state_interface]: expected `id = ..`, `key(..)` or `value(..)`",
+            ));
+        };
+        match head.to_string().as_str() {
+            "id" => {
+                if id.is_some() {
+                    return Err(err(head.span(), "#[state_interface]: duplicate `id`"));
+                }
+                let value_tokens = match rest.split_first() {
+                    Some((eq, after)) if is_punct(eq, '=') => after,
+                    _ => {
+                        return Err(err(
+                            head.span(),
+                            "#[state_interface]: expected `id = <0..=255>`",
+                        ));
+                    }
+                };
+                id = Some((parse_si_id(value_tokens, head.span())?, head.span()));
+            }
+            "key" => {
+                if key_seen {
+                    return Err(err(head.span(), "#[state_interface]: duplicate `key(..)`"));
+                }
+                key_seen = true;
+                let inner = match rest {
+                    [TokenTree::Group(g)] if g.delimiter() == Delimiter::Parenthesis => {
+                        g.stream().into_iter().collect::<Vec<_>>()
+                    }
+                    _ => {
+                        return Err(err(
+                            head.span(),
+                            "#[state_interface]: expected `key(name: Type, ..)`",
+                        ));
+                    }
+                };
+                (key_fields, key_field_spans) =
+                    parse_si_field_list(&inner, "key")?.into_iter().unzip();
+            }
+            "value" => {
+                if value_seen {
+                    return Err(err(
+                        head.span(),
+                        "#[state_interface]: duplicate `value(..)`",
+                    ));
+                }
+                value_seen = true;
+                let inner = match rest {
+                    [TokenTree::Group(g)] if g.delimiter() == Delimiter::Parenthesis => {
+                        g.stream().into_iter().collect::<Vec<_>>()
+                    }
+                    _ => {
+                        return Err(err(
+                            head.span(),
+                            "#[state_interface]: expected `value(name: Type, ..)`",
+                        ));
+                    }
+                };
+                value_fields = parse_si_field_list(&inner, "value")?
+                    .into_iter()
+                    .map(|(f, _)| f)
+                    .collect();
+            }
+            other => {
+                return Err(err(
+                    head.span(),
+                    &format!(
+                        "#[state_interface]: unknown argument `{other}` (expected `id`, `key` \
+                         or `value`)"
+                    ),
+                ));
+            }
+        }
+    }
+
+    let Some((id, id_span)) = id else {
+        return Err(err(
+            attr_ident.span(),
+            "#[state_interface]: missing required `id = <0..=255>`",
+        ));
+    };
+
+    if !value_seen || value_fields.is_empty() {
+        return Err(err(
+            attr_ident.span(),
+            "#[state_interface]: missing required `value(name: Type, ..)` (at least one value \
+             field)",
+        ));
+    }
+
+    // Both checks below blame the specific key field whose inclusion first
+    // pushed the running total over its limit (via `key_field_spans`,
+    // parallel to `key_fields`), not the `id = ..` argument — matching
+    // every other per-field diagnostic in this function.
+    let mut key_payload = 0usize;
+    for (f, &span) in key_fields.iter().zip(&key_field_spans) {
+        key_payload = key_payload.wrapping_add(f.width);
+        if key_payload > SI_MAX_KEY_PAYLOAD {
+            return Err(err(
+                span,
+                &format!(
+                    "#[state_interface]: key payload is {key_payload} bytes, exceeds the \
+                     {SI_MAX_KEY_PAYLOAD}-byte limit (the 32-byte key minus the 1-byte State ID)"
+                ),
+            ));
+        }
+    }
+
+    let mut name_total = 6usize;
+    for (f, &span) in key_fields.iter().zip(&key_field_spans) {
+        name_total = name_total.wrapping_add(2usize.wrapping_add(f.name.len()));
+        if name_total > 32 {
+            return Err(err(
+                span,
+                &format!(
+                    "#[state_interface]: the declared HookParameterName would be {name_total} \
+                     bytes, exceeds the protocol's 32-byte HookParameterName limit"
+                ),
+            ));
+        }
+    }
+
+    let value_total: usize = 1usize.wrapping_add(
+        value_fields
+            .iter()
+            .map(|f| 2usize.wrapping_add(f.name.len()))
+            .sum(),
+    );
+    if value_total > SI_MAX_VALUE_LEN {
+        return Err(err(
+            id_span,
+            &format!(
+                "#[state_interface]: the declared HookParameterValue would be {value_total} \
+                 bytes, exceeds the protocol's {SI_MAX_VALUE_LEN}-byte HookParameterValue limit"
+            ),
+        ));
+    }
+
+    Ok(FieldDecl::StateInterface {
+        id,
+        id_span,
+        key_fields,
+        value_fields,
+    })
+}
+
 /// Renders the complete expansion for an already-validated
 /// [`ParsedStruct`].
 fn generate(parsed: &ParsedStruct, description: Option<&str>) -> TokenStream {
@@ -833,6 +1223,25 @@ fn generate(parsed: &ParsedStruct, description: Option<&str>) -> TokenStream {
         StructBody::Unit => &[],
         StructBody::Named(fields) => fields,
     };
+
+    // State IDs must be unique across every `#[state_interface(..)]` field
+    // on this struct (`docs/STATE_INTERFACE_DESIGN.md` §1.3) — a
+    // cross-field rule, so it's checked here rather than at each field's
+    // own parse time.
+    let mut seen_si_ids: Vec<u8> = Vec::new();
+    for f in fields {
+        if let FieldDecl::StateInterface { id, id_span, .. } = &f.decl {
+            if seen_si_ids.contains(id) {
+                return err(
+                    *id_span,
+                    &format!(
+                        "#[state_interface]: duplicate State ID {id} (State IDs must be unique across every `#[state_interface(..)]` field on this struct)"
+                    ),
+                );
+            }
+            seen_si_ids.push(*id);
+        }
+    }
 
     let mut out = String::new();
 
@@ -939,7 +1348,7 @@ fn generate(parsed: &ParsedStruct, description: Option<&str>) -> TokenStream {
             ));
             for f in ns_fields {
                 let wrapper = match &f.decl {
-                    FieldDecl::State { .. } => "State",
+                    FieldDecl::State { .. } | FieldDecl::StateInterface { .. } => "State",
                     FieldDecl::Param { param_kind, .. } => param_kind.wrapper(),
                 };
                 out.push_str(&format!(
@@ -1024,7 +1433,7 @@ fn assemble_named_body(
 /// The rewritten field type text: `::rshooks::decl::<Wrapper><V, __Marker>`.
 fn rewritten_field_type(struct_name: &str, field_index: usize, f: &ParsedField) -> String {
     let wrapper = match &f.decl {
-        FieldDecl::State { .. } => "State",
+        FieldDecl::State { .. } | FieldDecl::StateInterface { .. } => "State",
         FieldDecl::Param { param_kind, .. } => param_kind.wrapper(),
     };
     let marker = marker_name(struct_name, field_index, &f.name.to_string());
@@ -1188,9 +1597,242 @@ fn field_marker_and_impls(
                 ));
             }
         }
+        FieldDecl::StateInterface {
+            id,
+            key_fields,
+            value_fields,
+            ..
+        } => {
+            out.push_str(&state_interface_field_codegen(
+                &field_vis,
+                &marker,
+                &value_ty,
+                *id,
+                key_fields,
+                value_fields,
+            ));
+        }
     }
 
     out
+}
+
+/// The value struct, `SiFieldType` alias-drift const-asserts, and
+/// `StateSpec` impl for one `#[state_interface(..)]` field
+/// (`docs/STATE_INTERFACE_DESIGN.md` §3). `value_ty` is the bare
+/// user-chosen value-struct identifier (already validated as a single
+/// `Ident` by the caller).
+///
+/// Not itself feature-gated (unlike the `#[state_interface(..)]` parser
+/// above) — mirrors `hooks_impl.rs`'s `render_sig_param_prologue`: its only
+/// call site is an ordinary, unconditionally-compiled match arm on
+/// [`FieldDecl::StateInterface`], which the parser never constructs unless
+/// `unstable-state-interface` is on, so this is unreachable rather than
+/// unused when the feature is off.
+fn state_interface_field_codegen(
+    field_vis: &str,
+    marker: &str,
+    value_ty: &str,
+    id: u8,
+    key_fields: &[SiFieldSpec],
+    value_fields: &[SiFieldSpec],
+) -> String {
+    let mut out = String::new();
+
+    // --- the value struct: pub fields, `ToBytes`/`FromBytes`/`FixedRead`
+    // mirroring `#[derive(HookData)]`'s codegen shape, except every field
+    // is encoded via `si::SiFieldType` (big-endian ints, verbatim byte
+    // arrays) at macro-computed const offsets (docs/STATE_INTERFACE_DESIGN.md
+    // §3 item 1). Widths come from `classify_si_type`, so offsets are
+    // ordinary `usize` literals rather than an `<Ty as ToBytes>::MAX_LEN`
+    // const chain.
+    // `missing_docs` (workspace lint, denied) applies to every reachable
+    // item this macro emits, this struct and its fields included when
+    // `field_vis` makes them `pub` — so every one gets a real doc comment,
+    // not just the marker's `#[doc(hidden)]` escape.
+    out.push_str(&format!(
+        "/// Generated by `#[state_interface(id = {id}, ..)]`: the declared value \
+         schema `{value_schema}`.\n\
+         #[derive(Clone, Copy)]\n{field_vis} struct {value_ty} {{\n",
+        value_schema = si_field_list_display(value_fields),
+    ));
+    for f in value_fields {
+        out.push_str(&format!(
+            "/// `{name}: {ty}`.\n{field_vis} {name}: {ty},\n",
+            name = f.name,
+            ty = tokens_to_string(&f.ty_tokens),
+        ));
+    }
+    out.push_str("}\n");
+
+    let value_len: usize = value_fields.iter().map(|f| f.width).sum();
+    let value_offsets = field_offsets(0, value_fields);
+
+    let mut write_body = String::new();
+    let mut read_body = String::new();
+    for (f, (off, next)) in value_fields.iter().zip(&value_offsets) {
+        write_body.push_str(&format!(
+            "if let Some(__f) = __dst.get_mut({off}..{next}) {{ \
+             ::rshooks::si::SiFieldType::write_si(&self.{name}, __f); }}\n",
+            name = f.name,
+        ));
+        read_body.push_str(&format!(
+            "{name}: <{ty} as ::rshooks::si::SiFieldType>::read_si(__src.get({off}..{next}).unwrap_or(&[])),\n",
+            name = f.name,
+            ty = tokens_to_string(&f.ty_tokens),
+        ));
+    }
+
+    out.push_str(&format!(
+        "#[automatically_derived]\n\
+         impl ::rshooks::convert::ToBytes for {value_ty} {{\n\
+             const MAX_LEN: usize = {value_len}usize;\n\
+             #[inline(always)]\n\
+             fn write(&self, buf: &mut [u8]) -> usize {{\n\
+                 match buf.get_mut(..<Self as ::rshooks::convert::ToBytes>::MAX_LEN) {{\n\
+                     ::core::option::Option::Some(__dst) => {{\n\
+                         {write_body}\
+                         <Self as ::rshooks::convert::ToBytes>::MAX_LEN\n\
+                     }}\n\
+                     ::core::option::Option::None => 0,\n\
+                 }}\n\
+             }}\n\
+         }}\n\
+         #[automatically_derived]\n\
+         impl ::rshooks::convert::FromBytes for {value_ty} {{\n\
+             #[inline(always)]\n\
+             fn read(buf: &[u8]) -> ::rshooks::error::Result<Self> {{\n\
+                 let __src = buf.get(..<Self as ::rshooks::convert::ToBytes>::MAX_LEN)\n\
+                     .ok_or(::rshooks::error::HookError::TooSmall)?;\n\
+                 ::core::result::Result::Ok(Self {{\n\
+                     {read_body}\
+                 }})\n\
+             }}\n\
+         }}\n\
+         #[automatically_derived]\n\
+         impl ::rshooks::convert::FixedRead for {value_ty} {{\n\
+             #[inline(always)]\n\
+             fn read_exact(\n\
+                 read: impl FnOnce(&mut [u8]) -> ::rshooks::error::Result<usize>,\n\
+             ) -> ::rshooks::error::Result<Self> {{\n\
+                 let mut __buf = [0u8; <Self as ::rshooks::convert::ToBytes>::MAX_LEN];\n\
+                 let __written = read(&mut __buf)?;\n\
+                 if __written == <Self as ::rshooks::convert::ToBytes>::MAX_LEN {{\n\
+                     <Self as ::rshooks::convert::FromBytes>::read(&__buf)\n\
+                 }} else {{\n\
+                     ::core::result::Result::Err(::rshooks::error::HookError::TooSmall)\n\
+                 }}\n\
+             }}\n\
+         }}\n\
+         impl {value_ty} {{\n\
+             /// Total encoded length in bytes (`docs/STATE_INTERFACE_DESIGN.md` §1.7:\n\
+             /// fields concatenated in declaration order, no separators or length\n\
+             /// prefixes).\n\
+             pub const LEN: usize = <Self as ::rshooks::convert::ToBytes>::MAX_LEN;\n\
+         }}\n"
+    ));
+
+    // --- alias-drift const asserts (§3 item 3's "pinned against alias
+    // drift" rule) for every declared field, key and value alike.
+    out.push_str("const _: () = {\n");
+    for f in key_fields.iter().chain(value_fields.iter()) {
+        let ty = tokens_to_string(&f.ty_tokens);
+        out.push_str(&format!(
+            "assert!(<{ty} as ::rshooks::si::SiFieldType>::TYPE_BYTE == {byte}u8, \
+             \"rshooks: state_interface field '{name}' resolves to a different wire type than \
+             its declared type token (check for a type alias mismatch)\");\n\
+             assert!(<{ty} as ::rshooks::si::SiFieldType>::WIDTH == {width}usize, \
+             \"rshooks: state_interface field '{name}' resolves to a different width than its \
+             declared type token (check for a type alias mismatch)\");\n",
+            byte = f.type_byte,
+            width = f.width,
+            name = f.name,
+        ));
+    }
+    out.push_str("};\n");
+
+    // --- the marker's `StateSpec` impl.
+    let key_offsets = field_offsets(STATE_ID_PREFIX_LEN, key_fields);
+    let (key_args, args_pat, key_body) = match (key_fields.first(), key_fields.len()) {
+        (None, _) => ("()".to_string(), "_args", String::new()),
+        (Some(f), 1) => {
+            let (off, next) = key_offsets.first().copied().unwrap_or((0, 0));
+            (
+                tokens_to_string(&f.ty_tokens),
+                "args",
+                format!(
+                    "if let Some(__f) = __buf.get_mut({off}..{next}) {{ \
+                     ::rshooks::si::SiFieldType::write_si(args, __f); }}\n"
+                ),
+            )
+        }
+        (Some(_), _) => {
+            let tys: Vec<String> = key_fields
+                .iter()
+                .map(|f| tokens_to_string(&f.ty_tokens))
+                .collect();
+            let mut body = String::new();
+            for (i, (off, next)) in key_offsets.iter().enumerate() {
+                body.push_str(&format!(
+                    "if let Some(__f) = __buf.get_mut({off}..{next}) {{ \
+                     ::rshooks::si::SiFieldType::write_si(&args.{i}, __f); }}\n"
+                ));
+            }
+            (format!("({},)", tys.join(", ")), "args", body)
+        }
+    };
+
+    let with_key_method = if key_fields.is_empty() {
+        // 31 zero bytes: the 32-byte key minus the 1-byte State ID
+        // (`docs/STATE_INTERFACE_DESIGN.md` §1.6 — a singleton's key is
+        // `StateID || 31 zero bytes`).
+        let zeros = vec!["0u8"; 31].join(", ");
+        format!(
+            "#[inline(always)]\n\
+             fn with_key<__R>(_args: &Self::KeyArgs, f: impl ::core::ops::FnOnce(&::rshooks::state::EncodedStateKey) -> __R) -> __R {{\n\
+                 f(const {{ &::rshooks::state::EncodedStateKey::from_short(&[{id}u8, {zeros}]) }})\n\
+             }}\n"
+        )
+    } else {
+        String::new()
+    };
+
+    out.push_str(&format!(
+        "#[automatically_derived]\n\
+         impl ::rshooks::decl::StateSpec for {marker} {{\n\
+             type Value = {value_ty};\n\
+             type KeyArgs = {key_args};\n\
+             #[inline(always)]\n\
+             fn encode_key({args_pat}: &Self::KeyArgs) -> ::rshooks::state::EncodedStateKey {{\n\
+                 let mut __buf = [0u8; 32];\n\
+                 if let Some(__b) = __buf.get_mut(0) {{ *__b = {id}u8; }}\n\
+                 {key_body}\
+                 ::rshooks::state::EncodedStateKey::new(__buf, 32)\n\
+             }}\n\
+             {with_key_method}\
+         }}\n"
+    ));
+
+    out
+}
+
+/// Length in bytes of the state interface key's leading State ID byte
+/// (`docs/STATE_INTERFACE_DESIGN.md` §1.6) — the macro-time twin of
+/// `rshooks::si::STATE_ID_PREFIX_LEN`. Not feature-gated — see
+/// [`state_interface_field_codegen`]'s doc comment for why.
+const STATE_ID_PREFIX_LEN: usize = 1;
+
+/// Computes `(start, end)` byte offsets for a sequence of
+/// [`SiFieldSpec`]s, starting at `base`.
+fn field_offsets(base: usize, fields: &[SiFieldSpec]) -> Vec<(usize, usize)> {
+    let mut offsets = Vec::with_capacity(fields.len());
+    let mut cursor = base;
+    for f in fields {
+        let next = cursor.wrapping_add(f.width);
+        offsets.push((cursor, next));
+        cursor = next;
+    }
+    offsets
 }
 
 /// A `proc_macro`-free (plain-`String`) view of one field's chain-carrier
@@ -1219,6 +1861,60 @@ enum ChainFieldJson {
         /// default value, not merely its presence.
         default: Option<String>,
     },
+    /// `#[state_interface(id = .., key(..), value(..))]`
+    /// (`docs/STATE_INTERFACE_DESIGN.md` §5's `SiDecl`).
+    StateInterface {
+        field: String,
+        id: u8,
+        /// The declared `HookParameterName` bytes, uppercase hex.
+        name_hex: String,
+        /// The declared `HookParameterValue` bytes, uppercase hex.
+        value_hex: String,
+        /// Human-readable `(name: Type, ..)` display form of `key(..)`
+        /// (`"()"` for a singleton).
+        key: String,
+        /// Human-readable `(name: Type, ..)` display form of `value(..)`.
+        value: String,
+    },
+}
+
+/// Builds one `#[state_interface(..)]` declaration's `HookParameterName`
+/// bytes (`docs/STATE_INTERFACE_DESIGN.md` §1.3): `_SI` + version `0x00` +
+/// State ID + key field count + one `(type byte, name length, name)`
+/// descriptor per key field.
+fn si_declaration_name_bytes(id: u8, key_fields: &[SiFieldSpec]) -> Vec<u8> {
+    let mut out = vec![0x5Fu8, 0x53, 0x49, 0x00, id, key_fields.len() as u8];
+    for f in key_fields {
+        out.push(f.type_byte);
+        out.push(f.name.len() as u8);
+        out.extend_from_slice(f.name.as_bytes());
+    }
+    out
+}
+
+/// Builds one `#[state_interface(..)]` declaration's `HookParameterValue`
+/// bytes (`docs/STATE_INTERFACE_DESIGN.md` §1.4): value field count + one
+/// `(type byte, name length, name)` descriptor per value field. Distinct
+/// from the runtime `HookStateData` encoding (§1.7, no count prefix) —
+/// this is schema metadata, never written to a hook's own state.
+fn si_declaration_value_bytes(value_fields: &[SiFieldSpec]) -> Vec<u8> {
+    let mut out = vec![value_fields.len() as u8];
+    for f in value_fields {
+        out.push(f.type_byte);
+        out.push(f.name.len() as u8);
+        out.extend_from_slice(f.name.as_bytes());
+    }
+    out
+}
+
+/// Human-readable `(name: Type, ..)` display form of a key/value field
+/// list — `"()"` for an empty list (a singleton's `key(..)`).
+fn si_field_list_display(fields: &[SiFieldSpec]) -> String {
+    let parts: Vec<String> = fields
+        .iter()
+        .map(|f| format!("{}: {}", f.name, tokens_to_string(&f.ty_tokens)))
+        .collect();
+    format!("({})", parts.join(", "))
 }
 
 /// Converts one already-parsed field into its plain-`String` JSON view.
@@ -1255,6 +1951,19 @@ fn field_to_chain_json(f: &ParsedField) -> ChainFieldJson {
                 default: spec.default.as_ref().map(|expr| tokens_to_string(expr)),
             }
         }
+        FieldDecl::StateInterface {
+            id,
+            key_fields,
+            value_fields,
+            ..
+        } => ChainFieldJson::StateInterface {
+            field: field_name,
+            id: *id,
+            name_hex: hex_upper(&si_declaration_name_bytes(*id, key_fields)),
+            value_hex: hex_upper(&si_declaration_value_bytes(value_fields)),
+            key: si_field_list_display(key_fields),
+            value: si_field_list_display(value_fields),
+        },
     }
 }
 
@@ -1269,6 +1978,7 @@ fn encode_chain_json(
     let mut state = Vec::new();
     let mut hook_params = Vec::new();
     let mut otxn_params = Vec::new();
+    let mut state_interface = Vec::new();
 
     for entry in entries {
         match entry {
@@ -1316,6 +2026,23 @@ fn encode_chain_json(
                     ParamKind::OtxnParam => otxn_params.push(entry),
                 }
             }
+            ChainFieldJson::StateInterface {
+                field,
+                id,
+                name_hex,
+                value_hex,
+                key,
+                value,
+            } => {
+                let mut obj = serde_json::Map::new();
+                obj.insert("field".into(), field.clone().into());
+                obj.insert("id".into(), (*id).into());
+                obj.insert("name_hex".into(), name_hex.clone().into());
+                obj.insert("value_hex".into(), value_hex.clone().into());
+                obj.insert("key".into(), key.clone().into());
+                obj.insert("value".into(), value.clone().into());
+                state_interface.push(serde_json::Value::Object(obj));
+            }
         }
     }
 
@@ -1323,6 +2050,13 @@ fn encode_chain_json(
     decls.insert("state".into(), state.into());
     decls.insert("hook_params".into(), hook_params.into());
     decls.insert("otxn_params".into(), otxn_params.into());
+    // Byte-identity with a pre-`unstable-state-interface` build: only emit
+    // this key when non-empty, so a struct with no `#[state_interface]`
+    // fields carries the exact same carrier JSON (and therefore the exact
+    // same wasm) it always did.
+    if !state_interface.is_empty() {
+        decls.insert("state_interface".into(), state_interface.into());
+    }
 
     let mut object = serde_json::Map::new();
     object.insert("schema".into(), "rshooks-chain-v2".into());
@@ -1507,5 +2241,108 @@ mod tests {
         let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
         let param = &value["decls"]["otxn_params"][0];
         assert!(param["default"].is_null());
+    }
+
+    // --- `#[state_interface(..)]` (docs/STATE_INTERFACE_DESIGN.md) ---
+
+    // This module's own import of the shared `classify_fixed_sti_type_text`/
+    // `is_valid_interface_name` helpers (`crate::hooks_shared`) is
+    // `#[cfg(feature = "unstable-state-interface")]`-gated (their only
+    // caller here, `parse_state_interface_decl`, is too) — mirror that gate
+    // here rather than on the whole module, so these three tests still
+    // exist in both feature configurations at least as source, cfg'd out
+    // cleanly.
+    #[cfg(feature = "unstable-state-interface")]
+    #[test]
+    fn si_type_table_matches_the_design_docs_nine_rows() {
+        assert_eq!(classify_fixed_sti_type_text("u8"), Some((0x10, 1)));
+        assert_eq!(classify_fixed_sti_type_text("u16"), Some((0x01, 2)));
+        assert_eq!(classify_fixed_sti_type_text("u32"), Some((0x02, 4)));
+        assert_eq!(classify_fixed_sti_type_text("u64"), Some((0x03, 8)));
+        assert_eq!(classify_fixed_sti_type_text("[u8;16]"), Some((0x04, 16)));
+        assert_eq!(classify_fixed_sti_type_text("[u8;32]"), Some((0x05, 32)));
+        assert_eq!(classify_fixed_sti_type_text("Hash"), Some((0x05, 32)));
+        assert_eq!(classify_fixed_sti_type_text("AccountId"), Some((0x08, 20)));
+        assert_eq!(classify_fixed_sti_type_text("[u8;20]"), Some((0x11, 20)));
+        assert_eq!(
+            classify_fixed_sti_type_text("CurrencyCode"),
+            Some((0x1A, 20))
+        );
+    }
+
+    #[cfg(feature = "unstable-state-interface")]
+    #[test]
+    fn si_type_table_rejects_variable_width_and_unknown_types() {
+        // `AmountBytes`/`Blob<N>`/`IssueBytes` are in the *signature*
+        // parameter table but deliberately not this one (§1.5).
+        assert_eq!(classify_fixed_sti_type_text("AmountBytes"), None);
+        assert_eq!(classify_fixed_sti_type_text("IssueBytes"), None);
+        assert_eq!(classify_fixed_sti_type_text("i64"), None);
+        assert_eq!(classify_fixed_sti_type_text("String"), None);
+    }
+
+    #[cfg(feature = "unstable-state-interface")]
+    #[test]
+    fn si_field_name_validation_matches_the_signature_interfaces_charset() {
+        assert!(is_valid_interface_name("account"));
+        assert!(is_valid_interface_name("token"));
+        assert!(is_valid_interface_name("abcdefghijklmnop")); // exactly 16
+        assert!(!is_valid_interface_name("min_amount")); // underscore
+        assert!(!is_valid_interface_name("1field")); // leading digit
+        assert!(!is_valid_interface_name("")); // empty
+        assert!(!is_valid_interface_name("abcdefghijklmnopq")); // 17 bytes
+    }
+
+    /// Builds a test-only `SiFieldSpec` with no type tokens — constructing
+    /// real `proc_macro::TokenTree`s needs an active macro invocation (see
+    /// `ChainFieldJson`'s own doc comment), so every test here only checks
+    /// `name`/`type_byte`/`width`, never the rendered type text.
+    fn si_field(name: &str, type_byte: u8, width: usize) -> SiFieldSpec {
+        SiFieldSpec {
+            name: name.to_string(),
+            ty_tokens: Vec::new(),
+            type_byte,
+            width,
+        }
+    }
+
+    /// Pins the design doc §7 spec vector: declaration name
+    /// `5F534900000208076163636F756E740205746F6B656E`, declaration value
+    /// `020306616D6F756E74020775706461746564`, for
+    /// `key(account: AccountId, token: u32), value(amount: u64, updated: u32)`
+    /// at State ID `0`.
+    #[test]
+    fn si_declaration_bytes_match_the_design_docs_spec_vector() {
+        let key_fields = vec![si_field("account", 0x08, 20), si_field("token", 0x02, 4)];
+        let value_fields = vec![si_field("amount", 0x03, 8), si_field("updated", 0x02, 4)];
+
+        let name_hex = hex_upper(&si_declaration_name_bytes(0, &key_fields));
+        assert_eq!(name_hex, "5F534900000208076163636F756E740205746F6B656E");
+
+        let value_hex = hex_upper(&si_declaration_value_bytes(&value_fields));
+        assert_eq!(value_hex, "020306616D6F756E74020775706461746564");
+    }
+
+    #[test]
+    fn si_declaration_name_bytes_singleton_has_zero_key_fields() {
+        let name_hex = hex_upper(&si_declaration_name_bytes(1, &[]));
+        // `_SI\x00` + State ID 0x01 + key field count 0x00.
+        assert_eq!(name_hex, "5F5349000100");
+    }
+
+    #[test]
+    fn si_field_list_display_is_empty_parens_for_a_singleton() {
+        assert_eq!(si_field_list_display(&[]), "()");
+    }
+
+    #[test]
+    fn si_field_list_display_joins_name_type_pairs_with_commas() {
+        // `ty_tokens` is empty in this helper (constructing real
+        // `proc_macro::TokenTree`s needs an active macro invocation — see
+        // `ChainFieldJson`'s own doc comment for why this module keeps its
+        // unit-testable helpers `TokenTree`-shape-agnostic where it can);
+        // this only pins the field separator/parenthesization shape.
+        let fields = vec![si_field("account", 0x08, 20), si_field("token", 0x02, 4)];
+        assert_eq!(si_field_list_display(&fields), "(account: , token: )");
     }
 }

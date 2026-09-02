@@ -30,10 +30,15 @@ k256 = { version = "0.13", default-features = false, features = [
 
 [features]
 unstable-param-sig-interface = ["rshooks/unstable-param-sig-interface"]
+unstable-state-interface = ["rshooks/unstable-state-interface"]
 
 [[test]]
 name = "sig_params"
 required-features = ["unstable-param-sig-interface"]
+
+[[test]]
+name = "state_interface"
+required-features = ["unstable-state-interface"]
 
 [lints]
 workspace = true

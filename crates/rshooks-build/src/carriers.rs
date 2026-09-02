@@ -44,6 +44,39 @@ pub struct ChainDecls {
     /// `#[otxn_param(...)]` field declarations.
     #[serde(default)]
     pub otxn_params: Vec<ParamDecl>,
+    /// `#[state_interface(...)]` field declarations
+    /// (`docs/STATE_INTERFACE_DESIGN.md`). `#[serde(default)]` so a carrier
+    /// built without any (older `rshooks`, or simply no such field on the
+    /// struct) still parses, as an empty list — the macro itself only emits
+    /// the `state_interface` key when non-empty (byte-identity with a
+    /// pre-`unstable-state-interface` build).
+    #[serde(default)]
+    pub state_interface: Vec<SiDecl>,
+}
+
+/// One `#[state_interface(...)]` field declaration
+/// (`docs/STATE_INTERFACE_DESIGN.md` §5). Chain-level (like [`StateDecl`]),
+/// not per-entry: all entries of the struct share the account/namespace
+/// state, so [`crate::sethook_template`] emits this declaration's
+/// `HookParameters` entry on every non-gap entry.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SiDecl {
+    /// The struct field name.
+    pub field: String,
+    /// The State ID, `0..=255`.
+    pub id: u8,
+    /// The full declared `HookParameterName`, uppercase hex — resolved at
+    /// macro time.
+    pub name_hex: String,
+    /// The full declared `HookParameterValue` (the value schema, not a
+    /// `"00"` marker), uppercase hex — resolved at macro time.
+    pub value_hex: String,
+    /// Human-readable `(name: Type, ..)` display form of `key(..)` (`"()"`
+    /// for a singleton), matching [`StateDecl`]'s display-string convention.
+    pub key: String,
+    /// Human-readable `(name: Type, ..)` display form of `value(..)`.
+    pub value: String,
 }
 
 /// One `#[state(...)]` field declaration.
@@ -718,6 +751,55 @@ mod tests {
             r#"{{"schema":"rshooks-hooks-v2","impl":"Vault","entries":[{{"index":0,"hook_fn":"increment","cbak_fn":null,"HookName":null,"on":{on},"HookCanEmit":null,"description":null,"sig_params":[{{"field":"account","type_byte":8,"name_hex":"AA","unknown":1}}]}}]}}"#
         );
         let wasm = wasm_with_carriers(CHAIN_JSON, &hooks);
+        assert!(extract_chain_carriers(&wasm, "vault").is_err());
+    }
+
+    // --- `state_interface` (docs/STATE_INTERFACE_DESIGN.md §5) ---
+
+    #[test]
+    fn chain_carrier_without_state_interface_key_defaults_to_empty() {
+        let on = r#"{"form":"omitted","HookOn":null,"HookOnIncoming":null,"HookOnOutgoing":null}"#;
+        let wasm = wasm_with_carriers(CHAIN_JSON, &entries_json(on, "null"));
+        let carriers = extract_chain_carriers(&wasm, "vault").expect("extraction succeeds");
+        assert!(carriers.chain.decls.state_interface.is_empty());
+    }
+
+    #[test]
+    fn chain_carrier_round_trips_state_interface_decls() {
+        let on = r#"{"form":"omitted","HookOn":null,"HookOnIncoming":null,"HookOnOutgoing":null}"#;
+        let chain_json = concat!(
+            r#"{"schema":"rshooks-chain-v2","struct":"Vault","description":null,"#,
+            r#""decls":{"state":[],"hook_params":[],"otxn_params":[],"state_interface":[{"#,
+            r#""field":"balances","id":0,"#,
+            r#""name_hex":"5F534900000208076163636F756E740205746F6B656E","#,
+            r#""value_hex":"020306616D6F756E74020775706461746564","#,
+            r#""key":"(account: AccountId, token: u32)","value":"(amount: u64, updated: u32)"}]}}"#
+        );
+        let wasm = wasm_with_carriers(chain_json, &entries_json(on, "null"));
+        let carriers = extract_chain_carriers(&wasm, "vault").expect("extraction succeeds");
+        let si = &carriers.chain.decls.state_interface;
+        assert_eq!(si.len(), 1);
+        assert_eq!(si[0].field, "balances");
+        assert_eq!(si[0].id, 0);
+        assert_eq!(
+            si[0].name_hex,
+            "5F534900000208076163636F756E740205746F6B656E"
+        );
+        assert_eq!(si[0].value_hex, "020306616D6F756E74020775706461746564");
+        assert_eq!(si[0].key, "(account: AccountId, token: u32)");
+        assert_eq!(si[0].value, "(amount: u64, updated: u32)");
+    }
+
+    #[test]
+    fn chain_carrier_rejects_unknown_state_interface_field() {
+        let on = r#"{"form":"omitted","HookOn":null,"HookOnIncoming":null,"HookOnOutgoing":null}"#;
+        let chain_json = concat!(
+            r#"{"schema":"rshooks-chain-v2","struct":"Vault","description":null,"#,
+            r#""decls":{"state":[],"hook_params":[],"otxn_params":[],"state_interface":[{"#,
+            r#""field":"balances","id":0,"name_hex":"AA","value_hex":"BB","key":"()","#,
+            r#""value":"()","unknown":1}]}}"#
+        );
+        let wasm = wasm_with_carriers(chain_json, &entries_json(on, "null"));
         assert!(extract_chain_carriers(&wasm, "vault").is_err());
     }
 }

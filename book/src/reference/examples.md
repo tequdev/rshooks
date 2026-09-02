@@ -34,6 +34,7 @@ with a digit, so only the directory is prefixed).
 | 17 | `sto-writer` | `rshooks::sto_writer::StoWriter`: a runtime-shaped Remit — a native `sfAmounts` entry always, an issued one when hook parameters supply it — built field-by-field and emitted via `prepare_for_emit()`/`Prepared::emit()` | [The `StoWriter` API](../emit/sto-writer.md) |
 | 18 | `typed-views` | `rshooks::views`: generated, type-checked read views — an incoming-IOU gate reading `tx::Payment`, then `ledger::RippleState`'s freeze flags and `ledger::AccountRoot`'s optional `sfTransferRate`, with a per-read cost table | [Typed Views](../data/views.md) |
 | 19 | `param-signature` | the Hook Parameter Signature Interface: `#[hook(..)]` fn arguments (`increment(account: AccountID, count: UInt16)`) as declared, typed, machine-readable Hook parameters — requires the `unstable-param-sig-interface` cargo feature on `rshooks` (see the example's own `Cargo.toml`) | [Hook and Transaction Parameters](../data/parameters.md#signature-parameters-fn-arguments) |
+| 20 | `state-interface` | the Hook State Interface: `#[state_interface(id = .., key(..), value(..))]` chain-struct fields as a declared, typed, machine-readable on-ledger state schema — requires the `unstable-state-interface` cargo feature on `rshooks` (see the example's own `Cargo.toml`) | [Hook State](../data/state.md#state-interface-typed-on-ledger-schema) |
 
 There is no `11` in the numbering — the numbering follows the historical
 example order, with gaps where an example was retired.

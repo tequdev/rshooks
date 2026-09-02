@@ -1,0 +1,15 @@
+error: #[state_interface]: key payload is 32 bytes, exceeds the 31-byte limit (the 32-byte key minus the 1-byte State ID)
+ --> tests/ui/si/fail/hooks_si_key_payload_too_large.rs:8:1
+  |
+8 | #[hooks]
+  | ^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unused import: `rshooks::decl::State`
+ --> tests/ui/si/fail/hooks_si_key_payload_too_large.rs:5:5
+  |
+5 | use rshooks::decl::State;
+  |     ^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default

@@ -1,0 +1,15 @@
+error: #[state_interface]: the declared HookParameterValue would be 271 bytes, exceeds the protocol's 256-byte HookParameterValue limit
+  --> tests/ui/si/fail/hooks_si_value_too_large.rs:10:1
+   |
+10 | #[hooks]
+   | ^^^^^^^^
+   |
+   = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unused import: `rshooks::decl::State`
+ --> tests/ui/si/fail/hooks_si_value_too_large.rs:7:5
+  |
+7 | use rshooks::decl::State;
+  |     ^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default

@@ -63,6 +63,7 @@ use crate::api::otxn::{otxn_param, otxn_param_raw_code};
 use crate::buf_eq::buf_eq_20;
 use crate::convert::FixedRead;
 use crate::error::{HookError, Result, res};
+use crate::interface_name::is_valid_name;
 use crate::slot_obj::{AmountBytes, ISSUE_MAX_READ_LEN, classify_amount};
 use crate::types::{ACC_ID_LEN, AccountId, CURRENCY_CODE_LEN, CurrencyCode, Hash, IssuedAsset};
 
@@ -94,31 +95,6 @@ const fn is_supported_type_byte(b: u8) -> bool {
         | 0x18 // STI_ISSUE (IssueBytes)
         | 0x1A // STI_CURRENCY (CurrencyCode)
     )
-}
-
-/// Whether `name` matches the interface draft's charset:
-/// `[A-Za-z][A-Za-z0-9]*`, 1..=16 bytes. Every caller is `const { .. }`
-/// -evaluated, so this never compiles into hook wasm — it only runs during
-/// `rustc`'s own const evaluator.
-#[allow(clippy::indexing_slicing)] // in-bounds by the `i < name.len()` loop condition, const-evaluated only
-const fn is_valid_name(name: &[u8]) -> bool {
-    if name.is_empty() || name.len() > 16 {
-        return false;
-    }
-    let mut i = 0;
-    while i < name.len() {
-        let b = name[i];
-        let ok = if i == 0 {
-            b.is_ascii_alphabetic()
-        } else {
-            b.is_ascii_alphanumeric()
-        };
-        if !ok {
-            return false;
-        }
-        i = i.wrapping_add(1);
-    }
-    true
 }
 
 /// Builds one declared `HookParameterName` at compile time:
