@@ -259,8 +259,11 @@ impl OtxnFieldValue for Amount {
 
     #[inline(always)]
     fn read_otxn_field(field: SField<Self>) -> Result<Self::Output> {
-        let mut buf = [0u8; crate::types::IOU_AMOUNT_LEN];
-        let written = otxn_field(&mut buf, field.code())?;
+        let mut storage = core::mem::MaybeUninit::<[u8; crate::types::IOU_AMOUNT_LEN]>::uninit();
+        // SAFETY: only the `..written` prefix `otxn_field` reports writing
+        // is ever read below.
+        let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
+        let written = otxn_field(buf, field.code())?;
         let bytes = buf.get(..written).ok_or(HookError::TooBig)?;
         slot_obj::classify_amount(bytes)
     }
@@ -277,8 +280,11 @@ impl OtxnFieldValue for Issue {
     /// `TooSmall`.
     #[inline(always)]
     fn read_otxn_field(field: SField<Self>) -> Result<Self::Output> {
-        let mut buf = [0u8; slot_obj::ISSUE_MAX_READ_LEN];
-        let written = otxn_field(&mut buf, field.code())?;
+        let mut storage = core::mem::MaybeUninit::<[u8; slot_obj::ISSUE_MAX_READ_LEN]>::uninit();
+        // SAFETY: only the `..written` prefix `otxn_field` reports writing
+        // is ever read below.
+        let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
+        let written = otxn_field(buf, field.code())?;
         let bytes = buf.get(..written).ok_or(HookError::TooBig)?;
         slot_obj::classify_issue(bytes)
     }

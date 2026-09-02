@@ -285,15 +285,16 @@ compiler-generated `bcmp`-style loop to guard.
 
 The mulratio-and-`.lt()` logic is **unchanged, byte-for-byte, from the
 pre-operator method API** — isolated on its own, it reproduces the
-pre-operator **worst-case instructions = 162** exactly. The `Add`/`Mul`/
+pre-operator worst-case instruction count exactly. The `Add`/`Mul`/
 `Div` arithmetic operators are a pure syntax change over the pre-operator
 `.add()`/`.mul()`/`.div()` methods (same single host call each) and so are
 zero-cost by construction; `Sub`/`Neg` are the one place cost actually
 differs, because `Neg` is a real `float_negate` host round trip, not a
 local bit flip. The full version in this crate — with the `Sub`,
 `XFLUnchecked`, and `==`/`<`/`>` operator sections added on top purely for
-demonstration — measures **357** (up from 162; see below for where that
-comes from).
+demonstration — measures higher, purely from those added sections (see
+below for where that comes from); current values live in
+[`metrics.json`](./metrics.json).
 
 Chained-operator benchmark against the actual shipped types
 (`rshooks::xfl`/`rshooks::xfl_unchecked`, N=1/4/8 chained ops,
