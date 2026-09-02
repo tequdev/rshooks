@@ -78,9 +78,9 @@ pub const STATE_ID_PREFIX_LEN: usize = 1;
 pub const MAX_KEY_PAYLOAD: usize = 31;
 
 /// A Rust type usable as one state interface key or value field — pairs an
-/// `STI_*` wire type byte and fixed encoded width with a big-endian
-/// (integers) / verbatim (byte arrays) codec. See the module doc's "Why
-/// big-endian" section.
+/// XAS-010d type code and fixed encoded width with a big-endian (integers) /
+/// verbatim (byte arrays) codec. See the module doc's "Why big-endian"
+/// section.
 ///
 /// Implemented only for the version-0 fixed-width types
 /// (`docs/STATE_INTERFACE_DESIGN.md` §1.5) — variable-width `STI_*` types
@@ -88,8 +88,9 @@ pub const MAX_KEY_PAYLOAD: usize = 31;
 /// used as a `#[state_interface(..)]` key/value field type at all: using one
 /// is an ordinary rustc trait-bound error.
 pub trait SiFieldType: Sized {
-    /// The `STI_*` type byte advertised in the declaration
-    /// (`docs/STATE_INTERFACE_DESIGN.md` §1.5's table).
+    /// The XAS-010d type code advertised in the declaration
+    /// (`docs/STATE_INTERFACE_DESIGN.md` §1.5's table): an `STI_*` code or
+    /// `0x80` `XFL`.
     const TYPE_BYTE: u8;
 
     /// This type's fixed encoded width, in bytes.
@@ -219,6 +220,33 @@ newtype_si!(crate::types::Hash, 32, 0x05); // STI_UINT256
 newtype_si!(crate::types::AccountId, 20, 0x08); // STI_ACCOUNT
 array_si!(20, 0x11); // STI_UINT160
 newtype_si!(crate::types::CurrencyCode, 20, 0x1A); // STI_CURRENCY
+
+/// XAS-010d `XFL` — big-endian raw `int64` bit pattern, no validity check.
+///
+/// Deliberately not built on [`crate::convert::ToBytes`]/
+/// [`crate::convert::FromBytes`]: those encode `XFL` little-endian, for this
+/// crate's own hook-private state convention, the wrong byte order for this
+/// protocol-facing boundary (see the module doc's "Why big-endian" section).
+impl SiFieldType for crate::xfl::XFL {
+    const TYPE_BYTE: u8 = 0x80;
+    const WIDTH: usize = 8;
+
+    #[inline(always)]
+    fn write_si(&self, out: &mut [u8]) {
+        if let Some(dst) = out.get_mut(..8) {
+            dst.copy_from_slice(&self.raw_bits().to_be_bytes());
+        }
+    }
+
+    #[inline(always)]
+    fn read_si(bytes: &[u8]) -> Self {
+        let mut buf = [0u8; 8];
+        if let Some(src) = bytes.get(..8) {
+            buf.copy_from_slice(src);
+        }
+        crate::xfl::XFL::from_raw_bits(i64::from_be_bytes(buf))
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -353,5 +381,46 @@ mod tests {
         // trait's doc comment describes, not a partial big-endian read.
         assert_eq!(u16::read_si(&[0x01]), 0);
         assert_eq!(u16::read_si(&[]), 0);
+    }
+
+    #[test]
+    fn xfl_reports_type_byte_and_width() {
+        assert_eq!(<crate::xfl::XFL as SiFieldType>::TYPE_BYTE, 0x80);
+        assert_eq!(<crate::xfl::XFL as SiFieldType>::WIDTH, 8);
+    }
+
+    #[test]
+    fn xfl_one_encodes_big_endian_raw_bits() {
+        let one = crate::xfl::XFL::from_raw_bits(0x54838D7EA4C68000u64 as i64);
+        assert_eq!(one.raw_bits(), 0x54838D7EA4C68000u64 as i64);
+        let mut buf = [0u8; 8];
+        one.write_si(&mut buf);
+        assert_eq!(buf, [0x54, 0x83, 0x8D, 0x7E, 0xA4, 0xC6, 0x80, 0x00]);
+        assert_eq!(
+            crate::xfl::XFL::read_si(&buf).raw_bits(),
+            0x54838D7EA4C68000u64 as i64
+        );
+    }
+
+    #[test]
+    fn xfl_zero_round_trips() {
+        let zero = crate::xfl::XFL::from_raw_bits(0);
+        let mut buf = [0xFFu8; 8];
+        zero.write_si(&mut buf);
+        assert_eq!(buf, [0u8; 8]);
+        assert_eq!(crate::xfl::XFL::read_si(&buf).raw_bits(), 0);
+    }
+
+    #[test]
+    fn xfl_write_si_into_short_buffer_writes_nothing() {
+        let mut buf = [0xFFu8; 4];
+        crate::xfl::XFL::from_raw_bits(0x54838D7EA4C68000u64 as i64).write_si(&mut buf);
+        assert_eq!(buf, [0xFFu8; 4]);
+    }
+
+    #[test]
+    fn xfl_read_si_from_short_buffer_zero_pads() {
+        assert_eq!(crate::xfl::XFL::read_si(&[0x54, 0x83]).raw_bits(), 0);
+        assert_eq!(crate::xfl::XFL::read_si(&[]).raw_bits(), 0);
     }
 }

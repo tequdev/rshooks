@@ -343,9 +343,9 @@ pub(crate) fn is_valid_interface_name(name: &str) -> bool {
 }
 
 /// Classifies a whitespace-stripped, flattened type spelling into its
-/// `(STI_* type byte, encoded width)` pair, for the fixed-width type subset
-/// both interface drafts share (`docs/PARAM_SIGNATURE_DESIGN.md` §2 and
-/// `docs/STATE_INTERFACE_DESIGN.md` §1.5). Variable-width types
+/// `(XAS-010d type code, encoded width)` pair, for the fixed-width type
+/// subset both interface drafts share (`docs/PARAM_SIGNATURE_DESIGN.md` §2
+/// and `docs/STATE_INTERFACE_DESIGN.md` §1.5). Variable-width types
 /// (`AmountBytes`/`IssueBytes`/`Blob<N>`) are outside this table — the
 /// Signature Interface, the only draft that supports them, classifies those
 /// itself.
@@ -360,6 +360,7 @@ pub(crate) fn classify_fixed_sti_type_text(flat: &str) -> Option<(u8, usize)> {
         "AccountId" => Some((0x08, 20)),        // STI_ACCOUNT
         "[u8;20]" => Some((0x11, 20)),          // STI_UINT160
         "CurrencyCode" => Some((0x1A, 20)),     // STI_CURRENCY
+        "XFL" => Some((0x80, 8)),               // XAS-010d XFL
         _ => None,
     }
 }

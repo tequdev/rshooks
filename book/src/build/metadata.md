@@ -189,9 +189,9 @@ Fields not covered already on this page:
   `govern` here). When present, it is a `null`-free array, empty for an
   entry with no signature-parameter fn arguments. Each element is
   `{ "field", "type_byte", "name_hex" }` — the argument's own identifier,
-  its `STI_*` type byte, and the full declared `HookParameterName` as
-  uppercase hex, the same value the generated `HookParameters` declaration
-  entries below use verbatim.
+  its type code (an XAS-010d type code), and the full declared
+  `HookParameterName` as uppercase hex, the same value the generated
+  `HookParameters` declaration entries below use verbatim.
 - **`chain`** — this crate's **shared** schema, transcribed identically
   into every entry's sidecar (not filtered down to what this one entry
   actually uses — see [Hook Chains](../concepts/chains.md#the-shared-schema-why-this-is-the-models-biggest-win)

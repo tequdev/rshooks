@@ -296,7 +296,7 @@ Each declared parameter's `HookParameterName` is a fixed-layout byte string,
 | `0x5F 0x50 0x53` | `"_PS"` interface identifier |
 | `0x00` | version |
 | 1 byte | index, `0x00..=0x0F` (so at most 16 arguments per entry) |
-| 1 byte | the `STI_*` type byte (see the type table below) |
+| 1 byte | the type code (see the type table below) |
 | 1 byte | name length, `0x01..=0x10` |
 | 1 to 16 bytes | the display name, `[A-Za-z][A-Za-z0-9]*` (no `_`) |
 
@@ -310,7 +310,7 @@ it, or fall back to the escape hatch below with an explicit name literal.
 
 ### Supported types
 
-| Rust type | `STI_*` byte | wire payload |
+| Rust type | type code | wire payload |
 |---|---|---|
 | `u8` | `0x10` (`STI_UINT8`) | 1 byte |
 | `u16` | `0x01` (`STI_UINT16`) | 2 bytes |
@@ -324,6 +324,7 @@ it, or fall back to the escape hatch below with an explicit name literal.
 | `[u8; 20]` | `0x11` (`STI_UINT160`) | 20 bytes |
 | `IssueBytes` | `0x18` (`STI_ISSUE`) | 20 (native, all-zero) or 40 (issued) bytes |
 | `CurrencyCode` | `0x1A` (`STI_CURRENCY`) | 20 bytes |
+| `XFL` | `0x80` (`XFL`, XAS-010d non-standard) | 8 bytes |
 
 Every integer type here decodes **big-endian**, unlike this crate's own
 `ToBytes`/`FromBytes` little-endian convention covered earlier on this page
@@ -332,7 +333,11 @@ value crosses the same protocol boundary a raw `otxn_field`/`otxn_param`
 read does (see [Reading the Originating Transaction](otxn.md)), not this
 crate's own hook-private wire format. `Blob<N>`/`IssueBytes` are new types
 in `rshooks::sig`; every other row is a type this page and [Typed Data with
-Derives](typed-data.md) already cover.
+Derives](typed-data.md) already cover. `XFL`'s payload is the Hook API's
+`int64_t` XFL bit pattern, big-endian — `XFL::raw_bits()` — decoded via
+`XFL::from_raw_bits` with no validity check; the type codes themselves come
+from XAS-010d (Hook Type Codes), which both this interface and the Hook
+State Interface reference for their type codes.
 
 ### The generated prologue and its rollback
 

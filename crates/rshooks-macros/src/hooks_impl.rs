@@ -286,8 +286,9 @@ struct ParsedBody {
 /// out of sync with the match arms below it.
 const SIG_TYPE_MSG: &str = "#[hooks]: unsupported signature parameter type — supported types are \
                              u8, u16, u32, u64, [u8; 16], [u8; 32], Hash, AccountId, [u8; 20], \
-                             CurrencyCode, AmountBytes, IssueBytes, Blob<N> (write the type as a \
-                             bare name — a path-qualified or aliased spelling is not resolved)";
+                             CurrencyCode, XFL, AmountBytes, IssueBytes, Blob<N> (write the type \
+                             as a bare name — a path-qualified or aliased spelling is not \
+                             resolved)";
 
 /// The interface draft's display-name diagnostic — shared by every
 /// rejection [`is_valid_interface_name`] backs.
@@ -322,14 +323,14 @@ struct SigArg {
     /// prologue so an aliased type is decoded, and const-asserted, exactly
     /// as written (never re-derived from `type_byte`).
     type_text: String,
-    /// The `STI_*` type byte [`classify_sig_type`] derived from the type
+    /// The XAS-010d type code [`classify_sig_type`] derived from the type
     /// token's own shape — see `docs/PARAM_SIGNATURE_DESIGN.md` §1's type
     /// table.
     type_byte: u8,
 }
 
 /// Classifies a signature-parameter argument's type tokens into its
-/// `STI_*` type byte (`docs/PARAM_SIGNATURE_DESIGN.md` §1's table),
+/// XAS-010d type code (`docs/PARAM_SIGNATURE_DESIGN.md` §1's table),
 /// matching on the token *shape* (a whitespace-normalized textual
 /// comparison, plus a structural check for `Blob<N>` since angle brackets
 /// never arrive as a single token — see [`crate::hooks_shared::AngleTok`]'s
@@ -1761,7 +1762,7 @@ struct SigParamJson {
     /// The argument's type, as source text (see [`tokens_to_string`]) —
     /// codegen-only, not part of the wire carrier.
     type_text: String,
-    /// The `STI_*` type byte.
+    /// The XAS-010d type code.
     type_byte: u8,
     /// The full declared `HookParameterName`, uppercase hex.
     name_hex: String,
@@ -2661,6 +2662,7 @@ mod tests {
         assert_eq!(classify_sig_type_text("[u8;20]"), Some(0x11));
         assert_eq!(classify_sig_type_text("IssueBytes"), Some(0x18));
         assert_eq!(classify_sig_type_text("CurrencyCode"), Some(0x1A));
+        assert_eq!(classify_sig_type_text("XFL"), Some(0x80));
     }
 
     #[test]
@@ -2682,6 +2684,15 @@ mod tests {
         assert_eq!(
             sig_param_name_hex(1, 0x01, "count"),
             "5F505300010105636F756E74"
+        );
+    }
+
+    #[test]
+    fn sig_param_name_hex_covers_the_xfl_type_code() {
+        // rate(0), XFL (0x80, XAS-010d), 4-byte name.
+        assert_eq!(
+            sig_param_name_hex(0, 0x80, "rate"),
+            "5F50530000800472617465"
         );
     }
 

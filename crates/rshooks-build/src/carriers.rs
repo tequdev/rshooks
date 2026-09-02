@@ -167,7 +167,8 @@ pub struct EntryDecl {
 pub struct SigParamDecl {
     /// The declared name — the entry fn argument's own identifier.
     pub field: String,
-    /// The `STI_*` type byte (`docs/PARAM_SIGNATURE_DESIGN.md` §2's table).
+    /// The type code (an XAS-010d type code — `docs/PARAM_SIGNATURE_DESIGN.md`
+    /// §2's table).
     pub type_byte: u8,
     /// The full declared `HookParameterName`, uppercase hex — resolved at
     /// macro time (`docs/PARAM_SIGNATURE_DESIGN.md` §4), so the build tool

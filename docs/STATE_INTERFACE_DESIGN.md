@@ -24,7 +24,7 @@ Keys and values share one descriptor shape:
 
 | # | bytes | content |
 |---|-------|---------|
-| 1 | 1 | field type: serialized `STI_*` type code |
+| 1 | 1 | field type: an XAS-010d type code (see §1.5) |
 | 2 | 1 | field name length, `0x01`–`0x10` (1–16) |
 | 3 | 1–16 | field name, `[A-Za-z][A-Za-z0-9]*` |
 
@@ -54,12 +54,18 @@ a `00` marker — it carries the actual value schema.
 
 ### 1.5 Supported types
 
-Version 0 supports only fixed-width types. Integers are big-endian (protocol boundary,
-same rationale as `docs/PARAM_SIGNATURE_DESIGN.md`); byte-array types are copied
-verbatim.
+Type codes and their canonical value encodings are defined by **XAS-010d (Hook Type
+Codes, <https://github.com/Xahau/xahaud/discussions/798>)**: `0x00..=0x7F` mirror
+`SField.h`'s `STI_*` serialized type codes; `0x80..=0xFF` are Hook-specific
+non-standard codes (currently only `0x80` `XFL`). Each field is encoded exactly as the
+XAS-010d value encoding of its type — no field ID, type prefix, or length prefix.
 
-| type byte | `STI_*` | width | Rust type token |
-|-----------|---------|-------|-----------------|
+Version 0 supports only the fixed-width subset below; any other type code MUST NOT be
+used. Integers are big-endian (protocol boundary, same rationale as
+`docs/PARAM_SIGNATURE_DESIGN.md`); byte-array types are copied verbatim.
+
+| type code | XAS-010d name | width | Rust type token |
+|-----------|---------------|-------|-----------------|
 | `0x10` | `STI_UINT8` | 1 | `u8` |
 | `0x01` | `STI_UINT16` | 2 | `u16` |
 | `0x02` | `STI_UINT32` | 4 | `u32` |
@@ -69,6 +75,15 @@ verbatim.
 | `0x08` | `STI_ACCOUNT` | 20 | `AccountId` |
 | `0x11` | `STI_UINT160` | 20 | `[u8; 20]` |
 | `0x1A` | `STI_CURRENCY` | 20 | `CurrencyCode` |
+| `0x80` | `XFL` | 8 | `XFL` (`rshooks::xfl::XFL`) |
+
+`XFL`'s encoding is the Hook API's `int64_t` XFL bit pattern, big-endian —
+`XFL::raw_bits().to_be_bytes()`; the canonical zero is eight `0x00` bytes
+(`XFL::from_raw_bits(0)`). `read_si` is `XFL::from_raw_bits(i64::from_be_bytes(..))`
+with no validity check of the bit pattern (the opaque-bits contract `from_raw_bits`
+documents). The `si` impl must not reuse `XFL`'s `ToBytes`/`FromBytes` impls, which are
+the hook-private little-endian convention. `XFL` is usable as a key field as well as a
+value field (it is fixed-width); the macro recognizes the bare token `XFL`.
 
 Variable-width types (`STI_AMOUNT`, `STI_VL`, `STI_ISSUE`, …) are not part of version 0
 and are rejected.
@@ -200,7 +215,8 @@ Gated `#[cfg(feature = "unstable-state-interface")]`. Contents:
 
 - `pub trait SiFieldType`: `const TYPE_BYTE: u8`, `const WIDTH: usize`,
   `fn write_si(&self, out: &mut [u8])`, `fn read_si(bytes: &[u8]) -> Self` — the
-  version-0 fixed-width codec, implemented for the §1.5 table.
+  version-0 fixed-width codec, implemented for the §1.5 table (`XFL` via a dedicated
+  big-endian `raw_bits` impl, not the LE `convert.rs` codec).
 - `pub const STATE_ID_PREFIX_LEN`, `pub const MAX_KEY_PAYLOAD: usize = 31`, and the
   `is_valid_name` const validator (shared shape with `sig.rs`).
 - Module docs: wire-format summary, the BE rationale, the full-32-byte-key rationale
@@ -253,7 +269,8 @@ Identical topology to `unstable-param-sig-interface`:
   4B4E9C06F24296074F7BC48F92A97916C6DC5EA9, token = 42, amount = 1000,
   updated = 12345`.
 - `si.rs` unit tests: per-type encode/decode round-trips, BE assertions, name
-  validation edges.
+  validation edges; `XFL`: `TYPE_BYTE == 0x80`, `WIDTH == 8`, `XFL!(1)`
+  (`0x54838D7EA4C68000`) ↔ `54 83 8D 7E A4 C6 80 00`, zero ↔ eight `0x00`.
 - Macro unit tests: type table, name validation, declaration hex construction.
 - trybuild: `tests/ui/si/{fail,pass}` for the §3 diagnostics plus
   `tests/ui/no_si_feature` for the gate, wired into the existing `ui.rs`
@@ -263,7 +280,8 @@ Identical topology to `unstable-param-sig-interface`:
   signature-parameter declarations, no key when empty), sidecar transcription.
 - testenv integration test (`required-features`): a hook writes through a keyed and a
   singleton SI declaration; the raw stored bytes are asserted equal to the spec vector
-  key/value.
+  key/value. A further declaration with an `XFL` value field pins the on-ledger bytes as
+  big-endian `raw_bits`.
 - Example `examples/20_state-interface` + e2e test verifying the live on-ledger
   `HookStateKey`/`HookStateData` bytes and installing the generated template
   declarations verbatim.

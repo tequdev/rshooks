@@ -907,7 +907,7 @@ const SI_FEATURE_GATE_MSG: &str = "#[hooks]: `#[state_interface(..)]` declares H
 #[cfg(feature = "unstable-state-interface")]
 const SI_TYPE_MSG: &str = "#[state_interface]: unsupported field type — supported types are u8, \
                             u16, u32, u64, [u8; 16], [u8; 32], Hash, AccountId, [u8; 20], \
-                            CurrencyCode (write the type as a bare name — a path-qualified or \
+                            CurrencyCode, XFL (write the type as a bare name — a path-qualified or \
                             aliased spelling is not resolved)";
 
 /// The interface draft's field-name diagnostic — shared by every rejection
@@ -929,7 +929,7 @@ const SI_MAX_KEY_PAYLOAD: usize = 31;
 const SI_MAX_VALUE_LEN: usize = 256;
 
 /// Classifies a `#[state_interface]` key/value field's type tokens into its
-/// `(STI_* type byte, byte width)` pair (`docs/STATE_INTERFACE_DESIGN.md`
+/// `(XAS-010d type code, byte width)` pair (`docs/STATE_INTERFACE_DESIGN.md`
 /// §1.5's table), matching on the token *shape* (a whitespace-normalized
 /// textual comparison). Does not resolve type aliases: an aliased type is
 /// caught later by the monomorphized `const` assert the generated code
@@ -2254,7 +2254,7 @@ mod tests {
     // cleanly.
     #[cfg(feature = "unstable-state-interface")]
     #[test]
-    fn si_type_table_matches_the_design_docs_nine_rows() {
+    fn si_type_table_matches_the_design_docs_ten_rows() {
         assert_eq!(classify_fixed_sti_type_text("u8"), Some((0x10, 1)));
         assert_eq!(classify_fixed_sti_type_text("u16"), Some((0x01, 2)));
         assert_eq!(classify_fixed_sti_type_text("u32"), Some((0x02, 4)));
@@ -2268,6 +2268,7 @@ mod tests {
             classify_fixed_sti_type_text("CurrencyCode"),
             Some((0x1A, 20))
         );
+        assert_eq!(classify_fixed_sti_type_text("XFL"), Some((0x80, 8)));
     }
 
     #[cfg(feature = "unstable-state-interface")]
@@ -2321,6 +2322,22 @@ mod tests {
 
         let value_hex = hex_upper(&si_declaration_value_bytes(&value_fields));
         assert_eq!(value_hex, "020306616D6F756E74020775706461746564");
+    }
+
+    /// Pins a declaration using the `0x80` `XFL` type code (XAS-010d):
+    /// declaration name `5F5349000301800472617465`, declaration value
+    /// `010305636F756E74`, for `key(rate: XFL), value(count: u64)` at
+    /// State ID `3`.
+    #[test]
+    fn si_declaration_bytes_cover_the_xfl_type_code() {
+        let key_fields = vec![si_field("rate", 0x80, 8)];
+        let value_fields = vec![si_field("count", 0x03, 8)];
+
+        let name_hex = hex_upper(&si_declaration_name_bytes(3, &key_fields));
+        assert_eq!(name_hex, "5F5349000301800472617465");
+
+        let value_hex = hex_upper(&si_declaration_value_bytes(&value_fields));
+        assert_eq!(value_hex, "010305636F756E74");
     }
 
     #[test]

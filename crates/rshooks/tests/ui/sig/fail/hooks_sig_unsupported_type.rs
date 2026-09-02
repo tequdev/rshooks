@@ -1,5 +1,5 @@
 //! A `#[hook(..)]` entry's extra argument declares a signature parameter
-//! (`docs/PARAM_SIGNATURE_DESIGN.md` §1), but only for one of the twelve
+//! (`docs/PARAM_SIGNATURE_DESIGN.md` §1), but only for one of the thirteen
 //! `SigParamType` types — `i64` isn't one of them (`i64` is signed; the
 //! interface has no signed integer type).
 

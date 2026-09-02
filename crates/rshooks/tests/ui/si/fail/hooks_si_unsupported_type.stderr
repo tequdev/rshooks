@@ -1,4 +1,4 @@
-error: #[state_interface]: unsupported field type — supported types are u8, u16, u32, u64, [u8; 16], [u8; 32], Hash, AccountId, [u8; 20], CurrencyCode (write the type as a bare name — a path-qualified or aliased spelling is not resolved)
+error: #[state_interface]: unsupported field type — supported types are u8, u16, u32, u64, [u8; 16], [u8; 32], Hash, AccountId, [u8; 20], CurrencyCode, XFL (write the type as a bare name — a path-qualified or aliased spelling is not resolved)
  --> tests/ui/si/fail/hooks_si_unsupported_type.rs:8:1
   |
 8 | #[hooks]
