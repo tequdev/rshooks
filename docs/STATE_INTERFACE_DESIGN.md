@@ -1,6 +1,6 @@
-# Hook State Interface (XAH-009d) — design
+# Hook State Interface (XAS-009d) — design
 
-Status: implements the **XAH-009d** draft ("HookState On-ledger Interface", provisional
+Status: implements the **XAS-009d** draft ("HookState On-ledger Interface", provisional
 name; spec title "Hook State Interface"). The spec is a draft, so the entire surface is
 gated behind the `unstable-state-interface` cargo feature (default off). `unstable-*`
 features are exempt from semver — breaking changes may land in a minor release while the
