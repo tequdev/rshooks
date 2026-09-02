@@ -5,7 +5,7 @@ members = ["crates/*"]
 [workspace.package]
 edition = "2024"
 rust-version = "1.85"
-version = "0.1.1"
+version = "0.2.0"
 license = "MIT"
 repository = "https://github.com/tequdev/rshooks"
 readme = "README.md"
@@ -14,9 +14,9 @@ readme = "README.md"
 # Inter-crate dependencies inherit these entries (`{ workspace = true }`), so
 # the published version requirement lives next to `workspace.package.version`.
 # `cargo xtask check-versions` fails when the two drift apart.
-rshooks-core = { path = "crates/rshooks-core", version = "0.1.1" }
-rshooks-macros = { path = "crates/rshooks-macros", version = "0.1.1" }
-rshooks = { path = "crates/rshooks", version = "0.1.1" }
+rshooks-core = { path = "crates/rshooks-core", version = "0.2.0" }
+rshooks-macros = { path = "crates/rshooks-macros", version = "0.2.0" }
+rshooks = { path = "crates/rshooks", version = "0.2.0" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

@@ -47,7 +47,7 @@ or add it to `Cargo.toml` directly. A minimal Hook crate looks like this:
 ```toml
 [package]
 name = "my-hook"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2024"
 
 [lib]
@@ -57,7 +57,7 @@ crate-type = ["cdylib"]
 test = false
 
 [dependencies]
-rshooks = "0.1.1"
+rshooks = "0.2.0"
 
 [profile.release]
 opt-level = 3
@@ -102,7 +102,7 @@ own machine:
 
 ```toml
 [dependencies]
-rshooks = { version = "0.1.1", features = ["host-panic-handler"] }
+rshooks = { version = "0.2.0", features = ["host-panic-handler"] }
 ```
 
 Never enable this feature from a `std` context — it's meant only to make
