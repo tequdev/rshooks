@@ -32,6 +32,8 @@ pub struct ChainBuildArgs {
     pub out: Option<PathBuf>,
     /// Permit oversized per-entry output.
     pub allow_oversize: bool,
+    /// Skip the `wasm-opt` size-optimization pass (on by default).
+    pub no_optimize: bool,
     /// SetHook `Account` placeholder value for the generated template.
     pub account: Option<String>,
     /// `HookNamespace` placeholder value for the generated template.
@@ -55,6 +57,7 @@ pub fn run(args: &ChainBuildArgs) -> Result<()> {
         auto_guard: args.auto_guard,
         default_maxiter: args.default_maxiter,
         allow_oversize: args.allow_oversize,
+        optimize: !args.no_optimize,
     };
 
     let cargo = find_cargo()?;

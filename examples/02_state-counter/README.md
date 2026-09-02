@@ -99,14 +99,17 @@ harness does and does not model.
 ## Cost of the typed layer, here
 
 The typed layer's convenience (no hand-written buffer/length-check/
-byte-order code) isn't free: `state_get_typed`/`state_set_typed` go
-through `crate::state`'s generic, 32-byte-scratch-buffer machinery
-(`MAX_TYPED_STATE_LEN`), rather than this hook reading/writing a plain
-8-byte buffer via the raw `state`/`state_set` calls directly. Current
-WCE and wasm size live in [`metrics.json`](./metrics.json) (refreshed by
-`mise run record-example-metrics`). A hand-rolled-buffer version of this
-same hook measured 58 worst-case instructions / 349 bytes — close to
-parity, not a dramatic gap. Still guard-clean at the source level — no
+byte-order code) isn't free: `state_get_typed` still reads through
+`crate::state`'s generic, 32-byte-scratch-buffer machinery
+(`MAX_TYPED_STATE_LEN`), rather than this hook reading a plain 8-byte
+buffer via the raw `state` call directly. `state_set_typed`'s write side is
+right-sized instead — `u64`'s `ToBytes::with_bytes` override encodes into
+its own 8-byte buffer, not the full 32-byte scratch — so only the read path
+still pays the generic-buffer cost. Current WCE and wasm size live in
+[`metrics.json`](./metrics.json) (refreshed by `mise run
+record-example-metrics`); a hand-rolled-buffer version of this same hook
+measures close to parity — not a dramatic gap. Still guard-clean at the
+source level — no
 `--auto-guard`/`--default-maxiter` needed. For a hook this simple (one
 `u64` counter, one key), the raw layer is the cheaper choice; this
 example uses the typed layer anyway because its purpose is to be the

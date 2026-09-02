@@ -102,15 +102,10 @@ a raw `[u8; 20]` compare, so it does not reintroduce the `memcmp` loop the
 guard checker rejects (`examples/06_guard-patterns` documents that pitfall
 in full).
 
-It is still the more expensive option here, and not marginally. Measured,
-changing nothing else:
-
-| side determination | WCE | size | max nesting |
-|---|---:|---:|---:|
-| `low_limit()` + `buf_eq_20` (what this hook does) | 845 | 2559 bytes | 3 |
-| `me < asset.issuer` (`buf_cmp_20`) | 980 | 2815 bytes | 4 |
-
-+135 instructions and a nesting level, to save three host calls. The reason
+It is still the more expensive option here, and not marginally: measured
+with nothing else changed, the `me < asset.issuer` variant costs over a
+hundred extra worst-case instructions and a nesting level, to save three
+host calls. The reason
 is that **a host call is one instruction** in the worst-case count, while
 `buf_cmp_20` inlines a three-stage early-exit ladder — eight bytes, eight
 bytes, four bytes, each stage branching — that costs far more than the
@@ -192,15 +187,9 @@ for a fact it only needs in order to phrase an error message. See "Fewer
 host calls is not the same as fewer instructions" above for why those
 three calls are still the cheaper choice.
 
-Measured (`rshooks build`/`check`, this workspace's `opt-level = 3`
-profile):
-
-| | worst-case instructions | size | max nesting depth |
-|---|---:|---:|---:|
-| `main` (index 0) | 845 | 2559 bytes | 3 |
-
-These values are recorded in `metrics.json`; refresh it with
-`mise run record-example-metrics` when the generated wasm changes.
+Current WCE, wasm size, and max nesting depth live in
+[`metrics.json`](./metrics.json), refreshed by `mise run
+record-example-metrics`.
 
 `hook_is_low_side` and `issuer_charges_fee` are `#[inline(never)]`: both
 are only reached on rejection paths, and keeping their `match` ladders out

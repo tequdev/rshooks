@@ -188,11 +188,10 @@ in a freshly instantiated wasm instance.
 
 Converting `emit-txn` to this idiom removed its only compiler-generated
 loops entirely (no `--auto-guard` needed) and cut its worst-case
-instruction count by an order of magnitude (6798 → 331 as of the current
-toolchain and this workspace's `opt-level = 3` default, see
-`docs/DESIGN.md` §2 C6; exact numbers drift a little between compiler
-versions and profile settings — the `rshooks build` output prints the
-authoritative figures). The take-once flag costs a few dozen bytes over a
+instruction count by an order of magnitude at this workspace's
+`opt-level = 3` default (see `docs/DESIGN.md` §2 C6; each example's
+current figures live in its `metrics.json`, and the `rshooks build`
+output prints the authoritative values). The take-once flag costs a few dozen bytes over a
 raw `static mut` — the
 price of keeping hook code free of `unsafe`.
 

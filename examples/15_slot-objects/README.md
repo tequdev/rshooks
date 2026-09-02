@@ -32,20 +32,22 @@ which passed. A full pass is `2047` (`0b111_1111_1111`).
 
 The Hook API's guard checker rejects a module whose block nesting exceeds 32
 levels. Five checks' worth of `if let` ladders inlined into one entry point
-measured **53**. Splitting each into its own frame brings the hook to **4** —
-the same `#[inline(never)]` escape hatch `examples/80_governance` uses against the
+measured **53**. Splitting each into its own frame brings the hook
+comfortably back under the limit (the current value lives in
+[`metrics.json`](./metrics.json)) — the same `#[inline(never)]` escape hatch `examples/80_governance` uses against the
 same ceiling, and the reason `docs/DESIGN.md` §5.8 recommends keeping
 `slot_path!` chains short.
 
 For the record, `slot_path!` itself is not the problem: measured on its own,
 its nesting after `rshooks-build`'s unnest pass is **1** at 1, 3 *and* 10 hops,
-with worst-case instructions growing linearly (46 / 94 / 255).
+with worst-case instructions growing linearly with hop count.
 
 ## Cost
 
 Each recycling loop runs 260 iterations of real host calls — just past the
 255-slot budget, which is the only property that matters — so the worst-case
-instruction count is large by design (~62k). This hook exists to exhaust
+instruction count is large by design (see [`metrics.json`](./metrics.json)).
+This hook exists to exhaust
 things, not to be cheap; `examples/08_slot-ledger` is where the layer's
 zero-cost claim is measured.
 

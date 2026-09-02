@@ -30,6 +30,13 @@
 
 use crate::error::{HookError, Result};
 
+/// Default scratch-buffer size for [`ToBytes::with_bytes`]'s generic default
+/// impl — matches `MAX_TYPED_STATE_LEN`'s codegen-safe ceiling (see
+/// `crate::state`'s doc comment for that constant): the largest local
+/// `[0u8; N]` zero-init this toolchain's wasm32v1-none codegen still lowers
+/// to a handful of inlined stores rather than an unguarded `memset` libcall.
+pub const DEFAULT_SCRATCH_LEN: usize = 32;
+
 /// Encode `Self` into the front of a caller-provided buffer.
 ///
 /// Mirrors this crate's caller-buffer convention (`state`, `hook_account`,
@@ -45,6 +52,36 @@ pub trait ToBytes {
     /// `0` if `buf` is shorter than `Self::MAX_LEN` (nothing is written in
     /// that case — never a partial write).
     fn write(&self, buf: &mut [u8]) -> usize;
+
+    /// Encodes `self` and hands the written prefix to `f`, returning
+    /// whatever `f` returns.
+    ///
+    /// # Cost
+    ///
+    /// The default impl below is the only option generic over an arbitrary
+    /// [`ToBytes`] `Self`: a single generic function can't size a local
+    /// buffer to `Self::MAX_LEN` on stable Rust — using an associated
+    /// constant as an array length needs `generic_const_exprs`, unstable on
+    /// this toolchain (the same restriction [`FixedRead::read_exact`]'s doc
+    /// comment describes) — so it encodes into a fixed
+    /// [`DEFAULT_SCRATCH_LEN`]-byte scratch buffer instead. A concrete,
+    /// non-generic `impl ToBytes for ConcreteType` can do better: in that
+    /// impl block `Self::MAX_LEN` is a literal, so `[0u8; Self::MAX_LEN]` is
+    /// ordinary stable Rust — every impl in this module overrides
+    /// `with_bytes` on exactly that basis, and `#[derive(HookData)]`'s
+    /// generated impl does the same for a hook-defined struct.
+    #[inline(always)]
+    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        let mut buf = [0u8; DEFAULT_SCRATCH_LEN];
+        let _ = self.write(&mut buf);
+        // Slice by the const `Self::MAX_LEN`, not `write`'s runtime return
+        // value: for a concrete `Self` this is a compile-time-constant
+        // range, letting the optimizer fold this to a direct, unchecked
+        // slice the same way `write`'s own `buf.get_mut(..Self::MAX_LEN)`
+        // does — `write`'s return value carries the same information but
+        // as a value the optimizer must first prove constant.
+        f(buf.get(..Self::MAX_LEN).unwrap_or(&[]))
+    }
 }
 
 /// Decode `Self` from a byte buffer.
@@ -71,6 +108,11 @@ impl ToBytes for u8 {
             None => 0,
         }
     }
+
+    #[inline(always)]
+    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        f(&self.to_le_bytes())
+    }
 }
 
 impl FromBytes for u8 {
@@ -95,6 +137,11 @@ impl ToBytes for u16 {
             }
             None => 0,
         }
+    }
+
+    #[inline(always)]
+    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        f(&self.to_le_bytes())
     }
 }
 
@@ -121,6 +168,11 @@ impl ToBytes for u32 {
             None => 0,
         }
     }
+
+    #[inline(always)]
+    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        f(&self.to_le_bytes())
+    }
 }
 
 impl FromBytes for u32 {
@@ -145,6 +197,11 @@ impl ToBytes for u64 {
             }
             None => 0,
         }
+    }
+
+    #[inline(always)]
+    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        f(&self.to_le_bytes())
     }
 }
 
@@ -171,6 +228,11 @@ impl ToBytes for i64 {
             None => 0,
         }
     }
+
+    #[inline(always)]
+    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        f(&self.to_le_bytes())
+    }
 }
 
 impl FromBytes for i64 {
@@ -191,6 +253,11 @@ impl ToBytes for crate::xfl::XFL {
     #[inline(always)]
     fn write(&self, buf: &mut [u8]) -> usize {
         self.raw_bits().write(buf)
+    }
+
+    #[inline(always)]
+    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        self.raw_bits().with_bytes(f)
     }
 }
 
@@ -225,6 +292,13 @@ impl<const N: usize> ToBytes for [u8; N] {
             }
             None => 0,
         }
+    }
+
+    #[inline(always)]
+    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        // `self` already *is* its own wire encoding — no scratch buffer
+        // needed at all.
+        f(self)
     }
 }
 
@@ -283,14 +357,57 @@ pub trait FixedRead: Sized {
 impl<const N: usize> FixedRead for [u8; N] {
     #[inline(always)]
     fn read_exact(read: impl FnOnce(&mut [u8]) -> Result<usize>) -> Result<Self> {
-        let mut out = [0u8; N];
-        let written = read(&mut out)?;
+        let mut out = core::mem::MaybeUninit::<[u8; N]>::uninit();
+        // SAFETY: `buf` is only read through `read`'s own caller-buffer
+        // contract (write, don't read back); `out` is only read via
+        // `assume_init` below, once `written == N` proves `read` wrote every
+        // byte of it.
+        let buf = unsafe { uninit_slice_mut(&mut out) };
+        let written = read(buf)?;
         if written == N {
-            Ok(out)
+            // SAFETY: `written == N` proves `read` wrote every byte of `out`.
+            Ok(unsafe { out.assume_init() })
         } else {
             Err(HookError::TooSmall)
         }
     }
+}
+
+/// Views `N` bytes of uninitialized scratch as a `&mut [u8]` for a
+/// caller-buffer Hook API wrapper (`otxn_field`, `state`, `slot`, ...) to
+/// fill, without zero-initializing it first.
+///
+/// Zero-initializing a read buffer whose written prefix a host call always
+/// overwrites is dead work the guard checker still charges for — the
+/// buffer's address escapes into an `extern` FFI call, so LLVM cannot prove
+/// the zeroing stores dead. Shared by `[u8; N]`'s [`FixedRead::read_exact`]
+/// impl and the `crate::api` funnels that need the same shape for a
+/// prefix-only or classified-length read (`otxn::Amount`/`Issue`'s
+/// [`OtxnFieldValue`](crate::api::otxn::OtxnFieldValue) impls,
+/// `state::state_raw_code_buf`).
+///
+/// # Safety
+///
+/// The returned slice must only ever be read (directly, or by calling
+/// [`MaybeUninit::assume_init`](core::mem::MaybeUninit::assume_init) on the
+/// `buf` it was borrowed from) over the range a prior write into it actually
+/// covered. No bit pattern is invalid for `u8`, so forming the `&mut [u8]`
+/// here is the standard pre-`BorrowedBuf` I/O shape over `MaybeUninit`
+/// storage — only reading through it before it is written would be unsound,
+/// a pattern this crate relies on throughout rather than one the language
+/// unconditionally guarantees.
+#[inline(always)]
+pub(crate) unsafe fn uninit_slice_mut<const N: usize>(
+    buf: &mut core::mem::MaybeUninit<[u8; N]>,
+) -> &mut [u8] {
+    // SAFETY: `buf` is `N` bytes of live, properly aligned storage (a
+    // `MaybeUninit<[u8; N]>` has the same size and alignment as `[u8; N]`).
+    // `u8` has no invalid bit patterns and no padding, so a `&mut [u8]` over
+    // that storage is well-formed the instant it is created, whether or not
+    // the storage has been written to yet — only reading through it before
+    // it is written would be unsound, and this function's own safety
+    // contract puts that burden on the caller.
+    unsafe { core::slice::from_raw_parts_mut(buf.as_mut_ptr().cast::<u8>(), N) }
 }
 
 /// Maximum length, in bytes, of a `hook_param`/`otxn_param` parameter

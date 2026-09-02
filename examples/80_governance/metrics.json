@@ -5,23 +5,23 @@
       "artifact": "0.govern.wasm",
       "index": 0,
       "hook_fn": "govern",
-      "bytes": 14431,
+      "bytes": 12498,
       "wce": {
-        "hook": 27457,
+        "hook": 25015,
         "cbak": 0
       },
-      "max_nesting": 23
+      "max_nesting": 25
     },
     {
       "artifact": "1.reward.wasm",
       "index": 1,
       "hook_fn": "reward",
-      "bytes": 7276,
+      "bytes": 6219,
       "wce": {
-        "hook": 12798,
+        "hook": 11367,
         "cbak": 0
       },
-      "max_nesting": 22
+      "max_nesting": 21
     }
   ]
 }
