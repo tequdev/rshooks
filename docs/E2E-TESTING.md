@@ -7,7 +7,7 @@ node and verifies their runtime behavior.
 ## Prerequisites
 
 - Docker-compatible container runtime
-- [`xrpld-netgen`](https://www.npmjs.com/package/xrpld-netgen)
+- [`xrpld-lab`](https://pypi.org/project/xrpld-lab/)
 - pnpm
 
 The node version is configured by `XAHAUD_VERSION` in `mise.toml`.
