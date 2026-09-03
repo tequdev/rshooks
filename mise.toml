@@ -97,7 +97,10 @@ run = "mdbook serve book --open"
 
 [tasks."e2e:node-up"]
 description = "Start a standalone Xahau node for e2e tests (xrpld-lab; amd64 image, runs under emulation on Apple Silicon)"
-run = "xrpld-lab up:standalone --protocol xahau --version $XAHAUD_VERSION"
+run = """
+xrpld-lab up:standalone --protocol xahau --version $XAHAUD_VERSION
+xrpld-lab up --name "xahau-$XAHAUD_VERSION"
+"""
 
 [tasks."e2e:node-down"]
 description = "Stop the standalone Xahau node started by e2e:node-up"

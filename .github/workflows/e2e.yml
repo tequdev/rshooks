@@ -84,7 +84,9 @@ jobs:
         run: pip install xrpld-lab 'anyio<4.15'
 
       - name: Start standalone Xahau node
-        run: xrpld-lab up:standalone --protocol xahau --version "${{ env.XAHAUD_VERSION }}"
+        run: |
+          xrpld-lab up:standalone --protocol xahau --version "${{ env.XAHAUD_VERSION }}"
+          xrpld-lab up --name "xahau-${{ env.XAHAUD_VERSION }}"
 
       - name: Wait for the node to answer admin RPC
         run: |
