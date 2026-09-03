@@ -11,10 +11,8 @@ keywords = ["xahau", "hooks", "testing", "wasm"]
 categories = ["development-tools::testing"]
 
 [dependencies]
-rshooks = { path = "../rshooks", version = "0.1.1", features = ["testenv"] }
-rshooks-core = { path = "../rshooks-core", version = "0.1.1", features = [
-    "testenv",
-] }
+rshooks = { workspace = true, features = ["testenv"] }
+rshooks-core = { workspace = true, features = ["testenv"] }
 sha2 = "0.10"
 # util_verify (P2-C): ed25519 / secp256k1 signature verification, matching
 # xahaud's own `ripple::verify` dispatch (see `src/host/util.rs`'s module

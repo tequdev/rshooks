@@ -10,6 +10,14 @@ license = "MIT"
 repository = "https://github.com/tequdev/rshooks"
 readme = "README.md"
 
+[workspace.dependencies]
+# Inter-crate dependencies inherit these entries (`{ workspace = true }`), so
+# the published version requirement lives next to `workspace.package.version`.
+# `cargo xtask check-versions` fails when the two drift apart.
+rshooks-core = { path = "crates/rshooks-core", version = "0.1.1" }
+rshooks-macros = { path = "crates/rshooks-macros", version = "0.1.1" }
+rshooks = { path = "crates/rshooks", version = "0.1.1" }
+
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
 missing_docs = "deny"

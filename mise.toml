@@ -25,6 +25,10 @@ cargo clippy -p rshooks --all-targets --all-features -- -D warnings
 cargo clippy --manifest-path examples/Cargo.toml --workspace --target wasm32v1-none -- -D warnings
 """
 
+[tasks."check-versions"]
+description = "Verify every version reference tracks the root workspace version"
+run = "cargo run -q -p xtask -- check-versions"
+
 [tasks.test]
 description = "Run all workspace tests, plus rshooks in each amendment-availability state"
 run = """
