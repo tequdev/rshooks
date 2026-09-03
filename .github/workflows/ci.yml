@@ -43,6 +43,9 @@ jobs:
       - name: Generated rshooks-core sources are up to date
         run: cargo run -q -p xtask -- gen-core --check
 
+      - name: Every version reference tracks the root workspace version
+        run: cargo run -q -p xtask -- check-versions
+
       - name: Clippy (host, deny warnings)
         run: cargo clippy --workspace --all-targets -- -D warnings
 
