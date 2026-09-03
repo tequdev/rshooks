@@ -81,7 +81,7 @@ jobs:
       # published CLI tool as a subprocess has no such issue and keeps
       # local/CI provisioning identical (both `up:standalone`).
       - name: Install xrpld-lab
-        run: pip install xrpld-lab
+        run: pip install xrpld-lab 'anyio<4.15'
 
       - name: Start standalone Xahau node
         run: xrpld-lab up:standalone --protocol xahau --version "${{ env.XAHAUD_VERSION }}"
