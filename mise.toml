@@ -101,6 +101,7 @@ run = """
 xrpld-lab up:standalone --protocol xahau --version $XAHAUD_VERSION
 curl -fsSL -o "workspace/xahau-$XAHAUD_VERSION/xahaud.$XAHAUD_VERSION" "https://build.xahau.tech/$XAHAUD_VERSION"
 chmod +x "workspace/xahau-$XAHAUD_VERSION/xahaud.$XAHAUD_VERSION"
+perl -pi -e 's/"None"/""/' "workspace/xahau-$XAHAUD_VERSION/Dockerfile"
 xrpld-lab up --name "xahau-$XAHAUD_VERSION"
 """
 
