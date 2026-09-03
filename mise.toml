@@ -99,6 +99,8 @@ run = "mdbook serve book --open"
 description = "Start a standalone Xahau node for e2e tests (xrpld-lab; amd64 image, runs under emulation on Apple Silicon)"
 run = """
 xrpld-lab up:standalone --protocol xahau --version $XAHAUD_VERSION
+curl -fsSL -o "workspace/xahau-$XAHAUD_VERSION/xahaud.$XAHAUD_VERSION" "https://build.xahau.tech/$XAHAUD_VERSION"
+chmod +x "workspace/xahau-$XAHAUD_VERSION/xahaud.$XAHAUD_VERSION"
 xrpld-lab up --name "xahau-$XAHAUD_VERSION"
 """
 

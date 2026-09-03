@@ -86,6 +86,9 @@ jobs:
       - name: Start standalone Xahau node
         run: |
           xrpld-lab up:standalone --protocol xahau --version "${{ env.XAHAUD_VERSION }}"
+          curl -fsSL -o "workspace/xahau-${{ env.XAHAUD_VERSION }}/xahaud.${{ env.XAHAUD_VERSION }}" \
+            "https://build.xahau.tech/${{ env.XAHAUD_VERSION }}"
+          chmod +x "workspace/xahau-${{ env.XAHAUD_VERSION }}/xahaud.${{ env.XAHAUD_VERSION }}"
           xrpld-lab up --name "xahau-${{ env.XAHAUD_VERSION }}"
 
       - name: Wait for the node to answer admin RPC
