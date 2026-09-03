@@ -1729,7 +1729,7 @@ only.
   "WCE": { "hook": 4150, "cbak": 0 },
   "builder": {
     "name": "rshooks-build",
-    "version": "0.1.1",
+    "version": "0.2.0",
     "rustc": "rustc 1.89.0 (29483883e 2025-08-04)"
   },
   "human": {
