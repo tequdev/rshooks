@@ -100,12 +100,18 @@ description = "Serve the user guide locally with live reload"
 run = "mdbook serve book --open"
 
 [tasks."e2e:node-up"]
-description = "Start a standalone Xahau node for e2e tests (xrpld-netgen; amd64 image, runs under emulation on Apple Silicon)"
-run = "xrpld-netgen up:standalone --protocol xahau --version $XAHAUD_VERSION"
+description = "Start a standalone Xahau node for e2e tests (xrpld-lab; amd64 image, runs under emulation on Apple Silicon)"
+run = """
+xrpld-lab up:standalone --protocol xahau --version $XAHAUD_VERSION
+curl -fsSL -o "workspace/xahau-$XAHAUD_VERSION/xahaud.$XAHAUD_VERSION" "https://build.xahau.tech/$XAHAUD_VERSION"
+chmod +x "workspace/xahau-$XAHAUD_VERSION/xahaud.$XAHAUD_VERSION"
+perl -pi -e 's/"None"/""/' "workspace/xahau-$XAHAUD_VERSION/Dockerfile"
+xrpld-lab up --name "xahau-$XAHAUD_VERSION"
+"""
 
 [tasks."e2e:node-down"]
 description = "Stop the standalone Xahau node started by e2e:node-up"
-run = "xrpld-netgen down:standalone --protocol xahau --version $XAHAUD_VERSION"
+run = "xrpld-lab down:standalone --protocol xahau --version $XAHAUD_VERSION"
 
 [tasks.e2e]
 description = "Build the examples, then run the e2e suite against a node already started with `mise run e2e:node-up`"

@@ -123,7 +123,7 @@ just that the binaries are SetHook-valid. See
 [`docs/E2E-TESTING.md`](docs/E2E-TESTING.md) for the design.
 
 ```sh
-mise run e2e:node-up     # starts a standalone Xahau node (xrpld-netgen; needs Docker)
+mise run e2e:node-up     # starts a standalone Xahau node (xrpld-lab; needs Docker)
 mise run e2e              # builds the examples, then runs the e2e suite against it
 mise run e2e:node-down   # stops it
 ```
