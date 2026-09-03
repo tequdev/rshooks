@@ -72,7 +72,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      # `xrpld-netgen` is a PyPI package (not vendored config): using it
+      # `xrpld-lab` is a PyPI package (not vendored config): using it
       # here, identically to `mise run e2e:node-up` locally, avoids hand-
       # rolling a genesis-ledger generator. hooks-toolkit-ts's own CI
       # pattern does exactly that (a vendored `.ci-config/genesis.js`) but
@@ -80,11 +80,11 @@ jobs:
       # cannot be vendored into this MIT-licensed repo; driving the same
       # published CLI tool as a subprocess has no such issue and keeps
       # local/CI provisioning identical (both `up:standalone`).
-      - name: Install xrpld-netgen
-        run: pip install xrpld-netgen
+      - name: Install xrpld-lab
+        run: pip install xrpld-lab
 
       - name: Start standalone Xahau node
-        run: xrpld-netgen up:standalone --protocol xahau --version "${{ env.XAHAUD_VERSION }}"
+        run: xrpld-lab up:standalone --protocol xahau --version "${{ env.XAHAUD_VERSION }}"
 
       - name: Wait for the node to answer admin RPC
         run: |
@@ -112,4 +112,4 @@ jobs:
 
       - name: Stop standalone Xahau node
         if: always()
-        run: xrpld-netgen down:standalone --protocol xahau --version "${{ env.XAHAUD_VERSION }}" || true
+        run: xrpld-lab down:standalone --protocol xahau --version "${{ env.XAHAUD_VERSION }}" || true
