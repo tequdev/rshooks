@@ -17,6 +17,8 @@ cargo fmt --all --manifest-path examples/Cargo.toml
 
 [tasks.lint]
 description = "Lint the root workspace (all targets, plus rshooks in each amendment-availability state) and the examples workspace (wasm32v1-none), denying warnings"
+# Mirrored by hand in .github/workflows/ci.yml's build-test job (Clippy
+# steps); keep the feature combinations in sync with that job.
 run = """
 cargo clippy --workspace --all-targets -- -D warnings
 # Cover the active-only and widest-wins generated surfaces too.
@@ -31,6 +33,8 @@ run = "cargo run -q -p xtask -- check-versions"
 
 [tasks.test]
 description = "Run all workspace tests, plus rshooks in each amendment-availability state"
+# Mirrored by hand in .github/workflows/ci.yml's build-test job (Test
+# steps); keep the feature combinations in sync with that job.
 run = """
 cargo test --workspace
 # Exercise generated availability gates in every state.
