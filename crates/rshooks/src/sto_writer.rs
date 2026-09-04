@@ -115,7 +115,11 @@ enum FrameKind {
 /// container nesting, a duplicate required-field write, or a write after
 /// [`Self::prepare_for_emit`] has succeeded all fail
 /// (see each method's `# Errors`) rather than panicking or corrupting
-/// already-written bytes.
+/// already-written bytes. Every method is all-or-nothing: an `Err` return
+/// leaves the writer's cursor and buffer contents exactly as they were
+/// before the call, so a failed call can always be retried (with
+/// different arguments, or after freeing buffer capacity) or the writer
+/// abandoned without inspecting it further.
 #[must_use = "a StoWriter that is never read via as_bytes()/prepare_for_emit() means the writes were wasted"]
 pub struct StoWriter<'a> {
     buf: &'a mut [u8],
@@ -277,6 +281,43 @@ impl<'a> StoWriter<'a> {
         self.write_bytes(hdr)
     }
 
+    /// Writes field `f`'s header immediately followed by `payload`, as one
+    /// atomic unit: validates the combined capacity before writing either
+    /// piece, so a capacity failure — or the disallowed-in-array check —
+    /// leaves the writer completely unchanged, never with just the header
+    /// committed. Returns the header's start offset (the value, if any,
+    /// begins at `start + `[`codec::field_header`]`(f).1`). Every scalar
+    /// field writer that emits a fixed-shape value is built on this; `vl`
+    /// (whose prefix and payload lengths are only known at the call site)
+    /// applies the same total-capacity-first discipline by hand.
+    ///
+    /// `payload.len()` should be a compile-time constant at the call site,
+    /// for the reason [`Self::write_bytes`]'s doc comment gives.
+    #[inline(always)]
+    fn write_field_and_payload<T>(&mut self, f: SField<T>, payload: &[u8]) -> Result<usize> {
+        self.check_write(false)?;
+        let (hdr, hdr_len) = codec::field_header(f);
+        let hdr = hdr.get(..hdr_len).ok_or(HookError::InvalidArgument)?;
+        let total = hdr_len
+            .checked_add(payload.len())
+            .ok_or(HookError::InvalidArgument)?;
+        let start = self.reserve_capacity(total)?;
+        let mid = start.wrapping_add(hdr_len);
+        let end = start.wrapping_add(total);
+        let hdr_dst = self
+            .buf
+            .get_mut(start..mid)
+            .ok_or(HookError::InvalidArgument)?;
+        hdr_dst.copy_from_slice(hdr);
+        let value_dst = self
+            .buf
+            .get_mut(mid..end)
+            .ok_or(HookError::InvalidArgument)?;
+        value_dst.copy_from_slice(payload);
+        self.commit(start, total)?;
+        Ok(start)
+    }
+
     /// Whether `code` is one of the six required emit-plumbing fields
     /// (`sfSequence`/`sfFirstLedgerSequence`/`sfLastLedgerSequence`/
     /// `sfFee`/`sfSigningPubKey`/`sfAccount`) that has already been
@@ -302,9 +343,8 @@ impl<'a> StoWriter<'a> {
     /// (see [`Self::prepare_for_emit`]).
     #[inline(always)]
     pub fn u16_field(&mut self, f: SField<u16>, value: u16) -> Result<()> {
-        self.check_write(false)?;
-        self.write_field_header_bytes(f)?;
-        self.write_bytes(&value.to_be_bytes())
+        self.write_field_and_payload(f, &value.to_be_bytes())?;
+        Ok(())
     }
 
     /// Writes an `STI_UINT32` field (e.g. `sfFlags`, `sfSequence`).
@@ -325,16 +365,15 @@ impl<'a> StoWriter<'a> {
         if self.plumbing_already_set(code) {
             return Err(HookError::AlreadySet);
         }
-        self.check_write(false)?;
-        self.write_field_header_bytes(f)?;
-        let value_off = self.pos;
-        self.write_bytes(&value.to_be_bytes())?;
+        let start = self.write_field_and_payload(f, &value.to_be_bytes())?;
         if code == sfSequence.code() {
             self.sequence_seen = true;
         } else if code == sfFirstLedgerSequence.code() {
-            self.first_ledger_sequence_off = Some(value_off);
+            let hdr_len = codec::field_header(f).1;
+            self.first_ledger_sequence_off = Some(start.wrapping_add(hdr_len));
         } else if code == sfLastLedgerSequence.code() {
-            self.last_ledger_sequence_off = Some(value_off);
+            let hdr_len = codec::field_header(f).1;
+            self.last_ledger_sequence_off = Some(start.wrapping_add(hdr_len));
         }
         Ok(())
     }
@@ -354,13 +393,13 @@ impl<'a> StoWriter<'a> {
         if self.plumbing_already_set(code) {
             return Err(HookError::AlreadySet);
         }
-        self.check_write(false)?;
-        self.write_field_header_bytes(f)?;
-        self.write_bytes(&[ACC_ID_LEN as u8])?;
-        let value_off = self.pos;
-        self.write_bytes(value.as_ref())?;
+        let mut payload = [0u8; 1 + ACC_ID_LEN];
+        payload[0] = ACC_ID_LEN as u8;
+        payload[1..].copy_from_slice(value.as_ref());
+        let start = self.write_field_and_payload(f, &payload)?;
         if code == sfAccount.code() {
-            self.account_off = Some(value_off);
+            let hdr_len = codec::field_header(f).1;
+            self.account_off = Some(start.wrapping_add(hdr_len).wrapping_add(1));
         }
         Ok(())
     }
@@ -381,9 +420,7 @@ impl<'a> StoWriter<'a> {
         if self.plumbing_already_set(code) {
             return Err(HookError::AlreadySet);
         }
-        self.check_write(false)?;
-        self.write_field_header_bytes(f)?;
-        self.write_bytes(&[0u8])?;
+        self.write_field_and_payload(f, &[0u8])?;
         if code == sfSigningPubKey.code() {
             self.signing_pub_key_seen = true;
         }
@@ -420,11 +457,34 @@ impl<'a> StoWriter<'a> {
         if value.len() > codec::MAX_VL_LEN {
             return Err(HookError::InvalidArgument);
         }
-        self.write_field_header_bytes(f)?;
+        let (hdr, hdr_len) = codec::field_header(f);
+        let hdr = hdr.get(..hdr_len).ok_or(HookError::InvalidArgument)?;
         let (prefix, prefix_len) = codec::vl_length_prefix(value.len());
         let prefix = prefix.get(..prefix_len).ok_or(HookError::InvalidArgument)?;
-        self.write_bytes(prefix)?;
-        self.write_bytes(value)
+        // Total capacity is validated up front, and nothing below is
+        // written until it is confirmed to fit, so a capacity failure
+        // never leaves the header or prefix committed on their own.
+        let total = hdr_len
+            .checked_add(prefix_len)
+            .and_then(|n| n.checked_add(value.len()))
+            .ok_or(HookError::InvalidArgument)?;
+        let start = self.reserve_capacity(total)?;
+        let after_hdr = start.wrapping_add(hdr_len);
+        let after_prefix = after_hdr.wrapping_add(prefix_len);
+        let end = start.wrapping_add(total);
+        self.buf
+            .get_mut(start..after_hdr)
+            .ok_or(HookError::InvalidArgument)?
+            .copy_from_slice(hdr);
+        self.buf
+            .get_mut(after_hdr..after_prefix)
+            .ok_or(HookError::InvalidArgument)?
+            .copy_from_slice(prefix);
+        self.buf
+            .get_mut(after_prefix..end)
+            .ok_or(HookError::InvalidArgument)?
+            .copy_from_slice(value);
+        self.commit(start, total)
     }
 
     /// Writes an `STI_AMOUNT` field encoded as a native (XRP/XAH) amount —
@@ -445,16 +505,14 @@ impl<'a> StoWriter<'a> {
         if self.plumbing_already_set(code) {
             return Err(HookError::AlreadySet);
         }
-        self.check_write(false)?;
-        self.write_field_header_bytes(f)?;
-        let start = self.reserve(8)?;
-        let dst = self
-            .buf
-            .get_mut(start..start.wrapping_add(8))
-            .ok_or(HookError::InvalidArgument)?;
-        codec::encode_native_amount(dst, drops)?;
+        // Validated into a scratch array first: an out-of-range `drops`
+        // must never leave the field header committed on its own.
+        let mut encoded = [0u8; 8];
+        codec::encode_native_amount(&mut encoded, drops)?;
+        let start = self.write_field_and_payload(f, &encoded)?;
         if code == sfFee.code() {
-            self.fee_off = Some(start);
+            let hdr_len = codec::field_header(f).1;
+            self.fee_off = Some(start.wrapping_add(hdr_len));
         }
         Ok(())
     }
@@ -605,20 +663,29 @@ impl<'a> StoWriter<'a> {
     /// [`sfSigningPubKey`], [`sfAccount`]) to have already been written, in
     /// whatever order the caller chose, then:
     ///
-    /// 1. Patches `FirstLedgerSequence`/`LastLedgerSequence` from
-    ///    `ledger_seq() + 1` / `+ 5`.
-    /// 2. Patches `Account` from [`crate::api::hook_ctx::hook_account`].
-    /// 3. Appends the runtime-sized `sfEmitDetails` field at the current
-    ///    cursor via [`crate::api::etxn::etxn_details`] — see the module
-    ///    doc comment's "`prepare_for_emit` writes `EmitDetails` itself"
-    ///    section for the buffer-headroom requirement this implies.
-    /// 4. Computes `etxn_fee_base` over the full serialized prefix,
-    ///    including the just-appended `EmitDetails`, and patches `Fee`.
-    /// 5. Finalizes the writer (further writes fail with
-    ///    [`HookError::InvalidArgument`]) and returns a
-    ///    [`crate::txn::Prepared`] handle sized to exactly what was written
-    ///    — the same typestate [`crate::txn::Prepared::emit`] already knows
-    ///    how to emit.
+    /// 1. Gathers every fallible input — [`crate::api::hook_ctx::hook_account_buf`],
+    ///    the runtime-sized `sfEmitDetails` bytes via
+    ///    [`crate::api::etxn::etxn_details`], and `etxn_fee_base` computed
+    ///    over the serialized prefix including those `EmitDetails` bytes —
+    ///    without mutating any field the caller already wrote or advancing
+    ///    the cursor. See the module doc comment's "`prepare_for_emit`
+    ///    writes `EmitDetails` itself" section for the buffer-headroom
+    ///    requirement `EmitDetails` implies.
+    /// 2. Only once every step in (1) has succeeded: patches
+    ///    `FirstLedgerSequence`/`LastLedgerSequence` from `ledger_seq() + 1`
+    ///    / `+ 5`, patches `Account` and `Fee` from the gathered values,
+    ///    commits the `EmitDetails` bytes onto the cursor, and finalizes
+    ///    the writer (further writes fail with
+    ///    [`HookError::InvalidArgument`]).
+    /// 3. Returns a [`crate::txn::Prepared`] handle sized to exactly what
+    ///    was written — the same typestate [`crate::txn::Prepared::emit`]
+    ///    already knows how to emit.
+    ///
+    /// Because every fallible step runs before any mutation, a failure at
+    /// any point (including `etxn_fee_base`) leaves the writer exactly as
+    /// it was before the call — safe to retry (e.g. after making more
+    /// buffer capacity available) without risking a duplicated
+    /// `EmitDetails` or any other partial write.
     ///
     /// `Sequence` and `SigningPubKey` are left untouched (checked for
     /// presence only), exactly as in the macro.
@@ -628,7 +695,8 @@ impl<'a> StoWriter<'a> {
     /// [`HookError::InvalidArgument`] if any container is still open, any
     /// required field was never written, `buf` lacks enough headroom for
     /// `EmitDetails`, or the writer is already finalized. Otherwise
-    /// propagates `hook_account`/`etxn_details`/`etxn_fee_base`'s errors.
+    /// propagates `hook_account_buf`/`etxn_details`/`etxn_fee_base`'s
+    /// errors.
     #[inline(always)]
     pub fn prepare_for_emit(&mut self) -> Result<Prepared<'_, Self>> {
         if self.finalized {
@@ -649,28 +717,12 @@ impl<'a> StoWriter<'a> {
             return Err(HookError::InvalidArgument);
         }
 
+        // Every fallible input is gathered here, before any byte of `buf`
+        // is mutated or the cursor moves, so an `Err` from any of these
+        // leaves the writer completely unchanged.
         let fls = ledger::ledger_seq().wrapping_add(1);
-        {
-            let dst = self
-                .buf
-                .get_mut(fls_off..fls_off.wrapping_add(4))
-                .ok_or(HookError::InvalidArgument)?;
-            dst.copy_from_slice(&fls.to_be_bytes());
-        }
-        {
-            let dst = self
-                .buf
-                .get_mut(lls_off..lls_off.wrapping_add(4))
-                .ok_or(HookError::InvalidArgument)?;
-            dst.copy_from_slice(&fls.wrapping_add(4).to_be_bytes());
-        }
-        {
-            let dst = self
-                .buf
-                .get_mut(account_off..account_off.wrapping_add(ACC_ID_LEN))
-                .ok_or(HookError::InvalidArgument)?;
-            hook_ctx::hook_account(dst)?;
-        }
+        let lls = fls.wrapping_add(4);
+        let account = hook_ctx::hook_account_buf()?;
 
         let ed_start = self.reserve_capacity(EMIT_DETAILS_MAX_LEN)?;
         let ed_end = ed_start.wrapping_add(EMIT_DETAILS_MAX_LEN);
@@ -679,9 +731,10 @@ impl<'a> StoWriter<'a> {
             .get_mut(ed_start..ed_end)
             .ok_or(HookError::InvalidArgument)?;
         let ed_len = etxn::etxn_details(ed_region)?;
-        self.commit(ed_start, ed_len)?;
+        let total_len = ed_start
+            .checked_add(ed_len)
+            .ok_or(HookError::InvalidArgument)?;
 
-        let total_len = self.pos;
         let fee = {
             let blob = self
                 .buf
@@ -689,13 +742,29 @@ impl<'a> StoWriter<'a> {
                 .ok_or(HookError::InvalidArgument)?;
             etxn::etxn_fee_base(blob)?
         };
-        {
-            let dst = self
-                .buf
-                .get_mut(fee_off..fee_off.wrapping_add(8))
-                .ok_or(HookError::InvalidArgument)?;
-            codec::encode_native_amount(dst, fee)?;
-        }
+        let mut fee_bytes = [0u8; 8];
+        codec::encode_native_amount(&mut fee_bytes, fee)?;
+
+        // Every fallible step above has succeeded; the rest are plain
+        // in-bounds copies into offsets this writer itself recorded, so
+        // nothing from here on can fail partway through.
+        self.buf
+            .get_mut(fls_off..fls_off.wrapping_add(4))
+            .ok_or(HookError::InvalidArgument)?
+            .copy_from_slice(&fls.to_be_bytes());
+        self.buf
+            .get_mut(lls_off..lls_off.wrapping_add(4))
+            .ok_or(HookError::InvalidArgument)?
+            .copy_from_slice(&lls.to_be_bytes());
+        self.buf
+            .get_mut(account_off..account_off.wrapping_add(ACC_ID_LEN))
+            .ok_or(HookError::InvalidArgument)?
+            .copy_from_slice(account.as_ref());
+        self.buf
+            .get_mut(fee_off..fee_off.wrapping_add(8))
+            .ok_or(HookError::InvalidArgument)?
+            .copy_from_slice(&fee_bytes);
+        self.commit(ed_start, ed_len)?;
 
         self.finalized = true;
         Ok(Prepared::new(self, total_len))
@@ -850,15 +919,50 @@ mod tests {
     #[test]
     fn one_byte_short_buffer_fails() {
         // `sfFlags`'s 1-byte header fits in 4 bytes, but its 4-byte value
-        // does not — the call still fails as a whole (the header write
-        // alone is not a usable partial result; callers must treat any
-        // `Err` as "stop using this writer").
+        // does not — the whole write is rejected before either piece is
+        // committed, leaving the writer exactly as it was beforehand.
         let mut buf = [0u8; 4];
         let mut w = StoWriter::new(&mut buf);
         assert_eq!(w.u32_field(sfFlags, 1), Err(HookError::InvalidArgument));
-        // The failed value write never advanced the cursor past the header
-        // it already committed.
-        assert_eq!(w.len(), 1);
+        assert_eq!(w.len(), 0);
+        assert!(w.is_empty());
+    }
+
+    #[test]
+    fn failed_writes_leave_the_writer_unchanged_across_field_kinds() {
+        // Each of these fails for a different reason (capacity, an
+        // out-of-range value, a length over the maximum) after already
+        // having written at least one prior field; none may touch the
+        // bytes or cursor already committed, nor advance past them.
+        let mut buf = [0u8; 3];
+        let mut w = StoWriter::new(&mut buf);
+        w.u16_field(sfTransactionType, 7)
+            .expect("fits exactly, no headroom left");
+        let mut before = [0u8; 3];
+        let before_len = w.len();
+        before[..before_len].copy_from_slice(w.as_bytes());
+
+        assert_eq!(
+            w.u32_field(sfFlags, 1),
+            Err(HookError::InvalidArgument),
+            "capacity"
+        );
+        assert_eq!(w.as_bytes(), &before[..before_len]);
+
+        assert_eq!(
+            w.native_amount(sfAmount, 1u64 << 62),
+            Err(HookError::InvalidArgument),
+            "out-of-range drops"
+        );
+        assert_eq!(w.as_bytes(), &before[..before_len]);
+
+        static TOO_LONG: [u8; codec::MAX_VL_LEN + 1] = [0u8; codec::MAX_VL_LEN + 1];
+        assert_eq!(
+            w.vl(sfBlob, &TOO_LONG),
+            Err(HookError::InvalidArgument),
+            "vl over the maximum length"
+        );
+        assert_eq!(w.as_bytes(), &before[..before_len]);
     }
 
     #[test]
@@ -1221,6 +1325,46 @@ mod testenv_tests {
         // everything the caller wrote.
         assert_eq!(prepared_len, before_prepare + 116);
         assert_eq!(prepared_len, w.len());
+    }
+
+    #[test]
+    fn retry_after_fee_base_failure_does_not_duplicate_emit_details() {
+        // `etxn_fee_base` runs after `EmitDetails` has already been read
+        // from the host into `buf`; if the writer committed those bytes
+        // before checking the fee call's result, a retried
+        // `prepare_for_emit` would append a second copy.
+        let failing_backend = Rc::new(MockBackend {
+            account: [0x22; 20],
+            ledger_seq: 10,
+            fee_base: rshooks_core::NOT_IMPLEMENTED,
+            emit_details: vec![0xEEu8; 116],
+            float_sto_out: Vec::new(),
+        });
+        let mut buf = [0u8; 512];
+        let mut w = StoWriter::new(&mut buf);
+        write_required_prefix(&mut w);
+        let before_prepare = w.len();
+
+        {
+            let _guard = rshooks_core::backend::install(failing_backend);
+            assert_eq!(w.prepare_for_emit().err(), Some(HookError::NotImplemented));
+        }
+        // The failed attempt must not have advanced the cursor at all.
+        assert_eq!(w.len(), before_prepare);
+
+        let succeeding_backend = Rc::new(MockBackend {
+            account: [0x22; 20],
+            ledger_seq: 10,
+            fee_base: 12,
+            emit_details: vec![0xEEu8; 116],
+            float_sto_out: Vec::new(),
+        });
+        let _guard = rshooks_core::backend::install(succeeding_backend);
+        let prepared = w
+            .prepare_for_emit()
+            .expect("retry succeeds once the backend does");
+        // Exactly one `EmitDetails` was appended, not two.
+        assert_eq!(prepared.as_bytes().len(), before_prepare + 116);
     }
 
     #[test]
