@@ -195,10 +195,10 @@ fn grep_raw_call_sites(api_dir: &Path) -> BTreeSet<Row> {
             } else {
                 find_raw_call(line)
             };
-            if let Some(raw) = raw {
-                if let Some(f) = &current_fn {
-                    set.insert((format!("api/{file_name}"), f.clone(), raw));
-                }
+            if let Some(raw) = raw
+                && let Some(f) = &current_fn
+            {
+                set.insert((format!("api/{file_name}"), f.clone(), raw));
             }
         }
     }
@@ -218,10 +218,10 @@ fn grep_raw_call_sites(api_dir: &Path) -> BTreeSet<Row> {
             if let Some(name) = find_fn_name(trimmed) {
                 current_fn = Some(name);
             }
-            if let Some(raw) = find_raw_call(line) {
-                if let Some(f) = &current_fn {
-                    set.insert((file_name.to_string(), f.clone(), raw));
-                }
+            if let Some(raw) = find_raw_call(line)
+                && let Some(f) = &current_fn
+            {
+                set.insert((file_name.to_string(), f.clone(), raw));
             }
         }
     }
@@ -301,15 +301,15 @@ fn find_unbridged_call_sites(api_dir: &Path) -> Vec<(String, String)> {
             } else {
                 find_raw_call(line)
             };
-            if raw.is_some() {
-                if let Some(f) = &current_fn {
-                    let end = fn_body_end_line(&lines, current_fn_start);
-                    let body_has_marker = lines
-                        .get(current_fn_start..=end)
-                        .is_some_and(|body| body.iter().any(|l| l.contains(MARKER)));
-                    if !body_has_marker {
-                        offenders.push((label.to_string(), f.clone()));
-                    }
+            if raw.is_some()
+                && let Some(f) = &current_fn
+            {
+                let end = fn_body_end_line(&lines, current_fn_start);
+                let body_has_marker = lines
+                    .get(current_fn_start..=end)
+                    .is_some_and(|body| body.iter().any(|l| l.contains(MARKER)));
+                if !body_has_marker {
+                    offenders.push((label.to_string(), f.clone()));
                 }
             }
         }

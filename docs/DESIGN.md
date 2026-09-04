@@ -192,12 +192,13 @@ rshooks/
 - Root workspace members: `crates/*` only. `examples/` is its own workspace:
   its crates are `no_std` cdylibs with hook-specific release profiles that
   must not leak into host crates, and they don't build for host targets.
-- Edition 2024, `rust-version = "1.85"` (wasm32v1-none is stable ≥ 1.84). A
-  stable toolchain is pinned via `rust-toolchain.toml` (currently `1.89.0`,
-  matching `mise.toml`'s `[tools] rust` pin — see §5.5 for why no nightly
-  feature is needed: `rshooks-macros`, a small hand-rolled `proc_macro` crate,
-  covers what `${concat(...)}` used to); `rust-version` still tracks the
-  language edition floor, not the exact pinned toolchain.
+- Edition 2024, `rust-version = "1.88"` (let-chains, used by `rshooks-build`'s
+  wasm passes and `xtask`, stabilized in 1.88; wasm32v1-none is stable ≥
+  1.84). A stable toolchain is pinned via `rust-toolchain.toml` (currently
+  `1.89.0`, matching `mise.toml`'s `[tools] rust` pin — see §5.5 for why no
+  nightly feature is needed: `rshooks-macros`, a small hand-rolled
+  `proc_macro` crate, covers what `${concat(...)}` used to); `rust-version`
+  still tracks the language edition floor, not the exact pinned toolchain.
 - All crates `publish = false` for now.
 - All comments, docs, and identifiers in English.
 

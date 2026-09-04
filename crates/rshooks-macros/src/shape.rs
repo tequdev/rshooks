@@ -63,14 +63,14 @@ fn skip_attrs(iter: &mut Peekable<impl Iterator<Item = TokenTree>>) {
 
 /// Advances past an optional leading `pub`/`pub(...)` visibility.
 fn skip_vis(iter: &mut Peekable<impl Iterator<Item = TokenTree>>) {
-    if let Some(TokenTree::Ident(id)) = iter.peek() {
-        if id.to_string() == "pub" {
+    if let Some(TokenTree::Ident(id)) = iter.peek()
+        && id.to_string() == "pub"
+    {
+        iter.next();
+        if let Some(TokenTree::Group(g)) = iter.peek()
+            && g.delimiter() == Delimiter::Parenthesis
+        {
             iter.next();
-            if let Some(TokenTree::Group(g)) = iter.peek() {
-                if g.delimiter() == Delimiter::Parenthesis {
-                    iter.next();
-                }
-            }
         }
     }
 }
@@ -131,13 +131,13 @@ pub fn parse_struct(input: TokenStream, derive_name: &str) -> Result<StructShape
     let name_span = name_id.span();
     let name = name_id.to_string();
 
-    if let Some(TokenTree::Punct(p)) = iter.peek() {
-        if p.as_char() == '<' {
-            return Err(err(
-                p.span(),
-                &format!("{derive_name} does not support generic structs"),
-            ));
-        }
+    if let Some(TokenTree::Punct(p)) = iter.peek()
+        && p.as_char() == '<'
+    {
+        return Err(err(
+            p.span(),
+            &format!("{derive_name} does not support generic structs"),
+        ));
     }
 
     match iter.next() {

@@ -294,16 +294,16 @@ fn parse_struct_item(item: TokenStream) -> Result<ParsedStruct, TokenStream> {
     }
 
     let mut vis = Vec::new();
-    if let Some(tt @ TokenTree::Ident(id)) = tokens.get(i) {
-        if id.to_string() == "pub" {
-            vis.push(tt.clone());
+    if let Some(tt @ TokenTree::Ident(id)) = tokens.get(i)
+        && id.to_string() == "pub"
+    {
+        vis.push(tt.clone());
+        i = i.wrapping_add(1);
+        if let Some(g @ TokenTree::Group(group)) = tokens.get(i)
+            && group.delimiter() == Delimiter::Parenthesis
+        {
+            vis.push(g.clone());
             i = i.wrapping_add(1);
-            if let Some(g @ TokenTree::Group(group)) = tokens.get(i) {
-                if group.delimiter() == Delimiter::Parenthesis {
-                    vis.push(g.clone());
-                    i = i.wrapping_add(1);
-                }
-            }
         }
     }
 
@@ -327,22 +327,22 @@ fn parse_struct_item(item: TokenStream) -> Result<ParsedStruct, TokenStream> {
     };
     i = i.wrapping_add(1);
 
-    if let Some(tt) = tokens.get(i) {
-        if is_punct(tt, '<') {
-            return Err(err(
-                tt.span(),
-                "#[hooks]: a chain-declaration struct cannot be generic \
+    if let Some(tt) = tokens.get(i)
+        && is_punct(tt, '<')
+    {
+        return Err(err(
+            tt.span(),
+            "#[hooks]: a chain-declaration struct cannot be generic \
                  (no type parameters or lifetimes)",
-            ));
-        }
+        ));
     }
-    if let Some(TokenTree::Ident(id)) = tokens.get(i) {
-        if id.to_string() == "where" {
-            return Err(err(
-                id.span(),
-                "#[hooks]: a chain-declaration struct cannot have a `where` clause",
-            ));
-        }
+    if let Some(TokenTree::Ident(id)) = tokens.get(i)
+        && id.to_string() == "where"
+    {
+        return Err(err(
+            id.span(),
+            "#[hooks]: a chain-declaration struct cannot have a `where` clause",
+        ));
     }
 
     let body = match tokens.get(i) {
@@ -479,16 +479,16 @@ fn parse_named_fields(stream: TokenStream) -> Result<Vec<ParsedField>, TokenStre
         }
 
         let mut vis = Vec::new();
-        if let Some(tt @ TokenTree::Ident(id)) = tokens.get(i) {
-            if id.to_string() == "pub" {
-                vis.push(tt.clone());
+        if let Some(tt @ TokenTree::Ident(id)) = tokens.get(i)
+            && id.to_string() == "pub"
+        {
+            vis.push(tt.clone());
+            i = i.wrapping_add(1);
+            if let Some(g @ TokenTree::Group(group)) = tokens.get(i)
+                && group.delimiter() == Delimiter::Parenthesis
+            {
+                vis.push(g.clone());
                 i = i.wrapping_add(1);
-                if let Some(g @ TokenTree::Group(group)) = tokens.get(i) {
-                    if group.delimiter() == Delimiter::Parenthesis {
-                        vis.push(g.clone());
-                        i = i.wrapping_add(1);
-                    }
-                }
             }
         }
 

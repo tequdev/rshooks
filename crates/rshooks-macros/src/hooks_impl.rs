@@ -138,13 +138,13 @@ fn parse_impl_item(item: TokenStream) -> Result<ParsedImpl, TokenStream> {
     };
     i = i.wrapping_add(1);
 
-    if let Some(tt) = tokens.get(i) {
-        if is_punct(tt, '<') {
-            return Err(err(
-                tt.span(),
-                "#[hooks]: the chain entry impl cannot be generic",
-            ));
-        }
+    if let Some(tt) = tokens.get(i)
+        && is_punct(tt, '<')
+    {
+        return Err(err(
+            tt.span(),
+            "#[hooks]: the chain entry impl cannot be generic",
+        ));
     }
 
     let struct_name = match tokens.get(i) {
@@ -338,14 +338,14 @@ struct SigArg {
 /// later by the monomorphized `const` assert the caller emits alongside
 /// this byte (`docs/PARAM_SIGNATURE_DESIGN.md` §1).
 fn classify_sig_type(tokens: &[TokenTree]) -> Option<u8> {
-    if let [TokenTree::Ident(id), TokenTree::Punct(lt), rest @ ..] = tokens {
-        if id.to_string() == "Blob" && lt.as_char() == '<' && rest.len() >= 2 {
-            if let Some(TokenTree::Punct(gt)) = rest.last() {
-                if gt.as_char() == '>' {
-                    return Some(0x07); // STI_VL
-                }
-            }
-        }
+    if let [TokenTree::Ident(id), TokenTree::Punct(lt), rest @ ..] = tokens
+        && id.to_string() == "Blob"
+        && lt.as_char() == '<'
+        && rest.len() >= 2
+        && let Some(TokenTree::Punct(gt)) = rest.last()
+        && gt.as_char() == '>'
+    {
+        return Some(0x07); // STI_VL
     }
     classify_sig_type_text(&tokens_to_string(tokens).replace(' ', ""))
 }
@@ -522,16 +522,16 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
         }
 
         let mut vis: Vec<TokenTree> = Vec::new();
-        if let Some(tt @ TokenTree::Ident(id)) = tokens.get(i) {
-            if id.to_string() == "pub" {
-                vis.push(tt.clone());
+        if let Some(tt @ TokenTree::Ident(id)) = tokens.get(i)
+            && id.to_string() == "pub"
+        {
+            vis.push(tt.clone());
+            i = i.wrapping_add(1);
+            if let Some(g @ TokenTree::Group(group)) = tokens.get(i)
+                && group.delimiter() == Delimiter::Parenthesis
+            {
+                vis.push(g.clone());
                 i = i.wrapping_add(1);
-                if let Some(g @ TokenTree::Group(group)) = tokens.get(i) {
-                    if group.delimiter() == Delimiter::Parenthesis {
-                        vis.push(g.clone());
-                        i = i.wrapping_add(1);
-                    }
-                }
             }
         }
 
@@ -911,10 +911,10 @@ fn scan_fn_item(tokens: &[TokenTree], start: usize) -> Result<ScannedFn, TokenSt
         .get(receiver_consumed..)
         .unwrap_or_default()
         .to_vec();
-    if let [tt] = extra_args.as_slice() {
-        if is_punct(tt, ',') {
-            extra_args.clear();
-        }
+    if let [tt] = extra_args.as_slice()
+        && is_punct(tt, ',')
+    {
+        extra_args.clear();
     }
 
     // Return-type tokens are re-emitted verbatim but otherwise unexamined:
@@ -1292,11 +1292,11 @@ fn parse_hook_attr(
                         "#[hook]: expected `on = all` or `on = [Tx, ..]`",
                     ));
                 };
-                if let [TokenTree::Ident(id)] = toks.as_slice() {
-                    if id.to_string() == "all" {
-                        on_all_span = Some(key_span);
-                        continue;
-                    }
+                if let [TokenTree::Ident(id)] = toks.as_slice()
+                    && id.to_string() == "all"
+                {
+                    on_all_span = Some(key_span);
+                    continue;
                 }
                 on_list = Some(parse_tx_list(&toks, key_span, "#[hook]", "on")?);
             }
