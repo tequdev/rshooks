@@ -31,6 +31,7 @@ rshooks build --manifest-path path/to/Cargo.toml
 | `--default-maxiter <N>` | `16` | **Deprecated**, scheduled for removal. The `maxiter` value used for auto-inserted guards, when `--auto-guard` is set. See [Guards and Loops](../concepts/guards.md) for the source-level alternatives. |
 | `--out <DIR>` | `target/rshooks/<crate-name>` under the workspace's target directory | Output **root**: generation directories (`gen-<N>/`) are written under it, with `current` symlinked to the latest complete, validated one. |
 | `--allow-oversize` | off | Write each index's output even if it exceeds the 65,535-byte SetHook size limit. The result is still clearly marked invalid in the printed report. |
+| `--no-optimize` | off | Skip the Binaryen `wasm-opt` `-Oz` size-optimization pass that otherwise runs on each entry's raw wasm before cleaning. |
 | `--account <r...>` | none | Fill the generated template's `Account` placeholder with this address. |
 | `--namespace <64hex>` | none | Fill the generated template's `HookNamespace` placeholder(s) with this value. |
 | `--override` | off | Add `hsfOVERRIDE` (`Flags: 1`) to every declared (non-gap) entry in the generated template, permitting replacement of an already-installed Hook at that position. Never applied to gap (`{"Hook": {}}`) entries. |
@@ -43,14 +44,47 @@ template's exact shape.
 
 ## `rshooks clean`
 
-Cleans and validates an already-built wasm file directly, without invoking
-cargo. Useful for post-processing a single artifact you already have on
-disk — for example one index's raw build output from a different pipeline,
-or one you want to reprocess with different flags without rebuilding.
+Runs the same post-processing pipeline as `build` — the Binaryen `wasm-opt`
+`-Oz` pass, the cleaner (drops custom sections and any export other than
+`hook`/`cbak`, then garbage-collects), flatten (inlines every defined
+helper function into `hook`/`cbak`), unnest, and the authoritative guard
+check — on one already-compiled wasm file from **any** toolchain, without
+invoking cargo. Useful for post-processing a single artifact you already
+have on disk — for example one index's raw build output from a different
+pipeline, or one you want to reprocess with different flags without
+rebuilding.
+
+This makes `clean` usable as a post-processor for Hooks written in C and
+compiled with clang: C authors can write ordinary (non-inline) helper
+functions, and loops with `GUARD` inside them, exactly as they would in any
+other C program, and `clean` inlines those helpers into `hook`/`cbak`, so
+the type section reduces to the import types plus the entry-point type, as
+SetHook requires.
 
 ```sh
 rshooks clean path/to/artifact.wasm
 ```
+
+```sh
+clang --target=wasm32 -mcpu=mvp -nostdlib -O2 \
+  -Wl,--no-entry -Wl,--allow-undefined -Wl,--export=hook -Wl,--export=cbak \
+  -o hook.raw.wasm hook.c
+rshooks clean hook.raw.wasm -o hook.wasm
+```
+
+`-mcpu=mvp` keeps clang from emitting post-MVP instructions (such as
+sign-extension ops) in the first place. Without it, `clean` stops before
+the `wasm-opt` pass with an error naming the flag, because that pass only
+accepts modules within the WebAssembly MVP instruction set; with
+`--no-optimize` (or under `check`) such a module may still pass the
+authoritative upstream guard checker, but a divergence warning is printed,
+since the Rust validator enforces the MVP instruction set. Compile with `-O2` or higher: at `-O0`/`-O1` clang does
+not keep the `_g` call as the first instruction of every loop, so the raw
+output only passes the guard check when the `wasm-opt` pass is left on.
+
+A helper containing a guarded loop is duplicated at each call site while
+keeping one guard id, so size its `maxiter` for the total across all call
+sites. See [Guards and Loops](../concepts/guards.md).
 
 | flag | default | description |
 |---|---|---|
@@ -60,6 +94,7 @@ rshooks clean path/to/artifact.wasm
 | `--auto-guard` | off | **Deprecated**, scheduled for removal. Insert missing loop guards instead of treating them as an error. See [Guards and Loops](../concepts/guards.md) for the source-level alternatives. |
 | `--default-maxiter <N>` | `16` | **Deprecated**, scheduled for removal. `maxiter` used for auto-inserted guards. See [Guards and Loops](../concepts/guards.md) for the source-level alternatives. |
 | `--allow-oversize` | off | Write the output even if it exceeds the 65,535-byte SetHook limit. |
+| `--no-optimize` | off | Skip the Binaryen `wasm-opt` `-Oz` size-optimization pass that otherwise runs on the raw wasm before cleaning. |
 
 `clean` does not generate a metadata sidecar or a `SetHook` template — those
 steps are specific to `build`, since they need the original crate's

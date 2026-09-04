@@ -456,7 +456,7 @@ pub fn validate(wasm: &[u8], opts: &Options) -> Result<ValidationReport, Validat
 /// mutable globals have been part of the module encoding since the MVP
 /// (only cross-module global mutability was the later "mutable globals"
 /// proposal's concern).
-fn mvp_features() -> wasmparser::WasmFeatures {
+pub(crate) fn mvp_features() -> wasmparser::WasmFeatures {
     wasmparser::WasmFeatures::MUTABLE_GLOBAL
 }
 

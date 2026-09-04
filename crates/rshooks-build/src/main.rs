@@ -76,7 +76,9 @@ enum Cmd {
         #[arg(long = "override")]
         override_flag: bool,
     },
-    /// Cleans and validates an already-built wasm file, without invoking
+    /// Runs the full post-processing pipeline — the Binaryen `wasm-opt`
+    /// `-Oz` pass, the cleaner, flatten, unnest, and guard validation — on
+    /// an already-built wasm file from any toolchain, without invoking
     /// cargo.
     Clean {
         /// The input wasm file.
@@ -103,6 +105,10 @@ enum Cmd {
         /// limit (clearly marked invalid).
         #[arg(long)]
         allow_oversize: bool,
+        /// Skip the Binaryen `wasm-opt` `-Oz` size-optimization pass that
+        /// otherwise runs on the raw wasm before cleaning.
+        #[arg(long)]
+        no_optimize: bool,
     },
     /// Validates a wasm file against the full SetHook rule set, without
     /// modifying it. Works on any wasm, including C-built hooks.
@@ -176,6 +182,7 @@ fn main() -> Result<()> {
             auto_guard,
             default_maxiter,
             allow_oversize,
+            no_optimize,
         } => {
             if auto_guard {
                 warn_auto_guard_deprecated();
@@ -185,7 +192,7 @@ fn main() -> Result<()> {
                 auto_guard,
                 default_maxiter,
                 allow_oversize,
-                ..Options::default()
+                optimize: !no_optimize,
             };
             cmd_clean(&input, out, &opts)
         }

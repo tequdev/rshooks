@@ -1435,8 +1435,10 @@ No walrus (C8).
 ```
 rshooks build [--manifest-path <dir/Cargo.toml>] [-p <crate>]
                   [--api-version 0|1] [--out <dir>] [--allow-oversize]
+                  [--no-optimize]
                   [--auto-guard] [--default-maxiter N]   # deprecated
-rshooks clean <in.wasm> [-o out.wasm] [--api-version 0|1]   # post-process only
+rshooks clean <in.wasm> [-o out.wasm] [--api-version 0|1] [--no-optimize]
+                  # post-process only (any toolchain's wasm, incl. C)
 rshooks check <file.wasm> [--api-version 0|1]               # validate only, no output
 ```
 
