@@ -63,7 +63,15 @@ hook_errors! {
 }
 
 #[hooks(description = "Emits a Remit whose sfAmounts nesting is declared in txn_template!.")]
-pub struct TxnTemplateNested;
+pub struct TxnTemplateNested {
+    /// The Remit's destination account; required.
+    #[hook_param(name = b"DEST", required)]
+    dest: HookParam<AccountId>,
+    /// An issuer overriding the baked `USD_ISSUER` for the issued entry;
+    /// optional.
+    #[hook_param(name = b"ISSUER")]
+    issuer: HookParam<AccountId>,
+}
 
 #[hooks]
 impl TxnTemplateNested {
@@ -82,7 +90,7 @@ impl TxnTemplateNested {
             );
         }
 
-        let Ok(destination) = hook_param_exact::<AccountId>(b"DEST") else {
+        let Ok(destination) = self.hook_param.dest.get_required() else {
             rollback!(
                 b"txn-template-nested: missing DEST hook parameter",
                 TxnTemplateNestedError::MissingDestination
@@ -108,9 +116,9 @@ impl TxnTemplateNested {
         // which needs the full 48-byte setter — exercised on the real wasm
         // target so a future compiler-generated copy loop over the
         // `[u8; 48]` region would be caught by `rshooks build`/`check`.
-        match hook_param_exact::<AccountId>(b"ISSUER") {
-            Ok(issuer) => txn.set_amounts_usd_amount(XFL::one(), &USD, &issuer),
-            Err(_) => txn.set_amounts_usd_amount_value(XFL::one()),
+        match self.hook_param.issuer.get() {
+            Ok(Some(issuer)) => txn.set_amounts_usd_amount(XFL::one(), &USD, &issuer),
+            Ok(None) | Err(_) => txn.set_amounts_usd_amount_value(XFL::one()),
         }
 
         let Ok(prepared) = txn.prepare_for_emit() else {

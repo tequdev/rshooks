@@ -54,11 +54,15 @@ entry's gets two setters — `set_amounts_usd_amount(xfl, &currency,
 both, on two different paths:
 
 ```rust
-match hook_param_exact::<AccountId>(b"ISSUER") {
-    Ok(issuer) => txn.set_amounts_usd_amount(XFL::one(), &USD, &issuer),
-    Err(_) => txn.set_amounts_usd_amount_value(XFL::one()),
+match self.hook_param.issuer.get() {
+    Ok(Some(issuer)) => txn.set_amounts_usd_amount(XFL::one(), &USD, &issuer),
+    Ok(None) | Err(_) => txn.set_amounts_usd_amount_value(XFL::one()),
 }
 ```
+
+Both hook parameters are declared on the chain struct (`#[hook_param(name =
+b"DEST", required)]` / `#[hook_param(name = b"ISSUER")]`, see
+`examples/03_hook-params`) and read through `self.hook_param`.
 
 Without an `ISSUER` hook parameter, the currency and issuer stay at their
 baked default and only the 8-byte value changes — a single store, no host
@@ -136,15 +140,12 @@ record-example-metrics`.
 
 | | WCE (hook / cbak) | size | max nesting |
 |---|---|---|---|
-| `txn-template-nested` (this example) | 487 / 7 | 1812 bytes | 3 |
+| `txn-template-nested` (this example) | 576 / 7 | 2029 bytes | 3 |
 | `sto-writer` | 703 / 7 | 2224 bytes | 5 |
 
 Below `examples/17_sto-writer`'s WCE and size, at a shallower nesting
-depth, for an equivalent-shaped Remit — even with `main` reading a second
-hook parameter (`ISSUER`) and branching between the 8-byte `_value` hot
-path and the full 48-byte `amount` setter, both of which `StoWriter` still
-has to beat on top of its own bounds/duplicate checks and conditional
-issued-entry branch. The baked-issuer path alone (no `ISSUER` parameter,
-so only `set_amounts_usd_amount_value` runs) costs 349 WCE / 1443 bytes /
-nesting 2 — the `ISSUER`-parameter read plus the full 48-byte setter add
-138 WCE and 369 bytes over that baked-only cost.
+depth, for an equivalent-shaped Remit — even with `main` reading two
+declared hook parameters through `self.hook_param` and branching between
+the 8-byte `_value` hot path and the full 48-byte `amount` setter, on top
+of which `StoWriter` still pays its own bounds/duplicate checks on every
+field and its conditional issued-entry branch.
