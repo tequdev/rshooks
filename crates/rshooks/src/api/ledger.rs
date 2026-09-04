@@ -5,6 +5,7 @@
 //! error codes, so they are exposed as plain (non-`Result`) values, cast
 //! from the `i64` wire type to their natural unsigned widths.
 
+use crate::convert::FixedRead;
 use crate::error::{Result, res};
 use crate::types::{Hash, Keylet, Nonce};
 
@@ -55,9 +56,7 @@ pub fn ledger_last_hash<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
 /// The hash of the previous (parent) ledger.
 #[inline(always)]
 pub fn ledger_last_hash_buf() -> Result<Hash> {
-    let mut buf = Hash::default();
-    let _ = ledger_last_hash(buf.as_mut())?;
-    Ok(buf)
+    Hash::read_exact(ledger_last_hash)
 }
 
 /// A ledger-derived nonce value, written into `out`. Returns the number of
@@ -77,9 +76,7 @@ pub fn ledger_nonce<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
 /// which is per-emission).
 #[inline(always)]
 pub fn ledger_nonce_buf() -> Result<Nonce> {
-    let mut buf = Nonce::default();
-    let _ = ledger_nonce(buf.as_mut())?;
-    Ok(buf)
+    Nonce::read_exact(ledger_nonce)
 }
 
 /// Compute a Keylet from a low/high bound pair, written into `out`. Returns
@@ -113,9 +110,7 @@ pub fn ledger_keylet<B: AsMut<[u8]> + ?Sized>(
 /// ledger entries).
 #[inline(always)]
 pub fn ledger_keylet_buf(low: &[u8], high: &[u8]) -> Result<Keylet> {
-    let mut buf = Keylet::default();
-    let _ = ledger_keylet(buf.as_mut(), low, high)?;
-    Ok(buf)
+    Keylet::read_exact(|buf| ledger_keylet(buf, low, high))
 }
 
 #[cfg(test)]
@@ -140,6 +135,52 @@ mod tests {
         assert_eq!(
             ledger_keylet(&mut out, &[0u8; 34], &[0u8; 34]),
             Err(HookError::NotImplemented)
+        );
+    }
+}
+
+/// Proves that `ledger_keylet_buf` rejects a host answer shorter than
+/// [`crate::types::KEYLET_LEN`] as [`HookError::TooSmall`] instead of
+/// returning a [`Keylet`] zero-padded past the bytes the host actually
+/// reported.
+#[cfg(all(test, feature = "testenv"))]
+mod testenv_tests {
+    #![allow(clippy::unwrap_used, clippy::panic)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
+
+    extern crate std;
+
+    use std::rc::Rc;
+    use std::vec::Vec;
+
+    use super::*;
+    use crate::error::HookError;
+    use rshooks_core::backend::{HostBackend, install};
+
+    /// Answers `ledger_keylet` with a byte string shorter than a full
+    /// `Keylet`; `accept`/`rollback` are unused by this test and simply
+    /// panic if ever reached.
+    struct ShortLedgerKeyletBackend;
+
+    impl HostBackend for ShortLedgerKeyletBackend {
+        fn ledger_keylet(&self, _low: &[u8], _high: &[u8]) -> core::result::Result<Vec<u8>, i64> {
+            Ok(std::vec![1, 2, 3])
+        }
+
+        fn accept(&self, _msg: &[u8], _code: i64) -> ! {
+            panic!("ShortLedgerKeyletBackend::accept unexpectedly called")
+        }
+
+        fn rollback(&self, _msg: &[u8], _code: i64) -> ! {
+            panic!("ShortLedgerKeyletBackend::rollback unexpectedly called")
+        }
+    }
+
+    #[test]
+    fn ledger_keylet_buf_short_host_answer_is_too_small() {
+        let _guard = install(Rc::new(ShortLedgerKeyletBackend));
+        assert_eq!(
+            ledger_keylet_buf(&[0u8; 34], &[0u8; 34]),
+            Err(HookError::TooSmall)
         );
     }
 }

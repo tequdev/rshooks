@@ -1,6 +1,7 @@
 //! Address conversion, hashing, signature verification, and keylet
 //! computation utilities.
 
+use crate::convert::FixedRead;
 use crate::error::{HookError, Result, res};
 use crate::types::{AccountId, Hash, Keylet};
 
@@ -50,9 +51,7 @@ pub fn util_accid<B: AsMut<[u8]> + ?Sized>(out: &mut B, r_address: &[u8]) -> Res
 /// Convert a base58 r-address (`r_address`) to its AccountID form.
 #[inline(always)]
 pub fn util_accid_buf(r_address: &[u8]) -> Result<AccountId> {
-    let mut buf = AccountId::default();
-    let _ = util_accid(buf.as_mut(), r_address)?;
-    Ok(buf)
+    AccountId::read_exact(|buf| util_accid(buf, r_address))
 }
 
 /// Verify that `signature` over `data` was produced by the key `public_key`.
@@ -100,9 +99,7 @@ pub fn util_sha512h<B: AsMut<[u8]> + ?Sized>(out: &mut B, data: &[u8]) -> Result
 /// SHA-512-Half of `data`.
 #[inline(always)]
 pub fn util_sha512h_buf(data: &[u8]) -> Result<Hash> {
-    let mut buf = Hash::default();
-    let _ = util_sha512h(buf.as_mut(), data)?;
-    Ok(buf)
+    Hash::read_exact(|buf| util_sha512h(buf, data))
 }
 
 /// Compute a Keylet of `keylet_type` from up to six `u32` components
@@ -234,5 +231,48 @@ mod tests {
             util_keylet(&mut keylet_out, 1, 0, 0, 0, 0, 0, 0),
             Err(HookError::NotImplemented)
         );
+    }
+}
+
+/// Proves that `util_accid_buf` rejects a host answer shorter than
+/// [`crate::types::ACC_ID_LEN`] as [`HookError::TooSmall`] instead of
+/// returning an [`AccountId`] zero-padded past the bytes the host actually
+/// reported.
+#[cfg(all(test, feature = "testenv"))]
+mod testenv_tests {
+    #![allow(clippy::unwrap_used, clippy::panic)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
+
+    extern crate std;
+
+    use std::rc::Rc;
+    use std::vec::Vec;
+
+    use super::*;
+    use crate::error::HookError;
+    use rshooks_core::backend::{HostBackend, install};
+
+    /// Answers `util_accid` with a byte string shorter than a full
+    /// `AccountId`; `accept`/`rollback` are unused by this test and simply
+    /// panic if ever reached.
+    struct ShortAccidBackend;
+
+    impl HostBackend for ShortAccidBackend {
+        fn util_accid(&self, _r_address: &[u8]) -> core::result::Result<Vec<u8>, i64> {
+            Ok(std::vec![1, 2, 3])
+        }
+
+        fn accept(&self, _msg: &[u8], _code: i64) -> ! {
+            panic!("ShortAccidBackend::accept unexpectedly called")
+        }
+
+        fn rollback(&self, _msg: &[u8], _code: i64) -> ! {
+            panic!("ShortAccidBackend::rollback unexpectedly called")
+        }
+    }
+
+    #[test]
+    fn util_accid_buf_short_host_answer_is_too_small() {
+        let _guard = install(Rc::new(ShortAccidBackend));
+        assert_eq!(util_accid_buf(b"raddress"), Err(HookError::TooSmall));
     }
 }

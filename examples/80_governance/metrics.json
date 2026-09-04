@@ -5,9 +5,9 @@
       "artifact": "0.govern.wasm",
       "index": 0,
       "hook_fn": "govern",
-      "bytes": 12475,
+      "bytes": 12487,
       "wce": {
-        "hook": 24941,
+        "hook": 24943,
         "cbak": 0
       },
       "max_nesting": 25
@@ -16,9 +16,9 @@
       "artifact": "1.reward.wasm",
       "index": 1,
       "hook_fn": "reward",
-      "bytes": 6219,
+      "bytes": 6231,
       "wce": {
-        "hook": 11367,
+        "hook": 11369,
         "cbak": 0
       },
       "max_nesting": 21

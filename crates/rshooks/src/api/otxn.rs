@@ -347,9 +347,7 @@ pub fn otxn_id<B: AsMut<[u8]> + ?Sized>(out: &mut B, flags: u32) -> Result<usize
 /// API reference, so exposed as a plain `u32` rather than an invented enum).
 #[inline(always)]
 pub fn otxn_id_buf(flags: u32) -> Result<Hash> {
-    let mut buf = Hash::default();
-    let _ = otxn_id(buf.as_mut(), flags)?;
-    Ok(buf)
+    Hash::read_exact(|buf| otxn_id(buf, flags))
 }
 
 /// The [`TxType`] of the originating transaction.
@@ -649,5 +647,48 @@ mod tests {
 
     impl crate::convert::TypedParamName for TestKeyParamName {
         type Value = TestKeyParam;
+    }
+}
+
+/// Proves that `otxn_id_buf` rejects a host answer shorter than
+/// [`crate::types::HASH_LEN`] as [`HookError::TooSmall`] instead of
+/// returning a [`Hash`] zero-padded past the bytes the host actually
+/// reported.
+#[cfg(all(test, feature = "testenv"))]
+mod testenv_tests {
+    #![allow(clippy::unwrap_used, clippy::panic)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
+
+    extern crate std;
+
+    use std::rc::Rc;
+    use std::vec::Vec;
+
+    use super::*;
+    use crate::error::HookError;
+    use rshooks_core::backend::{HostBackend, install};
+
+    /// Answers `otxn_id` with a byte string shorter than a full `Hash`;
+    /// `accept`/`rollback` are unused by this test and simply panic if ever
+    /// reached.
+    struct ShortOtxnIdBackend;
+
+    impl HostBackend for ShortOtxnIdBackend {
+        fn otxn_id(&self, _flags: u32) -> core::result::Result<Vec<u8>, i64> {
+            Ok(std::vec![1, 2, 3])
+        }
+
+        fn accept(&self, _msg: &[u8], _code: i64) -> ! {
+            panic!("ShortOtxnIdBackend::accept unexpectedly called")
+        }
+
+        fn rollback(&self, _msg: &[u8], _code: i64) -> ! {
+            panic!("ShortOtxnIdBackend::rollback unexpectedly called")
+        }
+    }
+
+    #[test]
+    fn otxn_id_buf_short_host_answer_is_too_small() {
+        let _guard = install(Rc::new(ShortOtxnIdBackend));
+        assert_eq!(otxn_id_buf(0), Err(HookError::TooSmall));
     }
 }

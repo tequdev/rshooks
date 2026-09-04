@@ -7,6 +7,7 @@
 //! rejected negative values), while calls with no error code
 //! (`etxn_generation`) return plain values.
 
+use crate::convert::FixedRead;
 use crate::error::{HookError, Result, res};
 use crate::types::{Hash, Nonce};
 
@@ -89,9 +90,7 @@ pub fn etxn_nonce<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
 /// A fresh nonce for use in an emitted transaction.
 #[inline(always)]
 pub fn etxn_nonce_buf() -> Result<Nonce> {
-    let mut buf = Nonce::default();
-    let _ = etxn_nonce(buf.as_mut())?;
-    Ok(buf)
+    Nonce::read_exact(etxn_nonce)
 }
 
 /// Emit `tx_blob` as a new transaction, writing the emitted transaction's
