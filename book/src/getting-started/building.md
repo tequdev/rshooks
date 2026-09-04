@@ -31,20 +31,17 @@ and validation steps:
    producing different declarations at a different `--cfg` value) is a
    build error naming exactly which entry and field diverged.
 3. **Hook-cleaner** (per index) — strips the disallowed `memory` export,
-   the now-redundant carrier exports, and any other dead export, and (for
-   Guard-type, API version 0, modules) flattens and inlines the crate's
-   call graph into the `hook`/`cbak` entry points for *this index only*,
-   untangling the resulting block/loop/if nesting so it fits the host's
-   structural limits. Because each index is compiled and cleaned
-   separately, one index's unreachable code (another entry's logic, in a
-   multi-Hook chain) never counts against this index's own size or nesting
-   budget.
-4. **Guard checker** (per index) — for API version 0, validates that every
-   loop begins with the exact guard call sequence the host requires, and
-   computes the static worst-case instruction count (WCE) for `hook` and,
-   if present, `cbak`, from those guards. This step is skipped for API
-   version 1 (Gas-type hooks meter instructions at runtime instead of
-   requiring static guards).
+   the now-redundant carrier exports, and any other dead export, and
+   flattens and inlines the crate's call graph into the `hook`/`cbak`
+   entry points for *this index only*, untangling the resulting
+   block/loop/if nesting so it fits the host's structural limits. Because
+   each index is compiled and cleaned separately, one index's unreachable
+   code (another entry's logic, in a multi-Hook chain) never counts
+   against this index's own size or nesting budget.
+4. **Guard checker** (per index) — validates that every loop begins with
+   the exact guard call sequence the host requires, and computes the
+   static worst-case instruction count (WCE) for `hook` and, if present,
+   `cbak`, from those guards.
 5. **Validator** (per index) — checks the complete SetHook rule set:
    exactly one `hook` export (and at most one `cbak`, and only if this
    index declared one), no disallowed imports, no recursion, and a binary
@@ -100,9 +97,7 @@ estimated SetHook fee: 870000 drops (0.870000 XAH)
 ```
 
 - **`worst-case instructions`** is the guard checker's static upper bound
-  on instructions the host will ever execute for each entry point. It only
-  appears for API version 0 (Guard-type) modules — a Gas-type module has no
-  static bound of this kind.
+  on instructions the host will ever execute for each entry point.
 - **`max nesting depth`** is the deepest block/loop/if nesting in the final
   module, checked against the host's structural limit — 32 for a
   Guard-type module. This is the number [Hook Chains](../concepts/chains.md)

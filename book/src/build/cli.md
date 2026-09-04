@@ -26,7 +26,6 @@ rshooks build --manifest-path path/to/Cargo.toml
 |---|---|---|
 | `--manifest-path <PATH>` | cargo's default (current directory) | Path to the crate's `Cargo.toml`, forwarded to every cargo invocation. |
 | `-p, --package <NAME>` | none | Build only the named package, forwarded to cargo's `-p`. Useful when `--manifest-path` points at a workspace. |
-| `--api-version <0\|1>` | `0` | The Hook API version this module targets. `0` is Guard-type (loop guards required, and the only version `#[hooks]` chains currently support); `1` is Gas-type (guard handling skipped) and is rejected for a chain build. |
 | `--auto-guard` | off | **Deprecated**, scheduled for removal. Insert missing loop guards instead of treating an unguarded loop as a build error. Applies per index. See [Guards and Loops](../concepts/guards.md) for the source-level alternatives. |
 | `--default-maxiter <N>` | `16` | **Deprecated**, scheduled for removal. The `maxiter` value used for auto-inserted guards, when `--auto-guard` is set. See [Guards and Loops](../concepts/guards.md) for the source-level alternatives. |
 | `--out <DIR>` | `target/rshooks/<crate-name>` under the workspace's target directory | Output **root**: generation directories (`gen-<N>/`) are written under it, with `current` symlinked to the latest complete, validated one. |
@@ -78,9 +77,10 @@ the `wasm-opt` pass with an error naming the flag, because that pass only
 accepts modules within the WebAssembly MVP instruction set; with
 `--no-optimize` (or under `check`) such a module may still pass the
 authoritative upstream guard checker, but a divergence warning is printed,
-since the Rust validator enforces the MVP instruction set. Compile with `-O2` or higher: at `-O0`/`-O1` clang does
-not keep the `_g` call as the first instruction of every loop, so the raw
-output only passes the guard check when the `wasm-opt` pass is left on.
+since the Rust validator enforces the MVP instruction set. Compile with
+`-O2` or higher: at `-O0`/`-O1` clang does not keep the `_g` call as the
+first instruction of every loop, so the raw output only passes the guard
+check when the `wasm-opt` pass is left on.
 
 A helper containing a guarded loop is duplicated at each call site while
 keeping one guard id, so size its `maxiter` for the total across all call
@@ -90,7 +90,6 @@ sites. See [Guards and Loops](../concepts/guards.md).
 |---|---|---|
 | `input` (positional) | — | The input wasm file. Required. |
 | `-o, --out <PATH>` | `<input>.clean.wasm` | Where to write the cleaned binary. |
-| `--api-version <0\|1>` | `0` | The Hook API version this module targets. |
 | `--auto-guard` | off | **Deprecated**, scheduled for removal. Insert missing loop guards instead of treating them as an error. See [Guards and Loops](../concepts/guards.md) for the source-level alternatives. |
 | `--default-maxiter <N>` | `16` | **Deprecated**, scheduled for removal. `maxiter` used for auto-inserted guards. See [Guards and Loops](../concepts/guards.md) for the source-level alternatives. |
 | `--allow-oversize` | off | Write the output even if it exceeds the 65,535-byte SetHook limit. |
@@ -105,9 +104,8 @@ in it.
 ## `rshooks check`
 
 Validates a wasm file against the full SetHook rule set without modifying
-it. Unlike `build`/`clean`, this works on **any** wasm file, including
-ones not built by this toolchain at all — for example, a Hook compiled
-from C.
+it. Like `clean`, this works on **any** wasm file, including ones not
+built by this toolchain at all — for example, a Hook compiled from C.
 
 ```sh
 rshooks check path/to/hook.wasm
@@ -116,7 +114,6 @@ rshooks check path/to/hook.wasm
 | flag | default | description |
 |---|---|---|
 | `file` (positional) | — | The wasm file to validate. Required. |
-| `--api-version <0\|1>` | `0` | The Hook API version this module targets. |
 
 On success, `check` prints the same worst-case-instruction and
 nesting-depth report as `build`/`clean`, followed by `OK: <file> is a

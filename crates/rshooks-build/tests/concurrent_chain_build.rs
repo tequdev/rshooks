@@ -29,7 +29,6 @@ fn typed_results_manifest() -> PathBuf {
 fn build_args(manifest_path: &Path, out: &Path) -> ChainBuildArgs {
     ChainBuildArgs {
         manifest_path: Some(manifest_path.to_path_buf()),
-        api_version: 0,
         out: Some(out.to_path_buf()),
         ..Default::default()
     }

@@ -640,8 +640,8 @@ fn auto_guard_inserts_exact_pattern_and_passes_revalidation() {
 // Validator hard-error rules
 
 // `_g` is imported (never called — no loops here) purely to satisfy R1
-// (`docs/DESIGN.md` §6.2b/§6.4): every api-version-0 module must import
-// `_g`, even without a single loop. This is a real, vendored-checker-
+// (`docs/DESIGN.md` §6.2b/§6.4): every module must import `_g`, even
+// without a single loop. This is a real, vendored-checker-
 // discovered rule, not a pipeline artifact — `build`/`clean` guarantee it
 // via the flatten pass, but `validate()` is exercised directly here,
 // bypassing that pass, so the fixture must supply it itself.
@@ -1021,8 +1021,8 @@ fn end_to_end_clean_and_check_is_idempotent() {
 fn run_pipeline_reports_fee_relevant_size() {
     // `MINIMAL_HOOK` has no loop and never calls `_g`, so it doesn't survive
     // the pipeline's final gate: the vendored upstream guard checker
-    // (`docs/DESIGN.md` §6.5) unconditionally requires every API-version-0
-    // module to import `_g`, regardless of loops. `GUARDED_LOOP_HOOK` calls
+    // (`docs/DESIGN.md` §6.5) unconditionally requires every module to
+    // import `_g`, regardless of loops. `GUARDED_LOOP_HOOK` calls
     // `_g` in a properly guarded loop, so it clears that gate and exercises
     // the fee-reporting behavior this test is actually about.
     let (out, report) =
@@ -1031,7 +1031,7 @@ fn run_pipeline_reports_fee_relevant_size() {
     assert!(report.warnings.is_empty() || report.warnings.iter().all(|w| !w.contains("INVALID")));
     assert!(
         report.guard_verdict.is_some(),
-        "api-version-0 success should carry the native checker's instruction counts"
+        "success should carry the native checker's instruction counts"
     );
     let fee = rshooks_build::estimate_fee(out.len());
     assert_eq!(fee.drops, fee.bytes * 5000);
@@ -1211,7 +1211,7 @@ fn clang_shaped_module_with_helpers_flattens_to_valid_hook() {
 
     assert!(
         report.guard_verdict.is_some(),
-        "a valid api-version-0 module should carry the native checker's verdict"
+        "a valid module should carry the native checker's verdict"
     );
     assert!(
         report.warnings.is_empty(),
