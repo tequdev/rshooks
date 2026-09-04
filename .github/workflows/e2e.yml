@@ -13,6 +13,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   XAHAUD_VERSION: 2026.6.21-release+3350
+  XAHAUD_BINARY_SHA256: b8f699aa238144b921f145b3ed347da2165ad7d31100debd79164fd773cba445
 
 jobs:
   # Same build as ci.yml's `examples` job — see build-examples.yml, the
@@ -80,14 +81,19 @@ jobs:
       # cannot be vendored into this MIT-licensed repo; driving the same
       # published CLI tool as a subprocess has no such issue and keeps
       # local/CI provisioning identical (both `up:standalone`).
+      # `e2e/requirements.txt` pins xrpld-lab and its full transitive
+      # dependency closure by version and SHA256 hash for the job's
+      # platform/interpreter (linux x86_64, CPython 3.11); see that file
+      # for how to regenerate it.
       - name: Install xrpld-lab
-        run: pip install xrpld-lab 'anyio<4.15'
+        run: pip install --require-hashes -r e2e/requirements.txt
 
       - name: Start standalone Xahau node
         run: |
           xrpld-lab up:standalone --protocol xahau --version "${{ env.XAHAUD_VERSION }}"
           curl -fsSL -o "workspace/xahau-${{ env.XAHAUD_VERSION }}/xahaud.${{ env.XAHAUD_VERSION }}" \
             "https://build.xahau.tech/${{ env.XAHAUD_VERSION }}"
+          echo "${{ env.XAHAUD_BINARY_SHA256 }}  workspace/xahau-${{ env.XAHAUD_VERSION }}/xahaud.${{ env.XAHAUD_VERSION }}" | sha256sum -c -
           chmod +x "workspace/xahau-${{ env.XAHAUD_VERSION }}/xahaud.${{ env.XAHAUD_VERSION }}"
           perl -pi -e 's/"None"/""/' "workspace/xahau-${{ env.XAHAUD_VERSION }}/Dockerfile"
           xrpld-lab up --name "xahau-${{ env.XAHAUD_VERSION }}"
