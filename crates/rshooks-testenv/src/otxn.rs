@@ -207,11 +207,28 @@ pub(crate) fn deserialize(bytes: &[u8]) -> Option<std::collections::HashMap<u32,
 ///
 /// `None` on any parse failure (malformed field sequence, missing
 /// `TransactionType`, missing/malformed `EmitDetails` or its
-/// `EmitGeneration`/`EmitBurden` sub-fields); a caller maps that to a clear
-/// panic. Should not occur for any blob from `crate::TestEnv::emitted()`,
-/// since those already passed the emission walker's own `EmitDetails`
-/// well-formedness checks ([`crate::emit_walk::validate_emit_blob`]).
-pub(crate) fn from_emitted(blob: &[u8], hash: [u8; 32]) -> Option<(Otxn, u64, u32)> {
+/// `EmitGeneration`/`EmitBurden`/`EmitHookHash` sub-fields); a caller maps
+/// that to a clear panic. Should not occur for any blob from
+/// `crate::TestEnv::emitted()`, since those already passed the emission
+/// walker's own `EmitDetails` well-formedness checks
+/// ([`crate::emit_walk::validate_emit_blob`]).
+pub(crate) struct EmittedOtxn {
+    pub(crate) otxn: Otxn,
+    pub(crate) burden: u64,
+    pub(crate) generation: u32,
+    /// `EmitDetails.EmitHookHash` — the hash of the hook that performed the
+    /// emit.
+    pub(crate) hook_hash: [u8; 32],
+    /// `EmitDetails.EmitCallback`, if present — the account
+    /// `Transactor::doHookCallback` (`Xahau/xahaud` `dev`,
+    /// `src/xrpld/app/tx/detail/Transactor.cpp:1483-1614`) looks up a
+    /// callback hook on. `None` means the emitting hook declared no
+    /// `#[cbak]` body, so on-chain this transaction never triggers a
+    /// callback at all.
+    pub(crate) callback_account: Option<[u8; 20]>,
+}
+
+pub(crate) fn from_emitted(blob: &[u8], hash: [u8; 32]) -> Option<EmittedOtxn> {
     let map = deserialize(blob)?;
 
     let tt_bytes = map.get(&rshooks::sfield::sfTransactionType.code())?;
@@ -226,14 +243,35 @@ pub(crate) fn from_emitted(blob: &[u8], hash: [u8; 32]) -> Option<(Otxn, u64, u3
 
     let generation_code = u64::from(rshooks::sfield::sfEmitGeneration.code());
     let burden_code = u64::from(rshooks::sfield::sfEmitBurden.code());
+    let hook_hash_code = u64::from(rshooks::sfield::sfEmitHookHash.code());
+    let callback_code = u64::from(rshooks::sfield::sfEmitCallback.code());
+
     let generation_field = ed_fields.iter().find(|f| f.code == generation_code)?;
     let burden_field = ed_fields.iter().find(|f| f.code == burden_code)?;
+    let hook_hash_field = ed_fields.iter().find(|f| f.code == hook_hash_code)?;
     let (gs, ge) = crate::emit_walk::field_value_payload(ed_bytes, generation_field).ok()?;
     let (bs, be) = crate::emit_walk::field_value_payload(ed_bytes, burden_field).ok()?;
+    let (hs, he) = crate::emit_walk::field_value_payload(ed_bytes, hook_hash_field).ok()?;
     let generation = u32::from_be_bytes(ed_bytes.get(gs..ge)?.try_into().ok()?);
     let burden = u64::from_be_bytes(ed_bytes.get(bs..be)?.try_into().ok()?);
+    let hook_hash: [u8; 32] = ed_bytes.get(hs..he)?.try_into().ok()?;
 
-    Some((otxn, burden, generation))
+    let callback_account = match ed_fields.iter().find(|f| f.code == callback_code) {
+        Some(callback_field) => {
+            let (cs, ce) = crate::emit_walk::field_value_payload(ed_bytes, callback_field).ok()?;
+            let acc: [u8; 20] = ed_bytes.get(cs..ce)?.try_into().ok()?;
+            Some(acc)
+        }
+        None => None,
+    };
+
+    Some(EmittedOtxn {
+        otxn,
+        burden,
+        generation,
+        hook_hash,
+        callback_account,
+    })
 }
 
 #[cfg(test)]

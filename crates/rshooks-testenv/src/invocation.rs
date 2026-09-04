@@ -118,6 +118,14 @@ pub(crate) struct InvocationContext {
     emit_nonce_count: u32,
     retry_blocked: bool,
     static_take_set: HashSet<usize>,
+    /// Whether the entry this invocation is running declares a `#[cbak]`
+    /// body — set once by `crate::env::TestEnv::run_entry` before the
+    /// backend runs, mirroring `hookDef->isFieldPresent(sfHookCallbackFee)`
+    /// (`Xahau/xahaud` `dev`, `src/xrpld/app/tx/detail/Transactor.cpp:1408`),
+    /// the on-chain source of `HookAPI::etxn_details`'s own
+    /// `hookCtx.result.hasCallback` check (`HookAPI.cpp:914`) for whether
+    /// `EmitDetails` gets an `EmitCallback` field.
+    pub(crate) has_callback: bool,
     /// Bytes returned by the most recent `etxn_details()` call this
     /// invocation — the emission walker requires an `EmitDetails` field to
     /// match these exactly (design §5.6).
@@ -186,6 +194,7 @@ impl InvocationContext {
             emit_nonce_count: 0,
             retry_blocked: false,
             static_take_set: HashSet::new(),
+            has_callback: false,
             last_etxn_details: None,
             pending_emissions: Vec::new(),
             emit_attempts: Vec::new(),
