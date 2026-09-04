@@ -136,16 +136,8 @@ the `rollback!` code for each failure this hook can exit with:
 
 Current WCE, wasm size, and max nesting depth live in
 [`metrics.json`](./metrics.json), refreshed by `mise run
-record-example-metrics`.
-
-| | WCE (hook / cbak) | size | max nesting |
-|---|---|---|---|
-| `txn-template-nested` (this example) | 576 / 7 | 2029 bytes | 3 |
-| `sto-writer` | 703 / 7 | 2224 bytes | 5 |
-
-Below `examples/17_sto-writer`'s WCE and size, at a shallower nesting
-depth, for an equivalent-shaped Remit — even with `main` reading two
-declared hook parameters through `self.hook_param` and branching between
-the 8-byte `_value` hot path and the full 48-byte `amount` setter, on top
-of which `StoWriter` still pays its own bounds/duplicate checks on every
-field and its conditional issued-entry branch.
+record-example-metrics`. Compare against `examples/17_sto-writer`'s
+`metrics.json` for the equivalent runtime-shaped Remit: the compile-time
+template is cheaper on every axis, since `StoWriter` pays bounds/duplicate
+checks on every field plus its conditional issued-entry branch, while
+here the shape is baked and the setters are fixed-offset stores.
