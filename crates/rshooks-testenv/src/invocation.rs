@@ -23,7 +23,12 @@ const MAX_STATE_MODIFICATIONS: u32 = 256;
 /// `maxNamespaces()` (vendored `Enum.h`).
 const MAX_NAMESPACES: usize = 256;
 /// One past `max_nonce` (vendored `Enum.h:399`, `max_nonce = 255`): the
-/// 256th nonce call this invocation (`nonce_count == 256`) is refused.
+/// 256th call to a given nonce family this invocation is refused. xahaud
+/// tracks `ledger_nonce`'s and the emit-nonce family's (`etxn_nonce`,
+/// `etxn_details`) counters separately (`HookAPI.cpp`'s
+/// `hookCtx.ledger_nonce_counter` vs. `hookCtx.emit_nonce_counter`, each
+/// checked against `max_nonce` independently), so each family gets its own
+/// 256-call budget rather than sharing one.
 const MAX_NONCES: u32 = 256;
 // `max_slots` (xahau `Enum.h`) = 255: numbered slots `1..=255` — index `0`
 // of `InvocationContext::slots` is never assigned (slot number `0` means
@@ -103,7 +108,14 @@ pub(crate) struct InvocationContext {
     emit_count: u32,
     state_mod_count: u32,
     namespaces_touched: HashSet<([u8; 20], [u8; 32])>,
-    nonce_count: u32,
+    /// `ledger_nonce`'s own budget counter (`hookCtx.ledger_nonce_counter`
+    /// in xahaud), independent of [`Self::emit_nonce_count`].
+    ledger_nonce_count: u32,
+    /// The emit-nonce family's budget counter, shared by `etxn_nonce` and
+    /// `etxn_details` (xahaud's `hookCtx.emit_nonce_counter`:
+    /// `HookAPI::etxn_details` calls `HookAPI::etxn_nonce()` directly, so
+    /// both draw from the same counter and budget).
+    emit_nonce_count: u32,
     retry_blocked: bool,
     static_take_set: HashSet<usize>,
     /// Bytes returned by the most recent `etxn_details()` call this
@@ -170,7 +182,8 @@ impl InvocationContext {
             emit_count: 0,
             state_mod_count: 0,
             namespaces_touched: HashSet::new(),
-            nonce_count: 0,
+            ledger_nonce_count: 0,
+            emit_nonce_count: 0,
             retry_blocked: false,
             static_take_set: HashSet::new(),
             last_etxn_details: None,
@@ -279,28 +292,34 @@ impl InvocationContext {
         Ok(())
     }
 
-    /// Draws the next deterministic nonce (design §4: `H(invocation_counter
-    /// ‖ call_counter)`, shared by `etxn_nonce`/`ledger_nonce`). `> 256`
-    /// nonce calls this invocation → `TOO_MANY_NONCES`.
-    pub(crate) fn next_nonce(&mut self) -> Result<[u8; 32], i64> {
-        if self.nonce_count >= MAX_NONCES {
+    /// Draws the next deterministic `ledger_nonce` (design §4:
+    /// `H(invocation_counter ‖ call_counter)`). `> 256` `ledger_nonce` calls
+    /// this invocation → `TOO_MANY_NONCES`; independent of
+    /// [`Self::next_emit_nonce`]'s budget.
+    pub(crate) fn next_ledger_nonce(&mut self) -> Result<[u8; 32], i64> {
+        if self.ledger_nonce_count >= MAX_NONCES {
             return Err(rshooks_core::TOO_MANY_NONCES);
         }
         let call = self.call_counter;
-        self.nonce_count = self.nonce_count.saturating_add(1);
+        self.ledger_nonce_count = self.ledger_nonce_count.saturating_add(1);
         self.call_counter = self.call_counter.saturating_add(1);
         Ok(hash_counters(self.invocation_id, call))
     }
 
-    /// A nonce that must not consume the shared `etxn_nonce`/`ledger_nonce`
-    /// budget above — used for `EmitDetails`'s `EmitNonce` field, which
-    /// xahaud derives independently (see `details.rs`'s module doc comment
-    /// for why this is a documented simplification, not a pinned protocol
-    /// derivation).
-    pub(crate) fn next_details_nonce(&mut self) -> [u8; 32] {
+    /// Draws the next deterministic emit nonce, shared by `etxn_nonce` and
+    /// `etxn_details` (xahaud's `HookAPI::etxn_details` calls
+    /// `HookAPI::etxn_nonce()` directly, so both draw from the same
+    /// `emit_nonce_counter`/budget). `> 256` combined `etxn_nonce`/
+    /// `etxn_details` calls this invocation → `TOO_MANY_NONCES`; independent
+    /// of [`Self::next_ledger_nonce`]'s budget.
+    pub(crate) fn next_emit_nonce(&mut self) -> Result<[u8; 32], i64> {
+        if self.emit_nonce_count >= MAX_NONCES {
+            return Err(rshooks_core::TOO_MANY_NONCES);
+        }
         let call = self.call_counter;
+        self.emit_nonce_count = self.emit_nonce_count.saturating_add(1);
         self.call_counter = self.call_counter.saturating_add(1);
-        hash_counters(self.invocation_id, call.wrapping_add(1u64 << 32))
+        Ok(hash_counters(self.invocation_id, call))
     }
 
     /// Whether a foreign write is blocked by an earlier authorization
@@ -471,12 +490,36 @@ mod tests {
     }
 
     #[test]
-    fn nonce_budget_rejects_at_256() {
+    fn ledger_nonce_budget_rejects_at_256() {
         let mut ctx = InvocationContext::new(0);
         for _ in 0..256 {
-            assert!(ctx.next_nonce().is_ok());
+            assert!(ctx.next_ledger_nonce().is_ok());
         }
-        assert_eq!(ctx.next_nonce(), Err(rshooks_core::TOO_MANY_NONCES));
+        assert_eq!(ctx.next_ledger_nonce(), Err(rshooks_core::TOO_MANY_NONCES));
+    }
+
+    #[test]
+    fn emit_nonce_budget_rejects_at_256() {
+        let mut ctx = InvocationContext::new(0);
+        for _ in 0..256 {
+            assert!(ctx.next_emit_nonce().is_ok());
+        }
+        assert_eq!(ctx.next_emit_nonce(), Err(rshooks_core::TOO_MANY_NONCES));
+    }
+
+    #[test]
+    fn ledger_and_emit_nonce_budgets_are_independent() {
+        let mut ctx = InvocationContext::new(0);
+        for _ in 0..256 {
+            assert!(ctx.next_ledger_nonce().is_ok());
+        }
+        // The ledger-nonce family is exhausted, but the emit-nonce family
+        // still has its own, untouched 256-call budget.
+        for _ in 0..256 {
+            assert!(ctx.next_emit_nonce().is_ok());
+        }
+        assert_eq!(ctx.next_ledger_nonce(), Err(rshooks_core::TOO_MANY_NONCES));
+        assert_eq!(ctx.next_emit_nonce(), Err(rshooks_core::TOO_MANY_NONCES));
     }
 
     #[test]

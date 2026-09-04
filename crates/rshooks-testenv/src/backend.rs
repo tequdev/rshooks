@@ -289,7 +289,7 @@ impl HostBackend for Backend {
     }
 
     fn ledger_nonce(&self) -> Result<[u8; 32], i64> {
-        self.ctx.borrow_mut().next_nonce()
+        self.ctx.borrow_mut().next_ledger_nonce()
     }
 
     #[allow(clippy::expect_used)] // documented API: `TestEnv::base_fee_drops` validates drops fits in i64 before it ever reaches `World`
@@ -332,7 +332,16 @@ impl HostBackend for Backend {
             let w = self.world.borrow();
             (w.otxn.id, w.current_hook_hash().unwrap_or([0u8; 32]))
         };
-        let nonce = self.ctx.borrow_mut().next_details_nonce();
+        // `HookAPI::etxn_details` (`HookAPI.cpp:902-904`) calls
+        // `HookAPI::etxn_nonce()` directly and maps a nonce-budget failure to
+        // `INTERNAL_ERROR` rather than propagating `TOO_MANY_NONCES` —
+        // `etxn_details` shares `etxn_nonce`'s counter/budget, but not its
+        // error code.
+        let nonce = self
+            .ctx
+            .borrow_mut()
+            .next_emit_nonce()
+            .map_err(|_| rshooks_core::INTERNAL_ERROR)?;
         // This harness never populates `EmitCallback` — every emitted blob
         // is built with `callback: None`, regardless of whether the
         // currently invoked entry declares a `#[cbak]` body. Permanent
@@ -367,7 +376,7 @@ impl HostBackend for Backend {
     }
 
     fn etxn_nonce(&self) -> Result<[u8; 32], i64> {
-        self.ctx.borrow_mut().next_nonce()
+        self.ctx.borrow_mut().next_emit_nonce()
     }
 
     fn emit(&self, tx_blob: &[u8]) -> Result<[u8; 32], i64> {
@@ -1019,6 +1028,50 @@ mod tests {
         }
         ctx.borrow_mut().reserve(1).unwrap();
         assert_eq!(backend.etxn_fee_base(&[]), rshooks_core::FEE_TOO_LARGE);
+    }
+
+    // -- nonce budgets (design §4 / CR-03): `ledger_nonce` and the
+    // `etxn_nonce`/`etxn_details` emit-nonce family each get their own
+    // 256-call budget, matching xahaud's separate `ledger_nonce_counter`/
+    // `emit_nonce_counter` (`HookAPI.cpp`) --
+
+    #[test]
+    fn ledger_and_etxn_nonce_budgets_are_independent_at_the_backend() {
+        let (_world, _ctx, backend) = fresh();
+        for _ in 0..256 {
+            assert!(backend.ledger_nonce().is_ok());
+        }
+        // The ledger-nonce budget is exhausted, but `etxn_nonce` draws from
+        // a separate budget that is still untouched.
+        assert!(backend.etxn_nonce().is_ok());
+        assert_eq!(backend.ledger_nonce(), Err(rshooks_core::TOO_MANY_NONCES));
+    }
+
+    #[test]
+    fn etxn_details_consumes_the_etxn_nonce_budget() {
+        let (_world, ctx, backend) = fresh();
+        ctx.borrow_mut().reserve(1).unwrap();
+        // `etxn_details` calls the same emit-nonce counter `etxn_nonce`
+        // does (xahaud's `HookAPI::etxn_details` calls
+        // `HookAPI::etxn_nonce()` directly) — 256 calls to `etxn_details`
+        // alone exhaust the budget `etxn_nonce` also draws from.
+        for _ in 0..256 {
+            assert!(backend.etxn_details().is_ok());
+        }
+        assert_eq!(backend.etxn_nonce(), Err(rshooks_core::TOO_MANY_NONCES));
+    }
+
+    #[test]
+    fn etxn_details_past_the_nonce_budget_is_internal_error() {
+        let (_world, ctx, backend) = fresh();
+        ctx.borrow_mut().reserve(1).unwrap();
+        for _ in 0..256 {
+            assert!(backend.etxn_nonce().is_ok());
+        }
+        // xahaud's `HookAPI::etxn_details` maps its internal
+        // `etxn_nonce()` call failing to `INTERNAL_ERROR`, not
+        // `TOO_MANY_NONCES` (`HookAPI.cpp:902-904`).
+        assert_eq!(backend.etxn_details(), Err(rshooks_core::INTERNAL_ERROR));
     }
 
     // -- prepare (P2-D) --
