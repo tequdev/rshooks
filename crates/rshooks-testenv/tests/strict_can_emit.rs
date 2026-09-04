@@ -2,7 +2,8 @@
 //! three-state contract (design review FIX 5): an entry with no `can_emit`
 //! declaration at all (`None`) is unrestricted even under strict mode — the
 //! on-chain semantics of an absent `HookCanEmit` — while a declared list
-//! (`Some(&[..])`, empty slice included) is enforced exactly.
+//! (`Some(&[..])`, empty slice included) is enforced exactly. Strict
+//! checking is on by default; `strict_can_emit(false)` opts out.
 
 #![allow(
     clippy::unwrap_used,
@@ -76,16 +77,16 @@ impl CanEmitChecks {
 }
 
 #[test]
-fn strict_mode_allows_emission_with_no_can_emit_declaration() {
-    let env = TestEnv::new().strict_can_emit(true);
+fn strict_by_default_allows_emission_with_no_can_emit_declaration() {
+    let env = TestEnv::new(); // strict_can_emit left at its default (on)
     let exit = env.invoke::<CanEmitChecks>(0);
     assert_eq!(exit.exit, ExitType::Accept);
     assert_eq!(env.emitted().len(), 1);
 }
 
 #[test]
-fn strict_mode_allows_emission_within_the_declared_list() {
-    let env = TestEnv::new().strict_can_emit(true);
+fn strict_by_default_allows_emission_within_the_declared_list() {
+    let env = TestEnv::new(); // strict_can_emit left at its default (on)
     let exit = env.invoke::<CanEmitChecks>(1);
     assert_eq!(exit.exit, ExitType::Accept);
     assert_eq!(env.emitted().len(), 1);
@@ -93,14 +94,14 @@ fn strict_mode_allows_emission_within_the_declared_list() {
 
 #[test]
 #[should_panic(expected = "not declared in its `can_emit` list")]
-fn strict_mode_panics_on_emission_outside_the_declared_list() {
-    let env = TestEnv::new().strict_can_emit(true);
+fn strict_by_default_panics_on_emission_outside_the_declared_list() {
+    let env = TestEnv::new(); // strict_can_emit left at its default (on)
     let _ = env.invoke::<CanEmitChecks>(2);
 }
 
 #[test]
-fn non_strict_mode_never_checks_can_emit_regardless_of_declaration() {
-    let env = TestEnv::new(); // strict_can_emit left at its default (off)
+fn lenient_opt_out_never_checks_can_emit_regardless_of_declaration() {
+    let env = TestEnv::new().strict_can_emit(false);
     let exit = env.invoke::<CanEmitChecks>(2);
     assert_eq!(exit.exit, ExitType::Accept);
     assert_eq!(env.emitted().len(), 1);

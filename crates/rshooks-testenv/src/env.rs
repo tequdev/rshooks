@@ -143,7 +143,7 @@ impl TestEnv {
     pub fn new() -> Self {
         Self {
             world: Rc::new(RefCell::new(World::new())),
-            strict_can_emit: false,
+            strict_can_emit: true,
         }
     }
 
@@ -378,11 +378,14 @@ impl TestEnv {
         self
     }
 
-    /// Opts into asserting that every transaction type this invocation
-    /// commits to [`Self::emitted`] is one the invoked entry's
-    /// `#[hook(.., can_emit = [..])]` declaration allows. Off by default.
-    /// A violation panics (design §5.6) rather than silently accepting —
-    /// this is a test-author assertion, not a Hook API error path.
+    /// Controls whether every transaction type this invocation commits to
+    /// [`Self::emitted`] is asserted against the invoked entry's
+    /// `#[hook(.., can_emit = [..])]` declaration, matching the real
+    /// host's `HookCanEmit` enforcement. **On by default** — pass `false`
+    /// to opt out for a lower-fidelity test that deliberately emits
+    /// outside the declaration. A violation panics (design §5.6) rather
+    /// than silently accepting — this is a test-author assertion, not a
+    /// Hook API error path.
     #[must_use]
     pub fn strict_can_emit(mut self, on: bool) -> Self {
         self.strict_can_emit = on;
@@ -406,9 +409,9 @@ impl TestEnv {
     /// installed — i.e. `invoke` was called reentrantly (from inside a
     /// hook entry currently running via another `invoke` call on this
     /// thread); see [`rshooks_core::backend::install`]'s own panic message.
-    /// Also panics if [`Self::strict_can_emit`] is enabled and this
-    /// invocation commits an emission whose transaction type is not in the
-    /// invoked entry's `can_emit` declaration.
+    /// Also panics, unless [`Self::strict_can_emit`] was called with
+    /// `false`, if this invocation commits an emission whose transaction
+    /// type is not in the invoked entry's `can_emit` declaration.
     #[allow(clippy::panic)] // documented API: an unknown entry index is a test-author error (design §2.4/§4)
     pub fn invoke<C: HookChainEntries>(&self, index: u32) -> HookExit {
         let entry = Self::find_entry::<C>(index, "invoke");
