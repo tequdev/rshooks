@@ -5,9 +5,9 @@
       "artifact": "0.main.wasm",
       "index": 0,
       "hook_fn": "main",
-      "bytes": 666,
+      "bytes": 652,
       "wce": {
-        "hook": 134,
+        "hook": 127,
         "cbak": 0
       },
       "max_nesting": 2

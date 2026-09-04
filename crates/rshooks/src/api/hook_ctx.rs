@@ -1,9 +1,18 @@
 //! Information about the executing hook itself: its account, hash, and
 //! parameters.
 
-use crate::convert::{FixedRead, TypedParamName};
+use core::mem::MaybeUninit;
+
+use crate::convert::{FixedRead, TypedParamName, uninit_slice_mut};
 use crate::error::{Result, res};
 use crate::types::{AccountId, Hash};
+
+/// Maximum length, in bytes, of a stored `hook_param` value — the ledger's
+/// own bound on a `HookParameters` entry's value field (`hook_param_set`
+/// also errors past it). Scratch-buffer size for
+/// [`hook_param_checked`]/[`hook_param_checked_raw_code`], which read into
+/// a buffer this large before trusting a `hook_param` result as complete.
+const HOOK_PARAM_VALUE_MAX_LEN: usize = 256;
 
 /// The AccountID this hook is installed on, written into `out`. Returns the
 /// number of bytes written. [`hook_account_buf`] is the fixed-size
@@ -73,9 +82,13 @@ pub fn hook_param<B: AsMut<[u8]> + ?Sized>(out: &mut B, name: &[u8]) -> Result<u
 
 /// Read this hook's own parameter `name`, requiring it to be exactly `T`'s
 /// length — any [`crate::convert::FixedRead`] type. A parameter longer than
-/// `T` fails as [`crate::error::HookError::TooSmall`] from the underlying
-/// host call; a parameter shorter is caught by `T::read_exact` itself and
-/// mapped to the same variant. No loop, no panic.
+/// `T` fails as [`crate::error::HookError::TooSmall`] — checked against
+/// [`HOOK_PARAM_VALUE_MAX_LEN`], not just against `T`'s own length, since
+/// the underlying `hook_param` host call truncates rather than erroring
+/// when the destination is shorter than the value (see
+/// [`hook_param_checked`]); a parameter shorter is caught by
+/// `T::read_exact` itself and mapped to the same variant. No loop, no
+/// panic.
 ///
 /// `T` is inferred from context, not a turbofish.
 ///
@@ -90,7 +103,7 @@ pub fn hook_param<B: AsMut<[u8]> + ?Sized>(out: &mut B, name: &[u8]) -> Result<u
 /// ```
 #[inline(always)]
 pub fn hook_param_exact<T: FixedRead>(name: &[u8]) -> Result<T> {
-    T::read_exact(|buf| hook_param(buf, name))
+    T::read_exact(|buf| hook_param_checked(buf, name))
 }
 
 /// Read this hook's own parameter, named by `name` itself, so the name and
@@ -142,7 +155,9 @@ pub fn hook_param_typed<N: TypedParamName>(name: &N) -> Result<N::Value> {
 /// Calls the host `hook_param` function directly and returns its
 /// **undecoded** `i64` result — no [`res`] applied, so no
 /// [`crate::error::HookError`] is ever constructed here. `pub(crate)` fast
-/// path for [`hook_param_opt`], which must compare the raw code against
+/// path for [`hook_param_checked_raw_code`], the sole caller: it must see
+/// the host's raw, potentially truncated write to detect that truncation
+/// itself, and must compare the raw code against
 /// [`rshooks_core::DOESNT_EXIST`] before deciding whether to decode at all.
 /// Duplicates [`hook_param`]'s own call rather than routing through it,
 /// since doing so changes the compiled block nesting of unrelated call
@@ -161,6 +176,53 @@ pub(crate) fn hook_param_raw_code(buf: &mut [u8], name: &[u8]) -> i64 {
             name.len() as u32,
         )
     }
+}
+
+/// [`hook_param_raw_code`]'s truncation-safe counterpart: reports success
+/// only when the host wrote exactly `out.len()` bytes, never a value
+/// silently truncated to fit `out`.
+///
+/// `hook_param` truncates a parameter longer than the caller's buffer and
+/// reports only the truncated length, so a caller that hands it an
+/// exactly-`N`-byte buffer cannot tell "the value is exactly `N` bytes"
+/// from "the value is longer than `N` bytes" by inspecting the return
+/// value alone. This reads into a [`HOOK_PARAM_VALUE_MAX_LEN`]-byte scratch
+/// buffer first — large enough to hold any stored parameter value in full
+/// — then only copies into `out` and reports success when the raw call
+/// wrote exactly `out.len()` bytes; otherwise it reports
+/// [`rshooks_core::TOO_SMALL`], the same code every other Hook API call in
+/// this crate already returns for an undersized destination.
+#[inline(always)]
+pub(crate) fn hook_param_checked_raw_code(out: &mut [u8], name: &[u8]) -> i64 {
+    let mut scratch = MaybeUninit::<[u8; HOOK_PARAM_VALUE_MAX_LEN]>::uninit();
+    // SAFETY: only read below, over the range `hook_param_raw_code`'s own
+    // successful return proves it wrote.
+    let buf = unsafe { uninit_slice_mut(&mut scratch) };
+    let code = hook_param_raw_code(buf, name);
+    if code < 0 {
+        return code;
+    }
+    let written = code as usize;
+    match (
+        written == out.len(),
+        out.get_mut(..written),
+        buf.get(..written),
+    ) {
+        (true, Some(dst), Some(src)) => {
+            dst.copy_from_slice(src);
+            code
+        }
+        _ => rshooks_core::TOO_SMALL,
+    }
+}
+
+/// [`hook_param_checked_raw_code`]'s decoded counterpart, matching
+/// [`hook_param`]'s own signature — the drop-in replacement
+/// [`hook_param_exact`] uses in place of [`hook_param`] to close the same
+/// truncation hazard.
+#[inline(always)]
+pub(crate) fn hook_param_checked(out: &mut [u8], name: &[u8]) -> Result<usize> {
+    res(hook_param_checked_raw_code(out, name)).map(|v| v as usize)
 }
 
 /// Read this hook's own parameter `name`, distinguishing "parameter is
@@ -190,7 +252,7 @@ pub(crate) fn hook_param_raw_code(buf: &mut [u8], name: &[u8]) -> i64 {
 pub fn hook_param_opt<T: FixedRead>(name: &[u8]) -> Result<Option<T>> {
     let mut absent = false;
     let r = T::read_exact(|buf| {
-        let code = hook_param_raw_code(buf, name);
+        let code = hook_param_checked_raw_code(buf, name);
         if code == rshooks_core::DOESNT_EXIST {
             absent = true;
             return Ok(0);
@@ -333,6 +395,7 @@ mod testenv_tests {
     use std::vec::Vec;
 
     use super::*;
+    use crate::error::HookError;
     use rshooks_core::backend::{HostBackend, install};
 
     /// Answers `hook_param` with a fixed byte string regardless of `name`;
@@ -368,5 +431,103 @@ mod testenv_tests {
         let mut out = [0u8; 4]; // shorter than the backend's 9-byte value
         assert_eq!(hook_param_raw_code(&mut out, b"x"), 4);
         assert_eq!(out, [1, 2, 3, 4]);
+    }
+
+    /// Answers `hook_param` with `DOESNT_EXIST`, regardless of `name`.
+    struct AbsentBackend;
+
+    impl HostBackend for AbsentBackend {
+        fn hook_param(&self, _name: &[u8]) -> core::result::Result<Vec<u8>, i64> {
+            Err(rshooks_core::DOESNT_EXIST)
+        }
+
+        fn accept(&self, _msg: &[u8], _code: i64) -> ! {
+            panic!("AbsentBackend::accept unexpectedly called")
+        }
+
+        fn rollback(&self, _msg: &[u8], _code: i64) -> ! {
+            panic!("AbsentBackend::rollback unexpectedly called")
+        }
+    }
+
+    #[test]
+    fn hook_param_checked_undersized_destination_reports_too_small_not_truncated() {
+        let _guard = install(Rc::new(FixedBytesBackend(&[1, 2, 3, 4, 5, 6, 7, 8, 9])));
+        let mut out = [0u8; 4]; // shorter than the backend's 9-byte value
+        assert_eq!(hook_param_checked(&mut out, b"x"), Err(HookError::TooSmall));
+    }
+
+    #[test]
+    fn hook_param_checked_exact_length_succeeds() {
+        let _guard = install(Rc::new(FixedBytesBackend(&[1, 2, 3, 4])));
+        let mut out = [0u8; 4];
+        assert_eq!(hook_param_checked(&mut out, b"x"), Ok(4));
+        assert_eq!(out, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn hook_param_exact_oversized_value_is_too_small_not_truncated() {
+        let _guard = install(Rc::new(FixedBytesBackend(&[1, 2, 3, 4, 5, 6, 7, 8, 9])));
+        assert_eq!(hook_param_exact::<[u8; 4]>(b"x"), Err(HookError::TooSmall));
+    }
+
+    #[test]
+    fn hook_param_exact_matching_value_decodes() {
+        let _guard = install(Rc::new(FixedBytesBackend(&[1, 2, 3, 4])));
+        assert_eq!(hook_param_exact::<[u8; 4]>(b"x"), Ok([1, 2, 3, 4]));
+    }
+
+    #[test]
+    fn hook_param_exact_shorter_value_is_too_small() {
+        let _guard = install(Rc::new(FixedBytesBackend(&[1, 2])));
+        assert_eq!(hook_param_exact::<[u8; 4]>(b"x"), Err(HookError::TooSmall));
+    }
+
+    /// Name-only [`crate::convert::TypedParamName`] used to exercise
+    /// [`hook_param_typed`] here, independent of `mod tests`'s own
+    /// `TestParamName` (a different, host-stub-only module).
+    struct CheckedParamName;
+
+    impl crate::convert::ToBytes for CheckedParamName {
+        const MAX_LEN: usize = 1;
+
+        fn write(&self, buf: &mut [u8]) -> usize {
+            crate::convert::ToBytes::write(b"x", buf)
+        }
+    }
+
+    impl crate::convert::TypedParamName for CheckedParamName {
+        type Value = [u8; 4];
+
+        fn with_name_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+            f(b"x")
+        }
+    }
+
+    #[test]
+    fn hook_param_typed_oversized_value_is_too_small_not_truncated() {
+        let _guard = install(Rc::new(FixedBytesBackend(&[1, 2, 3, 4, 5, 6, 7, 8, 9])));
+        assert_eq!(
+            hook_param_typed(&CheckedParamName),
+            Err(HookError::TooSmall)
+        );
+    }
+
+    #[test]
+    fn hook_param_opt_oversized_value_is_too_small_not_truncated() {
+        let _guard = install(Rc::new(FixedBytesBackend(&[1, 2, 3, 4, 5, 6, 7, 8, 9])));
+        assert_eq!(hook_param_opt::<[u8; 4]>(b"x"), Err(HookError::TooSmall));
+    }
+
+    #[test]
+    fn hook_param_opt_matching_value_decodes() {
+        let _guard = install(Rc::new(FixedBytesBackend(&[1, 2, 3, 4])));
+        assert_eq!(hook_param_opt::<[u8; 4]>(b"x"), Ok(Some([1, 2, 3, 4])));
+    }
+
+    #[test]
+    fn hook_param_opt_absent_is_none() {
+        let _guard = install(Rc::new(AbsentBackend));
+        assert_eq!(hook_param_opt::<[u8; 4]>(b"x"), Ok(None));
     }
 }
