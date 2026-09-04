@@ -1,0 +1,12 @@
+error: txn_template!: `bad: emit_details` must be the last top-level field — it cannot be declared inside a nested `object`/`array`
+  --> tests/ui/fail/txn_template_emit_details_nested.rs:9:1
+   |
+9  | / txn_template! {
+10 | |     struct Remit {
+11 | |         transaction_type = ttREMIT,
+12 | |         sequence: u32_field(sfSequence) = 0,
+...  |
+23 | | }
+   | |_^
+   |
+   = note: this error originates in the macro `$crate::__txn_template_step` which comes from the expansion of the macro `txn_template` (in Nightly builds, run with -Z macro-backtrace for more info)

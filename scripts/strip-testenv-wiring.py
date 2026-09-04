@@ -36,6 +36,7 @@ WIRED_EXAMPLES = {
     "16_typed-results",
     "17_sto-writer",
     "18_typed-views",
+    "21_txn-template-nested",
 }
 
 

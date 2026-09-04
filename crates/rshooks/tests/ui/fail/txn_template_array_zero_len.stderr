@@ -1,0 +1,12 @@
+error[E0080]: evaluation panicked: txn_template!: `amounts`'s element count must be at least 1
+  --> tests/ui/fail/txn_template_array_zero_len.rs:8:1
+   |
+8  | / txn_template! {
+9  | |     struct Remit {
+10 | |         transaction_type = ttREMIT,
+11 | |         sequence: u32_field(sfSequence) = 0,
+...  |
+24 | | }
+   | |_^ evaluation of `_` failed here
+   |
+   = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `txn_template` (in Nightly builds, run with -Z macro-backtrace for more info)

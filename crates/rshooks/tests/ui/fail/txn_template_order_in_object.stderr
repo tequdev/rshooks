@@ -1,0 +1,12 @@
+error[E0080]: evaluation panicked: txn_template!: fields must be declared in canonical (type, field) order inside a nested `object` (sfXxx codes must be strictly increasing)
+  --> tests/ui/fail/txn_template_order_in_object.rs:9:1
+   |
+9  | / txn_template! {
+10 | |     struct Remit {
+11 | |         transaction_type = ttREMIT,
+12 | |         sequence: u32_field(sfSequence) = 0,
+...  |
+24 | | }
+   | |_^ evaluation of `_` failed here
+   |
+   = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `txn_template` (in Nightly builds, run with -Z macro-backtrace for more info)

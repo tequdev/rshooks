@@ -1,0 +1,12 @@
+error[E0080]: evaluation panicked: txn_template!: `blob`'s fixed_vl length must be at least 1 -- declare it as `empty_vl` for an empty blob
+  --> tests/ui/fail/txn_template_fixed_vl_zero.rs:8:1
+   |
+8  | / txn_template! {
+9  | |     struct Payment {
+10 | |         transaction_type = ttPAYMENT,
+11 | |         sequence: u32_field(sfSequence) = 0,
+...  |
+20 | | }
+   | |_^ evaluation of `_` failed here
+   |
+   = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `txn_template` (in Nightly builds, run with -Z macro-backtrace for more info)
