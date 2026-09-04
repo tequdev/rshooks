@@ -735,10 +735,8 @@ mod tests {
         bits as i64
     }
 
-    // `XFL!` always expands to a `rshooks::`-prefixed path, so it can't be
-    // used from inside this crate's own tests (only from an external
-    // dependent crate, as every doctest above does). These are the same
-    // reference vectors `tests/ui/pass/xfl_const.rs` pins for
+    // Pinned as literal bit patterns rather than built via `XFL!` — these
+    // are the same reference vectors `tests/ui/pass/xfl_const.rs` pins for
     // `XFL!(1)`/`XFL!(-1)`/`XFL!(0.1)`; `NEG_TENTH_BITS` is `TENTH_BITS`
     // with only the sign bit (62) flipped.
     const ONE_BITS: i64 = 6_089_866_696_204_910_592;

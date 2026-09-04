@@ -16,6 +16,7 @@ mod hook_key;
 mod hooks_impl;
 mod hooks_shared;
 mod hooks_struct;
+mod krate;
 mod param_name;
 mod param_value;
 mod shape;
@@ -185,6 +186,7 @@ pub fn account_id(input: TokenStream) -> TokenStream {
             .collect::<Vec<_>>()
             .join(", ")
     );
+    let src = krate::rewrite(src);
     src.parse::<TokenStream>().unwrap_or_else(|_| {
         err(
             span,

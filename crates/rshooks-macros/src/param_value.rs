@@ -118,6 +118,7 @@ impl ::rshooks::convert::FixedRead for {name} {{
         offset_consts = offset_consts,
         read_body = read_body,
     );
+    let src = crate::krate::rewrite(src);
 
     match src.parse::<TokenStream>() {
         Ok(ts) => ts,

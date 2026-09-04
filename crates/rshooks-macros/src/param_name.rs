@@ -113,6 +113,7 @@ impl ::rshooks::convert::ToBytes for {name} {{
         write_body = write_body,
         length_assert = param_name_length_assert(name),
     );
+    let src = crate::krate::rewrite(src);
 
     match src.parse::<TokenStream>() {
         Ok(ts) => ts,
