@@ -1,8 +1,9 @@
 //! Builds and validates SetHook-compatible WebAssembly modules.
 //!
 //! The pipeline cleans the module, applies the API-version-specific
-//! transformations, optionally inserts loop guards, and validates the result.
-//! This host-side crate permits ordinary index-space arithmetic.
+//! transformations, optionally runs the deprecated auto-guard insertion
+//! pass, and validates the result. This host-side crate permits ordinary
+//! index-space arithmetic.
 #![allow(clippy::arithmetic_side_effects)]
 
 pub mod carriers;
@@ -25,6 +26,7 @@ pub mod whitelist;
 pub use cleaner::clean;
 pub use fee::{FeeEstimate, estimate_fee};
 pub use flatten::{FlattenReport, flatten};
+#[allow(deprecated)]
 pub use guard::auto_guard;
 pub use guard_native::{GuardVerdict, NativeGuardError, validate_guards_native};
 pub use unnest::{UnnestReport, unnest};
@@ -45,9 +47,19 @@ pub enum ApiVersion {
 pub struct Options {
     /// Which Hook API version this module targets.
     pub api_version: ApiVersion,
-    /// Insert missing loop guards instead of reporting an error.
+    /// Deprecated: insert missing loop guards instead of reporting an
+    /// error. Scheduled for removal; remove the compiler-generated loop at
+    /// the source level (`rshooks::buf_eq_*`, `HookStatic`) or write the
+    /// loop by hand with `guard!` instead.
+    #[deprecated(
+        note = "the auto-guard transform is scheduled for removal; remove the \
+                compiler-generated loop at the source level (`rshooks::buf_eq_*`, `HookStatic`) \
+                or write the loop by hand with `guard!`"
+    )]
     pub auto_guard: bool,
-    /// The `maxiter` value used for auto-inserted guards.
+    /// Deprecated: the `maxiter` value used for auto-inserted guards. Only
+    /// meaningful with the deprecated [`Options::auto_guard`].
+    #[deprecated(note = "only meaningful with the deprecated `auto_guard`")]
     pub default_maxiter: u32,
     /// Permit oversized output from build operations. Validation still reports it.
     pub allow_oversize: bool,
@@ -56,6 +68,7 @@ pub struct Options {
     pub optimize: bool,
 }
 
+#[allow(deprecated)]
 impl Default for Options {
     fn default() -> Self {
         Self {
@@ -72,6 +85,7 @@ impl Default for Options {
 ///
 /// Version 0 modules are flattened and unnested before guard processing.
 /// Returns the transformed bytes and their validation report.
+#[allow(deprecated)]
 pub fn run_pipeline(wasm: &[u8], opts: &Options) -> anyhow::Result<(Vec<u8>, ValidationReport)> {
     // wasm-opt runs first, on the raw wasm, before cleaning: see
     // `optimizer` for why this ordering is load-bearing.
@@ -180,6 +194,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn options_default_values_are_pinned() {
         let o = Options::default();
         assert_eq!(o.api_version, ApiVersion::V0);

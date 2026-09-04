@@ -110,7 +110,7 @@ These come from xahaud's SetHook validation (`SetHook.cpp`,
     needs the `static`/`HookStatic` idiom (§6.3's "static-buffer idiom",
     `examples/README.md`'s "Statics for templates and large buffers")
     rather than relying on `opt-level` alone. `rshooks-build`'s
-    `--auto-guard` escape hatch (§6.3) remains available, and remains the
+    `--auto-guard` escape hatch (§6.3) is deprecated, and remains the
     wrong default for the reasons given there, independent of this
     setting.
   - Raising `-C llvm-args`-level memset/memcpy/memmove store thresholds
@@ -689,7 +689,8 @@ N=1/4/8 breakdown behind these marginal-cost figures).
   (same id formula as C `GUARDM`) for multiple loops on one line. All
   arithmetic explicit `u32` with `wrapping_add`-free constants.
   Guards are the developer's responsibility by default (see 6.3); the
-  opt-in auto-guard pass exists mainly for compiler-generated loops.
+  deprecated opt-in auto-guard pass exists mainly for compiler-generated
+  loops.
 - `trace!("msg")`, `trace!("msg", data)`, `trace_num!`, `trace_float!` —
   compiled to nothing unless **rshooks's** `trace` feature is enabled
   (traces cost bytes and execution; examples enable it in dev). The feature
@@ -1428,8 +1429,8 @@ No walrus (C8).
 
 ```
 rshooks build [--manifest-path <dir/Cargo.toml>] [-p <crate>]
-                  [--api-version 0|1] [--auto-guard] [--default-maxiter N]
-                  [--out <dir>] [--allow-oversize]
+                  [--api-version 0|1] [--out <dir>] [--allow-oversize]
+                  [--auto-guard] [--default-maxiter N]   # deprecated
 rshooks clean <in.wasm> [-o out.wasm] [--api-version 0|1]   # post-process only
 rshooks check <file.wasm> [--api-version 0|1]               # validate only, no output
 ```
@@ -1591,7 +1592,8 @@ For every function body, scan instructions; at each `loop` opcode:
 - Otherwise it is a **hard error by default**, reported with function index
   and instruction offset (pure guard-checker behavior, same as `check`).
   Developers fix it with `guard!` at the top of the loop body.
-- With opt-in `--auto-guard`, the missing guard is instead inserted:
+- With the deprecated opt-in `--auto-guard` (accepted with a warning,
+  scheduled for removal), the missing guard is instead inserted:
   `i32.const <id>; i32.const <maxiter>; call $_g; drop` immediately after
   the `loop` blocktype, id = `(1 << 30) + n` (sequential — disjoint from
   the `(1 << 31) + …` space used by `guard!`/`guard_m!`), maxiter =

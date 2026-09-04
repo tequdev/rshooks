@@ -523,6 +523,7 @@ fn validator_suppresses_hint_when_loop_calls_an_import() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn auto_guard_inserts_exact_pattern_and_passes_revalidation() {
     let input = wasm(UNGUARDED_LOOP_HOOK);
     let o = Options {
@@ -861,4 +862,51 @@ fn run_pipeline_reports_fee_relevant_size() {
     );
     let fee = rshooks_build::estimate_fee(out.len());
     assert_eq!(fee.drops, fee.bytes * 5000);
+}
+
+#[test]
+fn clean_cli_warns_when_auto_guard_is_passed() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let input_path = dir.path().join("unguarded.wasm");
+    std::fs::write(&input_path, wasm(UNGUARDED_LOOP_HOOK)).expect("write fixture");
+    let out_path = dir.path().join("unguarded.clean.wasm");
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_rshooks"))
+        .arg("clean")
+        .arg(&input_path)
+        .arg("-o")
+        .arg(&out_path)
+        .arg("--auto-guard")
+        .output()
+        .expect("running the rshooks binary");
+
+    assert!(
+        output.status.success(),
+        "clean --auto-guard should still succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--auto-guard is deprecated"),
+        "expected a deprecation warning on stderr: {stderr}"
+    );
+    assert!(
+        out_path.exists(),
+        "clean should still write its output file"
+    );
+
+    // Without the flag the same input is rejected (unguarded loop), and the
+    // warning must not appear: it is conditional on `--auto-guard`.
+    let control = std::process::Command::new(env!("CARGO_BIN_EXE_rshooks"))
+        .arg("clean")
+        .arg(&input_path)
+        .arg("-o")
+        .arg(dir.path().join("control.clean.wasm"))
+        .output()
+        .expect("running the rshooks binary");
+    let control_stderr = String::from_utf8_lossy(&control.stderr);
+    assert!(
+        !control_stderr.contains("--auto-guard is deprecated"),
+        "the warning must be conditional on the flag: {control_stderr}"
+    );
 }
