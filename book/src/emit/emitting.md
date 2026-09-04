@@ -88,6 +88,7 @@ header of its own:
 | `issue(sfX)` | ISSUE | 40 | zeroed | `set_x(&CurrencyCode, &AccountId)` |
 | `account_id(sfX)` | ACCOUNT | 1 + 20 | zeroed | `set_x(&AccountId)` |
 | `empty_vl(sfX)` | VL | 1 | empty blob | none |
+| `fixed_vl(sfX, N) = e` | VL | VL-prefix(N) + N | zeroed, or the declared `[u8; N]` | `set_x(&[u8; N])` |
 | `object(sfX) { .. }` | OBJECT | inner + 1 (`0xE1`) | inner defaults | inner setters, prefixed |
 | `array(sfX) [ .. ]` | ARRAY | elements + 1 (`0xF1`) | inner defaults | inner setters, prefixed |
 
@@ -157,6 +158,53 @@ Two setters follow from that split:
 - `set_x_value(xfl)` writes only the 8 value bytes, keeping the baked or
   previously set currency/issuer — the intended hot path once a default
   triple has fixed the currency/issuer: one 8-byte store, no host call.
+
+### `fixed_vl`: a fixed-length blob
+
+`empty_vl(sfX)` stays the empty blob; `fixed_vl(sfX, N)` is for a `VL`
+field whose length is fixed by the declaration rather than empty — a memo
+type code, a fixed-width tag, and the like. `N` (a `usize` const
+expression, at least 1) is part of the declaration, so rippled's VL length
+prefix — one, two, or three bytes depending on `N`'s own magnitude — is
+computed and baked in at compile time, the same as every other kind's
+header. `N = 0` is a compile error: `empty_vl` is the one spelling for an
+empty blob, so `sfSigningPubKey`'s required-kind check keeps accepting
+only `empty_vl`.
+
+```rust,ignore
+memo_type: fixed_vl(sfMemoType, 4) = *b"note",
+memo_data: fixed_vl(sfMemoData, 8),
+```
+
+Without a default the payload is `N` zero bytes; a declared default must
+be exactly `[u8; N]` — a wrong-length default is a compile-time type
+error, not a truncation. The setter, `set_x(&[u8; N])`, is an infallible
+fixed-size write. Only fixed-length `VL` is covered this way; a genuinely
+variable-length blob, `Vector256`, and `PathSet` stay out of scope (see
+"Deferred kinds" below).
+
+`fixed_vl` works the same way inside a nested container — a homogeneous
+`sfMemos` array (see "Nested `STObject`/`STArray`" below) whose element
+declares both fields:
+
+```rust,ignore
+memos: array(sfMemos) [
+    Memo: object(sfMemo) {
+        memo_type: fixed_vl(sfMemoType, 4) = *b"note",
+        memo_data: fixed_vl(sfMemoData, 8),
+    }; 1
+],
+```
+
+```rust,ignore
+let Some(mut memo) = txn.memos(0) else {
+    rollback!(b"emit-txn: index out of range", EmitTxnError::IndexOutOfRange);
+};
+memo.set_memo_data(b"payload!");
+```
+
+`examples/21_txn-template-nested` carries exactly this memo alongside its
+issued-amount entries.
 
 ### Nested `STObject`/`STArray`
 
@@ -288,11 +336,11 @@ the same lifecycle as `10_emit-txn`'s Payment.
 
 ### Deferred kinds
 
-Variable-length kinds whose wire size isn't fixed by the declaration alone
-— a non-empty `Blob`, `Vector256`, `PathSet` — have no `txn_template!` kind
-yet; see `docs/TXN_TEMPLATE_FIELDS_DESIGN.md` §6 for what's deferred and
-why. A field of one of these types still needs `StoWriter` (below) or
-hand-rolled bytes.
+`Vector256`, `PathSet`, and a genuinely variable-length blob (one whose
+length isn't fixed by the declaration, unlike `fixed_vl`) have no
+`txn_template!` kind yet; see `docs/TXN_TEMPLATE_FIELDS_DESIGN.md` §6 for
+what's deferred and why. A field of one of these types still needs
+`StoWriter` (below) or hand-rolled bytes.
 
 ### `prepare_for_emit()`
 

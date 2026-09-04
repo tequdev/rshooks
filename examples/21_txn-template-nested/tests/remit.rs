@@ -98,6 +98,45 @@ fn amounts_region_matches_the_two_declared_issued_entries() {
     );
 }
 
+/// Byte-exact check of the declared `sfMemos` region: `header(sfMemos)
+/// header(sfMemo) header(sfMemoType) 0x04 "note" header(sfMemoData) 0x08
+/// "rshooks!" 0xE1 0xF1` — `memo_type` at its baked default, `memo_data`
+/// written by `main`. `fixed_vl`'s VL length prefix (`0x04`/`0x08`) is a
+/// single byte since both lengths are `<= 192`; headers are derived via
+/// `txn::codec::field_header` rather than hardcoded.
+#[test]
+fn memos_region_matches_the_declared_memo() {
+    let env = env();
+    let exit = env.invoke::<TxnTemplateNested>(0);
+    assert_eq!(exit.exit, ExitType::Accept, "{exit:?}");
+    let emitted = env.emitted();
+    assert_eq!(emitted.len(), 1);
+    let blob = emitted[0].blob();
+
+    let (memos_hdr, memos_hdr_len) = rshooks::txn::codec::field_header(sfMemos);
+    let (memo_hdr, memo_hdr_len) = rshooks::txn::codec::field_header(sfMemo);
+    let (type_hdr, type_hdr_len) = rshooks::txn::codec::field_header(sfMemoType);
+    let (data_hdr, data_hdr_len) = rshooks::txn::codec::field_header(sfMemoData);
+
+    let mut expected = Vec::new();
+    expected.extend_from_slice(&memos_hdr[..memos_hdr_len]);
+    expected.extend_from_slice(&memo_hdr[..memo_hdr_len]);
+    expected.extend_from_slice(&type_hdr[..type_hdr_len]);
+    expected.push(4); // fixed_vl(sfMemoType, 4)'s length prefix
+    expected.extend_from_slice(b"note");
+    expected.extend_from_slice(&data_hdr[..data_hdr_len]);
+    expected.push(8); // fixed_vl(sfMemoData, 8)'s length prefix
+    expected.extend_from_slice(b"rshooks!");
+    expected.push(0xE1); // object end marker
+    expected.push(0xF1); // array end marker
+
+    assert!(
+        blob.windows(expected.len())
+            .any(|w| w == expected.as_slice()),
+        "sfMemos region not found in the emitted blob: {blob:02x?}"
+    );
+}
+
 /// `ISSUER` (a 20-byte `AccountId` hook parameter) overrides the baked
 /// issuer at runtime, on **every** `sfAmounts` entry, through the full
 /// 48-byte `set_amount` setter — the currency stays the baked `USD` on

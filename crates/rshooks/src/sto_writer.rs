@@ -390,6 +390,43 @@ impl<'a> StoWriter<'a> {
         Ok(())
     }
 
+    /// Writes an `STI_VL` field with a caller-supplied length prefix and
+    /// payload — the runtime counterpart of `txn_template!`'s `fixed_vl`
+    /// kind (`crate::txn::codec` §"fixed-length VL"): header, then
+    /// rippled's VL length prefix for `value.len()` via
+    /// [`codec::vl_length_prefix`] (reused directly, not re-derived), then
+    /// `value` itself. [`Self::empty_vl`] is exactly `vl(f, &[])` (a
+    /// single-byte zero-length prefix, no payload) plus the
+    /// `sfSigningPubKey` plumbing bookkeeping `vl` does not do — prefer it
+    /// there.
+    ///
+    /// `value`'s length should be a compile-time constant at the call site
+    /// (e.g. a `&[u8; N]` array), for the reason [`Self::write_bytes`]'s
+    /// doc comment gives: a genuinely runtime-length payload compiles to
+    /// an unguarded copy loop on `wasm32v1-none`.
+    ///
+    /// # Errors
+    ///
+    /// [`HookError::InvalidArgument`] if `value.len()` exceeds
+    /// [`codec::MAX_VL_LEN`] (the largest length a three-byte VL prefix can
+    /// represent — checked here, before calling into
+    /// [`codec::vl_length_prefix`], since that function panics past it and
+    /// a runtime panic would abort the whole hook), if the write does not
+    /// fit, or is nested directly inside an `STArray` (as
+    /// [`Self::u16_field`]).
+    #[inline(always)]
+    pub fn vl(&mut self, f: SField<Opaque>, value: &[u8]) -> Result<()> {
+        self.check_write(false)?;
+        if value.len() > codec::MAX_VL_LEN {
+            return Err(HookError::InvalidArgument);
+        }
+        self.write_field_header_bytes(f)?;
+        let (prefix, prefix_len) = codec::vl_length_prefix(value.len());
+        let prefix = prefix.get(..prefix_len).ok_or(HookError::InvalidArgument)?;
+        self.write_bytes(prefix)?;
+        self.write_bytes(value)
+    }
+
     /// Writes an `STI_AMOUNT` field encoded as a native (XRP/XAH) amount —
     /// byte-identical to [`codec::encode_native_amount`]'s output, which
     /// this reuses directly.
@@ -678,7 +715,7 @@ mod tests {
 
     use super::*;
     use crate::sfield::{
-        sfAmount, sfAmountEntry, sfAmounts, sfDestination, sfFirstLedgerSequence, sfFlags,
+        sfAmount, sfAmountEntry, sfAmounts, sfBlob, sfDestination, sfFirstLedgerSequence, sfFlags,
         sfLastLedgerSequence, sfSequence, sfSigningPubKey, sfTransactionType,
     };
 
@@ -721,6 +758,64 @@ mod tests {
         let mut w = StoWriter::new(&mut buf);
         w.empty_vl(sfSigningPubKey).expect("fits");
         assert_eq!(w.as_bytes(), &[0x73, 0x00]);
+    }
+
+    #[test]
+    fn vl_writes_one_byte_prefix_form() {
+        let mut buf = [0u8; 16];
+        let mut w = StoWriter::new(&mut buf);
+        w.vl(sfBlob, b"note").expect("fits");
+        // sfBlob (7,26): type 7 < 16, field 26 >= 16 -> 2-byte header
+        // [0x70, 0x1A], then a single-byte VL prefix (4 <= 192), then the
+        // 4-byte payload.
+        assert_eq!(w.as_bytes(), &[0x70, 0x1A, 0x04, b'n', b'o', b't', b'e']);
+    }
+
+    #[test]
+    fn vl_writes_two_byte_prefix_form() {
+        let mut buf = [200u8; 300];
+        let mut w = StoWriter::new(&mut buf);
+        let value = [0x5Au8; 193];
+        w.vl(sfBlob, &value).expect("fits");
+        let bytes = w.as_bytes();
+        // 193 is the smallest length needing a two-byte prefix:
+        // adj = 193 - 193 = 0, so [193, 0] (matches
+        // `codec::vl_length_prefix(193)`).
+        assert_eq!(&bytes[..2], &[0x70, 0x1A]);
+        assert_eq!(&bytes[2..4], &[193, 0]);
+        assert_eq!(&bytes[4..], &value[..]);
+    }
+
+    #[test]
+    fn vl_matches_codec_vl_length_prefix_exactly() {
+        // Cross-check against `txn_template!`'s own compile-time encoder
+        // (`codec::vl_length_prefix`), the same function this method
+        // calls -- this pins that both call sites agree, not just that
+        // `vl` matches its own internals.
+        const VALUE: [u8; 12481] = [0u8; 12481];
+        for &len in &[0usize, 1, 192, 193, 200, 12480, 12481] {
+            let mut buf = [0u8; 12490];
+            let mut w = StoWriter::new(&mut buf);
+            w.vl(sfBlob, &VALUE[..len]).expect("fits");
+            let (expected_prefix, expected_prefix_len) = codec::vl_length_prefix(len);
+            assert_eq!(
+                &w.as_bytes()[2..2 + expected_prefix_len],
+                &expected_prefix[..expected_prefix_len],
+                "len {len}"
+            );
+        }
+    }
+
+    #[test]
+    fn vl_rejects_length_over_the_maximum() {
+        // `static`, not a local array: a ~900 KB local would put that much
+        // on the test harness's own thread stack, which the harness does
+        // not otherwise size for. A `static` lands in the binary's data
+        // segment instead.
+        static VALUE: [u8; codec::MAX_VL_LEN + 1] = [0u8; codec::MAX_VL_LEN + 1];
+        let mut buf = [0u8; 8];
+        let mut w = StoWriter::new(&mut buf);
+        assert_eq!(w.vl(sfBlob, &VALUE), Err(HookError::InvalidArgument));
     }
 
     #[test]

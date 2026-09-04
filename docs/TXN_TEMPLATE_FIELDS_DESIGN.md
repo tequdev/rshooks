@@ -57,6 +57,7 @@ txn_template! {
   | <name>: issue(sfX)                            // 40 bytes (currency + issuer, zeroed)
   | <name>: account_id(sfX)                       // existing
   | <name>: empty_vl(sfX)                         // existing
+  | <name>: fixed_vl(sfX, N) $(= <[u8; N] expr>)?  // fixed-length VL blob
   | <name>: object(sfX) { <field>* }              // STObject, closed by 0xE1
   | <name>: array(sfX) [ <element>* ]             // STArray, named elements, closed by 0xF1
   | <name>: array(sfX) [ <Elem>: object(sfY) { <field>* } ; <N> ]  // STArray, homogeneous, indexed
@@ -89,6 +90,7 @@ error (§4.5).
 | `issue` | ISSUE (24) | 40 | zeroed | `set_x(&CurrencyCode, &AccountId)` |
 | `account_id` | ACCOUNT (8) | 1 + 20 | zeroed | `set_x(&AccountId)` (unchanged) |
 | `empty_vl` | VL (7) | 1 | `0x00` | none (unchanged) |
+| `fixed_vl(sfX, N)` | VL (7) | `vl_length_prefix(N)` + N | zeroed, or the declared `[u8; N]` | `set_x(&[u8; N])` |
 | `object` | OBJECT (14) | inner + 1 (`0xE1`) | inner defaults | inner setters, prefixed |
 | `array` | ARRAY (15) | elements + 1 (`0xF1`) | inner defaults | inner setters, prefixed |
 
@@ -250,6 +252,34 @@ generic-`Self` restriction, since `Self` carries a lifetime parameter here) — 
 private, module-level const outside the impl instead, and both `Elem::LEN` and
 `Elem::TEMPLATE` alias it.
 
+### 2.6 `fixed_vl` (fixed-length VL blob)
+
+```rust,ignore
+memo_type: fixed_vl(sfMemoType, 4) = *b"note",
+memo_data: fixed_vl(sfMemoData, 8),
+```
+
+`fixed_vl(sfX, N)` declares an `STI_VL` field whose length is fixed at declaration time,
+so its rippled VL length prefix is computed and baked in at compile time exactly like any
+other kind's header. `N` is a `usize` const expression (a literal or a named const), at
+least 1 — `N = 0` is a compile error, since `empty_vl` is the one spelling for an empty
+blob (so `sfSigningPubKey`'s required-kind check keeps rejecting `fixed_vl(sfSigningPubKey,
+..)` with its existing "must be declared as `empty_vl`" message, unaffected by this kind
+existing). Works at the top level and inside any `object`/element, the same `ctx = obj`
+rule every other scalar kind follows.
+
+Wire bytes: `header(sfX)`, then rippled's VL length prefix for `N` — `vl_length_prefix`
+(new in `codec`) implements the encoding directly: `N <= 192` is a single byte (`N`
+itself); `193..=12480` is two bytes, `[193 + ((N - 193) >> 8), (N - 193) & 0xFF]`;
+`12481..=918744` is three, `[241 + ((N - 12481) >> 16), ((N - 12481) >> 8) & 0xFF, (N -
+12481) & 0xFF]` — then `N` payload bytes. Default is `N` zero bytes unless a `= <[u8; N]
+expr>` is declared; the setter takes `&[u8; N]`, an infallible fixed-size write. A
+declared default whose length doesn't match `N` is a compile-time type error (`let __d:
+[u8; N] = <expr>;` inside the generated `new()`), not a truncation or a runtime panic.
+
+Only fixed-length `VL` is covered here — `Vector256`/`PathSet` and a genuinely
+variable-length blob stay deferred (§6).
+
 ## 3. Implementation
 
 ### 3.1 `codec` additions (`txn.rs`)
@@ -355,19 +385,39 @@ New:
   `sfHooks` array's element, proving a two-level indexed accessor
   (`hooks(i)?.grants(j)?`) lands in the right element and leaves every other element at
   its baked default.
+- `txn.rs` unit tests for §2.6: `vl_length_prefix` pinned at every boundary (the one-byte
+  form, the smallest and largest two-byte lengths, the smallest and largest three-byte
+  length, and the over-limit panic), `fixed_vl_field_size`/`write_vl_length_prefix`, a
+  `TestMemoFixture` (`sfMemos` holding one `Memo` element with both a defaulted and a
+  zeroed `fixed_vl` field, `Memo::LEN`/`TEMPLATE` byte-exact, both setters landing at their
+  expected offsets), and a top-level `BlobFixture` at the two-byte prefix boundary
+  (`N = 193`) with its header/prefix/payload offsets and setter pinned.
 - `tests/ui/fail`: STI mismatch, scalar inside array, order violation inside an object,
   unknown kind, a nested `sfAccount` not satisfying the top-level presence check, nesting
   depth over `STO_WRITER_MAX_DEPTH` (ten levels of plain nested `object`s), a homogeneous
-  array's element count below 1, and `emit_details` nested -- once inside a named
-  `object`, once inside a homogeneous array's element.
+  array's element count below 1, `emit_details` nested -- once inside a named `object`,
+  once inside a homogeneous array's element -- a `fixed_vl` field declared with `N = 0`,
+  a `fixed_vl` field on a non-`STI_VL` `sfXxx` code, and a `fixed_vl` default whose array
+  length doesn't match the declared `N`.
 - `tests/ui/pass`: a nested template compiles and its inner setters resolve; a
   homogeneous-array template compiles and its indexed accessor is callable in a loop over
-  every valid index.
-- New example `examples/21_txn-template-nested` (Remit with two fixed `AmountEntry`s:
-  one `native_amount`, one `amount` with a baked currency/issuer), with a testenv test
-  asserting the emitted bytes' `sfAmounts` contents through `TestEnv`, plus
-  `metrics.json`. Byte parity with `examples/17_sto-writer`'s two-entry Remit prefix is
-  asserted in the example's test (same fields, same order, same bytes).
+  every valid index; a `fixed_vl` field (with and without a declared default) inside a
+  homogeneous array element compiles and its setters are reachable through the element's
+  own accessor.
+- `sto_writer.rs` unit tests for `StoWriter::vl`: the one-byte and two-byte VL-prefix
+  forms, a cross-check against `codec::vl_length_prefix` at every prefix-width boundary,
+  and the over-maximum-length rejection.
+- New example `examples/21_txn-template-nested`: a Remit whose `sfAmounts` is a
+  homogeneous, two-element `AmountEntry` array (both entries issued, baked
+  `USD`/`USD_ISSUER` default, written through `Remit::amounts`'s indexed accessor) and
+  whose `sfMemos` is a homogeneous, one-element `Memo` array with two `fixed_vl` fields
+  (`memo_type` baked at its `*b"note"` default, `memo_data` written at runtime through
+  `Remit::memos`'s accessor); hook parameters (`DEST`, an optional `ISSUER` overriding
+  the baked issuer through the full 48-byte `amount` setter) are read via declared
+  `#[hook_param]` fields. Testenv tests assert the emitted `sfAmounts`/`sfMemos` regions
+  byte-exact, plus `metrics.json`. Byte parity with an equivalent `StoWriter`-built
+  prefix (`u16_field`/... for the fixed fields, `begin_array`/`begin_object`/`vl`/
+  `iou_amount` for `sfMemos`/`sfAmounts`) is asserted over `Remit`'s whole fixed prefix.
 - `examples/10_emit-txn` bytes/`metrics.json` unchanged (`mise run
   record-example-metrics --check`).
 
@@ -383,13 +433,13 @@ New:
 
 ## 6. Deferred (out of scope here)
 
-- Non-empty VL kinds: `vl(sfX, N)` (fixed-length blob, e.g. `sfPublicKey` 33 bytes,
-  `sfMemoData` with a fixed literal), `Vector256` (`sfURITokenIDs`, `sfHookNamespaces`),
-  `PathSet`. These need VL length-prefix encoding (1–3 bytes, size-dependent) and are the
-  next iteration.
+- `Vector256` (`sfURITokenIDs`, `sfHookNamespaces`) and `PathSet` — distinct wire shapes
+  from a plain `VL` blob (`Vector256` is a flat run of 32-byte hashes with no per-element
+  header; `PathSet` is its own nested path/step grammar), plus a genuinely variable-length
+  (not fixed-at-declaration) `VL` blob. `fixed_vl(sfX, N)` (§2.6) covers every *fixed*-length
+  `VL` field; these are the remaining VL-family gaps.
 - `Number` (`sfNumber`), `UInt192` (`sfMPTokenIssuanceID`), `XChainBridge`: no Xahau
   transaction emits them today; add on demand with the `fixed_field_size` pattern.
-- `; N` element repetition sugar for homogeneous arrays (needs a proc macro).
 - Type-level guard that an `amount` field with the zero default is set before emit (a
   runtime "unset" sentinel would cost WCE on every emit; a typestate would change the
   template's public shape). Left to the host's own validation.

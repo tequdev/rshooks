@@ -23,6 +23,15 @@ txn_template! {
     /// `StoWriter` needed, since the element count and shape are both
     /// known at declaration time (contrast `examples/17_sto-writer`,
     /// whose second entry is only present conditionally at runtime).
+    ///
+    /// `sfMemos` is a single-element array of the same homogeneous form,
+    /// with two `fixed_vl` fields: a length-`N` `VL` blob whose length
+    /// (and so its rippled length prefix) is fixed at declaration time —
+    /// `memo_type` bakes a `*b"note"` default (the whole field needs no
+    /// runtime write at all), `memo_data` defaults to `N` zero bytes and
+    /// is overwritten by `main`. `empty_vl` remains the one spelling for
+    /// an *empty* blob, so `signing_pub_key` above stays `empty_vl`, not
+    /// `fixed_vl(sfSigningPubKey, 0)` — the macro rejects `N = 0`.
     struct Remit {
         transaction_type = ttREMIT,
         flags: u32_field(sfFlags) = tfCANONICAL,
@@ -33,6 +42,12 @@ txn_template! {
         signing_pub_key: empty_vl(sfSigningPubKey),
         account: account_id(sfAccount),
         destination: account_id(sfDestination),
+        memos: array(sfMemos) [
+            Memo: object(sfMemo) {
+                memo_type: fixed_vl(sfMemoType, 4) = *b"note",
+                memo_data: fixed_vl(sfMemoData, 8),
+            }; 1
+        ],
         amounts: array(sfAmounts) [
             AmountEntry: object(sfAmountEntry) {
                 amount: amount(sfAmount) = (XFL::from_raw_bits(0), USD, USD_ISSUER),
@@ -61,10 +76,15 @@ hook_errors! {
         AmountsIndexOutOfRange = 4,
         /// `XFL::new` failed to normalize an entry's value.
         AmountValueFailed = 5,
+        /// The `sfMemos` index was out of range — unreachable by
+        /// construction (the index is a literal below the declared
+        /// element count), kept only because the accessor returns
+        /// `Option`.
+        MemosIndexOutOfRange = 6,
         /// The Remit could not be prepared.
-        PrepareFailed = 6,
+        PrepareFailed = 7,
         /// The prepared Remit could not be emitted.
-        EmitFailed = 7,
+        EmitFailed = 8,
     }
 }
 
@@ -87,7 +107,9 @@ impl TxnTemplateNested {
     /// entry 1 gets `2.0`, via the baked `USD`/`USD_ISSUER` default unless
     /// an `ISSUER` hook parameter overrides the issuer for both entries,
     /// which routes through the full 48-byte `amount` setter instead of
-    /// the 8-byte hot path — and emits.
+    /// the 8-byte hot path — writes the single `sfMemos` entry's
+    /// `memo_data` through `Remit::memos`'s accessor (`memo_type` stays at
+    /// its baked default), and emits.
     #[hook(0, name = "tplremit", on = [Invoke], can_emit = [Remit])]
     fn main(&self) -> HookResult {
         if etxn_reserve(1).is_err() {
@@ -155,6 +177,16 @@ impl TxnTemplateNested {
             None => second.set_amount_value(two),
         }
 
+        // The single `sfMemos` entry: `memo_type` stays at its baked
+        // `*b"note"` default; only `memo_data` is written at runtime.
+        let Some(mut memo) = txn.memos(0) else {
+            rollback!(
+                b"txn-template-nested: memos index out of range",
+                TxnTemplateNestedError::MemosIndexOutOfRange
+            );
+        };
+        memo.set_memo_data(b"rshooks!");
+
         let Ok(prepared) = txn.prepare_for_emit() else {
             rollback!(
                 b"txn-template-nested: prepare_for_emit failed",
@@ -196,7 +228,8 @@ mod tests {
     use super::{
         AccountId, Remit, TxnTemplateNested, USD, USD_ISSUER, XFL, sfAccount, sfAmount,
         sfAmountEntry, sfAmounts, sfDestination, sfFee, sfFirstLedgerSequence, sfFlags,
-        sfLastLedgerSequence, sfSequence, sfSigningPubKey, sfTransactionType, tfCANONICAL,
+        sfLastLedgerSequence, sfMemo, sfMemoData, sfMemoType, sfMemos, sfSequence, sfSigningPubKey,
+        sfTransactionType, tfCANONICAL,
     };
 
     const DEST: [u8; 20] = [3u8; 20];
@@ -278,6 +311,46 @@ mod tests {
             blob.windows(expected.len())
                 .any(|w| w == expected.as_slice()),
             "sfAmounts region not found in the emitted blob: {blob:02x?}"
+        );
+    }
+
+    /// Byte-exact check of the declared `sfMemos` region:
+    /// `header(sfMemos) header(sfMemo) header(sfMemoType) 0x04 "note"
+    /// header(sfMemoData) 0x08 "rshooks!" 0xE1 0xF1` — `memo_type` at its
+    /// baked default, `memo_data` written by `main`. `fixed_vl`'s VL
+    /// length prefix (`0x04`/`0x08`) is a single byte since both lengths
+    /// are `<= 192`; headers are derived via `txn::codec::field_header`
+    /// rather than hardcoded.
+    #[test]
+    fn memos_region_matches_the_declared_memo() {
+        let env = env();
+        let exit = env.invoke::<TxnTemplateNested>(0);
+        assert_eq!(exit.exit, ExitType::Accept, "{exit:?}");
+        let emitted = env.emitted();
+        assert_eq!(emitted.len(), 1);
+        let blob = emitted[0].blob();
+
+        let (memos_hdr, memos_hdr_len) = rshooks::txn::codec::field_header(sfMemos);
+        let (memo_hdr, memo_hdr_len) = rshooks::txn::codec::field_header(sfMemo);
+        let (type_hdr, type_hdr_len) = rshooks::txn::codec::field_header(sfMemoType);
+        let (data_hdr, data_hdr_len) = rshooks::txn::codec::field_header(sfMemoData);
+
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&memos_hdr[..memos_hdr_len]);
+        expected.extend_from_slice(&memo_hdr[..memo_hdr_len]);
+        expected.extend_from_slice(&type_hdr[..type_hdr_len]);
+        expected.push(4); // fixed_vl(sfMemoType, 4)'s length prefix
+        expected.extend_from_slice(b"note");
+        expected.extend_from_slice(&data_hdr[..data_hdr_len]);
+        expected.push(8); // fixed_vl(sfMemoData, 8)'s length prefix
+        expected.extend_from_slice(b"rshooks!");
+        expected.push(0xE1); // object end marker
+        expected.push(0xF1); // array end marker
+
+        assert!(
+            blob.windows(expected.len())
+                .any(|w| w == expected.as_slice()),
+            "sfMemos region not found in the emitted blob: {blob:02x?}"
         );
     }
 
@@ -442,6 +515,12 @@ mod tests {
             .expect("fits");
         w.account_id(sfDestination, &AccountId::default())
             .expect("fits");
+        w.begin_array(sfMemos).expect("fits");
+        w.begin_object(sfMemo).expect("fits");
+        w.vl(sfMemoType, b"note").expect("fits");
+        w.vl(sfMemoData, b"rshooks!").expect("fits");
+        w.end_object().expect("fits");
+        w.end_array().expect("fits");
         w.begin_array(sfAmounts).expect("fits");
         for i in 0..2i64 {
             let value = XFL::new(0, i + 1).expect("normalizes");
@@ -459,6 +538,8 @@ mod tests {
             let mut entry = tpl.amounts(i).expect("index in range");
             entry.set_amount_value(value);
         }
+        let mut memo = tpl.memos(0).expect("index in range");
+        memo.set_memo_data(b"rshooks!");
 
         assert_eq!(w.as_bytes(), &tpl.bytes()[..PREFIX_LEN]);
     }

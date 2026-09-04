@@ -363,6 +363,89 @@ pub mod codec {
         }
     }
 
+    /// The largest length rippled's three-byte VL length prefix can
+    /// represent. [`vl_length_prefix`] panics (at compile time) past this;
+    /// [`crate::sto_writer::StoWriter::vl`] (the runtime counterpart)
+    /// checks it explicitly and returns
+    /// [`HookError::InvalidArgument`](crate::error::HookError::InvalidArgument)
+    /// instead, since a runtime panic would abort the whole hook.
+    pub const MAX_VL_LEN: usize = 918_744;
+
+    /// Computes rippled's variable-length (`VL`) size prefix for a blob of
+    /// `len` bytes: `len <= 192` is a single byte (`len` itself);
+    /// `193..=12480` is two bytes; `12481..=`[`MAX_VL_LEN`] is three.
+    /// Returns the prefix bytes (only the first `N` of the 3 are
+    /// meaningful) and `N`, mirroring [`field_header`]'s `([u8; 3],
+    /// usize)` shape. Used by `txn_template!`'s `fixed_vl` kind — `len` is
+    /// always the field's declared, compile-time-fixed length there — and
+    /// by [`crate::sto_writer::StoWriter::vl`], the runtime counterpart.
+    ///
+    /// # Panics (compile-time only)
+    ///
+    /// Panics if `len` exceeds [`MAX_VL_LEN`] — only ever called from a
+    /// `const` context; [`crate::sto_writer::StoWriter::vl`] checks this
+    /// bound itself before calling in, so it never hits the panic at
+    /// runtime.
+    #[must_use]
+    pub const fn vl_length_prefix(len: usize) -> ([u8; 3], usize) {
+        if len <= 192 {
+            ([len as u8, 0, 0], 1)
+        } else if len <= 12480 {
+            let adj = len.wrapping_sub(193);
+            let byte0 = 193u8.wrapping_add((adj >> 8) as u8);
+            let byte1 = (adj & 0xFF) as u8;
+            ([byte0, byte1, 0], 2)
+        } else if len <= MAX_VL_LEN {
+            let adj = len.wrapping_sub(12481);
+            let byte0 = 241u8.wrapping_add((adj >> 16) as u8);
+            let byte1 = ((adj >> 8) & 0xFF) as u8;
+            let byte2 = (adj & 0xFF) as u8;
+            ([byte0, byte1, byte2], 3)
+        } else {
+            panic!(
+                "txn_template!: fixed_vl length exceeds the maximum representable VL length (918744)"
+            );
+        }
+    }
+
+    /// Header + VL-prefix + value size of a `fixed_vl(sfX, n)` field:
+    /// [`field_header`] plus [`vl_length_prefix`]'s prefix length plus `n`
+    /// itself.
+    #[must_use]
+    pub const fn fixed_vl_field_size<T>(f: SField<T>, n: usize) -> usize {
+        field_header(f)
+            .1
+            .wrapping_add(vl_length_prefix(n).1)
+            .wrapping_add(n)
+    }
+
+    /// Writes a [`vl_length_prefix`] for `len` into `bytes` at `offset`, at
+    /// compile time. Used by `txn_template!`'s generated `new()` to bake in
+    /// a `fixed_vl` field's length prefix, the same way
+    /// [`write_field_header`] bakes in a field header.
+    ///
+    /// # Panics (compile-time only)
+    ///
+    /// See [`write_field_header`] — same const-context-only guarantee.
+    #[allow(clippy::indexing_slicing)] // in-bounds per the assert below; const-only, see the Panics note
+    pub const fn write_vl_length_prefix<const N: usize>(
+        bytes: &mut [u8; N],
+        offset: usize,
+        len: usize,
+    ) {
+        let (prefix, prefix_len) = vl_length_prefix(len);
+        let mut i = 0;
+        while i < prefix_len {
+            let dst = offset.wrapping_add(i);
+            assert!(
+                dst < N,
+                "txn_template!: fixed_vl length-prefix write out of bounds"
+            );
+            bytes[dst] = prefix[i];
+            i = i.wrapping_add(1);
+        }
+    }
+
     /// Encodes `drops` as an 8-byte native amount at compile time: top byte
     /// `0x40 | ((drops >> 56) & 0x3F)`, remaining 7 bytes big-endian. Used by
     /// `txn_template!` to bake in a `native_amount` field's default.
@@ -488,6 +571,8 @@ pub mod codec {
     pub const KIND_OBJECT: u8 = 14;
     /// Kind tag for an `array` table row.
     pub const KIND_ARRAY: u8 = 15;
+    /// Kind tag for a `fixed_vl` table row.
+    pub const KIND_FIXED_VL: u8 = 16;
 
     /// One row of a `txn_template!` field table: `(sfcode, kind tag,
     /// payload offset, depth)`. `payload offset` is the offset of the
@@ -636,6 +721,76 @@ pub mod codec {
 
             #[cfg(feature = "all-amendments")]
             assert_eq!(sti_of(crate::sfield::sfMPTokenIssuanceID), sti::STI_UINT192);
+        }
+
+        #[test]
+        fn vl_length_prefix_one_byte_form() {
+            assert_eq!(vl_length_prefix(0), ([0, 0, 0], 1));
+            assert_eq!(vl_length_prefix(1), ([1, 0, 0], 1));
+            assert_eq!(vl_length_prefix(192), ([192, 0, 0], 1));
+        }
+
+        #[test]
+        fn vl_length_prefix_two_byte_boundary() {
+            // 193 is the smallest length needing a two-byte prefix:
+            // adj = 193 - 193 = 0, so [193 + 0, 0].
+            assert_eq!(vl_length_prefix(193), ([193, 0, 0], 2));
+        }
+
+        #[test]
+        fn vl_length_prefix_two_byte_form() {
+            // 200: adj = 200 - 193 = 7, so [193 + (7 >> 8), 7 & 0xFF] = [193, 7].
+            assert_eq!(vl_length_prefix(200), ([193, 7, 0], 2));
+            // 12480 (the largest two-byte length): adj = 12480 - 193 = 12287
+            // (0x2FFF), so [193 + (0x2FFF >> 8), 0x2FFF & 0xFF] = [193 + 0x2F, 0xFF]
+            // = [240, 255].
+            assert_eq!(vl_length_prefix(12480), ([240, 255, 0], 2));
+        }
+
+        #[test]
+        fn vl_length_prefix_three_byte_boundary() {
+            // 12481 is the smallest length needing a three-byte prefix:
+            // adj = 12481 - 12481 = 0, so [241 + 0, 0, 0].
+            assert_eq!(vl_length_prefix(12481), ([241, 0, 0], 3));
+        }
+
+        #[test]
+        fn vl_length_prefix_three_byte_form_and_maximum() {
+            // 918744 (the largest representable length): adj = 918744 -
+            // 12481 = 906263 (0x0D_D417), so
+            // [241 + (0x0D_D417 >> 16), (0x0D_D417 >> 8) & 0xFF, 0x0D_D417 & 0xFF]
+            // = [241 + 0x0D, 0xD4, 0x17] = [254, 212, 23].
+            assert_eq!(vl_length_prefix(918_744), ([254, 212, 23], 3));
+        }
+
+        #[test]
+        #[should_panic(expected = "exceeds the maximum representable VL length")]
+        fn vl_length_prefix_rejects_too_large() {
+            let _ = vl_length_prefix(918_745);
+        }
+
+        #[test]
+        fn fixed_vl_field_size_sums_header_prefix_and_payload() {
+            // sfSigningPubKey (7,3): single-byte header; 4-byte payload
+            // needs a single-byte VL prefix too.
+            assert_eq!(
+                fixed_vl_field_size(SField::<crate::types::Opaque>::new((7 << 16) + 3), 4),
+                1 + 1 + 4
+            );
+        }
+
+        #[test]
+        fn write_vl_length_prefix_writes_at_offset() {
+            let mut buf = [0u8; 4];
+            write_vl_length_prefix(&mut buf, 1, 200);
+            assert_eq!(buf, [0, 193, 7, 0]);
+        }
+
+        #[test]
+        #[should_panic(expected = "out of bounds")]
+        fn write_vl_length_prefix_rejects_out_of_bounds() {
+            let mut buf = [0u8; 1];
+            write_vl_length_prefix(&mut buf, 0, 200);
         }
 
         #[test]
@@ -915,6 +1070,7 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// | `issue(sfX)` | ISSUE | 40 | zeroed | `set_x(&CurrencyCode, &AccountId)` |
 /// | `account_id(sfX)` | ACCOUNT | 1 + 20 | zeroed | `set_x(&AccountId)` |
 /// | `empty_vl(sfX)` | VL | 1 | empty blob | none |
+/// | `fixed_vl(sfX, N) = e` | VL | VL-prefix(N) + N | zeroed, or the declared `[u8; N]` | `set_x(&[u8; N])` |
 /// | `object(sfX) { .. }` | OBJECT | inner + 1 (`0xE1`) | inner defaults | inner setters, prefixed |
 /// | `array(sfX) [ .. ]` | ARRAY | elements + 1 (`0xF1`) | inner defaults | inner setters, prefixed |
 ///
@@ -933,6 +1089,20 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// `set_x_value` writes only those 8 bytes, keeping the baked or
 /// previously set currency/issuer — the intended hot path when a default
 /// triple bakes in the currency/issuer once.
+///
+/// `fixed_vl(sfX, N)` is a fixed-length variable-length (`VL`) blob: `N`
+/// (a `usize` const expression, at least 1) is part of the declaration, so
+/// the wire's length prefix — [`crate::txn::codec::vl_length_prefix`]'s
+/// one-, two-, or three-byte rippled encoding, chosen by `N`'s own
+/// magnitude — is computed and baked in at compile time, the same way
+/// every other kind's header is. Declaring `N = 0` is a compile error —
+/// `empty_vl` is the one spelling for an empty blob, so
+/// `sfSigningPubKey`'s required-kind check still only accepts `empty_vl`,
+/// not `fixed_vl(sfSigningPubKey, 0)`. A declared default (`= [u8; N]`
+/// expr) must be exactly that array type — a wrong-length default is a
+/// compile-time type error, not a truncation or a panic. Only fixed-length
+/// `VL` is covered; `Vector256`/`PathSet` and a genuinely variable-length
+/// blob stay out of scope (`docs/TXN_TEMPLATE_FIELDS_DESIGN.md` §6).
 ///
 /// `emit_details` reserves
 /// [`EMIT_DETAILS_MAX_LEN`](crate::types::EMIT_DETAILS_MAX_LEN) zeroed
@@ -2274,6 +2444,140 @@ macro_rules! __txn_template_step {
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
+        fields = [ $field:ident : fixed_vl($sfcode:expr, $n:expr) $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_VL,
+            concat!("txn_template!: `", stringify!($field), "` is declared as `fixed_vl` but its sfXxx code is not an STI_VL field")
+        );
+        const _: () = assert!(
+            ($n) >= 1usize,
+            concat!("txn_template!: `", stringify!($field), "`'s fixed_vl length must be at least 1 -- declare it as `empty_vl` for an empty blob")
+        );
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)* ($sfcode).code(),],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Sets `", stringify!($field), "`'s ", stringify!($n), "-byte payload.")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<set_ $($prefix)* $field>](&mut self, value: &[u8; ($n)]) {
+                    const OFF: usize = ($($prev)*)
+                        .wrapping_add($crate::txn::codec::field_header($sfcode).1)
+                        .wrapping_add($crate::txn::codec::vl_length_prefix($n).1);
+                    self.bytes[OFF..OFF.wrapping_add($n)].copy_from_slice(value);
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [
+                $($init)*
+                $crate::txn::codec::write_field_header(&mut $($buf)*, ($($prev)*), $sfcode);
+                $crate::txn::codec::write_vl_length_prefix(
+                    &mut $($buf)*,
+                    ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1),
+                    $n,
+                );
+            ],
+            prev = [ ($($prev)*).wrapping_add($crate::txn::codec::fixed_vl_field_size($sfcode, $n)) ],
+            table = [
+                $($table)*
+                (($sfcode).code(), $crate::txn::codec::KIND_FIXED_VL, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1).wrapping_add($crate::txn::codec::vl_length_prefix($n).1), ($($depth)*)),
+            ],
+            emit_details = [$($emit_details)*],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $($($rest)*)? ]
+        }
+
+    };
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : fixed_vl($sfcode:expr, $n:expr) = $default:expr $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_VL,
+            concat!("txn_template!: `", stringify!($field), "` is declared as `fixed_vl` but its sfXxx code is not an STI_VL field")
+        );
+        const _: () = assert!(
+            ($n) >= 1usize,
+            concat!("txn_template!: `", stringify!($field), "`'s fixed_vl length must be at least 1 -- declare it as `empty_vl` for an empty blob")
+        );
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)* ($sfcode).code(),],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Sets `", stringify!($field), "`'s ", stringify!($n), "-byte payload (default `", stringify!($default), "`).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<set_ $($prefix)* $field>](&mut self, value: &[u8; ($n)]) {
+                    const OFF: usize = ($($prev)*)
+                        .wrapping_add($crate::txn::codec::field_header($sfcode).1)
+                        .wrapping_add($crate::txn::codec::vl_length_prefix($n).1);
+                    self.bytes[OFF..OFF.wrapping_add($n)].copy_from_slice(value);
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [
+                $($init)*
+                $crate::txn::codec::write_field_header(&mut $($buf)*, ($($prev)*), $sfcode);
+                $crate::txn::codec::write_vl_length_prefix(
+                    &mut $($buf)*,
+                    ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1),
+                    $n,
+                );
+                {
+                    let __d: [u8; ($n)] = $default;
+                    $crate::txn::codec::write_const_bytes(
+                        &mut $($buf)*,
+                        ($($prev)*)
+                            .wrapping_add($crate::txn::codec::field_header($sfcode).1)
+                            .wrapping_add($crate::txn::codec::vl_length_prefix($n).1),
+                        &__d,
+                    );
+                }
+            ],
+            prev = [ ($($prev)*).wrapping_add($crate::txn::codec::fixed_vl_field_size($sfcode, $n)) ],
+            table = [
+                $($table)*
+                (($sfcode).code(), $crate::txn::codec::KIND_FIXED_VL, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1).wrapping_add($crate::txn::codec::vl_length_prefix($n).1), ($($depth)*)),
+            ],
+            emit_details = [$($emit_details)*],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $($($rest)*)? ]
+        }
+
+    };
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
         fields = [ $name:ident : object($sfcode:expr) { $($inner:tt)* } $(, $($rest:tt)*)? ]
     ) => {
         const _: () = assert!(
@@ -2980,11 +3284,12 @@ mod tests {
     // The typed constants: `txn_template!` calls `.code()` on whatever it is
     // given, so its field list takes `SField`s, not raw `u32`s.
     use crate::sfield::{
-        sfAccount, sfAmount, sfAmountEntry, sfAmounts, sfAuthorize, sfBaseAsset, sfClaimCurrency,
-        sfDestination, sfDestinationTag, sfEmailHash, sfFee, sfFirstLedgerSequence, sfFlags,
-        sfHook, sfHookGrant, sfHookGrants, sfHookHash, sfHooks, sfIndexNext, sfInvoiceID,
-        sfLastLedgerSequence, sfSequence, sfSignerWeight, sfSigningPubKey, sfSourceTag,
-        sfTakerPaysCurrency, sfTransactionResult,
+        sfAccount, sfAmount, sfAmountEntry, sfAmounts, sfAuthorize, sfBaseAsset, sfBlob,
+        sfClaimCurrency, sfDestination, sfDestinationTag, sfEmailHash, sfFee,
+        sfFirstLedgerSequence, sfFlags, sfHook, sfHookGrant, sfHookGrants, sfHookHash, sfHooks,
+        sfIndexNext, sfInvoiceID, sfLastLedgerSequence, sfMemo, sfMemoData, sfMemoType, sfMemos,
+        sfSequence, sfSignerWeight, sfSigningPubKey, sfSourceTag, sfTakerPaysCurrency,
+        sfTransactionResult,
     };
 
     crate::txn_template! {
@@ -3643,6 +3948,175 @@ mod tests {
             tpl.prepare_for_emit()
                 .expect_err("prepare_for_emit must fail on the host stub"),
             crate::error::HookError::NotImplemented
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // `fixed_vl(sfX, N)`: a fixed-length VL blob
+    // -----------------------------------------------------------------
+
+    crate::txn_template! {
+        /// A homogeneous, single-element `sfMemos` array whose `Memo`
+        /// element declares both a `fixed_vl` field with a baked default
+        /// (`memo_type`) and one without (`memo_data`, zeroed) -- exercises
+        /// `fixed_vl` inside a container, at the one-byte VL-prefix size
+        /// (both payloads are well under 192 bytes). `sfMemoType` (7,12) <
+        /// `sfMemoData` (7,13), satisfying the element's own canonical
+        /// order.
+        struct TestMemoFixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            memos: array(sfMemos) [
+                Memo: object(sfMemo) {
+                    memo_type: fixed_vl(sfMemoType, 4) = *b"note",
+                    memo_data: fixed_vl(sfMemoData, 8),
+                }; 1
+            ],
+            emit_details: emit_details,
+        }
+    }
+
+    /// `Memo::TEMPLATE`, hand-derived byte for byte: header(sfMemo) (1
+    /// byte: type 14 < 16, field 10 < 16) + `memo_type`
+    /// (header(sfMemoType), 1 byte: type 7 < 16, field 12 < 16, a
+    /// single-byte VL prefix since 4 <= 192, then the baked `*b"note"`
+    /// default) + `memo_data` (header(sfMemoData), 1 byte: type 7 < 16,
+    /// field 13 < 16, a single-byte VL prefix since 8 <= 192, then 8 zero
+    /// bytes -- no default given) + the closing `0xE1` marker.
+    #[rustfmt::skip]
+    const MEMO_TEMPLATE_EXPECTED: [u8; 18] = [
+        0xEA,                               // Memo (14,10) header
+        0x7C, 0x04, b'n', b'o', b't', b'e', // MemoType (7,12) header, VL prefix (4), payload
+        0x7D, 0x08, 0, 0, 0, 0, 0, 0, 0, 0,  // MemoData (7,13) header, VL prefix (8), zeroed payload
+        0xE1,                               // object end marker
+    ];
+
+    #[test]
+    fn memo_len_and_template_are_byte_exact() {
+        assert_eq!(Memo::LEN, MEMO_TEMPLATE_EXPECTED.len());
+        assert_eq!(Memo::TEMPLATE, MEMO_TEMPLATE_EXPECTED);
+    }
+
+    #[test]
+    fn memo_data_setter_writes_at_the_expected_offset() {
+        let mut tpl = TestMemoFixture::new();
+        let mut memo = tpl.memos(0).expect("index in range");
+        memo.set_memo_data(&[0xAB; 8]);
+        // memo_data's payload starts right after the header/VL prefix
+        // bytes `MEMO_TEMPLATE_EXPECTED` pins as offsets 7..9.
+        assert_eq!(&memo.bytes()[9..17], &[0xAB; 8]);
+        // memo_type (and the surrounding headers/markers) are untouched.
+        assert_eq!(&memo.bytes()[..7], &MEMO_TEMPLATE_EXPECTED[..7]);
+        assert_eq!(memo.bytes()[17], 0xE1);
+
+        assert!(tpl.memos(1).is_none());
+    }
+
+    #[test]
+    fn memo_type_setter_writes_at_the_expected_offset() {
+        let mut tpl = TestMemoFixture::new();
+        let mut memo = tpl.memos(0).expect("index in range");
+        memo.set_memo_type(b"cccc");
+        assert_eq!(&memo.bytes()[3..7], b"cccc");
+
+        // Exercise every required-field setter too (dead-code hygiene).
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            crate::error::HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// A top-level `fixed_vl` field at the two-byte VL-prefix boundary
+        /// (`N = 193`, the smallest length needing a two-byte prefix).
+        /// `sfBlob` (7,26) sits between `sfSigningPubKey` (7,3) and
+        /// `sfAccount` (8,1) in canonical order.
+        struct BlobFixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            blob: fixed_vl(sfBlob, 193),
+            account: account_id(sfAccount),
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn blob_fixture_header_prefix_and_payload_offsets() {
+        let mut tpl = BlobFixture::new();
+        // header: TransactionType(3) + Sequence(5) + First(6) + Last(6) +
+        // Fee(9) + SigningPubKey(2) = 31.
+        let header_off = 31usize;
+        assert_eq!(&tpl.bytes()[header_off..header_off + 2], &[0x70, 0x1A]); // Blob (7,26) header
+        let prefix_off = header_off + 2;
+        assert_eq!(&tpl.bytes()[prefix_off..prefix_off + 2], &[193, 0]); // VL prefix for N = 193
+        let payload_off = prefix_off + 2;
+        assert_eq!(
+            &tpl.bytes()[payload_off..payload_off + 193],
+            &[0u8; 193][..]
+        );
+
+        let value = [0x5Au8; 193];
+        tpl.set_blob(&value);
+        assert_eq!(&tpl.bytes()[payload_off..payload_off + 193], &value[..]);
+
+        // `account` (the next field) starts exactly where the blob's
+        // payload ends.
+        let account_off = payload_off + 193;
+        assert_eq!(tpl.bytes()[account_off], 0x81); // Account (8,1) header
+        tpl.set_account(&AccountId::default());
+
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            crate::error::HookError::NotImplemented
+        );
+    }
+
+    #[test]
+    fn fixed_vl_bytes_match_sto_writer_vl() {
+        // Cross-check `fixed_vl`'s baked header/prefix/payload bytes
+        // against `StoWriter::vl` -- the runtime counterpart, built from
+        // the same `codec::vl_length_prefix` -- for both the one-byte and
+        // two-byte prefix forms this module already pins by hand.
+        let mut memo_buf = [0u8; 64];
+        let mut memo_writer = crate::sto_writer::StoWriter::new(&mut memo_buf);
+        memo_writer.vl(sfMemoType, b"note").expect("fits");
+        assert_eq!(memo_writer.as_bytes(), &MEMO_TEMPLATE_EXPECTED[1..7]);
+
+        let mut blob_buf = [0u8; 256];
+        let mut blob_writer = crate::sto_writer::StoWriter::new(&mut blob_buf);
+        let value = [0x5Au8; 193];
+        blob_writer.vl(sfBlob, &value).expect("fits");
+
+        let mut tpl = BlobFixture::new();
+        tpl.set_blob(&value);
+        // The same 31-byte header offset `blob_fixture_header_prefix_and_payload_offsets`
+        // derives by hand.
+        let header_off = 31usize;
+        assert_eq!(
+            blob_writer.as_bytes(),
+            &tpl.bytes()[header_off..header_off + 2 + 2 + 193]
         );
     }
 

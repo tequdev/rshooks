@@ -872,6 +872,10 @@ things:
    `hash128`/`hash160`/`hash256`/`currency(sfXxx)`, `native_amount(sfXxx)`,
    `amount(sfXxx)` (optionally `= (xfl, currency, issuer)`),
    `native_issue`/`issue(sfXxx)`, `account_id(sfXxx)`, `empty_vl(sfXxx)`,
+   `fixed_vl(sfXxx, N)` for an `STI_VL` field whose length is fixed by the
+   declaration rather than empty (`N`'s own magnitude picks rippled's
+   one/two/three-byte VL length prefix, baked in at compile time alongside
+   the header),
    `object(sfXxx) { .. }` for a fixed-shape nested `STObject`,
    `array(sfXxx) [ <element>* ]` for a nested `STArray` of individually
    named, independently shaped elements, or `array(sfXxx) [ Elem:
