@@ -872,9 +872,13 @@ things:
    `hash128`/`hash160`/`hash256`/`currency(sfXxx)`, `native_amount(sfXxx)`,
    `amount(sfXxx)` (optionally `= (xfl, currency, issuer)`),
    `native_issue`/`issue(sfXxx)`, `account_id(sfXxx)`, `empty_vl(sfXxx)`,
-   `object(sfXxx) { .. }`/`array(sfXxx) [ .. ]` for a fixed-shape nested
-   `STObject`/`STArray`, `emit_details`, plus the leading
-   `transaction_type = ttXXX`); the macro computes cumulative offsets and
+   `object(sfXxx) { .. }` for a fixed-shape nested `STObject`,
+   `array(sfXxx) [ <element>* ]` for a nested `STArray` of individually
+   named, independently shaped elements, or `array(sfXxx) [ Elem:
+   object(sfY) { .. } ; N ]` for a nested `STArray` of `N` identically
+   shaped elements reached by runtime index, `emit_details`, plus the
+   leading `transaction_type = ttXXX`); the macro computes cumulative
+   offsets and
    total length at compile time, bakes the field headers into a
    `const fn new()` template (⇒ data segment via `HookStatic`), and
    generates typed `set_<field>` setters plus an `emit_details_region()`
@@ -923,16 +927,39 @@ field)` order be checked **per container** — each object's own direct
 fields (and the template's top-level fields) independently, not as one
 flat sequence — while every scalar field rule stays a single macro arm
 needing only `prefix`/`depth` from the muncher's state, not any special
-knowledge of nesting. An array's elements are not order-checked against
-each other, since they typically share one repeated `sfcode` (every
-`sfAmounts` element is an `sfAmountEntry`). Nesting depth is asserted at
-compile time against `STO_WRITER_MAX_DEPTH`, the same limit
-`StoWriter`/xahaud's own deserializer enforce. Setter names for a nested
-field are the full `_`-joined declaration path (`set_amounts_usd_amount`),
-spliced through the same `$crate::__paste!` every top-level setter uses —
-an array element's declared name is only a path segment, not a repetition
-index; there is no `; N` sugar for a homogeneous array, so heterogeneous
-element shapes fall out of declaring each element separately.
+knowledge of nesting. An array's named elements are not order-checked
+against each other, since they typically share one repeated `sfcode`
+(every `sfAmounts` element is an `sfAmountEntry`). Nesting depth is
+asserted at compile time against `STO_WRITER_MAX_DEPTH`, the same limit
+`StoWriter`/xahaud's own deserializer enforce; a homogeneous array's
+element counts as two levels against that bound (the array itself, then
+the element), the same as a named array's object element. Setter names
+for a named nested field are the full `_`-joined declaration path
+(`set_amounts_usd_amount`), spliced through the same `$crate::__paste!`
+every top-level setter uses — an array element's declared name is only a
+path segment, not a repetition index.
+
+The homogeneous form (`array(sfX) [ Elem: object(sfY) { <field>* } ; N ]`)
+declares one element shape and reserves `N` back-to-back copies of it
+rather than generating a setter. The muncher spawns a second, independent
+`$crate::__txn_template_step!` invocation for `Elem`, seeded fresh (its
+own `prefix`/`order`/a single `stack` frame) with a new `mode = elem`
+state slot threaded through unchanged, and `fields = [ ..inner..,
+@end_object ]` — the *existing* `@end_object` arm closes it and runs its
+order check exactly as for a named object, so no new container-closing
+logic is needed. An `elem`-mode base case emits only a standalone
+element-view type (`Elem::LEN`, a baked `Elem::TEMPLATE`, and the same
+inner setters a template with that field list would generate, writing
+into an `&'a mut [u8]` view) — none of a template-mode base case's
+plumbing/presence/kind asserts, `prepare_for_emit`, or
+`TemplateBytes`/`Default`/`Clone`. On the parent, the field gets a
+runtime-indexed accessor named by its path with no `set_` prefix
+(`fn amounts(&mut self, index: usize) -> Option<Elem<'_>>`), returning
+`None` for `index >= N` via `slice::get_mut` rather than a raw, panicking
+index — consistent with the workspace's `indexing_slicing` lint (§9). Wire
+bytes are `header(sfX)`, `N` copies of `Elem::TEMPLATE` back to back, then
+`0xF1`, baked by a new `codec::write_repeated` helper (`write_const_bytes`
+applied `N` times at `Elem::LEN`-sized strides).
 
 `amount(sfXxx)`'s 48-byte value region (`[8-byte value][20-byte
 currency][20-byte issuer]`) needs no host call at either compile time or

@@ -1,9 +1,9 @@
 //! Off-chain unit tests for the `txn-template-nested` example, driven
 //! through `TestEnv::invoke` against the real `TxnTemplateNested` chain —
 //! no wasm build, no node. `src/lib.rs` carries an equivalent in-crate
-//! `#[cfg(test)]` variant, which additionally covers the private `Remit`
-//! template directly — byte-exact `sfAmounts` region and a `StoWriter`
-//! cross-check — since those are only reachable from an in-crate test.
+//! `#[cfg(test)]` variant, which additionally cross-checks the private
+//! `Remit` template directly against `rshooks::sto_writer::StoWriter`,
+//! since that's only reachable from an in-crate test.
 
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, missing_docs)]
 
@@ -49,9 +49,59 @@ fn missing_destination_rolls_back_without_emitting() {
     assert_eq!(env.emitted().len(), 0);
 }
 
-/// `ISSUER` (a 20-byte `AccountId` hook parameter) overrides the issued
-/// entry's baked issuer at runtime, through the full 48-byte
-/// `set_amounts_usd_amount` setter — the currency stays the baked `USD`.
+/// Byte-exact check of the declared `sfAmounts` region: an `sfAmounts`
+/// header around two `sfAmountEntry` images (`header(sfAmountEntry) 0x61
+/// <8 value bytes> <USD> <USD_ISSUER> 0xE1` each), closed by the array end
+/// marker — element 0 holds `XFL::new(0, 1)` (`1.0`), element 1 holds
+/// `XFL::new(0, 2)` (`2.0`), both against the baked `USD`/`USD_ISSUER`
+/// default. Headers are derived via `txn::codec::field_header` rather
+/// than hardcoded; value bytes are hand-derived from the XFL bit layout
+/// the way `rshooks/src/txn.rs`'s `encode_iou_amount_value_const_one`
+/// test documents for `1.0` (element 1 follows the identical
+/// normalization rule: mantissa `2_000_000_000_000_000`, exponent `-15`,
+/// positive).
+#[test]
+fn amounts_region_matches_the_two_declared_issued_entries() {
+    let env = env();
+    let exit = env.invoke::<TxnTemplateNested>(0);
+    assert_eq!(exit.exit, ExitType::Accept, "{exit:?}");
+    let emitted = env.emitted();
+    assert_eq!(emitted.len(), 1);
+    let blob = emitted[0].blob();
+
+    let (amounts_hdr, amounts_hdr_len) = rshooks::txn::codec::field_header(sfAmounts);
+    let (entry_hdr, entry_hdr_len) = rshooks::txn::codec::field_header(sfAmountEntry);
+    let (amount_hdr, amount_hdr_len) = rshooks::txn::codec::field_header(sfAmount);
+
+    let mut currency = [0u8; 20];
+    currency[12..15].copy_from_slice(b"USD");
+
+    let mut expected = Vec::new();
+    expected.extend_from_slice(&amounts_hdr[..amounts_hdr_len]);
+    for value in [
+        [0xD4, 0x83, 0x8D, 0x7E, 0xA4, 0xC6, 0x80, 0x00], // XFL::new(0, 1) == 1.0
+        [0xD4, 0x87, 0x1A, 0xFD, 0x49, 0x8D, 0x00, 0x00], // XFL::new(0, 2) == 2.0
+    ] {
+        expected.extend_from_slice(&entry_hdr[..entry_hdr_len]);
+        expected.extend_from_slice(&amount_hdr[..amount_hdr_len]);
+        expected.extend_from_slice(&value);
+        expected.extend_from_slice(&currency);
+        expected.extend_from_slice(&rshooks::account_id!("rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh").0);
+        expected.push(0xE1); // object end marker
+    }
+    expected.push(0xF1); // array end marker
+
+    assert!(
+        blob.windows(expected.len())
+            .any(|w| w == expected.as_slice()),
+        "sfAmounts region not found in the emitted blob: {blob:02x?}"
+    );
+}
+
+/// `ISSUER` (a 20-byte `AccountId` hook parameter) overrides the baked
+/// issuer at runtime, on **every** `sfAmounts` entry, through the full
+/// 48-byte `set_amount` setter — the currency stays the baked `USD` on
+/// both.
 #[test]
 fn issuer_hook_param_overrides_the_baked_issuer() {
     let env = env().hook_param(b"ISSUER", &[4u8; 20]);
@@ -63,23 +113,26 @@ fn issuer_hook_param_overrides_the_baked_issuer() {
 
     let (entry_hdr, entry_hdr_len) = rshooks::txn::codec::field_header(sfAmountEntry);
     let (amount_hdr, amount_hdr_len) = rshooks::txn::codec::field_header(sfAmount);
-    let mut expected = Vec::new();
-    expected.extend_from_slice(&entry_hdr[..entry_hdr_len]);
-    expected.extend_from_slice(&amount_hdr[..amount_hdr_len]);
-    // XFL::one()'s issued STAmount value bytes (rshooks/src/txn.rs's
-    // `encode_iou_amount_value_const_one` test derives the same vector by
-    // hand from the XFL bit layout).
-    expected.extend_from_slice(&[0xD4, 0x83, 0x8D, 0x7E, 0xA4, 0xC6, 0x80, 0x00]);
     let mut currency = [0u8; 20];
     currency[12..15].copy_from_slice(b"USD");
-    expected.extend_from_slice(&currency);
-    expected.extend_from_slice(&[4u8; 20]); // the overridden issuer
-    expected.push(0xE1); // object end marker
-    assert!(
-        blob.windows(expected.len())
-            .any(|w| w == expected.as_slice()),
-        "issued sfAmountEntry with the overridden issuer not found: {blob:02x?}"
-    );
+
+    for value in [
+        [0xD4, 0x83, 0x8D, 0x7E, 0xA4, 0xC6, 0x80, 0x00], // XFL::new(0, 1) == 1.0
+        [0xD4, 0x87, 0x1A, 0xFD, 0x49, 0x8D, 0x00, 0x00], // XFL::new(0, 2) == 2.0
+    ] {
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&entry_hdr[..entry_hdr_len]);
+        expected.extend_from_slice(&amount_hdr[..amount_hdr_len]);
+        expected.extend_from_slice(&value);
+        expected.extend_from_slice(&currency);
+        expected.extend_from_slice(&[4u8; 20]); // the overridden issuer
+        expected.push(0xE1); // object end marker
+        assert!(
+            blob.windows(expected.len())
+                .any(|w| w == expected.as_slice()),
+            "issued sfAmountEntry with the overridden issuer not found: {blob:02x?}"
+        );
+    }
 }
 
 // `TxnTemplateNested`'s `#[cbak(0)]` body unconditionally accepts, so the

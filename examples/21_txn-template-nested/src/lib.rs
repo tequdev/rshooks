@@ -3,22 +3,26 @@
 use rshooks::prelude::*;
 use rshooks::*;
 
-/// The issued entry's baked currency and issuer — compiled into the
-/// template's default bytes, so the hot path (`set_amounts_usd_amount_value`)
-/// is a single 8-byte store with no host call. `main` overrides the issuer
-/// at runtime, through the full 48-byte `set_amounts_usd_amount` setter,
+/// Baked currency/issuer default for every `sfAmounts` entry — compiled
+/// into `AmountEntry::TEMPLATE`, so the hot path (`set_amount_value`) is a
+/// single 8-byte store with no host call. `main` overrides the issuer at
+/// runtime, through the full 48-byte `set_amount` setter, for every entry
 /// when an `ISSUER` hook parameter is supplied.
 const USD: CurrencyCode = CurrencyCode::from_iso(b"USD");
 const USD_ISSUER: AccountId = account_id!("rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh");
 
 txn_template! {
-    /// A Remit template whose `sfAmounts` array is a fixed, two-entry
-    /// nested shape declared entirely in `txn_template!`: one
-    /// `native_amount` entry and one `amount` entry with a baked
-    /// currency/issuer default — no `StoWriter` needed, since both the
-    /// element count and every element's shape are known at declaration
-    /// time (contrast `examples/17_sto-writer`, whose second entry is only
-    /// present conditionally at runtime).
+    /// A Remit template whose `sfAmounts` array is a fixed, homogeneous
+    /// `array(sfX) [ Elem: object(sfY) { .. } ; N ]` shape: every element
+    /// has the identical declared shape (an issued `amount` with a baked
+    /// `USD`/`USD_ISSUER` default), so the macro generates one
+    /// `AmountEntry<'a>` view type — with the same `set_amount`/
+    /// `set_amount_value` setters a plain field of that shape would get —
+    /// plus a runtime-indexed `amounts(index) -> Option<AmountEntry<'_>>`
+    /// accessor on `Remit`, instead of per-element setters. No
+    /// `StoWriter` needed, since the element count and shape are both
+    /// known at declaration time (contrast `examples/17_sto-writer`,
+    /// whose second entry is only present conditionally at runtime).
     struct Remit {
         transaction_type = ttREMIT,
         flags: u32_field(sfFlags) = tfCANONICAL,
@@ -30,12 +34,9 @@ txn_template! {
         account: account_id(sfAccount),
         destination: account_id(sfDestination),
         amounts: array(sfAmounts) [
-            native: object(sfAmountEntry) {
-                amount: native_amount(sfAmount) = 1,
-            },
-            usd: object(sfAmountEntry) {
+            AmountEntry: object(sfAmountEntry) {
                 amount: amount(sfAmount) = (XFL::from_raw_bits(0), USD, USD_ISSUER),
-            },
+            }; 2
         ],
         emit_details: emit_details,
     }
@@ -53,12 +54,17 @@ hook_errors! {
         MissingDestination = 2,
         /// The Remit template was unavailable.
         BufferAlreadyTaken = 3,
-        /// The native-amount entry's setter failed.
-        SetAmountFailed = 4,
+        /// An `sfAmounts` index the fill loop computed was out of range —
+        /// unreachable by construction (the loop bound matches the
+        /// declared element count), kept only because the accessor
+        /// returns `Option`.
+        AmountsIndexOutOfRange = 4,
+        /// `XFL::new` failed to normalize an entry's value.
+        AmountValueFailed = 5,
         /// The Remit could not be prepared.
-        PrepareFailed = 5,
+        PrepareFailed = 6,
         /// The prepared Remit could not be emitted.
-        EmitFailed = 6,
+        EmitFailed = 7,
     }
 }
 
@@ -67,8 +73,8 @@ pub struct TxnTemplateNested {
     /// The Remit's destination account; required.
     #[hook_param(name = b"DEST", required)]
     dest: HookParam<AccountId>,
-    /// An issuer overriding the baked `USD_ISSUER` for the issued entry;
-    /// optional.
+    /// An issuer overriding the baked `USD_ISSUER` for every `sfAmounts`
+    /// entry; optional.
     #[hook_param(name = b"ISSUER")]
     issuer: HookParam<AccountId>,
 }
@@ -76,11 +82,13 @@ pub struct TxnTemplateNested {
 #[hooks]
 impl TxnTemplateNested {
     /// Reserves one emission slot, reads the required `DEST` hook
-    /// parameter (a 20-byte `AccountId`), fills in the two `sfAmounts`
-    /// entries — the issued entry's currency/issuer stay at their baked
-    /// default unless an `ISSUER` hook parameter overrides the issuer,
-    /// which routes through the full 48-byte `amount` setter instead of
-    /// the 8-byte hot path — and emits.
+    /// parameter, fills both `sfAmounts` entries in a `guard!`-bounded
+    /// loop over `Remit::amounts`'s runtime-indexed accessor — entry `i`
+    /// gets `XFL::new(0, i + 1)` (`1.0`, `2.0`) via the baked
+    /// `USD`/`USD_ISSUER` default unless an `ISSUER` hook parameter
+    /// overrides the issuer for every entry, which routes through the
+    /// full 48-byte `amount` setter instead of the 8-byte hot path — and
+    /// emits.
     #[hook(0, name = "tplremit", on = [Invoke], can_emit = [Remit])]
     fn main(&self) -> HookResult {
         if etxn_reserve(1).is_err() {
@@ -105,20 +113,38 @@ impl TxnTemplateNested {
         };
 
         txn.set_destination(&destination);
-        if txn.set_amounts_native_amount(1).is_err() {
-            rollback!(
-                b"txn-template-nested: native amount setter failed",
-                TxnTemplateNestedError::SetAmountFailed
-            );
-        }
-        // Baked `USD`/`USD_ISSUER`: a single 8-byte store. An optional
-        // `ISSUER` hook parameter overrides the issuer at runtime instead,
-        // which needs the full 48-byte setter — exercised on the real wasm
-        // target so a future compiler-generated copy loop over the
-        // `[u8; 48]` region would be caught by `rshooks build`/`check`.
-        match self.hook_param.issuer.get() {
-            Ok(Some(issuer)) => txn.set_amounts_usd_amount(XFL::one(), &USD, &issuer),
-            Ok(None) | Err(_) => txn.set_amounts_usd_amount_value(XFL::one()),
+
+        let issuer: Option<AccountId> = self.hook_param.issuer.get().unwrap_or_default();
+
+        // Fixed 2-trip loop over the homogeneous `sfAmounts` array: entry
+        // `i` gets `XFL::new(0, i + 1)`, written through the baked-issuer
+        // 8-byte hot path, or the full 48-byte setter when `ISSUER`
+        // overrides it — exercised on the real wasm target so a future
+        // compiler-generated copy loop over the `[u8; 48]` region would
+        // be caught by `rshooks build`/`check`.
+        let mut i: usize = 0;
+        loop {
+            guard!(2);
+            if i >= 2 {
+                break;
+            }
+            let Some(mut entry) = txn.amounts(i) else {
+                rollback!(
+                    b"txn-template-nested: amounts index out of range",
+                    TxnTemplateNestedError::AmountsIndexOutOfRange
+                );
+            };
+            let Ok(value) = XFL::new(0, (i as i64).wrapping_add(1)) else {
+                rollback!(
+                    b"txn-template-nested: XFL::new failed",
+                    TxnTemplateNestedError::AmountValueFailed
+                );
+            };
+            match issuer {
+                Some(iss) => entry.set_amount(value, &USD, &iss),
+                None => entry.set_amount_value(value),
+            }
+            i = i.wrapping_add(1);
         }
 
         let Ok(prepared) = txn.prepare_for_emit() else {
@@ -194,64 +220,63 @@ mod tests {
         assert_eq!(env.emitted().len(), 0);
     }
 
-    /// Byte-exact check of the declared `sfAmounts` region: an
-    /// `sfAmounts`/`sfAmountEntry` header pair around a native 1-drop
-    /// entry, then another `sfAmountEntry` around an issued entry holding
-    /// `XFL::one()`'s value bytes plus the baked `USD`/`USD_ISSUER`
-    /// currency and issuer, closed by the object and array end markers.
-    /// Headers are derived via `txn::codec::field_header` rather than
-    /// hardcoded, so this test tracks the codec's own header rule instead
-    /// of duplicating it.
+    /// Byte-exact check of the declared `sfAmounts` region: an `sfAmounts`
+    /// header around two `sfAmountEntry` images (`header(sfAmountEntry)
+    /// 0x61 <8 value bytes> <USD> <USD_ISSUER> 0xE1` each), closed by the
+    /// array end marker — element 0 holds `XFL::new(0, 1)` (`1.0`),
+    /// element 1 holds `XFL::new(0, 2)` (`2.0`), both against the baked
+    /// `USD`/`USD_ISSUER` default. Headers are derived via
+    /// `txn::codec::field_header` rather than hardcoded, so this test
+    /// tracks the codec's own header rule instead of duplicating it; the
+    /// value bytes are hand-derived from the XFL bit layout the same way
+    /// `rshooks/src/txn.rs`'s `encode_iou_amount_value_const_one` test
+    /// documents for `1.0` (element 1 follows the identical normalization
+    /// rule: mantissa `2_000_000_000_000_000`, exponent `-15`, positive).
+    /// Goes through the real entry (`env().invoke`), so it also proves
+    /// `XFL::new`'s real host normalization agrees with the hand
+    /// derivation.
     #[test]
-    fn amounts_region_matches_the_declared_native_and_issued_entries() {
-        // `XFL::one()` makes a `float_one` host call, which needs a
-        // backend installed under the `testenv` feature; this test only
-        // checks byte layout, so it uses the same canonical XFL 1.0 bit
-        // pattern `rshooks/src/txn.rs`'s own
-        // `encode_iou_amount_value_const_one` test cites, rather than
-        // installing one.
-        let xfl_one = XFL::from_raw_bits(6_089_866_696_204_910_592);
-
-        let mut tpl = Remit::new();
-        tpl.set_amounts_native_amount(1)
-            .expect("1 drop is in range");
-        tpl.set_amounts_usd_amount_value(xfl_one);
+    fn amounts_region_matches_the_two_declared_issued_entries() {
+        let env = env();
+        let exit = env.invoke::<TxnTemplateNested>(0);
+        assert_eq!(exit.exit, ExitType::Accept, "{exit:?}");
+        let emitted = env.emitted();
+        assert_eq!(emitted.len(), 1);
+        let blob = emitted[0].blob();
 
         let (amounts_hdr, amounts_hdr_len) = rshooks::txn::codec::field_header(sfAmounts);
         let (entry_hdr, entry_hdr_len) = rshooks::txn::codec::field_header(sfAmountEntry);
         let (amount_hdr, amount_hdr_len) = rshooks::txn::codec::field_header(sfAmount);
 
-        let mut expected = Vec::new();
-        expected.extend_from_slice(&amounts_hdr[..amounts_hdr_len]);
-        expected.extend_from_slice(&entry_hdr[..entry_hdr_len]);
-        expected.extend_from_slice(&amount_hdr[..amount_hdr_len]);
-        expected.extend_from_slice(&[0x40, 0, 0, 0, 0, 0, 0, 1]); // native 1 drop
-        expected.push(0xE1); // object end marker
-        expected.extend_from_slice(&entry_hdr[..entry_hdr_len]);
-        expected.extend_from_slice(&amount_hdr[..amount_hdr_len]);
-        // XFL::one()'s issued STAmount value bytes (rshooks/src/txn.rs's
-        // `encode_iou_amount_value_const_one` test derives the same
-        // vector by hand from the XFL bit layout).
-        expected.extend_from_slice(&[0xD4, 0x83, 0x8D, 0x7E, 0xA4, 0xC6, 0x80, 0x00]);
         let mut currency = [0u8; 20];
         currency[12..15].copy_from_slice(b"USD");
-        expected.extend_from_slice(&currency);
-        expected.extend_from_slice(&USD_ISSUER.0);
-        expected.push(0xE1); // object end marker
+
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&amounts_hdr[..amounts_hdr_len]);
+        for value in [
+            [0xD4, 0x83, 0x8D, 0x7E, 0xA4, 0xC6, 0x80, 0x00], // XFL::new(0, 1) == 1.0
+            [0xD4, 0x87, 0x1A, 0xFD, 0x49, 0x8D, 0x00, 0x00], // XFL::new(0, 2) == 2.0
+        ] {
+            expected.extend_from_slice(&entry_hdr[..entry_hdr_len]);
+            expected.extend_from_slice(&amount_hdr[..amount_hdr_len]);
+            expected.extend_from_slice(&value);
+            expected.extend_from_slice(&currency);
+            expected.extend_from_slice(&USD_ISSUER.0);
+            expected.push(0xE1); // object end marker
+        }
         expected.push(0xF1); // array end marker
 
-        let bytes = tpl.bytes();
-        let start = bytes
-            .windows(expected.len())
-            .position(|w| w == expected.as_slice())
-            .expect("sfAmounts region not found in the template's bytes");
-        assert_eq!(&bytes[start..start + expected.len()], expected.as_slice());
+        assert!(
+            blob.windows(expected.len())
+                .any(|w| w == expected.as_slice()),
+            "sfAmounts region not found in the emitted blob: {blob:02x?}"
+        );
     }
 
     /// `main`'s optional `ISSUER` hook parameter routes through the full
-    /// 48-byte `set_amounts_usd_amount` setter (rather than the 8-byte
-    /// `_value` hot path) and overrides only the issuer — the currency
-    /// stays the baked `USD`.
+    /// 48-byte `set_amount` setter (rather than the 8-byte `_value` hot
+    /// path) and overrides the issuer on **every** `sfAmounts` entry — the
+    /// currency stays the baked `USD` on both.
     #[test]
     fn issuer_hook_param_overrides_the_baked_issuer_via_the_full_setter() {
         let env = env().hook_param(b"ISSUER", &[4u8; 20]);
@@ -263,22 +288,26 @@ mod tests {
 
         let (entry_hdr, entry_hdr_len) = rshooks::txn::codec::field_header(sfAmountEntry);
         let (amount_hdr, amount_hdr_len) = rshooks::txn::codec::field_header(sfAmount);
-        let mut expected = Vec::new();
-        expected.extend_from_slice(&entry_hdr[..entry_hdr_len]);
-        expected.extend_from_slice(&amount_hdr[..amount_hdr_len]);
-        // XFL::one()'s issued STAmount value bytes (see the byte-exact
-        // `sfAmounts` test above).
-        expected.extend_from_slice(&[0xD4, 0x83, 0x8D, 0x7E, 0xA4, 0xC6, 0x80, 0x00]);
         let mut currency = [0u8; 20];
         currency[12..15].copy_from_slice(b"USD");
-        expected.extend_from_slice(&currency);
-        expected.extend_from_slice(&[4u8; 20]); // the overridden issuer
-        expected.push(0xE1); // object end marker
-        assert!(
-            blob.windows(expected.len())
-                .any(|w| w == expected.as_slice()),
-            "issued sfAmountEntry with the overridden issuer not found: {blob:02x?}"
-        );
+
+        for value in [
+            [0xD4, 0x83, 0x8D, 0x7E, 0xA4, 0xC6, 0x80, 0x00], // XFL::new(0, 1) == 1.0
+            [0xD4, 0x87, 0x1A, 0xFD, 0x49, 0x8D, 0x00, 0x00], // XFL::new(0, 2) == 2.0
+        ] {
+            let mut expected = Vec::new();
+            expected.extend_from_slice(&entry_hdr[..entry_hdr_len]);
+            expected.extend_from_slice(&amount_hdr[..amount_hdr_len]);
+            expected.extend_from_slice(&value);
+            expected.extend_from_slice(&currency);
+            expected.extend_from_slice(&[4u8; 20]); // the overridden issuer
+            expected.push(0xE1); // object end marker
+            assert!(
+                blob.windows(expected.len())
+                    .any(|w| w == expected.as_slice()),
+                "issued sfAmountEntry with the overridden issuer not found: {blob:02x?}"
+            );
+        }
     }
 
     /// A hand-written [`rshooks::raw::backend::HostBackend`] whose
@@ -287,7 +316,12 @@ mod tests {
     /// byte layout xahaud's own `float_sto` writes — not from the bit-OR
     /// identity `txn::codec` relies on — so installing it under
     /// [`StoWriter::iou_amount`] exercises a second, hand-derived encoder
-    /// rather than the one `txn_template!`'s setters call.
+    /// rather than the one `txn_template!`'s setters call. `float_set`
+    /// similarly reimplements XFL's integer-mantissa normalization from
+    /// its own invariant (a canonical mantissa always has exactly 16
+    /// significant digits), scoped to the small positive integers this
+    /// test passes — not a call into `rshooks-testenv`'s private
+    /// `host::float` module.
     struct RealFloatSto;
 
     impl rshooks::raw::backend::HostBackend for RealFloatSto {
@@ -305,11 +339,27 @@ mod tests {
         }
         // Canonical XFL 1.0 bit pattern (same reference value
         // `rshooks/src/txn.rs`'s `encode_iou_amount_value_const_one` test
-        // cites) — needed so `XFL::one()` (called both by
-        // `StoWriter::iou_amount` below and by `set_amounts_usd_amount_value`)
-        // resolves to a real value instead of the host stub's error code.
+        // cites) — needed so `XFL::one()` resolves to a real value instead
+        // of the host stub's error code.
         fn float_one(&self) -> i64 {
             6_089_866_696_204_910_592
+        }
+        fn float_set(&self, exponent: i32, mantissa: i64) -> i64 {
+            if mantissa <= 0 {
+                return -1; // not exercised by this test
+            }
+            let mut m = mantissa as u64;
+            let mut e = exponent;
+            while m < 1_000_000_000_000_000 {
+                m *= 10;
+                e -= 1;
+            }
+            while m >= 10_000_000_000_000_000 {
+                m /= 10;
+                e += 1;
+            }
+            let bits = (1u64 << 62) | (((e + 97) as u64 & 0xFF) << 54) | (m & ((1u64 << 54) - 1));
+            bits as i64
         }
         fn float_sto(
             &self,
@@ -362,7 +412,9 @@ mod tests {
     /// (which goes through `float_sto`) by building the identical
     /// fixed-prefix bytes both ways, over exactly `Remit`'s fixed prefix
     /// (`Remit::LEN - EMIT_DETAILS_MAX_LEN` bytes — everything before the
-    /// `EmitDetails` region).
+    /// `EmitDetails` region), with both `sfAmounts` entries issued
+    /// (`XFL::new(0, 1)`, `XFL::new(0, 2)`), matching `Remit`'s
+    /// homogeneous two-element shape.
     #[test]
     fn matches_sto_writer_bytes_for_the_same_fixed_prefix() {
         const PREFIX_LEN: usize = Remit::LEN - rshooks::types::EMIT_DETAILS_MAX_LEN;
@@ -383,20 +435,22 @@ mod tests {
         w.account_id(sfDestination, &AccountId::default())
             .expect("fits");
         w.begin_array(sfAmounts).expect("fits");
-        w.begin_object(sfAmountEntry).expect("fits");
-        w.native_amount(sfAmount, 1).expect("fits");
-        w.end_object().expect("fits");
-        w.begin_object(sfAmountEntry).expect("fits");
-        w.iou_amount(sfAmount, XFL::one(), &USD, &USD_ISSUER)
-            .expect("fits");
-        w.end_object().expect("fits");
+        for i in 0..2i64 {
+            let value = XFL::new(0, i + 1).expect("normalizes");
+            w.begin_object(sfAmountEntry).expect("fits");
+            w.iou_amount(sfAmount, value, &USD, &USD_ISSUER)
+                .expect("fits");
+            w.end_object().expect("fits");
+        }
         w.end_array().expect("fits");
 
         let mut tpl = Remit::new();
         tpl.set_destination(&AccountId::default());
-        tpl.set_amounts_native_amount(1)
-            .expect("1 drop is in range");
-        tpl.set_amounts_usd_amount_value(XFL::one());
+        for i in 0..2usize {
+            let value = XFL::new(0, i as i64 + 1).expect("normalizes");
+            let mut entry = tpl.amounts(i).expect("index in range");
+            entry.set_amount_value(value);
+        }
 
         assert_eq!(w.as_bytes(), &tpl.bytes()[..PREFIX_LEN]);
     }

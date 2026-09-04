@@ -58,13 +58,18 @@ txn_template! {
   | <name>: account_id(sfX)                       // existing
   | <name>: empty_vl(sfX)                         // existing
   | <name>: object(sfX) { <field>* }              // STObject, closed by 0xE1
-  | <name>: array(sfX) [ <element>* ]             // STArray, closed by 0xF1
+  | <name>: array(sfX) [ <element>* ]             // STArray, named elements, closed by 0xF1
+  | <name>: array(sfX) [ <Elem>: object(sfY) { <field>* } ; <N> ]  // STArray, homogeneous, indexed
 
 <element> := <name>: object(sfX) { <field>* }     // only objects directly inside an array
 ```
 
-Trailing commas are accepted everywhere a field list is accepted (as today).
-`emit_details` inside an `object`/`array` is a compile error (§4.5).
+Trailing commas are accepted everywhere a field list is accepted (as today), except after
+`<N>` in the homogeneous array form. `emit_details` inside an `object`/`array` is a compile
+error (§4.5).
+
+`<Elem>` names the generated element-view type; `<N>` is a `usize` const expression
+(literal or a named const), at least 1. See §2.5.
 
 ### 2.1 Kind table
 
@@ -168,8 +173,8 @@ txn.set_amounts_usd_amount_value(XFL!(1.5)); // issued entry, 8-byte store
   elements are named like any other field; the element name is only a path segment.
 - Array elements are declared one by one. That is what "element count known ahead" means
   here: the shape of every element is fixed, and heterogeneous element shapes (one native
-  entry, one issued entry) fall out naturally. There is no `; N` repetition sugar —
-  `macro_rules!` cannot count, and a proc-macro rewrite is out of scope.
+  entry, one issued entry) fall out naturally. A homogeneous, indexed form for the case
+  where every element has the *same* shape is §2.5.
 - Wire bytes: `object` writes `header(sfX)`, the inner fields, then `0xE1`
   (`ObjectEndMarker`); `array` writes `header(sfX)`, each element (itself an object with
   its own header and `0xE1`), then `0xF1` (`ArrayEndMarker`). Container headers are
@@ -183,6 +188,67 @@ txn.set_amounts_usd_amount_value(XFL!(1.5)); // issued entry, 8-byte store
 - The six emit-plumbing fields are recognized only at the top level. A nested `sfAccount`
   (inside a `Signer` or `HookGrant` object, say) neither satisfies the
   presence check nor gets patched by `prepare_for_emit`.
+
+### 2.5 Homogeneous arrays
+
+```rust,ignore
+txn_template! {
+    struct Remit {
+        // .. required fields ..
+        amounts: array(sfAmounts) [
+            AmountEntry: object(sfAmountEntry) {
+                amount: amount(sfAmount) = (XFL!(0), USD, USD_ISSUER),
+            }; 3
+        ],
+        emit_details: emit_details,
+    }
+}
+
+let mut entry = txn.amounts(1).expect("index in range"); // Option<AmountEntry<'_>>
+entry.set_amount_value(XFL!(1.5));
+```
+
+For the case where every element has the *same* declared shape, `array(sfX) [ Elem:
+object(sfY) { <field>* } ; N ]` declares that shape once and reserves `N` back-to-back
+copies of it, generating:
+
+- A standalone element-view type, named `Elem`: `pub struct Elem<'a> { bytes: &'a mut
+  [u8] }`, with `Elem::LEN` (that element's fixed byte length: header + inner fields +
+  `0xE1`), `Elem::TEMPLATE: [u8; Elem::LEN]` (the baked default, copied `N` times into the
+  reserved region), the *same* inner setters (`set_amount`/`set_amount_value`, ...) a
+  `txn_template!` struct itself would generate for the identical field list, and `bytes()`.
+  There is no owned constructor — a view is only ever produced by the parent's accessor.
+- On the parent, a runtime-indexed accessor named by the field path (no `set_` prefix):
+  `fn amounts(&mut self, index: usize) -> Option<Elem<'_>>`, `None` for `index >= N`,
+  otherwise a view over `self.bytes[OFF + index * Elem::LEN .. OFF + (index + 1) *
+  Elem::LEN]` (`slice::get_mut`, no unsafe, no raw indexing panic).
+
+A view over `&mut [u8]`, not a `#[repr(C)]`/transmuted struct or a direct `txn.amounts[n]`
+index expression, is deliberate: the generated types stay ordinary safe Rust, and the
+workspace's `indexing_slicing` lint (`docs/DESIGN.md` §8) would make a raw `[n]`
+panic-on-out-of-range unusable inside a hook anyway — `Option` makes the out-of-range case
+an ordinary checked branch. Wire bytes: `header(sfX)`, `N` copies of `Elem::TEMPLATE`
+back to back, then `0xF1` — a new `codec::write_repeated` helper (`write_const_bytes`
+applied `N` times at `Elem::LEN`-sized strides) bakes the `N` copies at compile time.
+
+Nesting depth: a homogeneous array's element counts as **two** levels against
+`STO_WRITER_MAX_DEPTH` (the array itself, then the element), the same as a named array's
+object element — checked once, directly, rather than through two separate nested-entry
+steps. A homogeneous array may itself be declared inside another homogeneous array's
+element (or a named object), to whatever depth that bound allows.
+
+Implementation: the homogeneous-array arm spawns a **second, independent**
+`$crate::__txn_template_step!` invocation for `Elem`, seeded fresh (its own `order`,
+`prefix`, a single `stack` frame, and a new `mode = elem` state slot every arm threads
+through unchanged) with `fields = [ ..inner.., @end_object ]`, so the *existing*
+`@end_object` arm closes it and runs its order check exactly as it would for a named
+object. An `elem`-mode base case (`fields = []`, `mode = elem`) emits only the view type
+above — none of a `tpl`-mode base case's plumbing/presence/kind asserts,
+`prepare_for_emit`, or `TemplateBytes`/`Default`/`Clone`. `Self::LEN` can't name the array
+length of a sibling `Self::TEMPLATE` const in the same impl (an anonymous-const-with-
+generic-`Self` restriction, since `Self` carries a lifetime parameter here) — `LEN` is a
+private, module-level const outside the impl instead, and both `Elem::LEN` and
+`Elem::TEMPLATE` alias it.
 
 ## 3. Implementation
 
@@ -281,9 +347,22 @@ New:
   is not a dev-dependency of `rshooks`, so these are checked by hand against the bit
   layout in §2.2, not against a second encoder), and `FieldEntry` depth filtering (a
   nested `sfAccount` must not satisfy presence).
-- `tests/ui/fail`: STI mismatch, scalar inside array, `emit_details` nested, order
-  violation inside an object, unknown kind, depth overflow.
-- `tests/ui/pass`: a nested template compiles and its inner setters resolve.
+- `txn.rs` unit tests for §2.5: a `TestRemitIndexed` template (`AmountEntry::LEN`/
+  `TEMPLATE` byte-exact, the full fixed prefix through three repeated elements plus the
+  `0xF1` marker, each index's accessor writing without disturbing its neighbours,
+  out-of-bounds indices returning `None`, `bytes()` returning exactly `LEN` bytes), and a
+  `HookChain` template nesting a homogeneous `sfHookGrants` array inside a homogeneous
+  `sfHooks` array's element, proving a two-level indexed accessor
+  (`hooks(i)?.grants(j)?`) lands in the right element and leaves every other element at
+  its baked default.
+- `tests/ui/fail`: STI mismatch, scalar inside array, order violation inside an object,
+  unknown kind, a nested `sfAccount` not satisfying the top-level presence check, nesting
+  depth over `STO_WRITER_MAX_DEPTH` (ten levels of plain nested `object`s), a homogeneous
+  array's element count below 1, and `emit_details` nested -- once inside a named
+  `object`, once inside a homogeneous array's element.
+- `tests/ui/pass`: a nested template compiles and its inner setters resolve; a
+  homogeneous-array template compiles and its indexed accessor is callable in a loop over
+  every valid index.
 - New example `examples/21_txn-template-nested` (Remit with two fixed `AmountEntry`s:
   one `native_amount`, one `amount` with a baked currency/issuer), with a testenv test
   asserting the emitted bytes' `sfAmounts` contents through `TestEnv`, plus

@@ -160,12 +160,18 @@ Two setters follow from that split:
 
 ### Nested `STObject`/`STArray`
 
-`object(sfX) { <field>* }` and `array(sfX) [ <element>* ]` nest a fixed
-inner field list, or a fixed element list, directly inside a template —
-every element's count and shape is known at declaration time, so the whole
-thing stays as compile-time-computable as the scalar kinds. An array's
-elements must each be `name: object(sfX) { .. }`; a bare scalar, or another
-`array`, directly inside an `array` is a compile error.
+`object(sfX) { <field>* }` and `array(sfX) [ .. ]` nest a fixed inner field
+list, or a fixed element list, directly inside a template — every
+element's count and shape is known at declaration time, so the whole thing
+stays as compile-time-computable as the scalar kinds. An array's elements
+must each be an `object(sfX) { .. }`; a bare scalar, or another `array`,
+directly inside an `array` is a compile error. `array` itself comes in two
+forms.
+
+#### Named elements
+
+Each element is declared individually, so heterogeneous shapes — one
+native entry, one issued entry — fall out naturally:
 
 ```rust,ignore
 txn_template! {
@@ -188,16 +194,69 @@ txn.set_amounts_native_amount(5)?;           // native entry, 8-byte store
 txn.set_amounts_usd_amount_value(XFL!(1.5)); // issued entry, 8-byte store
 ```
 
-Elements are declared one by one — that's what "known ahead" means here:
-there's no `; N` repetition sugar for a homogeneous array, so heterogeneous
-element shapes (one native entry, one issued entry, as above) fall out
-naturally rather than needing special syntax. Setter names are the
-`_`-joined declaration path (`set_amounts_native_amount`,
+Setter names are the `_`-joined declaration path
+(`set_amounts_native_amount`,
 `set_amounts_usd_amount`/`set_amounts_usd_amount_value`); an array
 element's own name (`native`, `usd`) is only a path segment, not a
 repetition index.
 
-A few rules apply once containers nest:
+#### Homogeneous, indexed elements
+
+When every element has the *same* declared shape, `array(sfX) [ Elem:
+object(sfY) { <field>* } ; N ]` declares that shape once and reserves `N`
+back-to-back copies of it (`N` a `usize` const expression, at least 1),
+instead of one setter per element:
+
+```rust,ignore
+txn_template! {
+    struct Remit {
+        transaction_type = ttREMIT,
+        // .. the required fields, plus `destination: account_id(sfDestination)` ..
+        amounts: array(sfAmounts) [
+            AmountEntry: object(sfAmountEntry) {
+                amount: amount(sfAmount) = (XFL!(0), USD, USD_ISSUER),
+            }; 2
+        ],
+        emit_details: emit_details,
+    }
+}
+
+let mut i: usize = 0;
+loop {
+    guard!(2);
+    if i >= 2 {
+        break;
+    }
+    let Some(mut e) = txn.amounts(i) else {
+        rollback!(b"emit-txn: index out of range", EmitTxnError::IndexOutOfRange);
+    };
+    let Ok(value) = XFL::new(0, (i as i64).wrapping_add(1)) else {
+        rollback!(b"emit-txn: XFL::new failed", EmitTxnError::AmountValueFailed);
+    };
+    e.set_amount_value(value);
+    i = i.wrapping_add(1);
+}
+```
+
+This generates an element-view type named `Elem` (`AmountEntry` above) —
+`AmountEntry::LEN`, a baked `AmountEntry::TEMPLATE` default, and the same
+inner setters (`set_amount`/`set_amount_value`) a template with that field
+list would generate itself, all writing into a `&mut [u8]` view — plus, on
+the parent, a runtime-indexed accessor named by the field path with **no**
+`set_` prefix: `fn amounts(&mut self, index: usize) ->
+Option<AmountEntry<'_>>`. `None` for `index >= N` is the whole
+out-of-range story; there's no `txn.amounts[n]` indexing operator (and no
+`unsafe`/`#[repr(C)]` behind the view type) — the workspace's
+panic-on-out-of-range indexing lint would make a raw `[n]` unusable inside
+a hook anyway, so `Option` plus a guarded loop is the idiom.
+
+#### Choosing between them, and shared rules
+
+Named elements read best when each entry's shape genuinely differs (a
+native amount next to an issued one, say); the homogeneous indexed form
+is for a repeated element shape whose count is fixed at declaration time,
+built or inspected through a loop rather than named individually. A few
+rules apply either way, once containers nest:
 
 - Canonical `(type, field)` order is checked **per container**: each
   object's own direct fields must be strictly increasing, same as the
@@ -209,7 +268,9 @@ A few rules apply once containers nest:
   baked byte.
 - Nesting depth is bounded at compile time by
   [`STO_WRITER_MAX_DEPTH`](sto-writer.md), the same limit xahaud's
-  deserializer enforces.
+  deserializer enforces — a homogeneous array's element counts as two
+  levels against that bound (the array itself, then the element), the
+  same as a named array's object element.
 - The six emit-plumbing fields (see "Required fields" above) are recognized
   only at the top level — an `sfAccount` nested inside some other object
   neither satisfies the presence check nor gets patched by
@@ -220,9 +281,10 @@ A few rules apply once containers nest:
   compile error (it's only meaningful once, at the top, last).
 
 See `examples/21_txn-template-nested` for the worked example this is drawn
-from — a Remit whose `sfAmounts` holds a native entry and a
-compile-time-baked issued entry, emitted the same way as `10_emit-txn`'s
-Payment.
+from — a Remit whose `sfAmounts` is a homogeneous, indexed array of
+compile-time-baked issued entries, filled and emitted through a guarded
+loop over the `amounts(i)` accessor, the same emission lifecycle as
+`10_emit-txn`'s Payment.
 
 ### Deferred kinds
 

@@ -2,18 +2,20 @@
 
 ## What you'll learn
 
-`txn_template!`'s fixed-shape nested containers: `object(sfX) { .. }` for a
-declared `STObject` and `array(sfX) [ .. ]` for a declared `STArray` (see
-`crates/rshooks/src/txn.rs`'s `txn_template!` doc comment, "Nested
-containers"). This hook emits a Remit whose `sfAmounts` field is a fixed,
-two-entry array — one `native_amount` entry, one `amount` (48-byte issued)
-entry with a baked currency/issuer default — declared entirely inside the
-template, with no `StoWriter` call anywhere. Contrast
-`examples/17_sto-writer`'s Remit, whose second `sfAmounts` entry is only
-present *conditionally*, based on hook parameters supplied at runtime:
-that shape isn't known at compile time, so it needs `StoWriter`.
-`txn_template!`'s nested containers are for the opposite case — every
-entry, and its shape, is fixed by the declaration alone. `main` also
+`txn_template!`'s homogeneous indexed array form: `array(sfX) [ Elem:
+object(sfY) { .. } ; N ]` for a fixed-count `STArray` whose elements all
+share one declared shape (see `crates/rshooks/src/txn.rs`'s
+`txn_template!` doc comment, "Homogeneous arrays", and
+`docs/TXN_TEMPLATE_FIELDS_DESIGN.md` §2.5). This hook emits a Remit whose
+`sfAmounts` field is two back-to-back copies of one issued `amount`
+entry, declared once and repeated, with no `StoWriter` call anywhere.
+Contrast `examples/17_sto-writer`'s Remit, whose second `sfAmounts` entry
+is only present *conditionally*, based on hook parameters supplied at
+runtime: that shape isn't known at compile time, so it needs `StoWriter`.
+`txn_template!`'s indexed arrays are for the opposite case — the element
+*count*, and every element's shape, are both fixed by the declaration
+alone; only the per-element *values* are filled in at runtime, in a
+`guard!`-bounded loop over a runtime-indexed accessor. `main` also
 exercises both `amount` setters on the real `wasm32v1-none` target — the
 8-byte `_value` hot path by default, and the full 48-byte setter when an
 `ISSUER` hook parameter is present — so `rshooks build`/`check` covers the
@@ -34,45 +36,62 @@ txn_template! {
         account: account_id(sfAccount),
         destination: account_id(sfDestination),
         amounts: array(sfAmounts) [
-            native: object(sfAmountEntry) {
-                amount: native_amount(sfAmount) = 1,
-            },
-            usd: object(sfAmountEntry) {
+            AmountEntry: object(sfAmountEntry) {
                 amount: amount(sfAmount) = (XFL::from_raw_bits(0), USD, USD_ISSUER),
-            },
+            }; 2
         ],
         emit_details: emit_details,
     }
 }
 ```
 
-Setter names splice the full declaration path: the native entry's amount
-gets `set_amounts_native_amount(u64) -> Result<()>`, and the issued
-entry's gets two setters — `set_amounts_usd_amount(xfl, &currency,
-&issuer)` (all 48 bytes) and `set_amounts_usd_amount_value(xfl)` (just the
-8-byte value, keeping the baked `USD`/`USD_ISSUER` default). `main` calls
-both, on two different paths:
+The `; 2` after the element's field list is the whole of the indexed-array
+syntax: it declares the element shape once (`AmountEntry`, an issued
+`amount` field with the baked `USD`/`USD_ISSUER` default) and reserves two
+back-to-back copies of it. This generates a standalone view type
+`AmountEntry<'a>` — with the *same* `set_amount(xfl, &currency, &issuer)`
+(all 48 bytes) / `set_amount_value(xfl)` (just the 8-byte value, keeping
+the baked default) setters a plain field of that shape would get — plus a
+runtime-indexed accessor on `Remit`: `fn amounts(&mut self, index: usize)
+-> Option<AmountEntry<'_>>`, `None` for `index >= 2`.
+
+`main` fills both entries in one fixed-trip loop, `guard!`-bounded like
+any other Hook loop (`examples/06_guard-patterns`):
 
 ```rust
-match self.hook_param.issuer.get() {
-    Ok(Some(issuer)) => txn.set_amounts_usd_amount(XFL::one(), &USD, &issuer),
-    Ok(None) | Err(_) => txn.set_amounts_usd_amount_value(XFL::one()),
+let mut i: usize = 0;
+loop {
+    guard!(2);
+    if i >= 2 {
+        break;
+    }
+    let Some(mut entry) = txn.amounts(i) else { /* rollback */ };
+    let Ok(value) = XFL::new(0, i as i64 + 1) else { /* rollback */ };
+    match issuer {
+        Some(iss) => entry.set_amount(value, &USD, &iss),
+        None => entry.set_amount_value(value),
+    }
+    i = i.wrapping_add(1);
 }
 ```
 
-Both hook parameters are declared on the chain struct (`#[hook_param(name =
-b"DEST", required)]` / `#[hook_param(name = b"ISSUER")]`, see
-`examples/03_hook-params`) and read through `self.hook_param`.
+`XFL::new(0, i + 1)` computes `1.0`/`2.0` for entries 0/1 via the host
+`float_set` call. Without an `ISSUER` hook parameter, every entry's
+currency and issuer stay at their baked default and only the 8-byte value
+changes — a single store, no host call. With one, every entry's currency
+and issuer are rewritten too, through the full 48-byte setter — this is
+the same `[u8; 48]` build-and-copy `rshooks::sto_writer::StoWriter`'s
+`iou_amount` writes on every call (`examples/17_sto-writer`); exercising
+it here, on the real `wasm32v1-none` target, is what lets `rshooks
+build`/`check` catch a future compiler-generated copy loop over that
+region before it reaches a live node. A fixed 2-trip loop like this one
+may get fully unrolled by LLVM at this optimization level — that's fine;
+`guard!` stays the correct, documented idiom regardless of whether the
+loop survives as a loop in the compiled module.
 
-Without an `ISSUER` hook parameter, the currency and issuer stay at their
-baked default and only the 8-byte value changes — a single store, no host
-call. With one, the issued entry's currency and issuer are rewritten too,
-through the full 48-byte setter — this is the same `[u8; 48]` build-and-copy
-`rshooks::sto_writer::StoWriter`'s `iou_amount` writes on every call
-(`examples/17_sto-writer`); exercising it here, on the real
-`wasm32v1-none` target, is what lets `rshooks build`/`check` catch a
-future compiler-generated copy loop over that region before it reaches a
-live node.
+Both hook parameters are declared on the chain struct (`#[hook_param(name
+= b"DEST", required)]` / `#[hook_param(name = b"ISSUER")]`, see
+`examples/03_hook-params`) and read through `self.hook_param`.
 
 `main` reserves one emission slot, reads the required `DEST` hook
 parameter (a 20-byte `AccountId`; rolls back if absent), sets the
@@ -99,24 +118,30 @@ cargo test --manifest-path examples/Cargo.toml -p txn-template-nested
 Two equivalent layouts exercise the real `TxnTemplateNested` entry through
 `rshooks_testenv::TestEnv::invoke` — no wasm build, no node:
 `tests/remit.rs` (an integration test against the crate as a library) and
-an in-crate `#[cfg(test)]` module at the bottom of `src/lib.rs`. Both cover
-the accept-and-emit path, the `DEST`-missing rollback, `cbak`, and the
-`ISSUER`-parameter override — asserting the emitted blob's issued
-`sfAmountEntry` carries the overridden issuer while the currency stays the
-baked `USD`. The in-crate module additionally exercises the private
-`Remit` type directly, since it isn't reachable from an integration test:
+an in-crate `#[cfg(test)]` module at the bottom of `src/lib.rs`. Both
+cover:
 
+- the accept-and-emit path, the `DEST`-missing rollback, and `cbak`;
 - a byte-exact check of the whole `sfAmounts` region — headers (derived
-  via `txn::codec::field_header`, not hardcoded), the native entry's
-  1-drop value, and the issued entry's `XFL::one()` value bytes plus the
-  baked `USD`/`USD_ISSUER` currency and issuer;
-- a cross-check against `rshooks::sto_writer::StoWriter`: the identical
-  fixed-prefix bytes, built once through `txn_template!`'s setters and
-  once through `StoWriter::iou_amount` against a hand-written
-  `float_sto` that assembles `STAmount`'s issued value component by
-  component (sign, biased exponent, mantissa) the way xahaud's `float_sto`
-  does, rather than through the bit-OR identity `txn::codec` relies on,
-  asserted equal over `Remit::LEN - EMIT_DETAILS_MAX_LEN` bytes.
+  via `txn::codec::field_header`, not hardcoded) and both entries' value
+  bytes (`XFL::new(0, 1)`/`XFL::new(0, 2)`, hand-derived from the XFL bit
+  layout) against the baked `USD`/`USD_ISSUER` currency and issuer;
+- the `ISSUER`-parameter override — asserting **both** emitted
+  `sfAmountEntry` images carry the overridden issuer while the currency
+  stays the baked `USD`.
+
+The in-crate module additionally cross-checks the private `Remit` type
+directly against `rshooks::sto_writer::StoWriter`, since that's only
+reachable from an in-crate test: the identical fixed-prefix bytes, built
+once through `txn_template!`'s setters and once through
+`StoWriter::iou_amount` against a hand-written `float_sto` that assembles
+`STAmount`'s issued value component by component (sign, biased exponent,
+mantissa) the way xahaud's `float_sto` does, rather than through the
+bit-OR identity `txn::codec` relies on — plus a hand-written `float_set`
+reimplementing XFL's integer-mantissa normalization independently, so
+`XFL::new` inside that same test resolves through the mock rather than
+the host stub — asserted equal over `Remit::LEN - EMIT_DETAILS_MAX_LEN`
+bytes.
 
 ## Error codes
 
@@ -128,16 +153,20 @@ the `rollback!` code for each failure this hook can exit with:
 | `ReserveFailed` | 1 | `etxn_reserve(1)` failed to reserve an emission slot |
 | `MissingDestination` | 2 | the `DEST` hook parameter was missing or not a 20-byte `AccountId` |
 | `BufferAlreadyTaken` | 3 | the static `Remit` template had already been `take()`n |
-| `SetAmountFailed` | 4 | the native entry's amount setter failed (out of `u64` drops range) |
-| `PrepareFailed` | 5 | `prepare_for_emit` failed to fill in the host-supplied fields |
-| `EmitFailed` | 6 | the prepared transaction could not be emitted |
+| `AmountsIndexOutOfRange` | 4 | the fill loop computed an out-of-range `sfAmounts` index — unreachable by construction, kept only because the accessor returns `Option` |
+| `AmountValueFailed` | 5 | `XFL::new` failed to normalize an entry's value |
+| `PrepareFailed` | 6 | `prepare_for_emit` failed to fill in the host-supplied fields |
+| `EmitFailed` | 7 | the prepared transaction could not be emitted |
 
 ## Cost
 
 Current WCE, wasm size, and max nesting depth live in
 [`metrics.json`](./metrics.json), refreshed by `mise run
 record-example-metrics`. Compare against `examples/17_sto-writer`'s
-`metrics.json` for the equivalent runtime-shaped Remit: the compile-time
-template is cheaper on every axis, since `StoWriter` pays bounds/duplicate
-checks on every field plus its conditional issued-entry branch, while
-here the shape is baked and the setters are fixed-offset stores.
+`metrics.json` for the equivalent runtime-shaped Remit: the two spend
+their budget in different places. `StoWriter` pays bounds/duplicate checks
+on every field plus its conditional issued-entry branch; here the shape is
+baked and each setter is a fixed-offset store, but `main` reads two hook
+parameters, computes each value through `XFL::new`, and runs a guarded
+loop with two rollback branches per iteration. The template's advantage
+shows up in nesting depth, not in instruction count.

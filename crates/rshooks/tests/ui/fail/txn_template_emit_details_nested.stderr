@@ -1,4 +1,4 @@
-error: txn_template!: unrecognized field declaration: bad: emit_details, @ end_object, emit_details: emit_details,
+error: txn_template!: `bad: emit_details` must be the last top-level field — it cannot be declared inside a nested `object`/`array`
   --> tests/ui/fail/txn_template_emit_details_nested.rs:9:1
    |
 9  | / txn_template! {
