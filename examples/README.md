@@ -115,8 +115,8 @@ cargo run -p rshooks-build -- build --manifest-path examples/02_state-counter/Ca
 cargo run -p rshooks-build -- check examples/02_state-counter/out/current/0.main.wasm
 ```
 
-See each example's own README for its exact command — none currently need
-`--auto-guard` (see below for why, and when it would still be needed).
+See each example's own README for its exact command — none need the
+deprecated `--auto-guard` (see below for why).
 
 ## Recorded cost (WCE / size / nesting)
 
@@ -207,8 +207,8 @@ though no loop appears in the Rust source at all** — array/slice equality
 (`[u8; N] == [u8; N]`) lowers to a `bcmp`-style byte-compare loop, and large
 buffer zero-inits/copies lower to `memset`/`memcpy`-style loops.
 
-`--auto-guard` (with a carefully sized `--default-maxiter`) is one way to
-handle this, but it is a footgun: the CLI only validates guard *shape*, not
+The deprecated `--auto-guard` (with a carefully sized `--default-maxiter`)
+papers over this, but it is a footgun: the CLI only validates guard *shape*, not
 that `maxiter` covers the loop's true runtime bound, so an under-sized
 `maxiter` builds clean and then fails with `GUARD_VIOLATION` on a live
 node. Two source-level idioms avoid the compiler-generated loop (and the
@@ -243,7 +243,8 @@ README for why, including an empirical check of what `guard_m!`'s `$n`
 does and doesn't protect against); and `account-id-macro`'s buffers (a
 20-byte `AccountId`, a 34-byte r-address) are compared with `buf_eq_20`/
 `buf_eq_34` and are far too small for LLVM to prefer an out-of-line loop
-regardless. `--auto-guard` remains
-available in `rshooks` for cases none of these idioms cover — size
-`--default-maxiter` from the loop's true worst-case iteration count (found
-via disassembly), never trust the default.
+regardless. `--auto-guard` is deprecated in `rshooks` (accepted with a
+build-time warning, scheduled for removal). For a loop none of these
+idioms cover, write the loop by hand with `guard!` so its `maxiter` is
+explicit and justified from the loop's true worst-case iteration count
+(found via disassembly), never guessed.

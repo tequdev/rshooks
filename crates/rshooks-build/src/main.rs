@@ -37,10 +37,15 @@ enum Cmd {
         /// supported for chain builds.
         #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(u8).range(0..=1))]
         api_version: u8,
-        /// Insert missing loop guards instead of treating them as an error.
+        /// Deprecated: insert missing loop guards instead of treating them
+        /// as an error. Scheduled for removal; remove the
+        /// compiler-generated loop at the source level
+        /// (rshooks::buf_eq_*, HookStatic) or write the loop by hand with
+        /// guard! instead.
         #[arg(long)]
         auto_guard: bool,
-        /// `maxiter` used for auto-inserted guards.
+        /// Deprecated: maxiter used for auto-inserted guards. Only
+        /// meaningful with the deprecated --auto-guard.
         #[arg(long, default_value_t = 16)]
         default_maxiter: u32,
         /// Output ROOT directory (default: `<target>/rshooks/<crate-name>`).
@@ -83,10 +88,15 @@ enum Cmd {
         /// The Hook API version this module targets.
         #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(u8).range(0..=1))]
         api_version: u8,
-        /// Insert missing loop guards instead of treating them as an error.
+        /// Deprecated: insert missing loop guards instead of treating them
+        /// as an error. Scheduled for removal; remove the
+        /// compiler-generated loop at the source level
+        /// (rshooks::buf_eq_*, HookStatic) or write the loop by hand with
+        /// guard! instead.
         #[arg(long)]
         auto_guard: bool,
-        /// `maxiter` used for auto-inserted guards.
+        /// Deprecated: maxiter used for auto-inserted guards. Only
+        /// meaningful with the deprecated --auto-guard.
         #[arg(long, default_value_t = 16)]
         default_maxiter: u32,
         /// Write the output even if it exceeds the 65,535-byte SetHook
@@ -113,6 +123,18 @@ fn api_version_from(v: u8) -> ApiVersion {
     }
 }
 
+/// Prints a build-time deprecation warning for `--auto-guard` to stderr.
+/// Called once per invocation, before running the pipeline, whenever the
+/// flag is set on either `Build` or `Clean`.
+fn warn_auto_guard_deprecated() {
+    eprintln!(
+        "warning: --auto-guard is deprecated and scheduled for removal; remove the \
+         compiler-generated loop at the source level (rshooks::buf_eq_*, HookStatic) or write \
+         the loop by hand with guard! instead"
+    );
+}
+
+#[allow(deprecated)]
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -129,6 +151,9 @@ fn main() -> Result<()> {
             namespace,
             override_flag,
         } => {
+            if auto_guard {
+                warn_auto_guard_deprecated();
+            }
             let args = ChainBuildArgs {
                 manifest_path,
                 package,
@@ -152,6 +177,9 @@ fn main() -> Result<()> {
             default_maxiter,
             allow_oversize,
         } => {
+            if auto_guard {
+                warn_auto_guard_deprecated();
+            }
             let opts = Options {
                 api_version: api_version_from(api_version),
                 auto_guard,

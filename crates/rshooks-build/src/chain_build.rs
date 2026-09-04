@@ -24,9 +24,19 @@ pub struct ChainBuildArgs {
     pub package: Option<String>,
     /// Only `0` (Guard-type) is currently supported for chain builds.
     pub api_version: u8,
-    /// Insert missing loop guards instead of treating them as an error.
+    /// Deprecated: insert missing loop guards instead of treating them as
+    /// an error. Scheduled for removal; remove the compiler-generated loop
+    /// at the source level (`rshooks::buf_eq_*`, `HookStatic`) or write the
+    /// loop by hand with `guard!` instead.
+    #[deprecated(
+        note = "the auto-guard transform is scheduled for removal; remove the \
+                compiler-generated loop at the source level (`rshooks::buf_eq_*`, `HookStatic`) \
+                or write the loop by hand with `guard!`"
+    )]
     pub auto_guard: bool,
-    /// `maxiter` used for auto-inserted guards.
+    /// Deprecated: `maxiter` used for auto-inserted guards. Only meaningful
+    /// with the deprecated [`ChainBuildArgs::auto_guard`].
+    #[deprecated(note = "only meaningful with the deprecated `auto_guard`")]
     pub default_maxiter: u32,
     /// Output ROOT directory (default: `<target>/rshooks/<crate-name>`).
     pub out: Option<PathBuf>,
@@ -45,6 +55,7 @@ pub struct ChainBuildArgs {
 /// Runs the full v2 chain build: discovery, per-index selected builds,
 /// pipeline, sidecar/template generation, and generation-directory
 /// publication. Prints progress and a final summary to stdout/stderr.
+#[allow(deprecated)]
 pub fn run(args: &ChainBuildArgs) -> Result<()> {
     if args.api_version != 0 {
         bail!(

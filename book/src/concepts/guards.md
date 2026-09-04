@@ -177,9 +177,12 @@ between compiler versions).
 
 ## When `--auto-guard --default-maxiter` is the last resort
 
-`--auto-guard` remains available for cases neither idiom above covers, but
-treat it as a last resort, not a default habit — it is a real footgun for
-one specific reason: **the CLI only validates guard shape, not that
+`--auto-guard` is deprecated: it is still accepted, with a build-time
+warning, but is scheduled for removal. The supported path for a loop
+neither idiom above covers is a hand-written loop with an explicit
+`guard!`, so its `maxiter` is chosen deliberately rather than guessed.
+Where the deprecated flag is still in use, treat it as a last resort, not
+a default habit — it is a real footgun for one specific reason: **the CLI only validates guard shape, not that
 `maxiter` covers the loop's true runtime bound.** An under-sized
 `--default-maxiter` builds clean — the guard checker sees a syntactically
 valid guard call at the top of the loop and is satisfied — and then fails
@@ -267,5 +270,5 @@ its failure mode if a future toolchain ever stopped honoring
   including the safety argument for its take-once exclusivity.
 - [Accept, Rollback, and Errors](errors.md) covers how a hook actually
   terminates once its checks — guarded loops included — are done.
-- [The rshooks CLI](../build/cli.md) covers `--auto-guard` and
-  `--default-maxiter` as build flags in full.
+- [The rshooks CLI](../build/cli.md) covers the deprecated `--auto-guard`
+  and `--default-maxiter` build flags in full.

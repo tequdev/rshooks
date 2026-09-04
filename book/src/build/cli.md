@@ -27,8 +27,8 @@ rshooks build --manifest-path path/to/Cargo.toml
 | `--manifest-path <PATH>` | cargo's default (current directory) | Path to the crate's `Cargo.toml`, forwarded to every cargo invocation. |
 | `-p, --package <NAME>` | none | Build only the named package, forwarded to cargo's `-p`. Useful when `--manifest-path` points at a workspace. |
 | `--api-version <0\|1>` | `0` | The Hook API version this module targets. `0` is Guard-type (loop guards required, and the only version `#[hooks]` chains currently support); `1` is Gas-type (guard handling skipped) and is rejected for a chain build. |
-| `--auto-guard` | off | Insert missing loop guards instead of treating an unguarded loop as a build error. Applies per index. |
-| `--default-maxiter <N>` | `16` | The `maxiter` value used for auto-inserted guards, when `--auto-guard` is set. |
+| `--auto-guard` | off | **Deprecated**, scheduled for removal. Insert missing loop guards instead of treating an unguarded loop as a build error. Applies per index. See [Guards and Loops](../concepts/guards.md) for the source-level alternatives. |
+| `--default-maxiter <N>` | `16` | **Deprecated**, scheduled for removal. The `maxiter` value used for auto-inserted guards, when `--auto-guard` is set. See [Guards and Loops](../concepts/guards.md) for the source-level alternatives. |
 | `--out <DIR>` | `target/rshooks/<crate-name>` under the workspace's target directory | Output **root**: generation directories (`gen-<N>/`) are written under it, with `current` symlinked to the latest complete, validated one. |
 | `--allow-oversize` | off | Write each index's output even if it exceeds the 65,535-byte SetHook size limit. The result is still clearly marked invalid in the printed report. |
 | `--account <r...>` | none | Fill the generated template's `Account` placeholder with this address. |
@@ -57,8 +57,8 @@ rshooks clean path/to/artifact.wasm
 | `input` (positional) | — | The input wasm file. Required. |
 | `-o, --out <PATH>` | `<input>.clean.wasm` | Where to write the cleaned binary. |
 | `--api-version <0\|1>` | `0` | The Hook API version this module targets. |
-| `--auto-guard` | off | Insert missing loop guards instead of treating them as an error. |
-| `--default-maxiter <N>` | `16` | `maxiter` used for auto-inserted guards. |
+| `--auto-guard` | off | **Deprecated**, scheduled for removal. Insert missing loop guards instead of treating them as an error. See [Guards and Loops](../concepts/guards.md) for the source-level alternatives. |
+| `--default-maxiter <N>` | `16` | **Deprecated**, scheduled for removal. `maxiter` used for auto-inserted guards. See [Guards and Loops](../concepts/guards.md) for the source-level alternatives. |
 | `--allow-oversize` | off | Write the output even if it exceeds the 65,535-byte SetHook limit. |
 
 `clean` does not generate a metadata sidecar or a `SetHook` template — those

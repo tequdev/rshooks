@@ -125,7 +125,7 @@ cargo run -p rshooks-build -- build --manifest-path examples/03_hook-params/Carg
 No extra flags needed: every comparison here is between plain integers
 (`u64`), not fixed-size arrays, so there's no compiler-generated
 `bcmp`-style loop to worry about (contrast with `firewall`, which compares
-two `[u8; 20]`s and needs `--auto-guard`).
+two `[u8; 20]`s and avoids that loop with `buf_eq_20`).
 
 ## Expected behavior
 

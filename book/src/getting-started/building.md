@@ -134,6 +134,7 @@ source is a bug, not something the toolchain should paper over. The
 `--auto-guard` flag exists mainly for loops the *compiler* generates that
 never appear in your Rust source at all (certain array-equality and
 buffer-zeroing patterns can lower to an unguarded loop at the WASM level).
-It's covered in full, including why it's a footgun if used carelessly and
-the source-level idioms that usually avoid needing it in the first place,
-in the [Guards and Loops](../concepts/guards.md) chapter.
+It is deprecated and scheduled for removal. It's covered in full,
+including why it's a footgun if used carelessly and the source-level
+idioms that avoid needing it in the first place, in the
+[Guards and Loops](../concepts/guards.md) chapter.
