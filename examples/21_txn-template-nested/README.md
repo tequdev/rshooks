@@ -14,8 +14,8 @@ is only present *conditionally*, based on hook parameters supplied at
 runtime: that shape isn't known at compile time, so it needs `StoWriter`.
 `txn_template!`'s indexed arrays are for the opposite case — the element
 *count*, and every element's shape, are both fixed by the declaration
-alone; only the per-element *values* are filled in at runtime, in a
-`guard!`-bounded loop over a runtime-indexed accessor. `main` also
+alone; only the per-element *values* are filled in at runtime, through a
+runtime-indexed accessor. `main` also
 exercises both `amount` setters on the real `wasm32v1-none` target — the
 8-byte `_value` hot path by default, and the full 48-byte setter when an
 `ISSUER` hook parameter is present — so `rshooks build`/`check` covers the
@@ -55,39 +55,38 @@ the baked default) setters a plain field of that shape would get — plus a
 runtime-indexed accessor on `Remit`: `fn amounts(&mut self, index: usize)
 -> Option<AmountEntry<'_>>`, `None` for `index >= 2`.
 
-`main` fills both entries in one fixed-trip loop, `guard!`-bounded like
-any other Hook loop (`examples/06_guard-patterns`):
+`main` fills the two entries one after the other, each through the
+accessor:
 
 ```rust
-let mut i: usize = 0;
-loop {
-    guard!(2);
-    if i >= 2 {
-        break;
-    }
-    let Some(mut entry) = txn.amounts(i) else { /* rollback */ };
-    let Ok(value) = XFL::new(0, i as i64 + 1) else { /* rollback */ };
-    match issuer {
-        Some(iss) => entry.set_amount(value, &USD, &iss),
-        None => entry.set_amount_value(value),
-    }
-    i = i.wrapping_add(1);
+let Some(mut first) = txn.amounts(0) else { /* rollback */ };
+let Ok(one) = XFL::new(0, 1) else { /* rollback */ };
+match issuer {
+    Some(iss) => first.set_amount(one, &USD, &iss),
+    None => first.set_amount_value(one),
+}
+
+let Some(mut second) = txn.amounts(1) else { /* rollback */ };
+let Ok(two) = XFL::new(0, 2) else { /* rollback */ };
+match issuer {
+    Some(iss) => second.set_amount(two, &USD, &iss),
+    None => second.set_amount_value(two),
 }
 ```
 
-`XFL::new(0, i + 1)` computes `1.0`/`2.0` for entries 0/1 via the host
-`float_set` call. Without an `ISSUER` hook parameter, every entry's
+`XFL::new(0, 1)`/`XFL::new(0, 2)` compute `1.0`/`2.0` via the host
+`float_set` call. Without an `ISSUER` hook parameter, each entry's
 currency and issuer stay at their baked default and only the 8-byte value
-changes — a single store, no host call. With one, every entry's currency
+changes — a single store, no host call. With one, each entry's currency
 and issuer are rewritten too, through the full 48-byte setter — this is
 the same `[u8; 48]` build-and-copy `rshooks::sto_writer::StoWriter`'s
 `iou_amount` writes on every call (`examples/17_sto-writer`); exercising
 it here, on the real `wasm32v1-none` target, is what lets `rshooks
-build`/`check` catch a future compiler-generated copy loop over that
-region before it reaches a live node. A fixed 2-trip loop like this one
-may get fully unrolled by LLVM at this optimization level — that's fine;
-`guard!` stays the correct, documented idiom regardless of whether the
-loop survives as a loop in the compiled module.
+build`/`check` catch a compiler-generated copy loop over that region
+before it reaches a live node. The accessor takes a runtime index, so a
+larger array can equally be filled from a `guard!`-bounded loop (see
+[Emitting Transactions](../../book/src/emit/emitting.md)); with two
+entries, straight-line code is the simpler read.
 
 Both hook parameters are declared on the chain struct (`#[hook_param(name
 = b"DEST", required)]` / `#[hook_param(name = b"ISSUER")]`, see
@@ -153,7 +152,7 @@ the `rollback!` code for each failure this hook can exit with:
 | `ReserveFailed` | 1 | `etxn_reserve(1)` failed to reserve an emission slot |
 | `MissingDestination` | 2 | the `DEST` hook parameter was missing or not a 20-byte `AccountId` |
 | `BufferAlreadyTaken` | 3 | the static `Remit` template had already been `take()`n |
-| `AmountsIndexOutOfRange` | 4 | the fill loop computed an out-of-range `sfAmounts` index — unreachable by construction, kept only because the accessor returns `Option` |
+| `AmountsIndexOutOfRange` | 4 | an `sfAmounts` index was out of range — unreachable by construction (both indexes are literals below the declared count), kept only because the accessor returns `Option` |
 | `AmountValueFailed` | 5 | `XFL::new` failed to normalize an entry's value |
 | `PrepareFailed` | 6 | `prepare_for_emit` failed to fill in the host-supplied fields |
 | `EmitFailed` | 7 | the prepared transaction could not be emitted |
@@ -167,6 +166,6 @@ record-example-metrics`. Compare against `examples/17_sto-writer`'s
 their budget in different places. `StoWriter` pays bounds/duplicate checks
 on every field plus its conditional issued-entry branch; here the shape is
 baked and each setter is a fixed-offset store, but `main` reads two hook
-parameters, computes each value through `XFL::new`, and runs a guarded
-loop with two rollback branches per iteration. The template's advantage
+parameters, computes each value through `XFL::new`, and carries two
+rollback branches per entry. The template's advantage
 shows up in nesting depth, not in instruction count.

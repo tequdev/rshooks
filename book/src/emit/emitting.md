@@ -280,11 +280,11 @@ rules apply either way, once containers nest:
   is a compile error, and an `emit_details` field inside any container is a
   compile error (it's only meaningful once, at the top, last).
 
-See `examples/21_txn-template-nested` for the worked example this is drawn
-from — a Remit whose `sfAmounts` is a homogeneous, indexed array of
-compile-time-baked issued entries, filled and emitted through a guarded
-loop over the `amounts(i)` accessor, the same emission lifecycle as
-`10_emit-txn`'s Payment.
+See `examples/21_txn-template-nested` for the worked example — a Remit
+whose `sfAmounts` is a homogeneous, indexed array of compile-time-baked
+issued entries, filled through the `amounts(i)` accessor (two entries,
+written one after the other rather than from a loop) and emitted through
+the same lifecycle as `10_emit-txn`'s Payment.
 
 ### Deferred kinds
 

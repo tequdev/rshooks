@@ -54,10 +54,10 @@ hook_errors! {
         MissingDestination = 2,
         /// The Remit template was unavailable.
         BufferAlreadyTaken = 3,
-        /// An `sfAmounts` index the fill loop computed was out of range —
-        /// unreachable by construction (the loop bound matches the
-        /// declared element count), kept only because the accessor
-        /// returns `Option`.
+        /// An `sfAmounts` index was out of range — unreachable by
+        /// construction (both indexes are literals below the declared
+        /// element count), kept only because the accessor returns
+        /// `Option`.
         AmountsIndexOutOfRange = 4,
         /// `XFL::new` failed to normalize an entry's value.
         AmountValueFailed = 5,
@@ -82,13 +82,12 @@ pub struct TxnTemplateNested {
 #[hooks]
 impl TxnTemplateNested {
     /// Reserves one emission slot, reads the required `DEST` hook
-    /// parameter, fills both `sfAmounts` entries in a `guard!`-bounded
-    /// loop over `Remit::amounts`'s runtime-indexed accessor — entry `i`
-    /// gets `XFL::new(0, i + 1)` (`1.0`, `2.0`) via the baked
-    /// `USD`/`USD_ISSUER` default unless an `ISSUER` hook parameter
-    /// overrides the issuer for every entry, which routes through the
-    /// full 48-byte `amount` setter instead of the 8-byte hot path — and
-    /// emits.
+    /// parameter, fills both `sfAmounts` entries through
+    /// `Remit::amounts`'s runtime-indexed accessor — entry 0 gets `1.0`,
+    /// entry 1 gets `2.0`, via the baked `USD`/`USD_ISSUER` default unless
+    /// an `ISSUER` hook parameter overrides the issuer for both entries,
+    /// which routes through the full 48-byte `amount` setter instead of
+    /// the 8-byte hot path — and emits.
     #[hook(0, name = "tplremit", on = [Invoke], can_emit = [Remit])]
     fn main(&self) -> HookResult {
         if etxn_reserve(1).is_err() {
@@ -116,35 +115,44 @@ impl TxnTemplateNested {
 
         let issuer: Option<AccountId> = self.hook_param.issuer.get().unwrap_or_default();
 
-        // Fixed 2-trip loop over the homogeneous `sfAmounts` array: entry
-        // `i` gets `XFL::new(0, i + 1)`, written through the baked-issuer
-        // 8-byte hot path, or the full 48-byte setter when `ISSUER`
-        // overrides it — exercised on the real wasm target so a future
-        // compiler-generated copy loop over the `[u8; 48]` region would
+        // Both `sfAmounts` entries, indexed through `Remit::amounts`: entry
+        // 0 carries 1.0, entry 1 carries 2.0, each written through the
+        // baked-issuer 8-byte hot path, or the full 48-byte setter when
+        // `ISSUER` overrides the issuer — exercised on the real wasm target
+        // so a compiler-generated copy loop over the `[u8; 48]` region would
         // be caught by `rshooks build`/`check`.
-        let mut i: usize = 0;
-        loop {
-            guard!(2);
-            if i >= 2 {
-                break;
-            }
-            let Some(mut entry) = txn.amounts(i) else {
-                rollback!(
-                    b"txn-template-nested: amounts index out of range",
-                    TxnTemplateNestedError::AmountsIndexOutOfRange
-                );
-            };
-            let Ok(value) = XFL::new(0, (i as i64).wrapping_add(1)) else {
-                rollback!(
-                    b"txn-template-nested: XFL::new failed",
-                    TxnTemplateNestedError::AmountValueFailed
-                );
-            };
-            match issuer {
-                Some(iss) => entry.set_amount(value, &USD, &iss),
-                None => entry.set_amount_value(value),
-            }
-            i = i.wrapping_add(1);
+        let Some(mut first) = txn.amounts(0) else {
+            rollback!(
+                b"txn-template-nested: amounts index out of range",
+                TxnTemplateNestedError::AmountsIndexOutOfRange
+            );
+        };
+        let Ok(one) = XFL::new(0, 1) else {
+            rollback!(
+                b"txn-template-nested: XFL::new failed",
+                TxnTemplateNestedError::AmountValueFailed
+            );
+        };
+        match issuer {
+            Some(iss) => first.set_amount(one, &USD, &iss),
+            None => first.set_amount_value(one),
+        }
+
+        let Some(mut second) = txn.amounts(1) else {
+            rollback!(
+                b"txn-template-nested: amounts index out of range",
+                TxnTemplateNestedError::AmountsIndexOutOfRange
+            );
+        };
+        let Ok(two) = XFL::new(0, 2) else {
+            rollback!(
+                b"txn-template-nested: XFL::new failed",
+                TxnTemplateNestedError::AmountValueFailed
+            );
+        };
+        match issuer {
+            Some(iss) => second.set_amount(two, &USD, &iss),
+            None => second.set_amount_value(two),
         }
 
         let Ok(prepared) = txn.prepare_for_emit() else {
