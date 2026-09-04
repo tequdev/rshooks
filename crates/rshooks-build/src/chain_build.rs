@@ -906,26 +906,107 @@ fn retain_latest_generations(root: &Path, keep: usize) {
     }
 }
 
+/// Filename of the `current` pointer under a build's output root, plus its
+/// staging name while the next generation is being installed.
+const CURRENT_NAME: &str = "current";
+const CURRENT_TMP_NAME: &str = "current.tmp";
+
+/// Swaps a freshly staged `current.tmp` entry (already written by the
+/// caller) into place as `current`, disposing of whatever `current`
+/// previously pointed to. Platform independent: it treats both entries
+/// opaquely via [`remove_entry`], so the same code path serves Unix's
+/// symlink swap and Windows' directory-symlink/real-directory fallback, and
+/// is exercised by a host-independent unit test (`swap_current_entry_*`).
+///
+/// `std::fs::rename` cannot replace an existing directory (or, reliably, a
+/// directory-reparse-point symlink) on Windows, so rather than renaming
+/// straight over `current`, any existing `current` is first moved aside to
+/// a process-unique name, the staged entry is renamed into place, and only
+/// then is the moved-aside entry deleted.
+fn swap_current_entry(root: &Path) -> Result<()> {
+    let current = root.join(CURRENT_NAME);
+    let tmp = root.join(CURRENT_TMP_NAME);
+    let old = root.join(format!(".current-old-{}", std::process::id()));
+    remove_entry(&old);
+
+    match std::fs::rename(&current, &old) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("moving aside stale `current` under {}", root.display()));
+        }
+    }
+
+    let result = std::fs::rename(&tmp, &current)
+        .with_context(|| format!("publishing `current` under {}", root.display()));
+    remove_entry(&old);
+    result
+}
+
+/// Removes a `current`/`current.tmp` entry regardless of whether it is a
+/// symlink, a directory-reparse-point symlink, or a real directory.
+/// `symlink_metadata` does not follow links, so a symlink is always removed
+/// with `remove_file` (unlinking it without touching whatever it points
+/// at); only a real directory is removed with `remove_dir_all`.
+fn remove_entry(path: &Path) {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_dir() => {
+            let _ = std::fs::remove_dir_all(path);
+        }
+        Ok(_) => {
+            let _ = std::fs::remove_file(path);
+        }
+        Err(_) => {}
+    }
+}
+
 #[cfg(unix)]
 fn update_current(root: &Path, gen_name: &str) -> Result<()> {
     use std::os::unix::fs::symlink;
-    let tmp = root.join("current.tmp");
-    let _ = std::fs::remove_file(&tmp);
+    let tmp = root.join(CURRENT_TMP_NAME);
+    remove_entry(&tmp);
     symlink(gen_name, &tmp).with_context(|| format!("creating symlink {}", tmp.display()))?;
-    std::fs::rename(&tmp, root.join("current"))
-        .with_context(|| format!("publishing `current` symlink under {}", root.display()))
+    swap_current_entry(root)
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
 fn update_current(root: &Path, gen_name: &str) -> Result<()> {
-    let tmp = root.join("current.tmp");
-    std::fs::write(&tmp, gen_name).with_context(|| format!("writing {}", tmp.display()))?;
-    std::fs::rename(&tmp, root.join("current"))
-        .with_context(|| format!("publishing `current` marker under {}", root.display()))
+    use std::os::windows::fs::symlink_dir;
+    let tmp = root.join(CURRENT_TMP_NAME);
+    remove_entry(&tmp);
+    if symlink_dir(gen_name, &tmp).is_err() {
+        // Creating a directory symlink needs elevated privilege or
+        // Developer Mode; fall back to a real directory holding copies of
+        // the generation's files so `current/<artifact>` still resolves.
+        copy_dir_all(&root.join(gen_name), &tmp)
+            .with_context(|| format!("copying {gen_name} into {}", tmp.display()))?;
+    }
+    swap_current_entry(root)
+}
+
+#[cfg(windows)]
+fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
+    std::fs::create_dir_all(dst)
+        .with_context(|| format!("creating directory {}", dst.display()))?;
+    for entry in std::fs::read_dir(src).with_context(|| format!("reading {}", src.display()))? {
+        let entry = entry.with_context(|| format!("reading entry in {}", src.display()))?;
+        let dest_path = dst.join(entry.file_name());
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("reading file type of {}", entry.path().display()))?;
+        if file_type.is_dir() {
+            copy_dir_all(&entry.path(), &dest_path)?;
+        } else {
+            std::fs::copy(entry.path(), &dest_path)
+                .with_context(|| format!("copying {}", entry.path().display()))?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::indexing_slicing)]
+#[allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 mod tests {
     use super::*;
     use crate::carriers::OnDecl;
@@ -1129,12 +1210,18 @@ mod tests {
                 PathBuf::from(gen2.file_name().expect("gen2 name"))
             );
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
         {
-            let pointer = std::fs::read_to_string(root.join("current")).expect("current marker");
+            let artifact = root
+                .join("current")
+                .join("0.deposit.wasm")
+                .canonicalize()
+                .expect("current/0.deposit.wasm resolves as a directory entry");
             assert_eq!(
-                pointer,
-                gen2.file_name().expect("gen2 name").to_string_lossy()
+                artifact,
+                gen2.join("0.deposit.wasm")
+                    .canonicalize()
+                    .expect("gen2/0.deposit.wasm exists")
             );
         }
 
@@ -1147,6 +1234,76 @@ mod tests {
             !root.join(".lock").exists(),
             "lock is released once the whole build completes"
         );
+        std::fs::remove_dir_all(&root).expect("cleanup");
+    }
+
+    #[test]
+    fn swap_current_entry_replaces_a_real_directory_across_repeated_publishes() {
+        // Exercises the swap algorithm the Windows fallback relies on (a
+        // real directory rather than a symlink) so it is checked on every
+        // host, including the platforms this crate is actually built and
+        // tested on.
+        let root = temp_dir("swap-directory");
+        std::fs::create_dir_all(&root).expect("create root");
+
+        for (n, marker) in [(1u32, "one"), (2, "two"), (3, "three")] {
+            let tmp = root.join(CURRENT_TMP_NAME);
+            remove_entry(&tmp);
+            std::fs::create_dir_all(&tmp).expect("create tmp directory");
+            std::fs::write(tmp.join("artifact.txt"), marker).expect("write artifact");
+
+            swap_current_entry(&root).unwrap_or_else(|error| panic!("swap {n}: {error:#}"));
+
+            let content = std::fs::read_to_string(root.join(CURRENT_NAME).join("artifact.txt"))
+                .unwrap_or_else(|error| panic!("read current after swap {n}: {error}"));
+            assert_eq!(content, marker);
+        }
+
+        std::fs::remove_dir_all(&root).expect("cleanup");
+    }
+
+    #[test]
+    fn swap_current_entry_replaces_a_symlink_across_repeated_publishes() {
+        #[cfg(unix)]
+        use std::os::unix::fs::symlink;
+
+        // A dangling target is fine: the test only reads the pointer, not
+        // through it, matching how `update_current` never dereferences the
+        // generation it points at.
+        #[cfg(unix)]
+        fn install(tmp: &Path, target: &str) {
+            symlink(target, tmp).expect("create symlink");
+        }
+
+        #[cfg(not(unix))]
+        fn install(tmp: &Path, target: &str) {
+            std::fs::write(tmp, target).expect("create marker file");
+        }
+
+        let root = temp_dir("swap-symlink");
+        std::fs::create_dir_all(&root).expect("create root");
+
+        for (n, target) in [(1u32, "gen-1"), (2, "gen-2"), (3, "gen-3")] {
+            let tmp = root.join(CURRENT_TMP_NAME);
+            remove_entry(&tmp);
+            install(&tmp, target);
+
+            swap_current_entry(&root).unwrap_or_else(|error| panic!("swap {n}: {error:#}"));
+
+            #[cfg(unix)]
+            {
+                let resolved =
+                    std::fs::read_link(root.join(CURRENT_NAME)).expect("current is a symlink");
+                assert_eq!(resolved, PathBuf::from(target));
+            }
+            #[cfg(not(unix))]
+            {
+                let content =
+                    std::fs::read_to_string(root.join(CURRENT_NAME)).expect("current marker");
+                assert_eq!(content, target);
+            }
+        }
+
         std::fs::remove_dir_all(&root).expect("cleanup");
     }
 
