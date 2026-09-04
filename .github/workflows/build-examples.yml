@@ -12,13 +12,16 @@ name: Build examples (reusable)
 # workflow edits (a per-example flag override, if the example needs one,
 # is the only case that still touches this file — see the `discover` job).
 #
-# Jobs (all independent except `build`, which needs the other two):
-#   discover           - lists examples/*/Cargo.toml and emits the build matrix
+# Jobs (all independent except `build` and `unit-tests-examples`, which need
+# `discover`):
+#   discover           - lists examples/*/Cargo.toml and emits the build matrix,
+#                        plus the list of testenv-wired (host-testable) packages
 #   build-tool         - builds `rshooks-build` once (release) and shares the
 #                        binary via artifact, so it isn't rebuilt per example
 #   clippy             - lints the whole examples workspace once (not per-example)
 #   testenv-parity     - continuous zero-wasm-impact probe (design doc §7)
-#   unit-tests-examples - off-chain unit tests (rshooks-testenv harness)
+#   unit-tests-examples - off-chain unit tests (rshooks-testenv harness), run for
+#                        every package `discover` reports as testenv-wired
 #   build              - matrix job, one leg per example, fail-fast: false so one
 #                        example failing never blocks the others from completing.
 #                        After build/check, each leg also asserts
@@ -44,8 +47,12 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.discover.outputs.matrix }}
+      test-packages: ${{ steps.discover.outputs.test-packages }}
     steps:
       - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain (per rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
 
       - name: Build example matrix from examples/*/Cargo.toml
         id: discover
@@ -79,6 +86,17 @@ jobs:
           echo "Discovered matrix:"
           jq . <<<"$matrix"
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+          # Host-testable examples: crates with a dev-dependency on
+          # rshooks-testenv, i.e. the ones wired up with off-chain unit
+          # tests under tests/. Derived from cargo metadata instead of
+          # hand-listed so a new testenv-wired example is picked up
+          # without a workflow edit.
+          test_packages="$(cargo metadata --manifest-path examples/Cargo.toml --format-version 1 --no-deps \
+            | jq -r '[.packages[] | select(.dependencies[]? | .name == "rshooks-testenv" and .kind == "dev") | .name] | sort | join(" ")')"
+
+          echo "Host-testable (testenv-wired) packages: $test_packages"
+          echo "test-packages=$test_packages" >> "$GITHUB_OUTPUT"
 
   build-tool:
     name: Build rshooks-build (shared binary)
@@ -146,6 +164,7 @@ jobs:
   # Off-chain tests for the harness and examples that opt into its host wiring.
   unit-tests-examples:
     name: Off-chain unit tests (rshooks-testenv)
+    needs: discover
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -158,8 +177,19 @@ jobs:
       - name: cargo test -p rshooks-testenv (root workspace)
         run: cargo test -p rshooks-testenv
 
+      # ${{ needs.discover.outputs.test-packages }} is a space-separated
+      # list of examples/ package names that declare a dev-dependency on
+      # rshooks-testenv (see the `discover` job) - every host-testable
+      # example, not a hand-picked subset.
       - name: cargo test (examples workspace, testenv-wired examples)
-        run: cargo test --manifest-path examples/Cargo.toml -p state-counter -p emit-txn -p typed-results -p sto-writer -p typed-views
+        run: |
+          set -euo pipefail
+          pkgs=(${{ needs.discover.outputs.test-packages }})
+          args=()
+          for pkg in "${pkgs[@]}"; do
+            args+=(-p "$pkg")
+          done
+          cargo test --manifest-path examples/Cargo.toml "${args[@]}"
 
   build:
     name: ${{ matrix.name }}
