@@ -6,6 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use crate::carriers::{EntryDecl, SiDecl, SigParamDecl, resolve_trigger_masks};
 use crate::metadata::{hook_mask, utf8_hex};
@@ -14,9 +15,14 @@ use crate::metadata::{hook_mask, utf8_hex};
 /// existing installed Hook at a declared (non-gap) position.
 pub const HSF_OVERRIDE: u32 = 1;
 
-/// Base58 alphabet used by XRPL/Xahau addresses (excludes `0`, `O`, `I`, `l`
-/// to avoid visual ambiguity).
-const BASE58_ALPHABET: &str = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+/// XRPL/Xahau's base58 alphabet — not Bitcoin's; same 58 symbols in a
+/// different order, so decoding must index into this exact ordering.
+/// `ALPHABET[0]` (`'r'`) is this alphabet's "zero" symbol.
+const ALPHABET: &[u8; 58] = b"rpshnaf39wBUDNEGHJKLM4PQRST7VWXYZ2bcdeCg65jkm8oFqi1tuvAxyz";
+
+/// Length of a base58check-decoded classic address: 1 version byte +
+/// 20-byte AccountID payload + 4-byte checksum.
+const DECODED_LEN: usize = 25;
 
 /// Validates a `--namespace` CLI value: exactly 64 ASCII hex characters.
 /// Normalizes the result to uppercase (the conventional `HookNamespace`
@@ -31,26 +37,112 @@ pub fn validate_namespace(s: &str) -> Result<String, String> {
     Ok(s.to_ascii_uppercase())
 }
 
-/// Validates a `--account` CLI value: a superficial (non-checksum) sanity
-/// check that it looks like an XRPL/Xahau classic address — non-empty,
-/// starts with `'r'`, and every remaining character is in the base58
-/// alphabet. Intended for use as a clap `value_parser`.
+/// Validates a `--account` CLI value: it must base58check-decode into a
+/// well-formed classic XRPL/Xahau AccountID — every character in the XRPL
+/// base58 alphabet, decoded length exactly 25 bytes, version byte `0x00`,
+/// and a matching double-SHA256 checksum. Intended for use as a clap
+/// `value_parser`.
 pub fn validate_account(s: &str) -> Result<String, String> {
-    if !s.starts_with('r') {
-        return Err("--account must start with 'r'".to_string());
-    }
-    let rest = s.get(1..).unwrap_or_default();
-    if rest.is_empty() {
-        return Err("--account must not be empty".to_string());
-    }
-    if !rest.chars().all(|c| BASE58_ALPHABET.contains(c)) {
-        return Err(
-            "--account must contain only base58 characters after the leading 'r' \
-             (no '0', 'O', 'I', or 'l')"
-                .to_string(),
-        );
-    }
+    decode_classic_address(s).map_err(|e| format!("--account: {e}"))?;
     Ok(s.to_string())
+}
+
+/// Why a classic address string failed to decode into a valid 20-byte
+/// AccountID.
+enum AddressDecodeError {
+    InvalidChar(char),
+    WrongLength(usize),
+    WrongVersion(u8),
+    ChecksumMismatch,
+}
+
+impl std::fmt::Display for AddressDecodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidChar(c) => write!(f, "'{c}' is not a valid XRPL base58 character"),
+            Self::WrongLength(len) => write!(
+                f,
+                "decoded address is {len} bytes, expected {DECODED_LEN} \
+                 (1 version byte + 20-byte AccountID + 4-byte checksum)"
+            ),
+            Self::WrongVersion(v) => write!(
+                f,
+                "decoded address has version byte 0x{v:02X}, expected 0x00 (classic AccountID)"
+            ),
+            Self::ChecksumMismatch => {
+                write!(
+                    f,
+                    "base58check checksum does not match — the address has a typo"
+                )
+            }
+        }
+    }
+}
+
+/// Decodes a classic XRPL/Xahau r-address string into its 20-byte
+/// AccountID, verifying length, version byte, and checksum along the way.
+// Every index/slice below is only reached after the `decoded.len() !=
+// DECODED_LEN` (25) check above returns early, so all of them are in
+// bounds by construction.
+#[allow(clippy::indexing_slicing)]
+fn decode_classic_address(address: &str) -> Result<[u8; 20], AddressDecodeError> {
+    let decoded = base58_decode(address)?;
+
+    if decoded.len() != DECODED_LEN {
+        return Err(AddressDecodeError::WrongLength(decoded.len()));
+    }
+
+    let version = decoded[0];
+    if version != 0x00 {
+        return Err(AddressDecodeError::WrongVersion(version));
+    }
+
+    let digest = Sha256::digest(Sha256::digest(&decoded[0..21]));
+    if digest[0..4] != decoded[21..25] {
+        return Err(AddressDecodeError::ChecksumMismatch);
+    }
+
+    let mut account_id = [0u8; 20];
+    account_id.copy_from_slice(&decoded[1..21]);
+    Ok(account_id)
+}
+
+/// Plain base58 decode (XRPL alphabet), with leading zero-symbol (`'r'`)
+/// characters becoming leading zero bytes in the output — no length or
+/// checksum validation, that's [`decode_classic_address`]'s job.
+fn base58_decode(s: &str) -> Result<Vec<u8>, AddressDecodeError> {
+    // Accumulator built by repeated multiply-by-58-and-add, stored
+    // little-endian while accumulating, reversed to big-endian at the end.
+    let mut num: Vec<u8> = Vec::new();
+
+    for ch in s.chars() {
+        let idx = ALPHABET
+            .iter()
+            .position(|&b| b as char == ch)
+            .ok_or(AddressDecodeError::InvalidChar(ch))?;
+
+        let mut carry = idx as u32;
+        for byte in num.iter_mut() {
+            carry += (*byte as u32) * 58;
+            *byte = (carry & 0xff) as u8;
+            carry >>= 8;
+        }
+        while carry > 0 {
+            num.push((carry & 0xff) as u8);
+            carry >>= 8;
+        }
+    }
+
+    num.reverse();
+
+    #[allow(clippy::indexing_slicing)] // ALPHABET[0] is a fixed in-bounds index
+    let leading_zeros = s
+        .chars()
+        .take_while(|&ch| ch == ALPHABET[0] as char)
+        .count();
+    let mut decoded = vec![0u8; leading_zeros];
+    decoded.extend_from_slice(&num);
+    Ok(decoded)
 }
 
 /// One `Hooks[i]` array element: either an untouched-position gap
@@ -463,6 +555,31 @@ mod tests {
     fn validate_account_rejects_excluded_base58_chars() {
         assert!(validate_account("r0b9CJAWyB4rj91VRWn96DkukG4bwdtyTh").is_err());
         assert!(validate_account("rOb9CJAWyB4rj91VRWn96DkukG4bwdtyTh").is_err());
+    }
+
+    #[test]
+    fn validate_account_rejects_too_short_address() {
+        let err = validate_account("rr").expect_err("must fail");
+        assert!(err.contains("--account"), "{err}");
+    }
+
+    #[test]
+    fn validate_account_rejects_bad_checksum() {
+        // Last char 'h' -> 'H': valid chars/length/version, bad checksum.
+        assert!(validate_account("rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTH").is_err());
+    }
+
+    #[test]
+    fn validate_account_rejects_wrong_version_byte() {
+        // Well-formed base58check string with version byte 5 (seed prefix),
+        // not 0 (classic AccountID).
+        assert!(validate_account("sJHw2iRxXngPFKZvYbjkfifqt8CJghksMM").is_err());
+    }
+
+    #[test]
+    fn validate_account_rejects_wrong_length() {
+        // Truncated by 2 chars: decodes to fewer than 25 bytes.
+        assert!(validate_account("rHb9CJAWyB4rj91VRWn96DkukG4bwdty").is_err());
     }
 
     #[test]
