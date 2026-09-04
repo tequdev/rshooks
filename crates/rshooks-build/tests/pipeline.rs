@@ -17,6 +17,29 @@ fn wasm(src: &str) -> Vec<u8> {
     wat::parse_str(src).expect("fixture is valid wat")
 }
 
+/// Drops every custom section (`wat::parse_str` emits a debug name section
+/// the native guard checker rejects outright: "Hook contained a custom
+/// section, which is not allowed. Use cleaner."), leaving every other
+/// section's raw bytes untouched. Used by fixtures that need to reach the
+/// native checker without going through the full `clean()` pipeline (which
+/// would also strip the very export/section this test is targeting).
+fn strip_custom_sections(wasm: &[u8]) -> Vec<u8> {
+    let mut module = wasm_encoder::Module::new();
+    for payload in wasmparser::Parser::new(0).parse_all(wasm) {
+        let payload = payload.expect("valid wasm");
+        if matches!(payload, wasmparser::Payload::CustomSection(_)) {
+            continue;
+        }
+        if let Some((id, range)) = payload.as_section() {
+            module.section(&wasm_encoder::RawSection {
+                id,
+                data: &wasm[range],
+            });
+        }
+    }
+    module.finish()
+}
+
 fn opts() -> Options {
     Options::default()
 }
@@ -700,6 +723,156 @@ fn validator_rejects_float_opcode() {
     assert!(
         err.to_string().to_lowercase().contains("float") || err.to_string().contains("MVP"),
         "{err}"
+    );
+}
+
+/// A guard-clean fixture (properly imports and calls `_g` in a correctly
+/// guarded loop, per `VALID_GUARDED_HOOK`-style construction in
+/// `guard_native.rs`) plus one non-guard hard error. The native upstream
+/// guard checker only evaluates guard shape (`docs/DESIGN.md` §6.5); it
+/// silently skips over any export other than `hook`/`cbak` and any opcode
+/// it recognizes byte-for-byte (including `f32.const`/`f64.const`), so it
+/// accepts both fixtures below. `verify()` (not just `validate()`) must
+/// still hard-fail: the native checker's acceptance may only downgrade
+/// guard/WCE findings, never these.
+fn guard_clean_prologue() -> &'static str {
+    r#"
+      (import "env" "_g" (func $g (param i32 i32) (result i32)))
+      (import "env" "accept" (func $accept (param i32 i32 i64) (result i64)))
+      (memory 1)
+    "#
+}
+
+/// A guard-clean fixture (an extra `evil` export alongside `hook`) that the
+/// native guard checker accepts: it silently skips over any export other
+/// than `hook`/`cbak`.
+fn guard_clean_extra_export_hook_bytes() -> Vec<u8> {
+    let src = format!(
+        r#"
+        (module
+          {prologue}
+          (func $hook (param i32) (result i64)
+            (local $i i32)
+            (loop $l
+              (call $g (i32.const 1) (i32.const 10))
+              drop
+              (local.set $i (i32.add (local.get $i) (i32.const 1)))
+              (br_if $l (i32.lt_u (local.get $i) (i32.const 10))))
+            (call $accept (i32.const 0) (i32.const 0) (i64.const 0)))
+          (export "hook" (func $hook))
+          (export "evil" (func $hook))
+          (data (i32.const 0) "0123456789012345678901234567890123456789012345678901234567890123456789"))
+        "#,
+        prologue = guard_clean_prologue()
+    );
+    strip_custom_sections(&wasm(&src))
+}
+
+/// A guard-clean fixture (a floating-point local and a `f32.const` opcode)
+/// that the native guard checker accepts: it recognizes and skips over
+/// `f32.const`/`f64.const` byte-for-byte, having no opinion on float types.
+fn guard_clean_float_opcode_hook_bytes() -> Vec<u8> {
+    let src = format!(
+        r#"
+        (module
+          {prologue}
+          (func $hook (param i32) (result i64)
+            (local $i i32)
+            (local $f f32)
+            (local.set $f (f32.const 1.0))
+            (loop $l
+              (call $g (i32.const 1) (i32.const 10))
+              drop
+              (local.set $i (i32.add (local.get $i) (i32.const 1)))
+              (br_if $l (i32.lt_u (local.get $i) (i32.const 10))))
+            (call $accept (i32.const 0) (i32.const 0) (i64.const 0)))
+          (export "hook" (func $hook))
+          (data (i32.const 0) "0123456789012345678901234567890123456789012345678901234567890123456789"))
+        "#,
+        prologue = guard_clean_prologue()
+    );
+    strip_custom_sections(&wasm(&src))
+}
+
+/// The native upstream guard checker only evaluates guard shape
+/// (`docs/DESIGN.md` §6.5). `verify()` (not just `validate()`) must still
+/// hard-fail on the extra export above: the native checker's acceptance
+/// may only downgrade guard/WCE findings, never these.
+#[test]
+fn verify_rejects_extra_export_even_when_native_guard_checker_accepts() {
+    let bytes = guard_clean_extra_export_hook_bytes();
+
+    rshooks_build::validate_guards_native(&bytes).expect("native checker ignores the extra export");
+
+    let err = rshooks_build::verify(&bytes, &opts()).unwrap_err();
+    assert!(
+        err.to_string().contains("evil"),
+        "verify() must still reject the extra export: {err}"
+    );
+}
+
+#[test]
+fn verify_rejects_float_opcode_even_when_native_guard_checker_accepts() {
+    let bytes = guard_clean_float_opcode_hook_bytes();
+
+    rshooks_build::validate_guards_native(&bytes)
+        .expect("native checker skips over float opcodes byte-for-byte");
+
+    let err = rshooks_build::verify(&bytes, &opts()).unwrap_err();
+    assert!(
+        err.to_string().to_lowercase().contains("float") || err.to_string().contains("MVP"),
+        "verify() must still reject the floating-point local/opcode: {err}"
+    );
+}
+
+/// Same as [`verify_rejects_extra_export_even_when_native_guard_checker_accepts`]
+/// but through the `rshooks check` CLI entry point, which calls `verify()`
+/// directly on arbitrary external wasm with no cleaning step — the exact
+/// path a hand-crafted or third-party `.wasm` file takes.
+#[test]
+fn check_cli_exits_nonzero_on_extra_export_even_when_native_guard_checker_accepts() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("extra_export.wasm");
+    std::fs::write(&path, guard_clean_extra_export_hook_bytes()).expect("write fixture");
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_rshooks"))
+        .arg("check")
+        .arg(&path)
+        .output()
+        .expect("running the rshooks binary");
+
+    assert!(
+        !output.status.success(),
+        "check must exit non-zero on an extra export: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("evil"), "{stderr}");
+}
+
+#[test]
+fn check_cli_exits_nonzero_on_float_opcode_even_when_native_guard_checker_accepts() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("float_opcode.wasm");
+    std::fs::write(&path, guard_clean_float_opcode_hook_bytes()).expect("write fixture");
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_rshooks"))
+        .arg("check")
+        .arg(&path)
+        .output()
+        .expect("running the rshooks binary");
+
+    assert!(
+        !output.status.success(),
+        "check must exit non-zero on a floating-point opcode: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
+    assert!(
+        stderr.contains("float") || stderr.contains("mvp"),
+        "{stderr}"
     );
 }
 

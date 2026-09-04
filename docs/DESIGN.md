@@ -1708,12 +1708,19 @@ external wasm (including C-built hooks).
 
 ### 6.5 Verdict authority: the vendored upstream checker
 
-The final accept/reject verdict for API-version-0 modules comes from
+For API-version-0 modules, the guard-shape/WCE verdict comes from
 **xahaud's own guard checker, compiled into rshooks-build from vendored,
 byte-identical upstream source** — not from a Rust reimplementation. A port,
 however careful, can diverge from what the node actually runs; the checker
 is consensus logic, not a reference tool, so divergence means "rshooks-build
-says valid, SetHook says `temMALFORMED`" (or worse, vice versa).
+says valid, SetHook says `temMALFORMED`" (or worse, vice versa). Its
+authority is scoped to what it actually evaluates (guard prologue shape,
+R1/R2, block nesting, worst-case instruction count): an accepting verdict
+downgrades a Rust-only finding in that class to a warning, but never
+overrides a Rust hard error outside that class (MVP validity, the
+export/import set, structural sections, float opcodes, `call_indirect`,
+recursion, the size gate) — the native checker has no opinion on those at
+all, so its acceptance says nothing about them.
 
 Vendored files (upstream `Xahau/xahaud`, branch `release`, kept verbatim —
 never hand-edited; re-sync only via `scripts/sync-vendor.sh`, which also
@@ -1753,8 +1760,10 @@ legality), so the division of labor is:
   (cleaning, auto-guard insertion, the 65,535-byte size gate, fee
   estimate, api-version 1 checks) plus pre-transform diagnostics with
   precise function/offset locations, which upstream's log lacks. If the
-  Rust validator and the C++ checker ever disagree, the C++ verdict wins
-  and the disagreement is surfaced as a rshooks-build bug.
+  Rust validator and the C++ checker disagree on a guard/WCE finding, the
+  C++ verdict wins and the disagreement is surfaced as a rshooks-build bug;
+  a Rust hard error outside that class always stands regardless of what the
+  C++ checker says, since it never evaluated that rule to begin with.
 
 The cleaner remains native Rust (upstream hook-cleaner is a separate
 project, and cleaning is a transform whose output the authoritative checker
