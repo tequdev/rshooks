@@ -63,6 +63,13 @@ const GENERATED_FILES_HOOKS_LIB: &[&str] = &[
     "views/inner.rs",
 ];
 
+/// The set of `rshooks-build/src/`-relative `.rs` files this generator owns:
+/// [`codegen::tx_type_table`]'s build-side transaction-type name/code table,
+/// generated from the same `tts.h` constants as
+/// [`codegen::tx_type`]'s typed `TxType` enum so the two can never drift
+/// apart.
+const GENERATED_FILES_BUILD: &[&str] = &["tx_type_table.rs"];
+
 /// The generated intermediate-representation file, checked in at the
 /// `rshooks-core` crate root (not under `src/`, since it isn't Rust source):
 /// the pipeline's `hook_api.json` artifact (module docs on [`crate::ir`]).
@@ -115,6 +122,12 @@ fn src_dir() -> PathBuf {
 /// own module doc comment for why).
 fn rshooks_src_dir() -> PathBuf {
     repo_root().join("crates/rshooks/src")
+}
+
+/// `crates/rshooks-build`'s `src/` directory — where
+/// [`GENERATED_FILES_BUILD`] lands.
+fn rshooks_build_src_dir() -> PathBuf {
+    repo_root().join("crates/rshooks-build/src")
 }
 
 fn read(path: &Path) -> Result<String> {
@@ -312,6 +325,29 @@ fn generate_rshooks_files(
     Ok(out)
 }
 
+/// Generates every `rshooks-build`-targeted file's *unformatted* content,
+/// keyed by its `rshooks-build/src/`-relative filename —
+/// [`codegen::tx_type_table`]'s build-side transaction-type name/code
+/// table, derived from the same `hook_api.json` artifact as
+/// [`generate_rshooks_files`]'s `tx_type.rs`.
+fn generate_build_files(hook_api_json: &str) -> Result<BTreeMap<&'static str, String>> {
+    let spec: HookApiSpec =
+        serde_json::from_str(hook_api_json).context("deserializing hook_api.json")?;
+
+    let mut out = BTreeMap::new();
+    out.insert(
+        "tx_type_table.rs",
+        codegen::tx_type_table::generate(&spec.tts)?,
+    );
+
+    for name in GENERATED_FILES_BUILD {
+        if !out.contains_key(name) {
+            bail!("internal error: generator produced no content for {name}");
+        }
+    }
+    Ok(out)
+}
+
 /// A scratch directory, auto-removed on drop, carrying a copy of the repo's
 /// `rustfmt.toml` so `rustfmt` (run directly, not through `cargo fmt`)
 /// discovers the same style config it would inside the real tree.
@@ -378,11 +414,11 @@ fn format_all(
 }
 
 /// `cargo xtask gen-core`: writes `hook_api.json`, then the generated +
-/// `rustfmt`-formatted `.rs` files, into `crates/rshooks-core/` and (for
-/// [`codegen::sfield`]'s and [`codegen::tx_type`]'s output)
-/// `crates/rshooks/`, then runs `cargo fmt
-/// -p rshooks-core -p rshooks` as a belt-and-braces final pass over the
-/// real files.
+/// `rustfmt`-formatted `.rs` files, into `crates/rshooks-core/`, (for
+/// [`codegen::sfield`]'s and [`codegen::tx_type`]'s output) `crates/rshooks/`,
+/// and (for [`codegen::tx_type_table`]'s output) `crates/rshooks-build/`,
+/// then runs `cargo fmt -p rshooks-core -p rshooks -p rshooks-build` as a
+/// belt-and-braces final pass over the real files.
 pub fn run_update() -> Result<()> {
     let hook_api_json = build_hook_api_json()?;
     let protocol_formats_json = build_protocol_formats_json(&hook_api_json)?;
@@ -402,6 +438,8 @@ pub fn run_update() -> Result<()> {
     let generated_rshooks =
         generate_rshooks_files(&hook_api_json, &protocol_formats_json, &availability)?;
     let formatted_rshooks = format_all(&generated_rshooks)?;
+    let generated_build = generate_build_files(&hook_api_json)?;
+    let formatted_build = format_all(&generated_build)?;
 
     let json_path = crate_dir().join(HOOK_API_JSON);
     fs::write(&json_path, &hook_api_json)
@@ -442,22 +480,38 @@ pub fn run_update() -> Result<()> {
         println!("wrote {}", path.display());
     }
 
+    let rshooks_build_dir = rshooks_build_src_dir();
+    for (name, content) in &formatted_build {
+        let path = rshooks_build_dir.join(name);
+        fs::write(&path, content).with_context(|| format!("writing {}", path.display()))?;
+        println!("wrote {}", path.display());
+    }
+
     let status = Command::new("cargo")
-        .args(["fmt", "-p", "rshooks-core", "-p", "rshooks"])
+        .args([
+            "fmt",
+            "-p",
+            "rshooks-core",
+            "-p",
+            "rshooks",
+            "-p",
+            "rshooks-build",
+        ])
         .current_dir(repo_root())
         .status()
-        .context("running `cargo fmt -p rshooks-core -p rshooks`")?;
+        .context("running `cargo fmt -p rshooks-core -p rshooks -p rshooks-build`")?;
     if !status.success() {
-        bail!("`cargo fmt -p rshooks-core -p rshooks` failed");
+        bail!("`cargo fmt -p rshooks-core -p rshooks -p rshooks-build` failed");
     }
     Ok(())
 }
 
 /// `cargo xtask gen-core --check`: regenerates `hook_api.json` and formats
 /// the `.rs` files in a scratch directory, then byte-compares both against
-/// `crates/rshooks-core/hook_api.json`, `crates/rshooks-core/src/*.rs`, and
+/// `crates/rshooks-core/hook_api.json`, `crates/rshooks-core/src/*.rs`,
 /// [`codegen::sfield`]'s and [`codegen::tx_type`]'s `crates/rshooks/src/`
-/// output, without writing
+/// output, and [`codegen::tx_type_table`]'s
+/// `crates/rshooks-build/src/tx_type_table.rs` output, without writing
 /// anything there. Returns an error naming every mismatched file if any
 /// differ (the CI-facing exit-1 path); prints a confirmation and returns
 /// `Ok(())` when everything matches.
@@ -479,6 +533,8 @@ pub fn run_check() -> Result<()> {
     let generated_rshooks =
         generate_rshooks_files(&hook_api_json, &protocol_formats_json, &availability)?;
     let formatted_rshooks = format_all(&generated_rshooks)?;
+    let generated_build = generate_build_files(&hook_api_json)?;
+    let formatted_build = format_all(&generated_build)?;
 
     let mut mismatched = Vec::new();
 
@@ -518,9 +574,17 @@ pub fn run_check() -> Result<()> {
         }
     }
 
+    let rshooks_build_dir = rshooks_build_src_dir();
+    for (name, content) in &formatted_build {
+        let on_disk = read(&rshooks_build_dir.join(name)).unwrap_or_default();
+        if *content != on_disk {
+            mismatched.push(*name);
+        }
+    }
+
     if mismatched.is_empty() {
         println!(
-            "cargo xtask gen-core --check: crates/rshooks-core/hook_api.json, crates/rshooks-core/protocol_formats.json, crates/rshooks-core/src/*.rs, and crates/rshooks/src/sfield.rs + tx_type.rs + ledger_entry_type.rs + views/{{tx,ledger,inner}}.rs are up to date"
+            "cargo xtask gen-core --check: crates/rshooks-core/hook_api.json, crates/rshooks-core/protocol_formats.json, crates/rshooks-core/src/*.rs, crates/rshooks/src/sfield.rs + tx_type.rs + ledger_entry_type.rs + views/{{tx,ledger,inner}}.rs, and crates/rshooks-build/src/tx_type_table.rs are up to date"
         );
         Ok(())
     } else {

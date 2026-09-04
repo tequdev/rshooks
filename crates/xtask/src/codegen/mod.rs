@@ -34,6 +34,11 @@ pub mod ledger_entry_type;
 /// `tts.h` — one of the generators in this module whose output lands
 /// outside `rshooks-core`; see its own module doc comment for why.
 pub mod tx_type;
+/// Generates `crates/rshooks-build/src/tx_type_table.rs` (the build-side
+/// transaction-type name/code table) from `tts.h`, sharing [`tx_type`]'s
+/// name spellings so the typed enum and the build-side validator can never
+/// drift apart; see its own module doc comment for why.
+pub mod tx_type_table;
 /// Generates `crates/rshooks/src/views/{tx,ledger,inner}.rs` (typed read
 /// views over every declared format) from `protocol_formats.json`.
 pub mod views;
