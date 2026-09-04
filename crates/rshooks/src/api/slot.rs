@@ -17,8 +17,8 @@
 //! 197 instructions and 925 bytes either way (see `examples/08_slot-ledger`'s
 //! README). Reach for the typed layer by default; reach for this one when a
 //! hook genuinely wants to place things in specific numbered slots and
-//! manage them itself, which `examples/80_reward` and `examples/81_govern`
-//! both do.
+//! manage them itself, which `examples/80_governance`'s `govern`/`reward`
+//! entries both do.
 //!
 //! **Do not mix the two.** Both address the same 255 registers. A
 //! `slot_clear(3)` here while a `SlotObject` happens to hold slot 3 leaves

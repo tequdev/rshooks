@@ -901,7 +901,7 @@ const _: () = {
 /// is what reaches the guard checker's 32-level limit.
 /// `examples/15_slot-objects` hit 53 that way and came back to 4 by putting
 /// each walk in its own `#[inline(never)]` function — the same escape hatch
-/// `examples/81_govern` uses.
+/// `examples/80_governance`'s `govern` entry uses.
 #[macro_export]
 macro_rules! slot_path {
     // Entry: bind the root once (by reference — never cleared), then
