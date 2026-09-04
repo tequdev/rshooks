@@ -1,0 +1,25 @@
+error[E0080]: evaluation panicked: txn_template!: `fee` is declared as `u32_field` but its sfXxx code is not an STI_UINT32 field
+  --> tests/ui/fail/txn_template_sti_mismatch.rs:9:1
+   |
+9  | / txn_template! {
+10 | |     struct Payment {
+11 | |         transaction_type = ttPAYMENT,
+12 | |         sequence: u32_field(sfSequence) = 0,
+...  |
+20 | | }
+   | |_^ evaluation of `_` failed here
+   |
+   = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `txn_template` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0080]: evaluation panicked: txn_template!: `sfFee` must be declared as `native_amount(sfFee)` — prepare_for_emit would corrupt the template with any other kind (it writes an 8-byte native amount)
+  --> tests/ui/fail/txn_template_sti_mismatch.rs:9:1
+   |
+9  | / txn_template! {
+10 | |     struct Payment {
+11 | |         transaction_type = ttPAYMENT,
+12 | |         sequence: u32_field(sfSequence) = 0,
+...  |
+20 | | }
+   | |_^ evaluation of `_` failed here
+   |
+   = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `txn_template` (in Nightly builds, run with -Z macro-backtrace for more info)

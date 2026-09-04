@@ -45,6 +45,7 @@ directory is prefixed) and matches what its own README, `Cargo.toml`, and
 | 18 | [`typed-views`](18_typed-views) | `rshooks::views`: generated, type-checked read views — an incoming-IOU gate reading `tx::Payment`, then `ledger::RippleState`'s freeze flags and `ledger::AccountRoot`'s optional `sfTransferRate`, with a per-read cost table |
 | 19 | [`param-signature`](19_param-signature) | the Hook Parameter Signature Interface: `#[hook(..)]` fn arguments (`increment(account: AccountID, count: UInt16)`) as declared, typed, machine-readable Hook parameters, with generated `sethook.template.json` declarations |
 | 20 | [`state-interface`](20_state-interface) | the Hook State Interface: `#[state_interface(id = .., key(..), value(..))]` chain-struct fields as a declared, typed, machine-readable state schema, with generated value structs and `sethook.template.json` declarations |
+| 21 | [`txn-template-nested`](21_txn-template-nested) | `txn_template!`'s homogeneous indexed array form (`array(sfX) [ Elem: object(sfY) { .. } ; N ]`) and `fixed_vl(sfX, N)` (a compile-time-length-prefixed VL blob): a Remit whose two-element `sfAmounts` array (an issued `amount` entry with a baked currency/issuer, repeated) and single-element `sfMemos` array (a fixed-length memo type/data) are declared once and filled at runtime through generated `amounts(index)`/`memos(index) -> Option<Elem<'_>>` accessors, with no `StoWriter` needed |
 
 ## 80+: Production hooks in Rust
 

@@ -2,13 +2,16 @@
 
 [Emitting Transactions](emitting.md) covers `txn_template!`: a declarative
 macro that bakes a transaction's field offsets and total length into a
-`const fn`, computed entirely at compile time. That only works when the
-transaction's shape is known ahead of time. A transaction with a
-runtime-sized nested `STArray`/`STObject` — Remit's `sfAmounts`, one
+`const fn`, computed entirely at compile time — including a fixed-shape
+nested `STObject`/`STArray`, such as a two-entry `sfAmounts` whose element
+count and shapes are known at declaration time (see [Emitting
+Transactions](emitting.md#nested-stobjectstarray)). What `txn_template!`
+cannot describe is a *runtime-sized* shape: a variable element count, or a
+container present only sometimes — Remit's `sfAmounts`, one
 `sfAmountEntry` per destination, present or absent depending on what the
-invoking transaction's hook parameters supply — cannot be described that
-way. `rshooks::sto_writer::StoWriter` is the runtime counterpart:
-a bounded, allocation-free cursor over caller-owned storage that writes
+invoking transaction's hook parameters supply. `rshooks::sto_writer::StoWriter`
+is the runtime counterpart for that case: a bounded, allocation-free cursor
+over caller-owned storage that writes
 field headers, tracks open containers, and checks every write against the
 buffer's real bounds. This page walks through it end to end using
 `examples/17_sto-writer`'s Remit hook as the worked example throughout —
@@ -45,8 +48,24 @@ shape:
 | `u32_field(f, value)` | an `STI_UINT32` field (e.g. `sfFlags`, `sfSequence`) |
 | `account_id(f, &value)` | an `STI_ACCOUNT` field (a 1-byte VL length of `20`, then the 20 raw bytes) |
 | `empty_vl(f)` | an `STI_VL` field as an empty blob (a 1-byte zero-length marker) — what `SigningPubKey` looks like on an emitted transaction |
+| `vl(f, value)` | an `STI_VL` field with a caller-supplied length prefix and payload — rippled's 1/2/3-byte `VL` length encoding, sized to `value.len()` |
 | `native_amount(f, drops)` | an `STI_AMOUNT` field encoded as a native (XRP/XAH) amount |
 | `iou_amount(f, xfl, &currency, &issuer)` | an `STI_AMOUNT` field encoded as an issued amount, via the `float_sto` host call |
+
+`iou_amount` is the runtime counterpart of `txn_template!`'s `amount` kind
+(see [Emitting Transactions](emitting.md#amount-the-48-byte-issued-form)) —
+same 48-byte issued layout, written through a host call here instead of
+baked in at compile time. Likewise, `vl` is the runtime counterpart of
+`txn_template!`'s `fixed_vl(sfX, N)` kind: the same length-prefix encoding,
+computed from a runtime `value.len()` here instead of baked in for a
+compile-time-fixed `N`. `vl` is the one writer whose payload length the
+caller controls: pass a `&[u8; N]` (or another length the optimizer can
+see as a constant at the call site) so the copy stays a fixed-size store
+after inlining — a genuinely runtime-sized slice can lower to a
+compiler-generated copy loop, which `rshooks build`'s guard checker
+rejects. `empty_vl(f)` is exactly `vl(f, &[])` plus the
+`SigningPubKey` plumbing bookkeeping `vl` does not do — prefer `empty_vl`
+there.
 
 Containers nest with `begin_object(f)`/`end_object()` (an `STObject` field,
 e.g. `sfAmountEntry`) and `begin_array(f)`/`end_array()` (an `STArray`
