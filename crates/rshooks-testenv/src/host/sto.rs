@@ -282,6 +282,29 @@ mod tests {
         assert_eq!(sto_validate(&[]), TOO_SMALL);
     }
 
+    /// A single field, nested `depth` levels deep (an empty innermost
+    /// object): `depth` copies of the `(type 14, field 2)` header opening
+    /// one level each, followed by `depth` `0xE1` terminators closing them
+    /// back out. Matches real xahaud's `get_stobject_length` recursion-depth
+    /// convention (`HookAPI.cpp:2901`; see also
+    /// `crate::emit_walk::STO_MAX_RECURSION_DEPTH`'s doc comment).
+    fn nested_object_chain(depth: u32) -> Vec<u8> {
+        let depth = depth as usize;
+        let mut out = vec![0xE2u8; depth]; // (type 14, field 2), repeated
+        out.extend(vec![0xE1u8; depth]); // OBJECT_END_MARKER, repeated
+        out
+    }
+
+    #[test]
+    fn sto_validate_accepts_nesting_up_to_the_real_hosts_limit_and_rejects_beyond_it() {
+        // Real xahaud accepts recursion depths 0..=10 (`HookAPI.cpp:2901`);
+        // depth 10 is the boundary, depth 11 is over it.
+        assert_eq!(sto_validate(&nested_object_chain(2)), 1);
+        assert_eq!(sto_validate(&nested_object_chain(3)), 1);
+        assert_eq!(sto_validate(&nested_object_chain(10)), 1);
+        assert_eq!(sto_validate(&[0xE2; 11]), 0);
+    }
+
     // -- sto_subfield --
 
     #[test]
