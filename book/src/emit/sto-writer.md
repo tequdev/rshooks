@@ -2,13 +2,16 @@
 
 [Emitting Transactions](emitting.md) covers `txn_template!`: a declarative
 macro that bakes a transaction's field offsets and total length into a
-`const fn`, computed entirely at compile time. That only works when the
-transaction's shape is known ahead of time. A transaction with a
-runtime-sized nested `STArray`/`STObject` — Remit's `sfAmounts`, one
+`const fn`, computed entirely at compile time — including a fixed-shape
+nested `STObject`/`STArray`, such as a two-entry `sfAmounts` whose element
+count and shapes are known at declaration time (see [Emitting
+Transactions](emitting.md#nested-stobjectstarray)). What `txn_template!`
+cannot describe is a *runtime-sized* shape: a variable element count, or a
+container present only sometimes — Remit's `sfAmounts`, one
 `sfAmountEntry` per destination, present or absent depending on what the
-invoking transaction's hook parameters supply — cannot be described that
-way. `rshooks::sto_writer::StoWriter` is the runtime counterpart:
-a bounded, allocation-free cursor over caller-owned storage that writes
+invoking transaction's hook parameters supply. `rshooks::sto_writer::StoWriter`
+is the runtime counterpart for that case: a bounded, allocation-free cursor
+over caller-owned storage that writes
 field headers, tracks open containers, and checks every write against the
 buffer's real bounds. This page walks through it end to end using
 `examples/17_sto-writer`'s Remit hook as the worked example throughout —
@@ -47,6 +50,11 @@ shape:
 | `empty_vl(f)` | an `STI_VL` field as an empty blob (a 1-byte zero-length marker) — what `SigningPubKey` looks like on an emitted transaction |
 | `native_amount(f, drops)` | an `STI_AMOUNT` field encoded as a native (XRP/XAH) amount |
 | `iou_amount(f, xfl, &currency, &issuer)` | an `STI_AMOUNT` field encoded as an issued amount, via the `float_sto` host call |
+
+`iou_amount` is the runtime counterpart of `txn_template!`'s `amount` kind
+(see [Emitting Transactions](emitting.md#amount-the-48-byte-issued-form)) —
+same 48-byte issued layout, written through a host call here instead of
+baked in at compile time.
 
 Containers nest with `begin_object(f)`/`end_object()` (an `STObject` field,
 e.g. `sfAmountEntry`) and `begin_array(f)`/`end_array()` (an `STArray`

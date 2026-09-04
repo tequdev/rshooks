@@ -1,0 +1,12 @@
+error: txn_template!: unrecognized field declaration: bad: emit_details, @ end_object, emit_details: emit_details,
+  --> tests/ui/fail/txn_template_emit_details_nested.rs:9:1
+   |
+9  | / txn_template! {
+10 | |     struct Remit {
+11 | |         transaction_type = ttREMIT,
+12 | |         sequence: u32_field(sfSequence) = 0,
+...  |
+23 | | }
+   | |_^
+   |
+   = note: this error originates in the macro `$crate::__txn_template_step` which comes from the expansion of the macro `txn_template` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -596,6 +596,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "txn-template-nested"
+version = "0.2.0"
+dependencies = [
+ "rshooks",
+ "rshooks-testenv",
+]
+
+[[package]]
 name = "typed-data"
 version = "0.2.0"
 dependencies = [

@@ -1,0 +1,24 @@
+[package]
+name = "txn-template-nested"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+# `rlib` lets the `tests/` integration tests link this crate as an ordinary
+# dependency; the lib target's own unit-test harness (`test`, default
+# `true`) runs the in-crate `#[cfg(test)]` module in `src/lib.rs`, made
+# possible by that module's `#![cfg_attr(not(test), no_std)]` — std is only
+# available under the `--test` harness, never in the shipped wasm build.
+
+[dependencies]
+rshooks = { path = "../../crates/rshooks", features = ["host-panic-handler"] }
+
+[dev-dependencies]
+rshooks = { path = "../../crates/rshooks", features = ["testenv"] }
+rshooks-testenv = { path = "../../crates/rshooks-testenv" }
+
+[lints]
+workspace = true

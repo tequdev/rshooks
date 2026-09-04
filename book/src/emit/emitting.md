@@ -66,19 +66,41 @@ txn_template! {
 }
 ```
 
-(from `examples/10_emit-txn`.) Each field uses one of four uniform kinds —
-`u32_field(sfXxx) = default`, `native_amount(sfXxx) = default` (always a
-`u64` drops value), `account_id(sfXxx)` (defaults to all-zero), or
-`empty_vl(sfXxx)` (an empty variable-length blob, no setter generated,
-since there's nothing to set) — plus the structural `emit_details` marker,
-which must be declared last and reserves space for the host's own
-`EmitDetails` field with no header of its own.
+(from `examples/10_emit-txn`.) Each field uses one of the uniform kinds
+below, plus the structural `emit_details` marker, which must be declared
+last and reserves space for the host's own `EmitDetails` field with no
+header of its own:
+
+| kind | serialized type | wire bytes after header | default | setter |
+|---|---|---|---|---|
+| `u8_field(sfX) = e` | UINT8 | 1 | required | `set_x(u8)` |
+| `u16_field(sfX) = e` | UINT16 | 2 | required | `set_x(u16)` |
+| `u32_field(sfX) = e` | UINT32 | 4 | required | `set_x(u32)` |
+| `u64_field(sfX) = e` | UINT64 | 8 | required | `set_x(u64)` |
+| `hash128(sfX)` | UINT128 | 16 | zeroed | `set_x(&[u8; 16])` |
+| `hash160(sfX)` | UINT160 | 20 | zeroed | `set_x(&[u8; 20])` |
+| `hash256(sfX)` | UINT256 | 32 | zeroed | `set_x(&Hash)` |
+| `currency(sfX)` | CURRENCY | 20 | zeroed | `set_x(&CurrencyCode)` |
+| `native_amount(sfX) = e` | AMOUNT | 8 | required drops | `set_x(u64) -> Result<()>` |
+| `amount(sfX)` | AMOUNT | 48 | IOU zero, zero currency/issuer | `set_x(xfl, &currency, &issuer)`, `set_x_value(xfl)` |
+| `amount(sfX) = (xfl, cur, iss)` | AMOUNT | 48 | the declared triple | same as above |
+| `native_issue(sfX)` | ISSUE | 20 | zeroed | none |
+| `issue(sfX)` | ISSUE | 40 | zeroed | `set_x(&CurrencyCode, &AccountId)` |
+| `account_id(sfX)` | ACCOUNT | 1 + 20 | zeroed | `set_x(&AccountId)` |
+| `empty_vl(sfX)` | VL | 1 | empty blob | none |
+| `object(sfX) { .. }` | OBJECT | inner + 1 (`0xE1`) | inner defaults | inner setters, prefixed |
+| `array(sfX) [ .. ]` | ARRAY | elements + 1 (`0xF1`) | inner defaults | inner setters, prefixed |
+
+Every kind checks, at compile time, that the declared `sfXxx` constant's
+serialized type matches — `u32_field(sfFee)` (an issued/native `AMOUNT`
+field) is rejected rather than silently writing the wrong wire
+representation. Integer kinds are big-endian.
 
 The macro computes cumulative byte offsets and the template's total length
 at compile time, bakes the field headers and defaults into a `const fn
 new()` (so the whole thing lands in a wasm data segment — see the statics
-idiom below), and generates one `set_<field>` method per
-`u32_field`/`native_amount`/`account_id` field:
+idiom below), and generates one setter per field that has one, per the
+table above:
 
 ```rust,ignore
 txn.set_amount(1).is_err();       // Result<()> — native_amount setters can fail out-of-range
@@ -107,6 +129,108 @@ exactly which field and check failed — never a runtime surprise. Declared
 fields' `sfXxx` codes must also be in strictly increasing canonical order,
 which is a compile error too (and incidentally catches an accidental
 duplicate field, since two equal codes can't be strictly increasing).
+
+### `amount`: the 48-byte issued form
+
+`native_amount` stays the 8-byte native (XRP/XAH) form; `amount` is always
+the 48-byte issued (IOU) form: `[8-byte value][20-byte currency][20-byte
+issuer]`. The value bytes are a pure bit transform of the XFL —
+`xfl.raw_bits() | (1 << 63)`, big-endian — so encoding an `amount` field
+needs no host call, at compile time or at runtime: an `XFL`'s canonical bit
+layout already occupies the same positions `STAmount`'s issued 8-byte value
+uses, and setting the top bit is `STAmount`'s own "not native" flag.
+
+An `amount(sfX)` field with no default reserves the canonical IOU zero with
+an all-zero currency and issuer; the host rejects an issued amount emitted
+in that state (a real issuer is required), so leaving it unset is an
+authoring bug the host surfaces at emit time, not something the macro
+catches. A declared default bakes the currency and issuer into the data
+segment instead:
+
+```rust,ignore
+amount: amount(sfAmount) = (XFL!(0), CurrencyCode::from_iso(b"USD"), account_id!("r...")),
+```
+
+Two setters follow from that split:
+
+- `set_x(xfl, &currency, &issuer)` rewrites all 48 bytes.
+- `set_x_value(xfl)` writes only the 8 value bytes, keeping the baked or
+  previously set currency/issuer — the intended hot path once a default
+  triple has fixed the currency/issuer: one 8-byte store, no host call.
+
+### Nested `STObject`/`STArray`
+
+`object(sfX) { <field>* }` and `array(sfX) [ <element>* ]` nest a fixed
+inner field list, or a fixed element list, directly inside a template —
+every element's count and shape is known at declaration time, so the whole
+thing stays as compile-time-computable as the scalar kinds. An array's
+elements must each be `name: object(sfX) { .. }`; a bare scalar, or another
+`array`, directly inside an `array` is a compile error.
+
+```rust,ignore
+txn_template! {
+    struct Remit {
+        transaction_type = ttREMIT,
+        // .. the required fields, plus `destination: account_id(sfDestination)` ..
+        amounts: array(sfAmounts) [
+            native: object(sfAmountEntry) {
+                amount: native_amount(sfAmount) = 1,
+            },
+            usd: object(sfAmountEntry) {
+                amount: amount(sfAmount) = (XFL!(0), USD, USD_ISSUER),
+            },
+        ],
+        emit_details: emit_details,
+    }
+}
+
+txn.set_amounts_native_amount(5)?;           // native entry, 8-byte store
+txn.set_amounts_usd_amount_value(XFL!(1.5)); // issued entry, 8-byte store
+```
+
+Elements are declared one by one — that's what "known ahead" means here:
+there's no `; N` repetition sugar for a homogeneous array, so heterogeneous
+element shapes (one native entry, one issued entry, as above) fall out
+naturally rather than needing special syntax. Setter names are the
+`_`-joined declaration path (`set_amounts_native_amount`,
+`set_amounts_usd_amount`/`set_amounts_usd_amount_value`); an array
+element's own name (`native`, `usd`) is only a path segment, not a
+repetition index.
+
+A few rules apply once containers nest:
+
+- Canonical `(type, field)` order is checked **per container**: each
+  object's own direct fields must be strictly increasing, same as the
+  template's top-level fields. An array's elements are not order-checked
+  against each other — they typically share one repeated `sfcode` (every
+  `sfAmounts` element here is an `sfAmountEntry`).
+- Container headers and end markers (`0xE1` closing an `object`, `0xF1`
+  closing an `array`) are written at compile time, same as every other
+  baked byte.
+- Nesting depth is bounded at compile time by
+  [`STO_WRITER_MAX_DEPTH`](sto-writer.md), the same limit xahaud's
+  deserializer enforces.
+- The six emit-plumbing fields (see "Required fields" above) are recognized
+  only at the top level — an `sfAccount` nested inside some other object
+  neither satisfies the presence check nor gets patched by
+  `prepare_for_emit`.
+- Every field's declared `sfXxx` still has its serialized type checked
+  against its kind, a scalar or nested `array` directly inside an `array`
+  is a compile error, and an `emit_details` field inside any container is a
+  compile error (it's only meaningful once, at the top, last).
+
+See `examples/21_txn-template-nested` for the worked example this is drawn
+from — a Remit whose `sfAmounts` holds a native entry and a
+compile-time-baked issued entry, emitted the same way as `10_emit-txn`'s
+Payment.
+
+### Deferred kinds
+
+Variable-length kinds whose wire size isn't fixed by the declaration alone
+— a non-empty `Blob`, `Vector256`, `PathSet` — have no `txn_template!` kind
+yet; see `docs/TXN_TEMPLATE_FIELDS_DESIGN.md` §6 for what's deferred and
+why. A field of one of these types still needs `StoWriter` (below) or
+hand-rolled bytes.
 
 ### `prepare_for_emit()`
 
@@ -236,10 +360,11 @@ attributes.
 
 ## Runtime-shaped transactions: `StoWriter`
 
-`txn_template!` requires the transaction's shape to be known at compile
-time — every field, and whether a nested `STArray`/`STObject` exists at
-all, is fixed by the declaration. A transaction whose shape depends on
-runtime data (Remit's `sfAmounts`, one entry per destination) needs
+`txn_template!` covers fixed-shape nested containers directly (see "Nested
+`STObject`/`STArray`" above) — what it cannot describe is a shape decided
+at runtime: a variable element count, or a container present only
+sometimes (Remit's `sfAmounts`, one entry per destination, depending on
+what the invoking transaction's hook parameters supply). That case needs
 [`rshooks::sto_writer::StoWriter`](sto-writer.md) instead: a bounded,
 allocation-free cursor over caller-owned storage with its own
 `prepare_for_emit()`/`Prepared::emit()` lifecycle, built directly on top of
