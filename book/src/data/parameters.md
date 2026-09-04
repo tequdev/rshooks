@@ -126,8 +126,7 @@ that *is* set, but to the wrong number of bytes for `V`, is a decode
 failure, and `.get_or_default()` reports that as `Err` rather than quietly
 substituting the default. If you want "any read failure at all, absence or
 malformed, falls back to the same value," write that explicitly at the
-call site instead, the same way `examples/05_firewall` and
-`examples/12_typed-data` both do:
+call site instead, the same way `examples/05_firewall` does:
 
 ```rust,ignore
 fn blocked_account() -> Option<AccountId> {
@@ -222,16 +221,19 @@ uses for a keyed state entry:
 ```rust,ignore
 const ADMIN_PAUSE_NAME: AdminName = AdminName { section: 0, field: 0 };
 
-fn deposits_paused() -> bool {
+fn deposits_paused() -> Result<bool> {
     TypedData
         .hook_param
         .admin_pause
         .at(ADMIN_PAUSE_NAME)
         .get_or_default()
         .map(|s| s.paused != 0)
-        .unwrap_or(false)
 }
 ```
+
+Returning `Result<bool>` rather than `bool` keeps a malformed switch's
+`Err` visible to the caller, which rolls back on it instead of treating it
+as `false`.
 
 `.at(args)` returns a handle over that one bound name, carrying the same
 `.get()`/`.get_or_default()`/`.get_required()` accessors the base field
