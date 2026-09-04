@@ -36,8 +36,12 @@
 //!   (`STObject.cpp:266-276`). This walker itself stays order/
 //!   duplicate-tolerant (shared with the `sto_*` family below);
 //!   [`validate_emit_blob`] alone layers that duplicate rejection back on,
-//!   scoped to top-level fields only — not recursed into nested
-//!   objects/arrays the way `STObject::set` does at every depth.
+//!   recursed into every nested `STI_OBJECT` and `STI_ARRAY` element's own
+//!   body — each object scope (top level, a nested object, one array
+//!   element) has its own independent field-code set, matching
+//!   `STObject::set`'s real per-depth invariant: the same field code may
+//!   repeat across sibling array elements, or between a scope and its
+//!   parent, but not twice within one scope.
 //! - `crate::host::sto::sto_validate`/`sto_subfield`/`sto_subarray`: cited
 //!   above and in `crate::host::sto`'s module doc (`HookAPI::sto_validate`,
 //!   `HookAPI.cpp:68-96`, "no field-ordering or duplicate-field check";
@@ -279,6 +283,10 @@ pub(crate) fn walk_object_body(
 /// else is a legal array element).
 const STI_OBJECT: u32 = 14;
 
+/// The STI_ARRAY type code — [`reject_duplicate_fields`]'s array-element
+/// recursion case.
+const STI_ARRAY: u32 = 15;
+
 /// The STI_VL / STI_ACCOUNT type codes — [`field_value_payload`]'s two VL
 /// length-prefix-stripped cases.
 const STI_VL: u32 = 7;
@@ -411,33 +419,63 @@ pub(crate) fn field_value_payload(data: &[u8], field: &FieldSpan) -> Result<(usi
     Ok(field.value_range)
 }
 
-/// Validates `blob` against the emission grammar. `expected_emit_details`
-/// is the exact bytes this invocation's `etxn_details()` returned (`None`
-/// if it was never called this invocation) — `blob`'s `EmitDetails` field
-/// must match those bytes exactly, header and terminator included.
-///
-/// Rejects a repeated top-level field code — a direct citation of real
-/// xahaud's `STObject::set`, which sorts every deserialized field by code
-/// and throws `"Duplicate field detected"` if any two share one
-/// (`STObject.cpp:266-276`; see this module's doc comment). The underlying
-/// field walk itself (shared with `sto_validate`/`sto_subfield`, whose real
-/// host implementation genuinely tolerates a repeat) stays permissive;
-/// this rejection is layered on here, matching `emit`'s own
-/// `STTx(SerialIter)` -> `STObject::set` parse path. Scoped to top-level
-/// fields only — nested objects/arrays are not independently checked,
-/// narrower than `STObject::set`'s real per-depth invariant.
-pub(crate) fn validate_emit_blob(
-    blob: &[u8],
-    expected_emit_details: Option<&[u8]>,
-) -> Result<(), ()> {
-    let fields = walk_top_level(blob)?;
-
+/// Rejects a repeated field code within any single object scope — a direct
+/// citation of real xahaud's `STObject::set`, which sorts every
+/// deserialized field by code and throws `"Duplicate field detected"` if
+/// any two share one (`STObject.cpp:266-276`; see this module's doc
+/// comment), applied at every depth `STObject::set` itself recurses into.
+/// `fields` is one scope's own field list (top level, a nested
+/// `STI_OBJECT`'s body, or one `STI_ARRAY` element's body) and `data` is
+/// the byte range that scope's spans index into; each recursive call gets
+/// a fresh scope, so the same field code repeating across sibling array
+/// elements, or between a scope and its parent, is left alone — only two
+/// fields sharing a code within the same scope are rejected. The
+/// underlying field walk itself (shared with `sto_validate`/`sto_subfield`,
+/// whose real host implementation genuinely tolerates a repeat at every
+/// depth) stays permissive; this rejection is layered on top, scoped to
+/// [`validate_emit_blob`]'s callers only.
+fn reject_duplicate_fields(fields: &[FieldSpan], data: &[u8]) -> Result<(), ()> {
     for (i, f) in fields.iter().enumerate() {
         let earlier = fields.get(..i).ok_or(())?;
         if earlier.iter().any(|e| e.code == f.code) {
             return Err(());
         }
     }
+    for f in fields {
+        let ty = (f.code >> 16) as u32;
+        if ty == STI_OBJECT {
+            let body = data.get(f.value_range.0..f.value_range.1).ok_or(())?;
+            let mut pos = 0usize;
+            let nested = walk_object_body(body, &mut pos, 0)?;
+            reject_duplicate_fields(&nested, body)?;
+        } else if ty == STI_ARRAY {
+            let body = data.get(f.value_range.0..f.value_range.1).ok_or(())?;
+            for (start, end) in walk_array_elements(body)? {
+                let element = body.get(start..end).ok_or(())?;
+                let mut pos = 0usize;
+                decode_header(element, &mut pos)?;
+                let nested = walk_object_body(element, &mut pos, 0)?;
+                reject_duplicate_fields(&nested, element)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Validates `blob` against the emission grammar. `expected_emit_details`
+/// is the exact bytes this invocation's `etxn_details()` returned (`None`
+/// if it was never called this invocation) — `blob`'s `EmitDetails` field
+/// must match those bytes exactly, header and terminator included.
+///
+/// See [`reject_duplicate_fields`] for the duplicate-field rule this
+/// applies, at every nesting depth.
+pub(crate) fn validate_emit_blob(
+    blob: &[u8],
+    expected_emit_details: Option<&[u8]>,
+) -> Result<(), ()> {
+    let fields = walk_top_level(blob)?;
+
+    reject_duplicate_fields(&fields, blob)?;
 
     let tx_type_field = fields
         .iter()
@@ -658,6 +696,51 @@ mod tests {
         out.extend_from_slice(&[0x73, 0x00]);
         out.extend_from_slice(&d);
         assert!(validate_emit_blob(&out, Some(&d)).is_err());
+    }
+
+    #[test]
+    fn rejects_duplicate_field_inside_a_nested_object() {
+        // Two Sequence-coded (2,4) fields inside one nested STObject
+        // (14,9): a repeat within the same object scope is rejected even
+        // though it is nested, matching `STObject::set`'s per-depth
+        // invariant (see `reject_duplicate_fields`'s doc comment).
+        let d = details();
+        let mut blob = minimal_payment(&d);
+        blob.push(0xE9); // nested object field: (14, 9)
+        blob.extend_from_slice(&[0x24, 0, 0, 0, 1]);
+        blob.extend_from_slice(&[0x24, 0, 0, 0, 2]); // duplicate within the nested object
+        blob.push(OBJECT_END_MARKER);
+        assert!(validate_emit_blob(&blob, Some(&d)).is_err());
+    }
+
+    #[test]
+    fn accepts_the_same_field_code_in_two_different_array_elements() {
+        // Each array element is its own object scope: a Sequence-coded
+        // (2,4) field repeating across sibling elements is legal.
+        let d = details();
+        let mut blob = minimal_payment(&d);
+        blob.push(0xFF); // array field: (15, 15)
+        blob.push(0xE2); // element 1 header: (14, 2)
+        blob.extend_from_slice(&[0x24, 0, 0, 0, 1]);
+        blob.push(OBJECT_END_MARKER);
+        blob.push(0xE3); // element 2 header: (14, 3)
+        blob.extend_from_slice(&[0x24, 0, 0, 0, 2]); // same field code as element 1's
+        blob.push(OBJECT_END_MARKER);
+        blob.push(ARRAY_END_MARKER);
+        assert!(validate_emit_blob(&blob, Some(&d)).is_ok());
+    }
+
+    #[test]
+    fn accepts_the_same_field_code_at_top_level_and_inside_a_nested_object() {
+        // A scope's field-code set is independent of its parent's: the
+        // top-level Sequence (2,4) and a Sequence-coded field inside a
+        // nested object (14,9) do not collide.
+        let d = details();
+        let mut blob = minimal_payment(&d);
+        blob.push(0xE9); // nested object field: (14, 9)
+        blob.extend_from_slice(&[0x24, 0, 0, 0, 7]);
+        blob.push(OBJECT_END_MARKER);
+        assert!(validate_emit_blob(&blob, Some(&d)).is_ok());
     }
 
     #[test]
