@@ -68,6 +68,12 @@ jobs:
         with:
           version: 9
 
+      - name: Install e2e dependencies
+        run: pnpm --dir e2e install
+
+      - name: Typecheck e2e suite
+        run: pnpm --dir e2e run typecheck
+
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
@@ -105,9 +111,6 @@ jobs:
           echo "node did not become ready in time" >&2
           docker logs xahau --tail 200 || true
           exit 1
-
-      - name: Install e2e dependencies
-        run: pnpm --dir e2e install
 
       - name: Run e2e suite
         run: pnpm --dir e2e test
