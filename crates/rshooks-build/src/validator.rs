@@ -5,11 +5,49 @@
 //! (after cleaning and the optional guard pass) and as the entirety of
 //! `check`, which runs it against arbitrary wasm (including C-built hooks).
 
-use anyhow::{Result, bail};
-
 use crate::guard::{find_g_index, guard_hint, scan_function_loops};
 use crate::ir;
 use crate::{ApiVersion, Options};
+
+/// A validation failure, split by whether the native upstream guard checker
+/// (`docs/DESIGN.md` §6.5) also evaluates the same rule.
+///
+/// [`crate::verify`] may let the native checker's acceptance downgrade
+/// [`ValidationError::guard`] findings to warnings, because the native
+/// checker independently re-derives them (guard shape, R1/R2, worst-case
+/// nesting). It may never downgrade [`ValidationError::hard`] findings —
+/// MVP validity, the export/import set, structural sections, float
+/// opcodes, and similar — because the native checker does not evaluate
+/// them at all; an `Ok` native verdict says nothing about them.
+#[derive(Debug, Clone, Default)]
+pub struct ValidationError {
+    /// Findings the native guard checker does not evaluate.
+    pub hard: Vec<String>,
+    /// Guard/nesting findings the native guard checker also evaluates.
+    pub guard: Vec<String>,
+}
+
+impl ValidationError {
+    /// True if there is at least one finding and every finding is
+    /// guard-class (safe for [`crate::verify`] to downgrade wholesale).
+    pub fn is_guard_only(&self) -> bool {
+        self.hard.is_empty() && !self.guard.is_empty()
+    }
+}
+
+impl std::fmt::Display for ValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let joined: Vec<&str> = self
+            .hard
+            .iter()
+            .chain(self.guard.iter())
+            .map(String::as_str)
+            .collect();
+        write!(f, "{}", joined.join("\n"))
+    }
+}
+
+impl std::error::Error for ValidationError {}
 
 /// The maximum size, in bytes, of a SetHook-legal wasm binary.
 pub const MAX_SIZE: usize = 65_535;
@@ -51,8 +89,9 @@ pub struct ValidationReport {
 /// Validates `wasm` against the full SetHook rule set. Returns `Ok` (with
 /// any warnings) if it is SetHook-legal, or `Err` describing every hard
 /// error found otherwise.
-pub fn validate(wasm: &[u8], opts: &Options) -> Result<ValidationReport> {
+pub fn validate(wasm: &[u8], opts: &Options) -> Result<ValidationReport, ValidationError> {
     let mut errors: Vec<String> = Vec::new();
+    let mut guard_errors: Vec<String> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
     let mut oversize_allowed = false;
 
@@ -94,7 +133,10 @@ pub fn validate(wasm: &[u8], opts: &Options) -> Result<ValidationReport> {
         Ok(m) => m,
         Err(e) => {
             errors.push(format!("failed to parse module: {e}"));
-            bail!(errors.join("\n"));
+            return Err(ValidationError {
+                hard: errors,
+                guard: guard_errors,
+            });
         }
     };
 
@@ -288,7 +330,7 @@ pub fn validate(wasm: &[u8], opts: &Options) -> Result<ValidationReport> {
         // R1: every api-version-0 module must import `_g`, even without any
         // loop — the vendored upstream checker enforces this unconditionally.
         if g_index.is_none() {
-            errors.push(
+            guard_errors.push(
                 "module does not import `_g` (env::_g, type (i32,i32)->i32) — required for \
                  every api-version-0 module, even without loops (R1)"
                     .to_string(),
@@ -320,7 +362,7 @@ pub fn validate(wasm: &[u8], opts: &Options) -> Result<ValidationReport> {
         for (i, ty) in m.types.iter().enumerate() {
             let shape = (ty.params(), ty.results());
             if shape != entry_ty && !import_shapes.contains(&shape) {
-                errors.push(format!(
+                guard_errors.push(format!(
                     "type {i} (`({:?}) -> {:?}`) is neither an import's type nor the entry-point \
                      type `(i32) -> i64` (R2) — this is only reachable if a defined helper \
                      function was left un-inlined",
@@ -343,7 +385,7 @@ pub fn validate(wasm: &[u8], opts: &Options) -> Result<ValidationReport> {
                             msg.push_str(" — ");
                             msg.push_str(hint);
                         }
-                        errors.push(msg);
+                        guard_errors.push(msg);
                     }
                 }
                 Err(e) => errors.push(format!(
@@ -366,7 +408,7 @@ pub fn validate(wasm: &[u8], opts: &Options) -> Result<ValidationReport> {
                 max_overall_depth = max_overall_depth.max(depth);
                 if opts.api_version == ApiVersion::V0 {
                     if depth > MAX_NESTING_DEPTH {
-                        errors.push(format!(
+                        guard_errors.push(format!(
                             "function {func_idx}: block/loop/if nesting depth is {depth}, \
                              exceeding the {MAX_NESTING_DEPTH}-level limit (`Guard.h` \
                              `NESTING_LIMIT` under `GuardRuleDepth32`)"
@@ -394,8 +436,11 @@ pub fn validate(wasm: &[u8], opts: &Options) -> Result<ValidationReport> {
         ));
     }
 
-    if !errors.is_empty() {
-        bail!(errors.join("\n"));
+    if !errors.is_empty() || !guard_errors.is_empty() {
+        return Err(ValidationError {
+            hard: errors,
+            guard: guard_errors,
+        });
     }
 
     Ok(ValidationReport {
