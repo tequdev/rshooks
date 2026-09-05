@@ -83,6 +83,7 @@ mod grant;
 mod host;
 mod invocation;
 mod otxn;
+mod protocol_formats;
 mod world;
 
 pub use env::{CbakOutcome, TestEnv};

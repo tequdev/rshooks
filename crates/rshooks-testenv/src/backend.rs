@@ -411,7 +411,25 @@ impl HostBackend for Backend {
         }
 
         let expected = self.ctx.borrow().last_etxn_details.clone();
-        match crate::emit_walk::validate_emit_blob(tx_blob, expected.as_deref()) {
+        let (hook_account, ledger_seq) = {
+            let w = self.world.borrow();
+            (w.hook_account, w.ledger_seq)
+        };
+        // Real `HookAPI::emit` rule 7 rejects outright if its own
+        // `etxn_fee_base` call fails (`minfee < 0` -> `EMISSION_FAILURE`).
+        let fee_base = self.etxn_fee_base(tx_blob);
+        let validation = if fee_base < 0 {
+            Err(())
+        } else {
+            crate::emit_walk::validate_emit_blob(
+                tx_blob,
+                expected.as_deref(),
+                &hook_account,
+                ledger_seq,
+                fee_base as u64,
+            )
+        };
+        match validation {
             Ok(()) => {
                 let hash = deterministic_hash(tx_blob);
                 self.ctx.borrow_mut().record_emitted(EmittedTxn {
@@ -1089,6 +1107,21 @@ mod tests {
         vec![0x12, 0x00, 0x00]
     }
 
+    /// [`minimal_template`] plus the two fields `prepare` itself never
+    /// fills in — `sfAmount`/`sfDestination`, both `presence: "required"`
+    /// for Payment in `protocol_formats.json` — so the result passes
+    /// `validate_emit_blob`'s required-field check. Everything else is
+    /// `prepare`'s job (unconditionally filled or overwritten).
+    fn minimal_emittable_payment_template() -> Vec<u8> {
+        let mut out = minimal_template();
+        out.push(0x61); // Amount (6, 1): native 1 drop
+        out.extend_from_slice(&0x4000_0000_0000_0001u64.to_be_bytes());
+        out.push(0x83); // Destination (8, 3)
+        out.push(20);
+        out.extend_from_slice(&[2u8; 20]);
+        out
+    }
+
     #[test]
     fn prepare_requires_a_prior_reserve() {
         let (_world, _ctx, backend) = fresh();
@@ -1115,11 +1148,22 @@ mod tests {
         world.borrow_mut().ledger_seq = 100;
         ctx.borrow_mut().reserve(1).unwrap();
 
-        let prepared = backend.prepare(&minimal_template()).unwrap();
+        let prepared = backend
+            .prepare(&minimal_emittable_payment_template())
+            .unwrap();
 
         let expected_details = ctx.borrow().last_etxn_details.clone();
+        let min_fee = backend.etxn_fee_base(&prepared);
+        assert!(min_fee >= 0);
         assert!(
-            crate::emit_walk::validate_emit_blob(&prepared, expected_details.as_deref()).is_ok()
+            crate::emit_walk::validate_emit_blob(
+                &prepared,
+                expected_details.as_deref(),
+                &[7u8; 20],
+                100,
+                min_fee as u64,
+            )
+            .is_ok()
         );
 
         // Round-trip: `prepare`'s own output is accepted by `emit`.

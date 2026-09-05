@@ -14,14 +14,20 @@ use rshooks::decl::{HookChainEntries, NativeEntry};
 use rshooks_testenv::prelude::*;
 
 /// Reserves one emission slot, `prepare`s a minimal `ttPAYMENT` template
-/// (`TransactionType = 0` -> wire bytes `[0x12, 0x00, 0x00]`), and emits
-/// it — then, *before* accepting, records this invocation's own
-/// `otxn_burden`/`otxn_generation` into state (`main_*`), so a test can
-/// prove they read back to the same values both before and after an
-/// intervening `invoke_cbak` call.
+/// (`TransactionType = 0` plus the two fields `prepare` never fills in —
+/// `sfAmount`/`sfDestination`, both `presence: "required"` for Payment in
+/// `protocol_formats.json`), and emits it — then, *before* accepting,
+/// records this invocation's own `otxn_burden`/`otxn_generation` into state
+/// (`main_*`), so a test can prove they read back to the same values both
+/// before and after an intervening `invoke_cbak` call.
 fn emit_minimal_payment(_r: u32) -> i64 {
     let _ = rshooks::api::etxn::etxn_reserve(1);
-    let template: [u8; 3] = [0x12, 0x00, 0x00];
+    let mut template = vec![0x12, 0x00, 0x00]; // TransactionType = 0
+    template.push(0x61); // Amount (6, 1): native 1 drop
+    template.extend_from_slice(&0x4000_0000_0000_0001u64.to_be_bytes());
+    template.push(0x83); // Destination (8, 3)
+    template.push(20);
+    template.extend_from_slice(&[0u8; 20]);
     let mut prepared = [0u8; 256];
     let n = rshooks::api::etxn::prepare(&mut prepared, &template).expect("prepare");
     let mut hash = [0u8; 32];
