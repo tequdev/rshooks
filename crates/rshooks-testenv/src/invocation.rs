@@ -20,8 +20,6 @@ pub(crate) const MAX_PARAM_OVERRIDES: u32 = 16;
 const MAX_RESERVE: u32 = 255;
 /// `max_state_modifications` (vendored `Enum.h:397`).
 const MAX_STATE_MODIFICATIONS: u32 = 256;
-/// `maxNamespaces()` (vendored `Enum.h`).
-const MAX_NAMESPACES: usize = 256;
 /// One past `max_nonce` (vendored `Enum.h:399`, `max_nonce = 255`): the
 /// 256th call to a given nonce family this invocation is refused. xahaud
 /// tracks `ledger_nonce`'s and the emit-nonce family's (`etxn_nonce`,
@@ -107,7 +105,6 @@ pub(crate) struct InvocationContext {
     reserve: Option<u32>,
     emit_count: u32,
     state_mod_count: u32,
-    namespaces_touched: HashSet<([u8; 20], [u8; 32])>,
     /// `ledger_nonce`'s own budget counter (`hookCtx.ledger_nonce_counter`
     /// in xahaud), independent of [`Self::emit_nonce_count`].
     ledger_nonce_count: u32,
@@ -189,7 +186,6 @@ impl InvocationContext {
             reserve: None,
             emit_count: 0,
             state_mod_count: 0,
-            namespaces_touched: HashSet::new(),
             ledger_nonce_count: 0,
             emit_nonce_count: 0,
             retry_blocked: false,
@@ -275,30 +271,13 @@ impl InvocationContext {
         Ok(())
     }
 
-    /// Records one successful modifying write (set or delete), and — if
-    /// `addr` (the written `(account, namespace)`) is new this invocation —
-    /// counts it against the namespace budget. Design §4: `> 256` distinct
-    /// namespaces → `TOO_MANY_NAMESPACES`. Callers must have already
-    /// checked [`Self::check_namespace_budget`] for a genuinely new `addr`
-    /// before performing the write, mirroring
-    /// [`Self::check_state_modification_budget`]'s contract.
-    pub(crate) fn record_state_modification(&mut self, addr: ([u8; 20], [u8; 32])) {
+    /// Records one successful modifying write (set or delete) against
+    /// `max_state_modifications`. The namespace budget
+    /// (`TOO_MANY_NAMESPACES`) is a separate, per-account, cross-invocation
+    /// concern tracked in [`crate::world::World::check_namespace_budget`],
+    /// not here.
+    pub(crate) fn record_state_modification(&mut self) {
         self.state_mod_count = self.state_mod_count.saturating_add(1);
-        self.namespaces_touched.insert(addr);
-    }
-
-    /// Checks (without mutating) whether writing into a *new* `addr` is
-    /// within the namespace budget. Returns `Ok(())` unconditionally if
-    /// `addr` was already touched this invocation (re-writing an existing
-    /// namespace never costs budget).
-    pub(crate) fn check_namespace_budget(&self, addr: &([u8; 20], [u8; 32])) -> Result<(), i64> {
-        if self.namespaces_touched.contains(addr) {
-            return Ok(());
-        }
-        if self.namespaces_touched.len() >= MAX_NAMESPACES {
-            return Err(rshooks_core::TOO_MANY_NAMESPACES);
-        }
-        Ok(())
     }
 
     /// Draws the next deterministic `ledger_nonce` (design §4:
@@ -460,41 +439,11 @@ mod tests {
         let mut ctx = InvocationContext::new(0);
         for _ in 0..256 {
             assert_eq!(ctx.check_state_modification_budget(), Ok(()));
-            ctx.record_state_modification(([0u8; 20], [0u8; 32]));
+            ctx.record_state_modification();
         }
         assert_eq!(
             ctx.check_state_modification_budget(),
             Err(rshooks_core::TOO_MANY_STATE_MODIFICATIONS)
-        );
-    }
-
-    #[test]
-    fn namespace_budget_only_costs_for_genuinely_new_namespaces() {
-        let mut ctx = InvocationContext::new(0);
-        let addr = ([1u8; 20], [2u8; 32]);
-        for _ in 0..1000 {
-            assert_eq!(ctx.check_namespace_budget(&addr), Ok(()));
-            ctx.record_state_modification(addr);
-        }
-        // Still only one distinct namespace touched.
-        assert_eq!(ctx.namespaces_touched.len(), 1);
-    }
-
-    #[test]
-    fn namespace_budget_rejects_the_257th_distinct_namespace() {
-        let mut ctx = InvocationContext::new(0);
-        for i in 0..256u16 {
-            let mut ns = [0u8; 32];
-            ns[0] = (i >> 8) as u8;
-            ns[1] = (i & 0xFF) as u8;
-            let addr = ([0u8; 20], ns);
-            assert_eq!(ctx.check_namespace_budget(&addr), Ok(()));
-            ctx.record_state_modification(addr);
-        }
-        let overflow_addr = ([0u8; 20], [0xFFu8; 32]);
-        assert_eq!(
-            ctx.check_namespace_budget(&overflow_addr),
-            Err(rshooks_core::TOO_MANY_NAMESPACES)
         );
     }
 

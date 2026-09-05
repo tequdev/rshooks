@@ -85,12 +85,10 @@ impl HostBackend for Backend {
         if data.len() > max_len {
             return Err(rshooks_core::TOO_BIG);
         }
-        let addr_ns = (hook_account, own_ns);
-        {
-            let ctx = self.ctx.borrow();
-            ctx.check_state_modification_budget()?;
-            ctx.check_namespace_budget(&addr_ns)?;
-        }
+        self.ctx.borrow().check_state_modification_budget()?;
+        self.world
+            .borrow()
+            .check_namespace_budget(hook_account, own_ns)?;
         {
             let mut w = self.world.borrow_mut();
             let key_addr = (hook_account, own_ns, norm);
@@ -100,7 +98,7 @@ impl HostBackend for Backend {
                 w.state.insert(key_addr, data.to_vec());
             }
         }
-        self.ctx.borrow_mut().record_state_modification(addr_ns);
+        self.ctx.borrow_mut().record_state_modification();
         Ok(data.len() as i64)
     }
 
@@ -162,12 +160,10 @@ impl HostBackend for Backend {
         if data.len() > max_len {
             return Err(rshooks_core::TOO_BIG);
         }
-        let addr_ns = (target_acc, target_ns);
-        {
-            let ctx = self.ctx.borrow();
-            ctx.check_state_modification_budget()?;
-            ctx.check_namespace_budget(&addr_ns)?;
-        }
+        self.ctx.borrow().check_state_modification_budget()?;
+        self.world
+            .borrow()
+            .check_namespace_budget(target_acc, target_ns)?;
         {
             let mut w = self.world.borrow_mut();
             let key_addr = (target_acc, target_ns, norm);
@@ -177,7 +173,7 @@ impl HostBackend for Backend {
                 w.state.insert(key_addr, data.to_vec());
             }
         }
-        self.ctx.borrow_mut().record_state_modification(addr_ns);
+        self.ctx.borrow_mut().record_state_modification();
         Ok(data.len() as i64)
     }
 
