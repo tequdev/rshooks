@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Lets publish.yml re-run every check here against the exact commit it is
+  # about to publish, rather than trusting an unrelated earlier CI run.
+  workflow_call: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
