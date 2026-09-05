@@ -104,6 +104,17 @@ hook_errors! {
         /// A `deposit` instruction, but the [`AdminName`] pause switch is
         /// currently set. Withdrawals are never rejected for this reason.
         DepositsPaused = 9,
+        /// The `CFG` Hook parameter is present but failed to decode.
+        ConfigMalformed = 10,
+        /// The [`AdminName`] pause-switch parameter is present but failed
+        /// to decode.
+        PauseReadFailed = 11,
+        /// A `deposit` instruction whose amount would overflow the
+        /// account's stored balance.
+        AmountOverflow = 12,
+        /// A `deposit` instruction whose lock window would overflow the
+        /// ledger sequence.
+        DeadlineOverflow = 13,
     }
 }
 
@@ -132,30 +143,25 @@ pub struct TypedData {
 }
 
 /// Returns the configured `CFG` values, falling back to the default when
-/// `CFG` is absent *or* present-but-malformed: `.unwrap_or(..)` masks any
-/// `Err` from [`HookParam::get_or_default`], not just the "absent" case.
-fn config() -> Config {
-    TypedData
-        .hook_param
-        .config
-        .get_or_default()
-        .unwrap_or(Config {
-            min_amount: DEFAULT_MIN_AMOUNT,
-            lock_ledgers: DEFAULT_LOCK_LEDGERS,
-        })
+/// `CFG` is absent. A present-but-malformed `CFG` is propagated as `Err`
+/// rather than masked to the default — [`HookParam::get_or_default`]
+/// already keeps absence and decode failure distinct; this just forwards
+/// that distinction instead of collapsing it with `.unwrap_or(..)`.
+fn config() -> Result<Config> {
+    TypedData.hook_param.config.get_or_default()
 }
 
-/// Returns whether new deposits are paused. Masks any read failure to
-/// "not paused", exactly like [`config`] masks `CFG` read failures to its
-/// default.
-fn deposits_paused() -> bool {
+/// Returns whether new deposits are paused, falling back to "not paused"
+/// when the switch is absent. A present-but-malformed switch is propagated
+/// as `Err` rather than masked to "not paused" — see [`config`]'s doc
+/// comment for the same absence-vs-decode-failure distinction.
+fn deposits_paused() -> Result<bool> {
     TypedData
         .hook_param
         .admin_pause
         .at(ADMIN_PAUSE_NAME)
         .get_or_default()
         .map(|s| s.paused != 0)
-        .unwrap_or(false)
 }
 
 /// Deposit value used when no record exists.
@@ -197,11 +203,22 @@ impl TypedData {
             ),
         };
 
-        let cfg = config();
+        let Ok(cfg) = config() else {
+            rollback!(
+                b"typed-data: CFG parameter malformed",
+                TypedDataError::ConfigMalformed
+            )
+        };
 
         let next = match instruction.action {
             ACTION_DEPOSIT => {
-                if deposits_paused() {
+                let Ok(paused) = deposits_paused() else {
+                    rollback!(
+                        b"typed-data: admin pause parameter malformed",
+                        TypedDataError::PauseReadFailed
+                    )
+                };
+                if paused {
                     rollback!(
                         b"typed-data: deposits are currently paused",
                         TypedDataError::DepositsPaused
@@ -213,9 +230,21 @@ impl TypedData {
                         TypedDataError::BelowMinimum
                     );
                 }
+                let Some(amount) = current.amount.checked_add(instruction.amount) else {
+                    rollback!(
+                        b"typed-data: deposit amount overflow",
+                        TypedDataError::AmountOverflow
+                    )
+                };
+                let Some(deadline) = ledger_seq().checked_add(cfg.lock_ledgers) else {
+                    rollback!(
+                        b"typed-data: lock deadline overflow",
+                        TypedDataError::DeadlineOverflow
+                    )
+                };
                 DepositValue {
-                    amount: current.amount.wrapping_add(instruction.amount),
-                    deadline: ledger_seq().wrapping_add(cfg.lock_ledgers),
+                    amount,
+                    deadline,
                     flags: 1,
                 }
             }

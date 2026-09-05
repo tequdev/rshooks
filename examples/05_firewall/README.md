@@ -45,3 +45,4 @@ scope for this repo (see `docs/DESIGN.md` §1 non-goals).
 |---|---|---|
 | `CouldNotReadSender` | 1 | `otxn_field(sfAccount)` did not return a 20-byte `AccountId` |
 | `BlockedAccount` | 2 | the sender matched the `BL`-configured blacklist account |
+| `CouldNotReadBlocklist` | 3 | `BL` is present but not a 20-byte `AccountId`, or the host call otherwise failed (an absent `BL` is not an error: it means nothing to block) |

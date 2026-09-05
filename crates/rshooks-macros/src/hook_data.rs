@@ -43,14 +43,17 @@
 //! `FromBytes::read`, matching the same unrolled fixed-offset shape used by
 //! `rshooks::txn::codec` and `txn_template!`.
 //!
-//! # Why the generated code hardcodes `::rshooks::...` paths
+//! # Why the generated code uses absolute `rshooks` paths
 //!
 //! This derive is re-exported as `rshooks::HookData`, so every crate that
-//! can invoke it already depends on `rshooks` under that exact name (Cargo
-//! normalizes the hyphen to an underscore). The generated code therefore
-//! references `::rshooks::convert::{ToBytes, FromBytes, FixedRead}` and
-//! `::rshooks::error::{HookError, Result}` as absolute paths, without
-//! requiring the invoking module to have those names in scope via `use`.
+//! can invoke it already depends on `rshooks`, without requiring the
+//! invoking module to have `convert`/`error` in scope via `use`. The
+//! generated code references `convert::{ToBytes, FromBytes, FixedRead}` and
+//! `error::{HookError, Result}` through an absolute path built at
+//! expansion time by [`crate::krate::rewrite`] — `::rshooks::` normally,
+//! `crate::` when compiled as part of `rshooks` itself, or whatever name a
+//! consumer's `Cargo.toml` gives the dependency (`hooks = { package =
+//! "rshooks", .. }`).
 
 use crate::err;
 use crate::shape::{StructShape, parse_struct};
@@ -211,6 +214,7 @@ impl {name} {{
         read_body = read_body,
         layout_doc = layout_doc,
     );
+    let src = crate::krate::rewrite(src);
 
     match src.parse::<TokenStream>() {
         Ok(ts) => ts,

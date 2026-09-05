@@ -69,6 +69,7 @@ pub(crate) fn expand(input: TokenStream) -> TokenStream {
     // `bits` never sets bit 63 (see `encode`'s doc comment), so it always
     // fits a plain, unsuffixed positive `i64` literal.
     let src = format!("::rshooks::xfl::XFL::from_raw_bits({bits}i64)");
+    let src = crate::krate::rewrite(src);
     src.parse::<TokenStream>()
         .unwrap_or_else(|_| err(span, "rshooks-macros: internal XFL! expansion failed"))
 }

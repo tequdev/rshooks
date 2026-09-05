@@ -16,6 +16,12 @@ use crate::otxn::Otxn;
 /// method's doc comment.
 pub(crate) const DEFAULT_MAX_STATE_VALUE_LEN: usize = 256;
 
+/// `hook::maxNamespaces()` (`Xahau/xahaud` `dev`,
+/// `crates/rshooks-build/vendor/xahaud/Enum.h`): the per-account cap on
+/// distinct hook namespaces holding at least one live state entry, enforced
+/// in [`World::check_namespace_budget`].
+const MAX_NAMESPACES: usize = 256;
+
 /// A state entry's storage key: the entry's own account, its namespace, and
 /// its 32-byte left-pad-normalized key (design §5.3 — `b"RR"` and its
 /// left-padded 32-byte form address the same entry).
@@ -234,6 +240,44 @@ impl World {
         }
     }
 
+    /// Checks (without mutating) whether a state write into `(account, ns)`
+    /// is within `MAX_NAMESPACES` for `account` — the account's *own*
+    /// ledger namespaces, not just the ones touched by the invocation in
+    /// progress. A namespace exists here iff `account` currently has at
+    /// least one live entry in it, mirroring the real host's
+    /// `AccountRoot.HookNamespaces` (`Xahau/xahaud` `dev`,
+    /// `src/xrpld/app/hook/detail/HookAPI.cpp`'s `set_state_cache`: a
+    /// namespace counts iff its `HookStateDir` exists, which is true iff it
+    /// holds a live entry) and matching the harness's own
+    /// seeded-state-entry builders (`state_entry`/`foreign_state_entry`),
+    /// which write directly into [`Self::state`] with no separate seeding
+    /// step required. Recomputed from [`Self::state`] on every call rather
+    /// than cached: a namespace this or an earlier invocation emptied is
+    /// never counted, and one a hook writes into earlier in the *same*
+    /// invocation is counted for a later, distinct new namespace in that
+    /// invocation, since the earlier write already landed in
+    /// [`Self::state`] (state writes apply live, restored only on
+    /// rollback — see [`Self::restore`]).
+    pub(crate) fn check_namespace_budget(
+        &self,
+        account: [u8; 20],
+        ns: [u8; 32],
+    ) -> Result<(), i64> {
+        let existing: HashSet<[u8; 32]> = self
+            .state
+            .keys()
+            .filter(|(acc, _, _)| *acc == account)
+            .map(|(_, entry_ns, _)| *entry_ns)
+            .collect();
+        if existing.contains(&ns) {
+            return Ok(());
+        }
+        if existing.len() >= MAX_NAMESPACES {
+            return Err(rshooks_core::TOO_MANY_NAMESPACES);
+        }
+        Ok(())
+    }
+
     /// Snapshot of every field a rolled-back/restored invocation must undo:
     /// the state map, the committed-emission list, and (P2-E) the three
     /// control-leftover commit targets (`hook_param_overrides`/
@@ -291,4 +335,83 @@ pub(crate) fn normalize_state_key(key: &[u8]) -> Result<[u8; 32], i64> {
         dst.copy_from_slice(key);
     }
     Ok(buf)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
+
+    use super::*;
+
+    #[test]
+    fn namespace_budget_only_costs_for_genuinely_new_namespaces() {
+        let mut w = World::new();
+        let acc = [1u8; 20];
+        let ns = [2u8; 32];
+        for i in 0..1000u32 {
+            assert_eq!(w.check_namespace_budget(acc, ns), Ok(()));
+            w.state.insert((acc, ns, [i as u8; 32]), vec![1]);
+        }
+        let existing: HashSet<[u8; 32]> = w
+            .state
+            .keys()
+            .filter(|(a, _, _)| *a == acc)
+            .map(|(_, n, _)| *n)
+            .collect();
+        assert_eq!(existing.len(), 1);
+    }
+
+    #[test]
+    fn namespace_budget_rejects_the_257th_distinct_namespace() {
+        let mut w = World::new();
+        let acc = [0u8; 20];
+        for i in 0..256u16 {
+            let mut ns = [0u8; 32];
+            ns[0] = (i >> 8) as u8;
+            ns[1] = (i & 0xFF) as u8;
+            assert_eq!(w.check_namespace_budget(acc, ns), Ok(()));
+            w.state.insert((acc, ns, [0u8; 32]), vec![1]);
+        }
+        let overflow_ns = [0xFFu8; 32];
+        assert_eq!(
+            w.check_namespace_budget(acc, overflow_ns),
+            Err(rshooks_core::TOO_MANY_NAMESPACES)
+        );
+    }
+
+    #[test]
+    fn namespace_budget_is_scoped_per_account() {
+        let mut w = World::new();
+        let acc_a = [1u8; 20];
+        let acc_b = [2u8; 20];
+        for i in 0..256u16 {
+            let mut ns = [0u8; 32];
+            ns[0] = (i >> 8) as u8;
+            ns[1] = (i & 0xFF) as u8;
+            w.state.insert((acc_a, ns, [0u8; 32]), vec![1]);
+        }
+        // `acc_a` is full, but a fresh `acc_b` is unaffected.
+        assert_eq!(
+            w.check_namespace_budget(acc_a, [0xFFu8; 32]),
+            Err(rshooks_core::TOO_MANY_NAMESPACES)
+        );
+        assert_eq!(w.check_namespace_budget(acc_b, [0xFFu8; 32]), Ok(()));
+    }
+
+    #[test]
+    fn namespace_budget_frees_up_once_the_last_entry_is_removed() {
+        let mut w = World::new();
+        let acc = [3u8; 20];
+        let ns = [4u8; 32];
+        w.state.insert((acc, ns, [0u8; 32]), vec![1]);
+        w.state.remove(&(acc, ns, [0u8; 32]));
+        // No live entry left in `ns`, so it no longer counts as existing.
+        let existing: HashSet<[u8; 32]> = w
+            .state
+            .keys()
+            .filter(|(a, _, _)| *a == acc)
+            .map(|(_, n, _)| *n)
+            .collect();
+        assert!(existing.is_empty());
+    }
 }

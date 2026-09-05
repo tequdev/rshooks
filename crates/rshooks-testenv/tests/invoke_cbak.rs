@@ -14,14 +14,20 @@ use rshooks::decl::{HookChainEntries, NativeEntry};
 use rshooks_testenv::prelude::*;
 
 /// Reserves one emission slot, `prepare`s a minimal `ttPAYMENT` template
-/// (`TransactionType = 0` -> wire bytes `[0x12, 0x00, 0x00]`), and emits
-/// it — then, *before* accepting, records this invocation's own
-/// `otxn_burden`/`otxn_generation` into state (`main_*`), so a test can
-/// prove they read back to the same values both before and after an
-/// intervening `invoke_cbak` call.
+/// (`TransactionType = 0` plus the two fields `prepare` never fills in —
+/// `sfAmount`/`sfDestination`, both `presence: "required"` for Payment in
+/// `protocol_formats.json`), and emits it — then, *before* accepting,
+/// records this invocation's own `otxn_burden`/`otxn_generation` into state
+/// (`main_*`), so a test can prove they read back to the same values both
+/// before and after an intervening `invoke_cbak` call.
 fn emit_minimal_payment(_r: u32) -> i64 {
     let _ = rshooks::api::etxn::etxn_reserve(1);
-    let template: [u8; 3] = [0x12, 0x00, 0x00];
+    let mut template = vec![0x12, 0x00, 0x00]; // TransactionType = 0
+    template.push(0x61); // Amount (6, 1): native 1 drop
+    template.extend_from_slice(&0x4000_0000_0000_0001u64.to_be_bytes());
+    template.push(0x83); // Destination (8, 3)
+    template.push(20);
+    template.extend_from_slice(&[0u8; 20]);
     let mut prepared = [0u8; 256];
     let n = rshooks::api::etxn::prepare(&mut prepared, &template).expect("prepare");
     let mut hash = [0u8; 32];
@@ -71,6 +77,15 @@ impl HookChainEntries for Chain {
             index: 1,
             name: "accept_no_cbak",
             hook: accept_no_cbak,
+            cbak: None,
+            can_emit: None,
+        },
+        // Same emitting body as index 0, but declares no `#[cbak]` — its
+        // emitted transactions must never carry `EmitCallback`.
+        NativeEntry {
+            index: 2,
+            name: "emit_minimal_payment_no_cbak",
+            hook: emit_minimal_payment,
             cbak: None,
             can_emit: None,
         },
@@ -148,4 +163,64 @@ fn invoke_cbak_on_an_entry_with_no_cbak_panics() {
     let _ = env.invoke::<Chain>(0);
     let txn = env.emitted()[0].clone();
     let _ = env.invoke_cbak::<Chain>(1, CbakOutcome::Success(txn));
+}
+
+/// The `EmitDetails.EmitCallback` field (AccountID, VL-encoded: a 1-byte
+/// length prefix of `20` then the account) is present, holding this
+/// `TestEnv`'s own `hook_account`, exactly when the emitting entry declares
+/// a `#[cbak]` body — and absent otherwise.
+#[test]
+fn emit_callback_presence_tracks_whether_the_entry_declares_a_cbak() {
+    let with_cbak = env();
+    let exit = with_cbak.invoke::<Chain>(0);
+    assert_eq!(exit.exit, ExitType::Accept, "{exit:?}");
+    let blob_with = with_cbak.emitted()[0].blob().to_vec();
+
+    let without_cbak = env();
+    let exit = without_cbak.invoke::<Chain>(2);
+    assert_eq!(exit.exit, ExitType::Accept, "{exit:?}");
+    let blob_without = without_cbak.emitted()[0].blob().to_vec();
+
+    let (hdr, hdr_len) = rshooks::txn::codec::field_header(rshooks::sfield::sfEmitCallback);
+    let mut expected = hdr[..hdr_len].to_vec();
+    expected.push(20); // AccountID VL length prefix
+    expected.extend_from_slice(&[1u8; 20]); // env()'s hook_account
+
+    assert!(
+        blob_with
+            .windows(expected.len())
+            .any(|w| w == expected.as_slice()),
+        "EmitCallback region not found in the emitted blob: {blob_with:02x?}"
+    );
+    assert!(
+        !blob_without.windows(hdr_len).any(|w| w == &hdr[..hdr_len]),
+        "EmitCallback header unexpectedly present: {blob_without:02x?}"
+    );
+}
+
+#[test]
+#[should_panic(expected = "carries no EmitCallback")]
+fn invoke_cbak_panics_for_a_transaction_emitted_by_an_entry_with_no_cbak() {
+    let env = env();
+    let exit = env.invoke::<Chain>(2); // declares cbak: None
+    assert_eq!(exit.exit, ExitType::Accept, "{exit:?}");
+    let txn = env.emitted()[0].clone();
+
+    // Entry 0 does declare a `#[cbak]`, but this transaction was never
+    // emitted by it — on-chain, `doHookCallback` would never invoke
+    // anything for a transaction whose `EmitDetails` has no `EmitCallback`
+    // at all.
+    let _ = env.invoke_cbak::<Chain>(0, CbakOutcome::Success(txn));
+}
+
+#[test]
+#[should_panic(expected = "do not match")]
+fn invoke_cbak_panics_when_the_hook_account_changed_since_the_emit() {
+    let env = env();
+    let exit = env.invoke::<Chain>(0);
+    assert_eq!(exit.exit, ExitType::Accept, "{exit:?}");
+    let txn = env.emitted()[0].clone();
+
+    let env = env.hook_account([9u8; 20]);
+    let _ = env.invoke_cbak::<Chain>(0, CbakOutcome::Success(txn));
 }

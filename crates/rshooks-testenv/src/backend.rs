@@ -85,12 +85,10 @@ impl HostBackend for Backend {
         if data.len() > max_len {
             return Err(rshooks_core::TOO_BIG);
         }
-        let addr_ns = (hook_account, own_ns);
-        {
-            let ctx = self.ctx.borrow();
-            ctx.check_state_modification_budget()?;
-            ctx.check_namespace_budget(&addr_ns)?;
-        }
+        self.ctx.borrow().check_state_modification_budget()?;
+        self.world
+            .borrow()
+            .check_namespace_budget(hook_account, own_ns)?;
         {
             let mut w = self.world.borrow_mut();
             let key_addr = (hook_account, own_ns, norm);
@@ -100,7 +98,7 @@ impl HostBackend for Backend {
                 w.state.insert(key_addr, data.to_vec());
             }
         }
-        self.ctx.borrow_mut().record_state_modification(addr_ns);
+        self.ctx.borrow_mut().record_state_modification();
         Ok(data.len() as i64)
     }
 
@@ -162,12 +160,10 @@ impl HostBackend for Backend {
         if data.len() > max_len {
             return Err(rshooks_core::TOO_BIG);
         }
-        let addr_ns = (target_acc, target_ns);
-        {
-            let ctx = self.ctx.borrow();
-            ctx.check_state_modification_budget()?;
-            ctx.check_namespace_budget(&addr_ns)?;
-        }
+        self.ctx.borrow().check_state_modification_budget()?;
+        self.world
+            .borrow()
+            .check_namespace_budget(target_acc, target_ns)?;
         {
             let mut w = self.world.borrow_mut();
             let key_addr = (target_acc, target_ns, norm);
@@ -177,7 +173,7 @@ impl HostBackend for Backend {
                 w.state.insert(key_addr, data.to_vec());
             }
         }
-        self.ctx.borrow_mut().record_state_modification(addr_ns);
+        self.ctx.borrow_mut().record_state_modification();
         Ok(data.len() as i64)
     }
 
@@ -289,7 +285,7 @@ impl HostBackend for Backend {
     }
 
     fn ledger_nonce(&self) -> Result<[u8; 32], i64> {
-        self.ctx.borrow_mut().next_nonce()
+        self.ctx.borrow_mut().next_ledger_nonce()
     }
 
     #[allow(clippy::expect_used)] // documented API: `TestEnv::base_fee_drops` validates drops fits in i64 before it ever reaches `World`
@@ -323,29 +319,49 @@ impl HostBackend for Backend {
         }
     }
 
+    // Ported against `HookAPI::etxn_details` (`Xahau/xahaud` `dev`,
+    // `src/xrpld/app/hook/detail/HookAPI.cpp:914`): `EmitCallback` is
+    // written iff `hookCtx.result.hasCallback` — set from
+    // `hookDef->isFieldPresent(sfHookCallbackFee)`
+    // (`Transactor.cpp:1408`), i.e. whether the *currently executing*
+    // hook's own wasm declares a `cbak` export — and its value is
+    // `hookCtx.result.account`, the currently executing hook's own account
+    // (never a different account). `InvocationContext::has_callback`
+    // stands in for that per-hook-definition flag (set once per invocation
+    // by `crate::env::TestEnv::run_entry` from the invoked entry's
+    // `cbak.is_some()`), and `World::hook_account` stands in for
+    // `hookCtx.result.account`.
     fn etxn_details(&self) -> Result<Vec<u8>, i64> {
         let reserved = self.ctx.borrow().require_reserved()?;
         let burden = self.compute_etxn_burden(reserved)?;
         let generation = self.compute_etxn_generation();
         let generation = u32::try_from(generation).map_err(|_| rshooks_core::FEE_TOO_LARGE)?;
-        let (parent_txn_id, hook_hash) = {
+        let has_callback = self.ctx.borrow().has_callback;
+        let (parent_txn_id, hook_hash, callback) = {
             let w = self.world.borrow();
-            (w.otxn.id, w.current_hook_hash().unwrap_or([0u8; 32]))
+            (
+                w.otxn.id,
+                w.current_hook_hash().unwrap_or([0u8; 32]),
+                has_callback.then_some(w.hook_account),
+            )
         };
-        let nonce = self.ctx.borrow_mut().next_details_nonce();
-        // This harness never populates `EmitCallback` — every emitted blob
-        // is built with `callback: None`, regardless of whether the
-        // currently invoked entry declares a `#[cbak]` body. Permanent
-        // limitation: an `invoke_cbak` context built from such a blob
-        // always differs from a genuine on-chain callback in that one
-        // field — see the book's "what this harness does not model" list.
+        // `HookAPI::etxn_details` (`HookAPI.cpp:902-904`) calls
+        // `HookAPI::etxn_nonce()` directly and maps a nonce-budget failure to
+        // `INTERNAL_ERROR` rather than propagating `TOO_MANY_NONCES` —
+        // `etxn_details` shares `etxn_nonce`'s counter/budget, but not its
+        // error code.
+        let nonce = self
+            .ctx
+            .borrow_mut()
+            .next_emit_nonce()
+            .map_err(|_| rshooks_core::INTERNAL_ERROR)?;
         let details = build_etxn_details(&EmitDetailsInputs {
             generation,
             burden,
             parent_txn_id,
             nonce,
             hook_hash,
-            callback: None,
+            callback,
         });
         self.ctx.borrow_mut().last_etxn_details = Some(details.clone());
         Ok(details)
@@ -367,7 +383,7 @@ impl HostBackend for Backend {
     }
 
     fn etxn_nonce(&self) -> Result<[u8; 32], i64> {
-        self.ctx.borrow_mut().next_nonce()
+        self.ctx.borrow_mut().next_emit_nonce()
     }
 
     fn emit(&self, tx_blob: &[u8]) -> Result<[u8; 32], i64> {
@@ -395,7 +411,25 @@ impl HostBackend for Backend {
         }
 
         let expected = self.ctx.borrow().last_etxn_details.clone();
-        match crate::emit_walk::validate_emit_blob(tx_blob, expected.as_deref()) {
+        let (hook_account, ledger_seq) = {
+            let w = self.world.borrow();
+            (w.hook_account, w.ledger_seq)
+        };
+        // Real `HookAPI::emit` rule 7 rejects outright if its own
+        // `etxn_fee_base` call fails (`minfee < 0` -> `EMISSION_FAILURE`).
+        let fee_base = self.etxn_fee_base(tx_blob);
+        let validation = if fee_base < 0 {
+            Err(())
+        } else {
+            crate::emit_walk::validate_emit_blob(
+                tx_blob,
+                expected.as_deref(),
+                &hook_account,
+                ledger_seq,
+                fee_base as u64,
+            )
+        };
+        match validation {
             Ok(()) => {
                 let hash = deterministic_hash(tx_blob);
                 self.ctx.borrow_mut().record_emitted(EmittedTxn {
@@ -1021,12 +1055,71 @@ mod tests {
         assert_eq!(backend.etxn_fee_base(&[]), rshooks_core::FEE_TOO_LARGE);
     }
 
+    // -- nonce budgets (design §4 / CR-03): `ledger_nonce` and the
+    // `etxn_nonce`/`etxn_details` emit-nonce family each get their own
+    // 256-call budget, matching xahaud's separate `ledger_nonce_counter`/
+    // `emit_nonce_counter` (`HookAPI.cpp`) --
+
+    #[test]
+    fn ledger_and_etxn_nonce_budgets_are_independent_at_the_backend() {
+        let (_world, _ctx, backend) = fresh();
+        for _ in 0..256 {
+            assert!(backend.ledger_nonce().is_ok());
+        }
+        // The ledger-nonce budget is exhausted, but `etxn_nonce` draws from
+        // a separate budget that is still untouched.
+        assert!(backend.etxn_nonce().is_ok());
+        assert_eq!(backend.ledger_nonce(), Err(rshooks_core::TOO_MANY_NONCES));
+    }
+
+    #[test]
+    fn etxn_details_consumes_the_etxn_nonce_budget() {
+        let (_world, ctx, backend) = fresh();
+        ctx.borrow_mut().reserve(1).unwrap();
+        // `etxn_details` calls the same emit-nonce counter `etxn_nonce`
+        // does (xahaud's `HookAPI::etxn_details` calls
+        // `HookAPI::etxn_nonce()` directly) — 256 calls to `etxn_details`
+        // alone exhaust the budget `etxn_nonce` also draws from.
+        for _ in 0..256 {
+            assert!(backend.etxn_details().is_ok());
+        }
+        assert_eq!(backend.etxn_nonce(), Err(rshooks_core::TOO_MANY_NONCES));
+    }
+
+    #[test]
+    fn etxn_details_past_the_nonce_budget_is_internal_error() {
+        let (_world, ctx, backend) = fresh();
+        ctx.borrow_mut().reserve(1).unwrap();
+        for _ in 0..256 {
+            assert!(backend.etxn_nonce().is_ok());
+        }
+        // xahaud's `HookAPI::etxn_details` maps its internal
+        // `etxn_nonce()` call failing to `INTERNAL_ERROR`, not
+        // `TOO_MANY_NONCES` (`HookAPI.cpp:902-904`).
+        assert_eq!(backend.etxn_details(), Err(rshooks_core::INTERNAL_ERROR));
+    }
+
     // -- prepare (P2-D) --
 
     /// A minimal well-formed template: just `TransactionType = ttPAYMENT`
     /// (`(1, 2)` -> header `0x12`, value `0`).
     fn minimal_template() -> Vec<u8> {
         vec![0x12, 0x00, 0x00]
+    }
+
+    /// [`minimal_template`] plus the two fields `prepare` itself never
+    /// fills in — `sfAmount`/`sfDestination`, both `presence: "required"`
+    /// for Payment in `protocol_formats.json` — so the result passes
+    /// `validate_emit_blob`'s required-field check. Everything else is
+    /// `prepare`'s job (unconditionally filled or overwritten).
+    fn minimal_emittable_payment_template() -> Vec<u8> {
+        let mut out = minimal_template();
+        out.push(0x61); // Amount (6, 1): native 1 drop
+        out.extend_from_slice(&0x4000_0000_0000_0001u64.to_be_bytes());
+        out.push(0x83); // Destination (8, 3)
+        out.push(20);
+        out.extend_from_slice(&[2u8; 20]);
+        out
     }
 
     #[test]
@@ -1055,11 +1148,22 @@ mod tests {
         world.borrow_mut().ledger_seq = 100;
         ctx.borrow_mut().reserve(1).unwrap();
 
-        let prepared = backend.prepare(&minimal_template()).unwrap();
+        let prepared = backend
+            .prepare(&minimal_emittable_payment_template())
+            .unwrap();
 
         let expected_details = ctx.borrow().last_etxn_details.clone();
+        let min_fee = backend.etxn_fee_base(&prepared);
+        assert!(min_fee >= 0);
         assert!(
-            crate::emit_walk::validate_emit_blob(&prepared, expected_details.as_deref()).is_ok()
+            crate::emit_walk::validate_emit_blob(
+                &prepared,
+                expected_details.as_deref(),
+                &[7u8; 20],
+                100,
+                min_fee as u64,
+            )
+            .is_ok()
         );
 
         // Round-trip: `prepare`'s own output is accepted by `emit`.

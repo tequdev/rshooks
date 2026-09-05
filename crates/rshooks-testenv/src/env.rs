@@ -143,7 +143,7 @@ impl TestEnv {
     pub fn new() -> Self {
         Self {
             world: Rc::new(RefCell::new(World::new())),
-            strict_can_emit: false,
+            strict_can_emit: true,
         }
     }
 
@@ -378,11 +378,14 @@ impl TestEnv {
         self
     }
 
-    /// Opts into asserting that every transaction type this invocation
-    /// commits to [`Self::emitted`] is one the invoked entry's
-    /// `#[hook(.., can_emit = [..])]` declaration allows. Off by default.
-    /// A violation panics (design §5.6) rather than silently accepting —
-    /// this is a test-author assertion, not a Hook API error path.
+    /// Controls whether every transaction type this invocation commits to
+    /// [`Self::emitted`] is asserted against the invoked entry's
+    /// `#[hook(.., can_emit = [..])]` declaration, matching the real
+    /// host's `HookCanEmit` enforcement. **On by default** — pass `false`
+    /// to opt out for a lower-fidelity test that deliberately emits
+    /// outside the declaration. A violation panics (design §5.6) rather
+    /// than silently accepting — this is a test-author assertion, not a
+    /// Hook API error path.
     #[must_use]
     pub fn strict_can_emit(mut self, on: bool) -> Self {
         self.strict_can_emit = on;
@@ -406,9 +409,9 @@ impl TestEnv {
     /// installed — i.e. `invoke` was called reentrantly (from inside a
     /// hook entry currently running via another `invoke` call on this
     /// thread); see [`rshooks_core::backend::install`]'s own panic message.
-    /// Also panics if [`Self::strict_can_emit`] is enabled and this
-    /// invocation commits an emission whose transaction type is not in the
-    /// invoked entry's `can_emit` declaration.
+    /// Also panics, unless [`Self::strict_can_emit`] was called with
+    /// `false`, if this invocation commits an emission whose transaction
+    /// type is not in the invoked entry's `can_emit` declaration.
     #[allow(clippy::panic)] // documented API: an unknown entry index is a test-author error (design §2.4/§4)
     pub fn invoke<C: HookChainEntries>(&self, index: u32) -> HookExit {
         let entry = Self::find_entry::<C>(index, "invoke");
@@ -449,9 +452,19 @@ impl TestEnv {
     /// export simply never receives a callback
     /// (`Transactor::doHookCallback` skips it via
     /// `!hookDef->isFieldPresent(sfHookCallbackFee)`, `Transactor.cpp:1512-1518`).
-    /// Also panics under the same reentrancy/`strict_can_emit` conditions
-    /// [`Self::invoke`] documents.
-    #[allow(clippy::panic)] // documented API: an unknown entry index, or an entry with no cbak, is a test-author error
+    /// Also panics if `outcome`'s emitted transaction has no
+    /// `EmitDetails.EmitCallback` field at all — real `doHookCallback`
+    /// returns without invoking anything in that case
+    /// (`Transactor.cpp:1498-1499`), so a callback here would run one that
+    /// could never happen on-chain (most commonly: the transaction was
+    /// emitted by an entry with no `#[cbak]` — `etxn_details` never writes
+    /// `EmitCallback` then, see [`crate::backend::Backend::etxn_details`]) —
+    /// or if `EmitCallback`'s account or `EmitHookHash` don't match this
+    /// `TestEnv`'s own `hook_account`/seeded hash at its `hook_pos` (the
+    /// transaction was emitted by a different hook identity than the one
+    /// `index` is being invoked against). Also panics under the same
+    /// reentrancy/`strict_can_emit` conditions [`Self::invoke`] documents.
+    #[allow(clippy::panic)] // documented API: an unknown entry index, an entry with no cbak, or an EmitDetails/hook-identity mismatch, is a test-author error
     pub fn invoke_cbak<C: HookChainEntries>(&self, index: u32, outcome: CbakOutcome) -> HookExit {
         let entry = Self::find_entry::<C>(index, "invoke_cbak");
         let Some(cbak_fn) = entry.cbak else {
@@ -468,14 +481,38 @@ impl TestEnv {
 
         let (cbak_otxn, burden, generation) = {
             let txn = outcome.emitted_txn();
-            crate::otxn::from_emitted(txn.blob(), txn.hash()).unwrap_or_else(|| {
+            let parsed = crate::otxn::from_emitted(txn.blob(), txn.hash()).unwrap_or_else(|| {
                 panic!(
                     "rshooks_testenv::TestEnv::invoke_cbak: the emitted transaction blob failed \
                      to parse into an otxn (malformed or missing TransactionType/EmitDetails) — \
                      this should be unreachable for a blob obtained from `TestEnv::emitted()`, \
                      since it already passed the emission walker"
                 )
-            })
+            });
+
+            let Some(callback_account) = parsed.callback_account else {
+                panic!(
+                    "rshooks_testenv::TestEnv::invoke_cbak: the emitted transaction's \
+                     EmitDetails carries no EmitCallback field — on-chain, \
+                     Transactor::doHookCallback never invokes a callback for such a \
+                     transaction (it was most likely emitted by an entry with no #[cbak] body)"
+                );
+            };
+            let (hook_account, current_hash) = {
+                let w = self.world.borrow();
+                (w.hook_account, w.current_hook_hash().unwrap_or([0u8; 32]))
+            };
+            assert!(
+                callback_account == hook_account && parsed.hook_hash == current_hash,
+                "rshooks_testenv::TestEnv::invoke_cbak: the emitted transaction's \
+                 EmitCallback/EmitHookHash ({callback_account:?}, {:?}) do not match this \
+                 TestEnv's own hook_account/hook_hash at its current hook_pos ({hook_account:?}, \
+                 {current_hash:?}) — it was not emitted by the hook identity entry {index} is \
+                 being invoked against",
+                parsed.hook_hash
+            );
+
+            (parsed.otxn, parsed.burden, parsed.generation)
         };
 
         let original = {
@@ -536,6 +573,7 @@ impl TestEnv {
             id
         };
         let ctx = Rc::new(RefCell::new(InvocationContext::new(invocation_id)));
+        ctx.borrow_mut().has_callback = entry.cbak.is_some();
         let snapshot = self.world.borrow().snapshot();
 
         install_panic_hook_filter();

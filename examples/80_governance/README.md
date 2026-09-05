@@ -110,8 +110,8 @@ own (see above), so its mandatory `&self` receiver goes unused there.
 This is a real, measured build constraint, not a style preference. Every
 layer of the typed accessor chain (`State::at` -> `StateEntry::get` ->
 `state::state_get` -> `decode_read` -> `res`, all `#[inline(always)]`) is
-zero-cost *at the Rust level*, but `rshooks-build`'s Guard-type (api-version
-0) pipeline force-inlines every reachable function into one `hook()` body
+zero-cost *at the Rust level*, but `rshooks-build`'s Guard-type pipeline
+force-inlines every reachable function into one `hook()` body
 regardless of Rust-level `#[inline(never)]` (`docs/DESIGN.md` §6.2b) —
 `#[inline(never)]` only isolates a function's *own* internal branch
 structure from a caller's during LLVM's stackifier pass; it does not
@@ -132,7 +132,7 @@ limit — current values live in [`metrics.json`](./metrics.json).
 orchestrator/library maintainers: the declarative `#[state(..)]`/
 `#[hook_param(..)]`/`#[otxn_param(..)]` field API, in its current
 implementation, does not appear practical to use at high call-site density
-in a single Guard-type (api-version 0) hook — every example migrated so
+in a single Guard-type hook — every example migrated so
 far (`01`/`02`/`03`/`12`) has few enough declared-field accesses per hook
 to stay comfortably under budget; `governance` is the first crate dense
 enough to hit the ceiling. A hook with `governance`'s call-site density

@@ -25,11 +25,18 @@ use rshooks::hooks;
 use rshooks_testenv::prelude::*;
 
 /// Reserves one emission slot and emits a minimal `ttPAYMENT` blob
-/// (`TransactionType = 0` -> wire bytes `[0x12, 0x00, 0x00]`) — enough for
-/// `TestEnv::invoke_cbak` to parse an otxn back out of it.
+/// (`TransactionType = 0` plus the two fields `prepare` never fills in —
+/// `sfAmount`/`sfDestination`, both `presence: "required"` for Payment in
+/// `protocol_formats.json`) — enough for `TestEnv::invoke_cbak` to parse an
+/// otxn back out of it.
 fn emit_minimal_payment() {
     let _ = etxn::etxn_reserve(1);
-    let template: [u8; 3] = [0x12, 0x00, 0x00];
+    let mut template = vec![0x12, 0x00, 0x00]; // TransactionType = 0
+    template.push(0x61); // Amount (6, 1): native 1 drop
+    template.extend_from_slice(&0x4000_0000_0000_0001u64.to_be_bytes());
+    template.push(0x83); // Destination (8, 3)
+    template.push(20);
+    template.extend_from_slice(&[0u8; 20]);
     let mut prepared = [0u8; 256];
     let n = etxn::prepare(&mut prepared, &template).expect("prepare");
     let mut hash = [0u8; 32];

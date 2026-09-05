@@ -7,7 +7,7 @@ release profile that must not leak into `rshooks-core`/`rshooks`/
 `rshooks-build`, and they don't build for host targets. Every code sample in
 this book is adapted from one of these.
 
-## Reading order: 01–19
+## Reading order: 01–21
 
 Numbered in **suggested reading order** — start at `01_accept-all` and work
 down; each one builds on ideas from the examples before it. The `example`
@@ -42,9 +42,9 @@ example order, with gaps where an example was retired.
 
 ## 80+: production hooks in Rust
 
-Unlike `01`–`16` (one concept each, in suggested reading order), the `80`+
+Unlike `01`–`21` (one concept each, in suggested reading order), the `80`+
 series are behavior-equivalent Rust ports of real, deployed xahaud C hooks —
-read them after `01`–`16`, not instead of them. Each has its own README with
+read them after `01`–`21`, not instead of them. Each has its own README with
 a full behavior-equivalence table against its C source and a differences
 table for any intentional deviation.
 

@@ -27,6 +27,7 @@ txn_template! {
         fee: native_amount(sfFee) = 0,
         signing_pub_key: empty_vl(sfSigningPubKey),
         account: account_id(sfAccount),
+        destination: account_id(sfDestination),
         emit_details: emit_details,
     }
 }
@@ -83,6 +84,7 @@ impl Limits {
             rollback!(b"reserve", 1);
         }
         let mut tpl = Probe::new();
+        tpl.set_destination(&AccountId::default());
         let prepared = match tpl.prepare_for_emit() {
             Ok(p) => p,
             Err(_) => rollback!(b"prepare", 2),

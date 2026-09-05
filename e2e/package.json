@@ -7,6 +7,7 @@
   "scripts": {
     "pretest": "node scripts/copy-wasm.mjs",
     "test": "LOG_LEVEL=error vitest run",
+    "typecheck": "tsc --noEmit",
     "trace": "docker logs --tail 100 -f xahau 2>&1 | cut -d ' ' -f 5- | grep -a -E 'Publishing ledger|HookInfo|HookTrace|HookError|HookEmit|preclaim result'"
   },
   "dependencies": {
@@ -16,7 +17,7 @@
   },
   "devDependencies": {
     "@tsconfig/node22": "^22.0.5",
-    "typescript": "^5.3.3",
+    "typescript": "5.9.3",
     "vitest": "^1.3.1"
   }
 }

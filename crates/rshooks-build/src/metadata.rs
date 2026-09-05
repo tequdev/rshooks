@@ -10,99 +10,13 @@ use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use sha2::{Digest, Sha512};
 
+use crate::tx_type_table::{TRANSACTION_TYPE_CODES, TRANSACTION_TYPES};
+
 /// Prefix used by `metadata!` (v1) carrier exports in raw Hook wasm
 /// artifacts. Detected — never parsed — so a crate that has not migrated to
 /// `#[hooks]` gets a migration hint instead of a generic "no chain found"
 /// error.
 pub const METADATA_EXPORT_PREFIX: &str = "__rshooks_metadata_v1_";
-
-/// Canonical Xahau JSON spellings for every known `TxType` variant
-/// (excluding the data-carrying `Unknown`), used to validate `#[hooks]`
-/// entries' `on`/`can_emit` transaction-type lists.
-pub(crate) const TRANSACTION_TYPES: &[&str] = &[
-    "Payment",
-    "EscrowCreate",
-    "EscrowFinish",
-    "AccountSet",
-    "EscrowCancel",
-    "SetRegularKey",
-    "OfferCreate",
-    "OfferCancel",
-    "TicketCreate",
-    "SignerListSet",
-    "PaymentChannelCreate",
-    "PaymentChannelFund",
-    "PaymentChannelClaim",
-    "CheckCreate",
-    "CheckCash",
-    "CheckCancel",
-    "DepositPreauth",
-    "TrustSet",
-    "AccountDelete",
-    "SetHook",
-    "NFTokenMint",
-    "NFTokenBurn",
-    "NFTokenCreateOffer",
-    "NFTokenCancelOffer",
-    "NFTokenAcceptOffer",
-    "Clawback",
-    "AMMClawback",
-    "AMMCreate",
-    "AMMDeposit",
-    "AMMWithdraw",
-    "AMMVote",
-    "AMMBid",
-    "AMMDelete",
-    "URITokenMint",
-    "URITokenBurn",
-    "URITokenBuy",
-    "URITokenCreateSellOffer",
-    "URITokenCancelSellOffer",
-    "XChainCreateClaimID",
-    "XChainCommit",
-    "XChainClaim",
-    "XChainAccountCreateCommit",
-    "XChainAddClaimAttestation",
-    "XChainAddAccountCreateAttestation",
-    "XChainModifyBridge",
-    "XChainCreateBridge",
-    "DIDSet",
-    "DIDDelete",
-    "OracleSet",
-    "OracleDelete",
-    "LedgerStateFix",
-    "MPTokenIssuanceCreate",
-    "MPTokenIssuanceDestroy",
-    "MPTokenIssuanceSet",
-    "MPTokenAuthorize",
-    "CredentialCreate",
-    "CredentialAccept",
-    "CredentialDelete",
-    "NFTokenModify",
-    "PermissionedDomainSet",
-    "PermissionedDomainDelete",
-    "Cron",
-    "CronSet",
-    "SetRemarks",
-    "Remit",
-    "GenesisMint",
-    "Import",
-    "ClaimReward",
-    "Invoke",
-    "EnableAmendment",
-    "SetFee",
-    "UNLModify",
-    "EmitFailure",
-    "UNLReport",
-];
-
-/// `tt*` codes corresponding position-for-position to [`TRANSACTION_TYPES`].
-pub(crate) const TRANSACTION_TYPE_CODES: &[u8] = &[
-    0, 1, 2, 3, 4, 5, 7, 8, 10, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 25, 26, 27, 28, 29, 30,
-    31, 35, 36, 37, 38, 39, 40, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61,
-    62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103,
-    104,
-];
 
 pub(crate) fn validate_transaction_types(field: &str, values: Option<&[String]>) -> Result<()> {
     let Some(values) = values else {
@@ -126,9 +40,9 @@ pub(crate) fn validate_transaction_types(field: &str, values: Option<&[String]>)
 /// Worst-case instruction counts for the Hook entry points.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct WorstCaseExecution {
-    /// Static WCE for `hook`, or `null` for gas-type Hooks.
+    /// Static WCE for `hook`.
     pub hook: Option<u64>,
-    /// Static WCE for `cbak`, or `null` for gas-type Hooks.
+    /// Static WCE for `cbak`.
     pub cbak: Option<u64>,
 }
 

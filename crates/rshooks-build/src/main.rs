@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use rshooks_build::chain_build::{ChainBuildArgs, run as run_chain_build};
-use rshooks_build::{ApiVersion, Options, ValidationReport};
+use rshooks_build::{Options, ValidationReport};
 
 /// A CLI toolchain for building and validating Xahau Hook wasm binaries.
 #[derive(Parser)]
@@ -33,10 +33,6 @@ enum Cmd {
         /// Build only the named package (forwarded to `cargo -p`).
         #[arg(short = 'p', long)]
         package: Option<String>,
-        /// The Hook API version this module targets. Only `0` is currently
-        /// supported for chain builds.
-        #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(u8).range(0..=1))]
-        api_version: u8,
         /// Deprecated: insert missing loop guards instead of treating them
         /// as an error. Scheduled for removal; remove the
         /// compiler-generated loop at the source level
@@ -76,7 +72,9 @@ enum Cmd {
         #[arg(long = "override")]
         override_flag: bool,
     },
-    /// Cleans and validates an already-built wasm file, without invoking
+    /// Runs the full post-processing pipeline — the Binaryen `wasm-opt`
+    /// `-Oz` pass, the cleaner, flatten, unnest, and guard validation — on
+    /// an already-built wasm file from any toolchain, without invoking
     /// cargo.
     Clean {
         /// The input wasm file.
@@ -85,9 +83,6 @@ enum Cmd {
         /// `<input>.clean.wasm`).
         #[arg(short = 'o', long)]
         out: Option<PathBuf>,
-        /// The Hook API version this module targets.
-        #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(u8).range(0..=1))]
-        api_version: u8,
         /// Deprecated: insert missing loop guards instead of treating them
         /// as an error. Scheduled for removal; remove the
         /// compiler-generated loop at the source level
@@ -103,24 +98,17 @@ enum Cmd {
         /// limit (clearly marked invalid).
         #[arg(long)]
         allow_oversize: bool,
+        /// Skip the Binaryen `wasm-opt` `-Oz` size-optimization pass that
+        /// otherwise runs on the raw wasm before cleaning.
+        #[arg(long)]
+        no_optimize: bool,
     },
     /// Validates a wasm file against the full SetHook rule set, without
     /// modifying it. Works on any wasm, including C-built hooks.
     Check {
         /// The wasm file to validate.
         file: PathBuf,
-        /// The Hook API version this module targets.
-        #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(u8).range(0..=1))]
-        api_version: u8,
     },
-}
-
-fn api_version_from(v: u8) -> ApiVersion {
-    if v == 1 {
-        ApiVersion::V1
-    } else {
-        ApiVersion::V0
-    }
 }
 
 /// Prints a build-time deprecation warning for `--auto-guard` to stderr.
@@ -141,7 +129,6 @@ fn main() -> Result<()> {
         Cmd::Build {
             manifest_path,
             package,
-            api_version,
             auto_guard,
             default_maxiter,
             out,
@@ -157,7 +144,6 @@ fn main() -> Result<()> {
             let args = ChainBuildArgs {
                 manifest_path,
                 package,
-                api_version,
                 auto_guard,
                 default_maxiter,
                 out,
@@ -172,28 +158,24 @@ fn main() -> Result<()> {
         Cmd::Clean {
             input,
             out,
-            api_version,
             auto_guard,
             default_maxiter,
             allow_oversize,
+            no_optimize,
         } => {
             if auto_guard {
                 warn_auto_guard_deprecated();
             }
             let opts = Options {
-                api_version: api_version_from(api_version),
                 auto_guard,
                 default_maxiter,
                 allow_oversize,
-                ..Options::default()
+                optimize: !no_optimize,
             };
             cmd_clean(&input, out, &opts)
         }
-        Cmd::Check { file, api_version } => {
-            let opts = Options {
-                api_version: api_version_from(api_version),
-                ..Options::default()
-            };
+        Cmd::Check { file } => {
+            let opts = Options::default();
             cmd_check(&file, &opts)
         }
     }

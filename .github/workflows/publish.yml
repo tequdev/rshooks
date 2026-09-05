@@ -12,8 +12,40 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # workflow_dispatch can be run against any branch or tag, so confirm the
+  # dispatched commit is actually reachable from main before doing anything
+  # else. This also covers a `v*` release tag, since a tag pointing at a
+  # commit on main is by definition an ancestor of main.
+  verify-ref:
+    name: Verify commit is on protected main
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Confirm dispatched commit is reachable from main
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_SHA is not on main (or a tag pointing at a commit on main); refusing to publish from an arbitrary ref" >&2
+            exit 1
+          fi
+
+  # Re-run the full CI suite (fmt, clippy, tests, wasm build, every example)
+  # against this exact commit rather than trusting that some earlier run on
+  # this SHA succeeded.
+  ci:
+    name: Run CI checks for this commit
+    needs: verify-ref
+    uses: ./.github/workflows/ci.yml
+
   publish:
     name: Publish crates to crates.io
+    needs: ci
     runs-on: ubuntu-latest
     permissions:
       id-token: write # OIDC token exchange for crates.io Trusted Publishing
@@ -26,6 +58,12 @@ jobs:
       - name: Install stable Rust toolchain
         run: rustup toolchain install stable --profile minimal
 
+      # Dry-run every crate, in dependency order, before touching the
+      # registry at all (works without registry auth) so a broken package
+      # fails fast rather than after some crates are already published.
+      - name: Dry-run publish (every crate, dependency order)
+        run: cargo +stable publish -p rshooks-core -p rshooks-macros -p rshooks -p rshooks-build -p rshooks-testenv --dry-run
+
       # Trusted Publishing only works for crates that already exist on
       # crates.io, so the very first publish falls back to the
       # CARGO_REGISTRY_TOKEN secret; once Trusted Publishing is configured
@@ -36,10 +74,31 @@ jobs:
         continue-on-error: true
         uses: rust-lang/crates-io-auth-action@v1
 
+      # Partial-publish recovery: publish one crate at a time (in dependency
+      # order) instead of a single multi-package `cargo publish`, and skip
+      # any crate whose exact version is already live on crates.io. A rerun
+      # after a mid-way failure then resumes from the crate that failed
+      # instead of erroring on the ones a previous run already published.
       - name: Publish
+        if: ${{ !inputs.dry-run }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token || secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo +stable publish -p rshooks-core -p rshooks-macros -p rshooks -p rshooks-build -p rshooks-testenv${{ inputs.dry-run && ' --dry-run' || '' }}
+        run: |
+          set -euo pipefail
+
+          version=$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)
+          if [ -z "$version" ]; then
+            echo "::error::could not determine workspace version from Cargo.toml" >&2
+            exit 1
+          fi
+
+          for crate in rshooks-core rshooks-macros rshooks rshooks-build rshooks-testenv; do
+            if curl -sf "https://crates.io/api/v1/crates/${crate}/${version}" >/dev/null; then
+              echo "${crate} ${version} is already published, skipping"
+              continue
+            fi
+            cargo +stable publish -p "$crate"
+          done
 
   release:
     name: Tag and create GitHub release
@@ -54,8 +113,10 @@ jobs:
       # All published crates share the workspace version (version.workspace
       # = true), and the repo is versioned/released as a whole, so one tag
       # covers the release. `gh release create` creates the tag itself
-      # (pinned to the commit that triggered this run); safe to re-run
-      # since an existing release is left alone instead of failing the job.
+      # (pinned to the commit that triggered this run); safe to re-run for
+      # the same commit, since an existing release is then left alone
+      # instead of failing the job. If the tag exists but points at a
+      # different commit, the job fails instead of silently skipping.
       - name: Tag and release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -70,7 +131,13 @@ jobs:
           tag="v${version}"
 
           if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Release $tag already exists, skipping"
+            git fetch --force origin "refs/tags/${tag}:refs/tags/${tag}"
+            tag_commit=$(git rev-parse "refs/tags/${tag}^{commit}")
+            if [ "$tag_commit" != "$GITHUB_SHA" ]; then
+              echo "::error::tag $tag already exists but points at $tag_commit, not the release commit $GITHUB_SHA" >&2
+              exit 1
+            fi
+            echo "Release $tag already exists and matches $GITHUB_SHA, skipping"
           else
             gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" --generate-notes
           fi

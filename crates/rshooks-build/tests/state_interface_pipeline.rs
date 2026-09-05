@@ -38,7 +38,6 @@ fn example_20_declares_the_design_docs_spec_vector_hex() {
     let args = ChainBuildArgs {
         manifest_path: Some(manifest),
         out: Some(out.clone()),
-        api_version: 0,
         ..ChainBuildArgs::default()
     };
     run(&args).expect("examples/20_state-interface builds through the real rshooks pipeline");

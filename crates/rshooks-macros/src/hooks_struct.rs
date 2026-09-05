@@ -1402,6 +1402,7 @@ fn generate(parsed: &ParsedStruct, description: Option<&str>) -> TokenStream {
         Err(message) => return err(parsed.name.span(), &message),
     }
 
+    let out = crate::krate::rewrite(out);
     out.parse::<TokenStream>().unwrap_or_else(|_| {
         err(
             parsed.name.span(),

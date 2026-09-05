@@ -64,6 +64,9 @@ Numbered in suggested reading order — see
 | 16 | [`typed-results`](examples/16_typed-results) | typed entry returns (`HookResult`): an idiomatic `?`/`Ok` entry with a `hook_errors!` message clause, alongside a raw `accept!`/`rollback!`-style entry in the same chain |
 | 17 | [`sto-writer`](examples/17_sto-writer) | `rshooks::sto_writer::StoWriter`: a runtime-shaped Remit — a native `sfAmounts` entry always, an issued one when hook parameters supply it — built field-by-field and emitted via `prepare_for_emit()`/`Prepared::emit()` |
 | 18 | [`typed-views`](examples/18_typed-views) | `rshooks::views`: generated, type-checked read views — an incoming-IOU gate reading `tx::Payment`, then `ledger::RippleState`'s freeze flags and `ledger::AccountRoot`'s optional `sfTransferRate`, with a per-read cost table |
+| 19 | [`param-signature`](examples/19_param-signature) | the Hook Parameter Signature Interface: `#[hook(..)]` fn arguments (`increment(account: AccountID, count: UInt16)`) as declared, typed, machine-readable Hook parameters, with generated `sethook.template.json` declarations |
+| 20 | [`state-interface`](examples/20_state-interface) | the Hook State Interface: `#[state_interface(id = .., key(..), value(..))]` chain-struct fields as a declared, typed, machine-readable state schema, with generated value structs and `sethook.template.json` declarations |
+| 21 | [`txn-template-nested`](examples/21_txn-template-nested) | `txn_template!`'s homogeneous indexed array form (`array(sfX) [ Elem: object(sfY) { .. } ; N ]`) and `fixed_vl(sfX, N)` (a compile-time-length-prefixed VL blob), with no `StoWriter` needed |
 | 80 | [`governance`](examples/80_governance) | a two-entry `#[hooks]` **chain** (`govern` + `reward`) porting xahaud's genesis governance hooks, sharing one state schema |
 
 ```sh

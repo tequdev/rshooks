@@ -29,6 +29,7 @@ from pathlib import Path
 WIRED_EXAMPLES = {
     "02_state-counter",
     "10_emit-txn",
+    "12_typed-data",
     "07_xfl-math",
     "13_keylets",
     "08_slot-ledger",
