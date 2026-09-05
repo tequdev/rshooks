@@ -58,7 +58,7 @@
 
 use core::marker::PhantomData;
 
-use crate::api::hook_ctx::{hook_param, hook_param_raw_code};
+use crate::api::hook_ctx::{hook_param_checked, hook_param_checked_raw_code};
 use crate::api::otxn::{otxn_param, otxn_param_raw_code};
 use crate::buf_eq::buf_eq_20;
 use crate::convert::FixedRead;
@@ -563,7 +563,7 @@ pub fn otxn_sig_param<T: SigParamType>(name: &[u8]) -> Result<T> {
 /// ```
 #[inline(always)]
 pub fn hook_sig_param<T: SigParamType>(name: &[u8]) -> Result<T> {
-    T::read_sig(|buf| hook_param(buf, name))
+    T::read_sig(|buf| hook_param_checked(buf, name))
 }
 
 /// Reads a Hook parameter attached to the originating transaction as a
@@ -627,7 +627,7 @@ pub fn otxn_sig_param_opt<T: SigParamType>(name: &[u8]) -> Result<Option<T>> {
 pub fn hook_sig_param_opt<T: SigParamType>(name: &[u8]) -> Result<Option<T>> {
     let mut absent = false;
     let r = T::read_sig(|buf| {
-        let code = hook_param_raw_code(buf, name);
+        let code = hook_param_checked_raw_code(buf, name);
         if code == rshooks_core::DOESNT_EXIST {
             absent = true;
             return Ok(0);
@@ -1089,3 +1089,88 @@ mod tests {
 // Const-assert failure cases (bad charset, index > 0x0F, unsupported type
 // byte, wrong `N`) cannot be exercised as runtime `#[test]`s — each is a
 // `compile_fail` doctest above instead.
+
+/// Proves [`hook_sig_param`]/[`hook_sig_param_opt`] inherit
+/// [`crate::api::hook_ctx::hook_param_exact`]'s truncation-safety: a
+/// backend value longer than the declared type fails as `TooSmall` rather
+/// than silently decoding a truncated prefix.
+#[cfg(all(test, feature = "testenv"))]
+mod testenv_tests {
+    #![allow(clippy::unwrap_used, clippy::panic)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
+
+    extern crate std;
+
+    use std::rc::Rc;
+    use std::vec::Vec;
+
+    use super::*;
+    use rshooks_core::backend::{HostBackend, install};
+
+    struct FixedBytesBackend(&'static [u8]);
+
+    impl HostBackend for FixedBytesBackend {
+        fn hook_param(&self, _name: &[u8]) -> core::result::Result<Vec<u8>, i64> {
+            Ok(self.0.to_vec())
+        }
+
+        fn accept(&self, _msg: &[u8], _code: i64) -> ! {
+            panic!("FixedBytesBackend::accept unexpectedly called")
+        }
+
+        fn rollback(&self, _msg: &[u8], _code: i64) -> ! {
+            panic!("FixedBytesBackend::rollback unexpectedly called")
+        }
+    }
+
+    #[test]
+    fn hook_sig_param_oversized_value_is_too_small_not_truncated() {
+        let _guard = install(Rc::new(FixedBytesBackend(&[0, 0, 1, 2, 3])));
+        assert_eq!(
+            hook_sig_param::<u16>(&sig_param_name::<8>(0, 0x01, b"n")),
+            Err(HookError::TooSmall)
+        );
+    }
+
+    #[test]
+    fn hook_sig_param_exact_length_decodes() {
+        let _guard = install(Rc::new(FixedBytesBackend(&[0x01, 0x02])));
+        assert_eq!(
+            hook_sig_param::<u16>(&sig_param_name::<8>(0, 0x01, b"n")),
+            Ok(0x0102)
+        );
+    }
+
+    #[test]
+    fn hook_sig_param_opt_oversized_value_is_too_small_not_truncated() {
+        let _guard = install(Rc::new(FixedBytesBackend(&[0, 0, 1, 2, 3])));
+        assert_eq!(
+            hook_sig_param_opt::<u16>(&sig_param_name::<8>(0, 0x01, b"n")),
+            Err(HookError::TooSmall)
+        );
+    }
+
+    #[test]
+    fn hook_sig_param_opt_absent_is_none() {
+        struct AbsentBackend;
+
+        impl HostBackend for AbsentBackend {
+            fn hook_param(&self, _name: &[u8]) -> core::result::Result<Vec<u8>, i64> {
+                Err(rshooks_core::DOESNT_EXIST)
+            }
+
+            fn accept(&self, _msg: &[u8], _code: i64) -> ! {
+                panic!("AbsentBackend::accept unexpectedly called")
+            }
+
+            fn rollback(&self, _msg: &[u8], _code: i64) -> ! {
+                panic!("AbsentBackend::rollback unexpectedly called")
+            }
+        }
+
+        let _guard = install(Rc::new(AbsentBackend));
+        assert_eq!(
+            hook_sig_param_opt::<u16>(&sig_param_name::<8>(0, 0x01, b"n")),
+            Ok(None)
+        );
+    }
+}
