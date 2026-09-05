@@ -173,7 +173,7 @@ describe('keylets', () => {
   const owner = () => testContext.alice.classicAddress
   const dest = () => testContext.hook1.classicAddress
 
-  it('accepts the Invoke and writes all 26 keylets', async () => {
+  it('accepts the Invoke and writes every keylet except Ticket', async () => {
     const response = await Xrpld.submit(testContext.client, {
       tx: {
         TransactionType: 'Invoke',

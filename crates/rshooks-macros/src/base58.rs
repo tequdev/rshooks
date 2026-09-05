@@ -176,7 +176,7 @@ mod tests {
     #[test]
     fn genesis_master_account() {
         // Genesis/master account (seed "masterpassphrase"), also hardcoded
-        // as `GENESIS_ACCOUNT` in examples/80_reward and examples/81_govern.
+        // as `GENESIS_ACCOUNT` in examples/80_governance.
         assert_eq!(
             decode("rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh").ok(),
             Some(hex_to_20("b5f762798a53d543a014caf8b297cff8f2f937e8"))

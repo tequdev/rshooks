@@ -145,10 +145,11 @@ pub fn state<B: AsMut<[u8]> + ?Sized, K: AsRef<[u8]> + ?Sized>(
 /// Deliberately **not** implemented by having [`state`] call this (or vice
 /// versa): routing [`state`] *through* a second, separately-defined
 /// function (even with both `#[inline(always)]`) changed `rshooks-build`'s
-/// unnest pass's output for an unrelated hook (`examples/81_govern`, which
-/// never touches this function's raw-code path), pushing its nesting depth
-/// from 22 to 55 — the pass's heuristics operate on the compiled wasm's
-/// actual block shape, not source semantics. Duplicating this one small
+/// unnest pass's output for an unrelated hook (`examples/80_governance`'s
+/// `govern` entry, which never touches this function's raw-code path),
+/// pushing its nesting depth from 22 to 55 — the pass's heuristics operate
+/// on the compiled wasm's actual block shape, not source semantics.
+/// Duplicating this one small
 /// function body instead keeps [`state`]'s own compiled output provably
 /// unaffected.
 #[inline(always)]

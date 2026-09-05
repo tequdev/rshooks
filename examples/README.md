@@ -49,9 +49,9 @@ directory is prefixed) and matches what its own README, `Cargo.toml`, and
 
 ## 80+: Production hooks in Rust
 
-Unlike `01`-`16` (one concept each, in suggested reading order), the
+Unlike `01`-`21` (one concept each, in suggested reading order), the
 `80`+ series are behavior-equivalent Rust ports of real, deployed xahaud
-C hooks — read them after `01`-`16`, not instead of them. `80_governance`
+C hooks — read them after `01`-`21`, not instead of them. `80_governance`
 is the flagship example of the `#[hooks]` **multi-hook chain** model: one
 crate declaring both hooks (`govern` at chain position 0, `reward` at
 position 1) against one shared `#[hooks]` struct, so the state layout the
