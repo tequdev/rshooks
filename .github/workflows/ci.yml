@@ -52,6 +52,12 @@ jobs:
       - name: Clippy (host, deny warnings)
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      - name: Clippy (host, active-amendments feature, deny warnings)
+        run: cargo clippy -p rshooks --all-targets --features active-amendments -- -D warnings
+
+      - name: Clippy (host, all-features, deny warnings)
+        run: cargo clippy -p rshooks --all-targets --all-features -- -D warnings
+
       - name: Clippy (host, unstable draft-spec features, deny warnings)
         run: cargo clippy --workspace --all-targets --features rshooks/unstable-param-sig-interface,rshooks/unstable-state-interface,rshooks-testenv/unstable-param-sig-interface,rshooks-testenv/unstable-state-interface -- -D warnings
 
@@ -66,6 +72,12 @@ jobs:
 
       - name: Test
         run: cargo test --workspace
+
+      - name: Test (active-amendments feature)
+        run: cargo test -p rshooks --features active-amendments
+
+      - name: Test (all-features)
+        run: cargo test -p rshooks --all-features
 
       - name: Test (unstable draft-spec features)
         run: cargo test --workspace --features rshooks/unstable-param-sig-interface,rshooks/unstable-state-interface,rshooks-testenv/unstable-param-sig-interface,rshooks-testenv/unstable-state-interface
