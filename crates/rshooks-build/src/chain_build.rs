@@ -79,6 +79,24 @@ pub fn run(args: &ChainBuildArgs) -> Result<()> {
     )?;
     let rustc = detect_rustc_version(&cargo);
 
+    std::fs::create_dir_all(&plan.private_target_dir).with_context(|| {
+        format!(
+            "creating cargo target directory {}",
+            plan.private_target_dir.display()
+        )
+    })?;
+    // Keyed on the cargo `--target-dir` itself, which is shared by every
+    // `rshooks build` invocation against this workspace regardless of
+    // `--out`: held from before the first cargo invocation through the last
+    // artifact read, closing the window where cargo finishes (re)writing
+    // the shared cdylib artifact and a concurrent build's cargo invocation
+    // overwrites it again before this process reads the bytes back. Waits
+    // for a concurrent holder instead of failing outright, because two
+    // builds sharing a target directory but publishing to different `--out`
+    // roots are a legitimate, non-conflicting scenario. Released on every
+    // exit path via `LockGuard`'s `Drop` impl.
+    let _target_lock = acquire_target_lock(&plan.private_target_dir)?;
+
     let root = args.out.clone().unwrap_or_else(|| {
         plan.target_directory
             .join("rshooks")
@@ -86,12 +104,11 @@ pub fn run(args: &ChainBuildArgs) -> Result<()> {
     });
     std::fs::create_dir_all(&root)
         .with_context(|| format!("creating output root {}", root.display()))?;
-    // Held for the *entire* chain build (discovery through publish), not
-    // just the final publish step: closes the window where a concurrent
-    // `rshooks build` sharing the same cargo target directory could
-    // overwrite the cdylib artifact between compiling it and reading it
-    // back. Released on every exit path via `LockGuard`'s `Drop` impl.
-    let _lock = acquire_lock(&root)?;
+    // Serializes generation-directory publish/prune/`current`-repoint
+    // bookkeeping for this specific output root. Distinct from
+    // `_target_lock`: two builds writing to different `--out` roots must
+    // not block each other here, only on the shared target directory above.
+    let _root_lock = acquire_lock(&root)?;
 
     println!("discovery build ({})", plan.package_name);
     let discovery_bytes = plan.run_discovery()?;
@@ -763,15 +780,8 @@ impl Drop for LockGuard {
 
 fn acquire_lock(root: &Path) -> Result<LockGuard> {
     let lock_path = root.join(".lock");
-    match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&lock_path)
-    {
-        Ok(mut file) => {
-            let _ = writeln!(file, "{}", std::process::id());
-            Ok(LockGuard { path: lock_path })
-        }
+    match open_lock_file(&lock_path) {
+        Ok(file) => Ok(finish_lock(file, lock_path)),
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => bail!(
             "could not acquire the rshooks-build publish lock at {} (another build may be in \
              progress); if you're certain no build is running, a crashed process may have left \
@@ -782,6 +792,65 @@ fn acquire_lock(root: &Path) -> Result<LockGuard> {
             Err(error).with_context(|| format!("creating lock file {}", lock_path.display()))
         }
     }
+}
+
+/// Maximum time [`acquire_target_lock`] waits for a concurrent holder to
+/// release the shared cargo target-directory lock before giving up.
+const TARGET_LOCK_WAIT_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+/// Poll interval used while waiting in [`acquire_target_lock`].
+const TARGET_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(200);
+
+/// Like [`acquire_lock`], but for the shared cargo target directory: waits
+/// (polling) for a concurrent holder to release the lock instead of failing
+/// immediately, since two builds legitimately sharing a target directory
+/// (different `--out` roots, or different packages in the same workspace)
+/// should serialize rather than error.
+fn acquire_target_lock(dir: &Path) -> Result<LockGuard> {
+    acquire_target_lock_with(dir, TARGET_LOCK_WAIT_TIMEOUT, TARGET_LOCK_POLL_INTERVAL)
+}
+
+fn acquire_target_lock_with(
+    dir: &Path,
+    wait_timeout: Duration,
+    poll_interval: Duration,
+) -> Result<LockGuard> {
+    let lock_path = dir.join(".lock");
+    let deadline = Instant::now()
+        .checked_add(wait_timeout)
+        .unwrap_or_else(Instant::now);
+    loop {
+        match open_lock_file(&lock_path) {
+            Ok(file) => return Ok(finish_lock(file, lock_path)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                if Instant::now() >= deadline {
+                    bail!(
+                        "timed out waiting for the cargo target-directory build lock at {} \
+                         (another `rshooks build` sharing this target directory did not finish \
+                         in time); if you're certain no build is running, a crashed process may \
+                         have left this lock behind — remove the file and retry",
+                        lock_path.display()
+                    );
+                }
+                std::thread::sleep(poll_interval);
+            }
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("creating lock file {}", lock_path.display()));
+            }
+        }
+    }
+}
+
+fn open_lock_file(lock_path: &Path) -> std::io::Result<std::fs::File> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(lock_path)
+}
+
+fn finish_lock(mut file: std::fs::File, lock_path: PathBuf) -> LockGuard {
+    let _ = writeln!(file, "{}", std::process::id());
+    LockGuard { path: lock_path }
 }
 
 fn write_staged_file(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -1390,6 +1459,38 @@ mod tests {
         drop(guard);
         let _ = acquire_lock(&root).expect("lock is released after drop");
         std::fs::remove_dir_all(&root).expect("cleanup");
+    }
+
+    #[test]
+    fn acquire_target_lock_waits_for_a_concurrent_holder_instead_of_failing() {
+        let dir = temp_dir("target-lock-wait");
+        let guard = acquire_lock(&dir).expect("first lock succeeds");
+
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            drop(guard);
+        });
+
+        let waited =
+            acquire_target_lock_with(&dir, Duration::from_secs(5), Duration::from_millis(20))
+                .expect("waits out the concurrent holder rather than failing");
+        releaser.join().expect("releaser thread does not panic");
+        drop(waited);
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
+    fn acquire_target_lock_times_out_if_never_released() {
+        let dir = temp_dir("target-lock-timeout");
+        let guard = acquire_lock(&dir).expect("first lock succeeds");
+
+        let err =
+            acquire_target_lock_with(&dir, Duration::from_millis(100), Duration::from_millis(20))
+                .expect_err("must time out while the lock is held");
+        assert!(format!("{err:#}").contains("timed out waiting"));
+
+        drop(guard);
+        std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 
     #[test]
