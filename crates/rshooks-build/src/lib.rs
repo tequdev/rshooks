@@ -19,6 +19,7 @@ mod ir;
 pub mod metadata;
 mod optimizer;
 pub mod sethook_template;
+mod tx_type_table;
 mod unnest;
 mod validator;
 pub mod whitelist;

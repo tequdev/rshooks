@@ -20,8 +20,10 @@ const MODULE_DOC: &str = "\
 ";
 
 /// Converts a C `tt*` constant name (e.g. `ttNFTOKEN_MINT`) into Xahau's
-/// canonical Rust spelling (`NFTokenMint`).
-fn variant_name(const_name: &str) -> Result<String> {
+/// canonical Rust spelling (`NFTokenMint`). Also used by
+/// [`super::tx_type_table`], whose build-side name table must use the exact
+/// same spellings as this typed enum.
+pub(super) fn variant_name(const_name: &str) -> Result<String> {
     let rest = const_name
         .strip_prefix("tt")
         .ok_or_else(|| anyhow!("expected a `tt`-prefixed name, got `{const_name}`"))?;
