@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::io::{BufRead, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
@@ -744,9 +744,12 @@ struct StagingGuard {
 }
 
 impl StagingGuard {
-    fn new(path: PathBuf) -> Result<Self> {
-        std::fs::create_dir_all(&path)
-            .with_context(|| format!("creating staging directory {}", path.display()))?;
+    /// Creates a brand-new, empty staging directory: fails with
+    /// `io::ErrorKind::AlreadyExists` if `path` already exists rather than
+    /// adopting its contents, so a leftover from a crashed run (or a reused
+    /// PID) is never silently reused as this build's staging area.
+    fn new(path: PathBuf) -> std::io::Result<Self> {
+        std::fs::create_dir(&path)?;
         Ok(Self {
             path,
             committed: false,
@@ -762,6 +765,73 @@ impl Drop for StagingGuard {
     fn drop(&mut self) {
         if !self.committed {
             let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+}
+
+/// Bound on how many candidate names [`create_staging_dir`] tries before
+/// giving up.
+const MAX_STAGING_DIR_ATTEMPTS: u32 = 64;
+
+/// Creates a fresh staging directory under `root` with a name unique to this
+/// attempt, retrying with a new candidate name if one is already occupied
+/// (e.g. a `.staging-<pid>` leftover from a crashed build sharing a reused
+/// PID). `root` must already exist.
+fn create_staging_dir(root: &Path) -> Result<StagingGuard> {
+    let pid = std::process::id();
+    let mut last_error = None;
+    for attempt in 0..MAX_STAGING_DIR_ATTEMPTS {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let path = root.join(format!(".staging-{pid}-{nanos}-{attempt}"));
+        match StagingGuard::new(path.clone()) {
+            Ok(guard) => return Ok(guard),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                last_error = Some(error);
+            }
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("creating staging directory {}", path.display()));
+            }
+        }
+    }
+    Err(match last_error {
+        Some(error) => anyhow::Error::new(error).context(format!(
+            "could not create a unique staging directory under {} after {MAX_STAGING_DIR_ATTEMPTS} attempts",
+            root.display()
+        )),
+        None => anyhow::anyhow!(
+            "could not create a unique staging directory under {}",
+            root.display()
+        ),
+    })
+}
+
+/// Best-effort cleanup of `.staging-*` directories left behind by a crashed
+/// build. Each is named uniquely per attempt (see [`create_staging_dir`]) so
+/// none is ever reused, but they should not accumulate forever; only entries
+/// older than [`PRUNE_GRACE_PERIOD`] are removed, so an in-flight sibling
+/// build's staging directory is never touched.
+fn prune_stale_staging_dirs(root: &Path) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    let now = SystemTime::now();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if !name.to_string_lossy().starts_with(".staging-") {
+            continue;
+        }
+        let eligible = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|modified| now.duration_since(modified).ok())
+            .is_some_and(is_prune_eligible);
+        if eligible {
+            let _ = std::fs::remove_dir_all(entry.path());
         }
     }
 }
@@ -876,9 +946,10 @@ fn publish(
 ) -> Result<PathBuf> {
     std::fs::create_dir_all(root)
         .with_context(|| format!("creating output root {}", root.display()))?;
+    prune_stale_staging_dirs(root);
 
-    let staging_path = root.join(format!(".staging-{}", std::process::id()));
-    let staging = StagingGuard::new(staging_path.clone())?;
+    let staging = create_staging_dir(root)?;
+    let staging_path = staging.path.clone();
 
     for (name, bytes) in staged_wasms {
         write_staged_file(&staging_path.join(name), bytes)?;
@@ -1373,6 +1444,35 @@ mod tests {
             }
         }
 
+        std::fs::remove_dir_all(&root).expect("cleanup");
+    }
+
+    #[test]
+    fn publish_does_not_reuse_a_stale_staging_directory_left_by_a_crashed_run() {
+        let root = temp_dir("stale-staging");
+        let lock = acquire_lock(&root).expect("acquire lock for the whole build");
+
+        // The exact name a naive `.staging-<pid>` implementation would pick,
+        // already populated by a crashed previous run (or a reused PID).
+        let naive_staging = root.join(format!(".staging-{}", std::process::id()));
+        std::fs::create_dir_all(&naive_staging).expect("create stale staging dir");
+        std::fs::write(
+            naive_staging.join("stale.txt"),
+            b"leftover from a crashed build",
+        )
+        .expect("write stale file");
+
+        let wasms = vec![("0.deposit.wasm".to_string(), b"AA".to_vec())];
+        let sidecars = vec![("0.deposit.metadata.json".to_string(), b"{}".to_vec())];
+        let gen1 = publish(&root, &wasms, &sidecars, b"{}", b"{}")
+            .expect("publish succeeds despite a stale staging directory");
+
+        assert!(gen1.join("0.deposit.wasm").exists());
+        assert!(
+            !gen1.join("stale.txt").exists(),
+            "published generation must not inherit a stale staging directory's contents"
+        );
+        drop(lock);
         std::fs::remove_dir_all(&root).expect("cleanup");
     }
 
