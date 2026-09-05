@@ -113,8 +113,10 @@ jobs:
       # All published crates share the workspace version (version.workspace
       # = true), and the repo is versioned/released as a whole, so one tag
       # covers the release. `gh release create` creates the tag itself
-      # (pinned to the commit that triggered this run); safe to re-run
-      # since an existing release is left alone instead of failing the job.
+      # (pinned to the commit that triggered this run); safe to re-run for
+      # the same commit, since an existing release is then left alone
+      # instead of failing the job. If the tag exists but points at a
+      # different commit, the job fails instead of silently skipping.
       - name: Tag and release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -129,7 +131,13 @@ jobs:
           tag="v${version}"
 
           if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Release $tag already exists, skipping"
+            git fetch --force origin "refs/tags/${tag}:refs/tags/${tag}"
+            tag_commit=$(git rev-parse "refs/tags/${tag}^{commit}")
+            if [ "$tag_commit" != "$GITHUB_SHA" ]; then
+              echo "::error::tag $tag already exists but points at $tag_commit, not the release commit $GITHUB_SHA" >&2
+              exit 1
+            fi
+            echo "Release $tag already exists and matches $GITHUB_SHA, skipping"
           else
             gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" --generate-notes
           fi
