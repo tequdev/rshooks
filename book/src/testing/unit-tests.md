@@ -295,13 +295,16 @@ count, emit reserve, nonce budget, and so on) resets per call.
   `meta_slot`.
 - **`xpop(tx, meta)`** — seeds an XPOP's `(transaction, metadata)` byte pair
   — backs `xpop_slot`.
-- **`strict_can_emit(true)`** — opt-in (default off): after `invoke`,
-  asserts every transaction type this invocation committed to `emitted()`
-  is one the invoked entry's `#[hook(.., can_emit = [..])]` list declares.
-  A violation panics — a test-author assertion, not a Hook API error path.
-  An entry with **no** `can_emit` declaration is unrestricted (no check),
-  while a declared-empty `can_emit = []` rejects every emission — the same
-  three-state distinction the SetHook metadata carries on-chain.
+- **`strict_can_emit(bool)`** — **on by default**: after `invoke`, asserts
+  every transaction type this invocation committed to `emitted()` is one
+  the invoked entry's `#[hook(.., can_emit = [..])]` list declares,
+  matching the real host's `HookCanEmit` enforcement. A violation panics —
+  a test-author assertion, not a Hook API error path. An entry with **no**
+  `can_emit` declaration is unrestricted (no check), while a
+  declared-empty `can_emit = []` rejects every emission — the same
+  three-state distinction the SetHook metadata carries on-chain. Pass
+  `strict_can_emit(false)` to opt out for a lower-fidelity test that
+  deliberately emits outside the declaration.
 
 ## Direct-entry invocation: no `HookOn` filtering
 
