@@ -1570,6 +1570,7 @@ fn generate(
         Ok(src) => src,
         Err(message) => return err(parsed.struct_name.span(), &message),
     };
+    let mod_src = crate::krate::rewrite(mod_src);
     let mod_ts = match mod_src.parse::<TokenStream>() {
         Ok(ts) => ts,
         Err(_) => {
@@ -1658,9 +1659,7 @@ fn build_entry_return_assertion(ret_tokens: &[TokenTree], fallback_span: Span) -
     out.push(alone('<'));
     out.extend(ret_ty.iter().cloned());
     out.push(ident("as"));
-    path_sep(&mut out);
-    out.push(ident("rshooks"));
-    path_sep(&mut out);
+    crate::krate::extend_path_tokens(&mut out, glue);
     out.push(ident("exit"));
     path_sep(&mut out);
     out.push(ident("EntryReturn"));

@@ -113,6 +113,7 @@ impl ::rshooks::convert::ToBytes for {name} {{
         write_body = write_body,
         state_key_encode = state_key_encode_impl(name),
     );
+    let src = crate::krate::rewrite(src);
 
     match src.parse::<TokenStream>() {
         Ok(ts) => ts,

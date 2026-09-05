@@ -1,0 +1,10 @@
+[package]
+name = "rshooks-rename-fixture"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+hooks = { package = "rshooks", path = "../../../rshooks" }
+
+[workspace]
