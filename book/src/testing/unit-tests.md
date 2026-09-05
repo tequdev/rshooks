@@ -344,7 +344,16 @@ let cbak_exit = env.invoke_cbak::<EmitTxn>(0, CbakOutcome::Success(txn));
 assert!(cbak_exit.is_success());
 ```
 
-Panics if the entry at `index` declares no `#[cbak]` body at all.
+`etxn_details` (and therefore `prepare`) writes an `EmitDetails.EmitCallback`
+field, holding this hook's own `hook_account`, exactly when the entry that
+performs the emit declares a `#[cbak]` body — matching xahaud's own
+`hookCtx.result.hasCallback` check. `invoke_cbak` panics if the transaction
+in `outcome` has no `EmitCallback` at all (most commonly: it was emitted by
+an entry with no `#[cbak]`), or if `EmitCallback`'s account or the
+transaction's `EmitHookHash` don't match this `TestEnv`'s own
+`hook_account`/seeded hash — either way, no genuine on-chain callback could
+ever be dispatched for that transaction against the entry being invoked.
+Also panics if the entry at `index` declares no `#[cbak]` body at all.
 
 ## Hook API coverage
 
@@ -427,13 +436,6 @@ stage (P2-E):
   accepts a bare 32-byte transaction hash for some slot operations; this
   harness treats that shape as `DOESNT_EXIST` rather than modeling a
   separate transaction-hash lookup table.
-- **Emitted blobs never carry `EmitCallback`.** `etxn_details` (and
-  therefore `prepare`) always builds `EmitDetails` with `callback: None`,
-  regardless of whether the currently invoked entry declares a `#[cbak]`
-  body. A later `invoke_cbak` call built from such a blob therefore differs
-  from a genuine on-chain callback invocation in that one `EmitDetails`
-  field — a permanent simplification, not a gap that later Phase 2 work
-  closes.
 - **Amendment gates are assumed active.** Every Hook API function behaves
   as if every amendment it depends on is already enabled — there is no
   per-amendment feature-flag model.

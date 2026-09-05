@@ -323,14 +323,31 @@ impl HostBackend for Backend {
         }
     }
 
+    // Ported against `HookAPI::etxn_details` (`Xahau/xahaud` `dev`,
+    // `src/xrpld/app/hook/detail/HookAPI.cpp:914`): `EmitCallback` is
+    // written iff `hookCtx.result.hasCallback` — set from
+    // `hookDef->isFieldPresent(sfHookCallbackFee)`
+    // (`Transactor.cpp:1408`), i.e. whether the *currently executing*
+    // hook's own wasm declares a `cbak` export — and its value is
+    // `hookCtx.result.account`, the currently executing hook's own account
+    // (never a different account). `InvocationContext::has_callback`
+    // stands in for that per-hook-definition flag (set once per invocation
+    // by `crate::env::TestEnv::run_entry` from the invoked entry's
+    // `cbak.is_some()`), and `World::hook_account` stands in for
+    // `hookCtx.result.account`.
     fn etxn_details(&self) -> Result<Vec<u8>, i64> {
         let reserved = self.ctx.borrow().require_reserved()?;
         let burden = self.compute_etxn_burden(reserved)?;
         let generation = self.compute_etxn_generation();
         let generation = u32::try_from(generation).map_err(|_| rshooks_core::FEE_TOO_LARGE)?;
-        let (parent_txn_id, hook_hash) = {
+        let has_callback = self.ctx.borrow().has_callback;
+        let (parent_txn_id, hook_hash, callback) = {
             let w = self.world.borrow();
-            (w.otxn.id, w.current_hook_hash().unwrap_or([0u8; 32]))
+            (
+                w.otxn.id,
+                w.current_hook_hash().unwrap_or([0u8; 32]),
+                has_callback.then_some(w.hook_account),
+            )
         };
         // `HookAPI::etxn_details` (`HookAPI.cpp:902-904`) calls
         // `HookAPI::etxn_nonce()` directly and maps a nonce-budget failure to
@@ -342,19 +359,13 @@ impl HostBackend for Backend {
             .borrow_mut()
             .next_emit_nonce()
             .map_err(|_| rshooks_core::INTERNAL_ERROR)?;
-        // This harness never populates `EmitCallback` — every emitted blob
-        // is built with `callback: None`, regardless of whether the
-        // currently invoked entry declares a `#[cbak]` body. Permanent
-        // limitation: an `invoke_cbak` context built from such a blob
-        // always differs from a genuine on-chain callback in that one
-        // field — see the book's "what this harness does not model" list.
         let details = build_etxn_details(&EmitDetailsInputs {
             generation,
             burden,
             parent_txn_id,
             nonce,
             hook_hash,
-            callback: None,
+            callback,
         });
         self.ctx.borrow_mut().last_etxn_details = Some(details.clone());
         Ok(details)
