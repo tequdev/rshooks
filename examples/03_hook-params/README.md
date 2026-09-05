@@ -31,12 +31,13 @@ impl Default for MinDrops {
 }
 
 fn min_drops() -> u64 {
-    HookParams
-        .hook_param
-        .min
-        .get_or_default()
-        .unwrap_or_default()
-        .drops
+    match HookParams.hook_param.min.get_or_default() {
+        Ok(min) => min.drops,
+        Err(_) => rollback!(
+            b"hook-params: could not read MIN parameter",
+            HookParamsError::CouldNotReadMinDrops
+        ),
+    }
 }
 
 #[hooks]
@@ -58,11 +59,12 @@ implemented for `[u8; N]`, `rshooks::types` newtypes, `XFL`, and
 `Config`/`Instruction` fields. The compiled-in fallback is single-sourced
 through `MinDrops`'s `Default` impl: the attribute's `default =
 MinDrops::default()` covers the absent case inside
-`HookParam<V>::get_or_default()` (which returns `Ok(<the field's
-default>)` when `MIN` is absent, and `Err` when `MIN` is present but the
-wrong number of bytes for `MinDrops` (8)), and `.unwrap_or_default()`
-masks that `Err` back to the very same value — both paths land on the
-default, not just the absent case. `MinDrops`'s `drops: u64` field decodes via this crate's
+`HookParam<V>::get_or_default()`, which returns `Ok(<the field's
+default>)` when `MIN` is absent and `Err` when `MIN` is present but the
+wrong number of bytes for `MinDrops` (8). Only the absent case resolves to
+the default; `min_drops` matches that `Result` explicitly and rolls back
+on `Err` instead of masking it, since a malformed `MIN` is an operator
+configuration error, not "unset". `MinDrops`'s `drops: u64` field decodes via this crate's
 little-endian `FromBytes` trait (`rshooks::convert::FromBytes for u64`).
 A Hook parameter like `MIN` carries no protocol-mandated endianness of its
 own — its byte convention is whatever the operator who set it wrote — so
@@ -134,6 +136,8 @@ two `[u8; 20]`s and avoids that loop with `buf_eq_20`).
   configured minimum"`, code `2`).
 - `MIN` set to some threshold, `Amount` at or above it → accept.
 - `MIN` set, `Amount` below it → rollback, code `2`.
+- `MIN` present but not exactly 8 bytes → rollback (`"hook-params: could
+  not read MIN parameter"`, code `3`), regardless of `Amount`.
 - `Amount` is an IOU (not native XRP/XAH) → rollback (`"hook-params:
   unsupported (non-native) Amount"`, code `1`), regardless of `MIN`.
 
@@ -146,3 +150,4 @@ two `[u8; 20]`s and avoids that loop with `buf_eq_20`).
 |---|---|---|
 | `UnsupportedAmount` | 1 | the originating transaction's `Amount` isn't an 8-byte native (XRP/XAH) amount |
 | `BelowMinimum` | 2 | the native `Amount` fell below the configured (or default) minimum |
+| `CouldNotReadMinDrops` | 3 | `MIN` is present but not exactly 8 bytes, or the host call otherwise failed (an absent `MIN` is not an error: it falls back to the compiled-in default) |
