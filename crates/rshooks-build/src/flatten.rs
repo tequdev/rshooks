@@ -1,4 +1,4 @@
-//! Full inlining for Hook API version 0 modules.
+//! Full inlining for Hook modules.
 //!
 //! The pass inlines non-entry functions, ensures `_g` is imported, and
 //! rebuilds the type section so only import and entry-point types remain.

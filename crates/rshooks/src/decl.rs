@@ -881,3 +881,93 @@ mod tests {
         );
     }
 }
+
+/// Proves a declared `#[hook_param]` field (via [`HookParam::get`]) inherits
+/// [`crate::api::hook_ctx::hook_param_opt`]'s truncation-safety: absent,
+/// exact-length, shorter, and longer backend values all resolve the way
+/// that function's own doc comment describes, with a longer value never
+/// silently decoded as a truncated prefix.
+#[cfg(all(test, feature = "testenv"))]
+mod testenv_tests {
+    #![allow(clippy::unwrap_used, clippy::panic)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
+
+    extern crate std;
+
+    use std::rc::Rc;
+    use std::vec::Vec;
+
+    use super::*;
+    use rshooks_core::backend::{HostBackend, install};
+
+    struct FixedBytesBackend(&'static [u8]);
+
+    impl HostBackend for FixedBytesBackend {
+        fn hook_param(&self, _name: &[u8]) -> core::result::Result<Vec<u8>, i64> {
+            Ok(self.0.to_vec())
+        }
+
+        fn accept(&self, _msg: &[u8], _code: i64) -> ! {
+            panic!("FixedBytesBackend::accept unexpectedly called")
+        }
+
+        fn rollback(&self, _msg: &[u8], _code: i64) -> ! {
+            panic!("FixedBytesBackend::rollback unexpectedly called")
+        }
+    }
+
+    struct AbsentBackend;
+
+    impl HostBackend for AbsentBackend {
+        fn hook_param(&self, _name: &[u8]) -> core::result::Result<Vec<u8>, i64> {
+            Err(rshooks_core::DOESNT_EXIST)
+        }
+
+        fn accept(&self, _msg: &[u8], _code: i64) -> ! {
+            panic!("AbsentBackend::accept unexpectedly called")
+        }
+
+        fn rollback(&self, _msg: &[u8], _code: i64) -> ! {
+            panic!("AbsentBackend::rollback unexpectedly called")
+        }
+    }
+
+    struct FieldParam;
+
+    impl ParamSpec for FieldParam {
+        type Value = [u8; 4];
+        type NameArgs = ();
+
+        #[inline(always)]
+        fn with_name_bytes<R>(_args: &(), f: impl FnOnce(&[u8]) -> R) -> R {
+            f(b"MK")
+        }
+    }
+
+    #[test]
+    fn hook_param_field_absent_is_none() {
+        let _guard = install(Rc::new(AbsentBackend));
+        let param: HookParam<[u8; 4], FieldParam> = HookParam::new();
+        assert_eq!(param.get(), Ok(None));
+    }
+
+    #[test]
+    fn hook_param_field_exact_length_decodes() {
+        let _guard = install(Rc::new(FixedBytesBackend(&[1, 2, 3, 4])));
+        let param: HookParam<[u8; 4], FieldParam> = HookParam::new();
+        assert_eq!(param.get(), Ok(Some([1, 2, 3, 4])));
+    }
+
+    #[test]
+    fn hook_param_field_shorter_value_is_too_small() {
+        let _guard = install(Rc::new(FixedBytesBackend(&[1, 2])));
+        let param: HookParam<[u8; 4], FieldParam> = HookParam::new();
+        assert_eq!(param.get(), Err(HookError::TooSmall));
+    }
+
+    #[test]
+    fn hook_param_field_longer_value_is_too_small_not_truncated() {
+        let _guard = install(Rc::new(FixedBytesBackend(&[1, 2, 3, 4, 5, 6, 7, 8, 9])));
+        let param: HookParam<[u8; 4], FieldParam> = HookParam::new();
+        assert_eq!(param.get(), Err(HookError::TooSmall));
+    }
+}

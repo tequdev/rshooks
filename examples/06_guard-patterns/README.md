@@ -168,7 +168,9 @@ compiler-generated loop anywhere in this crate to auto-guard.
 
 ## Expected behavior
 
-- `BL` not configured (or not 20 bytes) → accept (nothing to block).
+- `BL` not configured → accept (nothing to block).
+- `BL` configured but not a 20-byte `AccountId` → rollback
+  (`"guard-patterns: could not read BL parameter"`, code `3`).
 - `BL` configured and matches the otxn sender → rollback
   (`"guard-patterns: blocked account"`, code `2`).
 - `BL` configured and doesn't match → accept, with the accept code set to
@@ -184,3 +186,4 @@ compiler-generated loop anywhere in this crate to auto-guard.
 |---|---|---|
 | `CouldNotReadSender` | 1 | `otxn_field(sfAccount)` did not return a 20-byte `AccountId` |
 | `BlockedAccount` | 2 | the sender matched the `BL`-configured blacklist account |
+| `CouldNotReadBlocklist` | 3 | `BL` is present but not a 20-byte `AccountId`, or the host call otherwise failed (an absent `BL` is not an error: it means nothing to block) |

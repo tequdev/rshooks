@@ -16,6 +16,9 @@ hook_errors! {
         UnsupportedAmount = 1,
         /// The native amount is below the configured minimum.
         BelowMinimum = 2,
+        /// The `MIN` Hook parameter is present but malformed, or the host
+        /// call to read it failed for a reason other than absence.
+        CouldNotReadMinDrops = 3,
     }
 }
 
@@ -41,16 +44,18 @@ impl Default for MinDrops {
 }
 
 /// Returns the configured `MIN` value, falling back to
-/// [`MinDrops::default`] when `MIN` is absent *or* present-but-malformed:
-/// `.unwrap_or_default()` masks any `Err` from
-/// [`HookParam::get_or_default`], not just the "absent" case.
+/// [`MinDrops::default`] only when `MIN` is absent.
+/// [`HookParam::get_or_default`] already substitutes the default solely
+/// for that case; a present-but-malformed `MIN` (or any other host error)
+/// surfaces as `Err` here and must not be masked back to the default.
 fn min_drops() -> u64 {
-    HookParams
-        .hook_param
-        .min
-        .get_or_default()
-        .unwrap_or_default()
-        .drops
+    match HookParams.hook_param.min.get_or_default() {
+        Ok(min) => min.drops,
+        Err(_) => rollback!(
+            b"hook-params: could not read MIN parameter",
+            HookParamsError::CouldNotReadMinDrops
+        ),
+    }
 }
 
 #[hooks]

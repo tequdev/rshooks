@@ -63,6 +63,13 @@ const GENERATED_FILES_HOOKS_LIB: &[&str] = &[
     "views/inner.rs",
 ];
 
+/// The set of `rshooks-build/src/`-relative `.rs` files this generator owns:
+/// [`codegen::tx_type_table`]'s build-side transaction-type name/code table,
+/// generated from the same `tts.h` constants as
+/// [`codegen::tx_type`]'s typed `TxType` enum so the two can never drift
+/// apart.
+const GENERATED_FILES_BUILD: &[&str] = &["tx_type_table.rs"];
+
 /// The generated intermediate-representation file, checked in at the
 /// `rshooks-core` crate root (not under `src/`, since it isn't Rust source):
 /// the pipeline's `hook_api.json` artifact (module docs on [`crate::ir`]).
@@ -115,6 +122,12 @@ fn src_dir() -> PathBuf {
 /// own module doc comment for why).
 fn rshooks_src_dir() -> PathBuf {
     repo_root().join("crates/rshooks/src")
+}
+
+/// `crates/rshooks-build`'s `src/` directory — where
+/// [`GENERATED_FILES_BUILD`] lands.
+fn rshooks_build_src_dir() -> PathBuf {
+    repo_root().join("crates/rshooks-build/src")
 }
 
 fn read(path: &Path) -> Result<String> {
@@ -312,6 +325,29 @@ fn generate_rshooks_files(
     Ok(out)
 }
 
+/// Generates every `rshooks-build`-targeted file's *unformatted* content,
+/// keyed by its `rshooks-build/src/`-relative filename —
+/// [`codegen::tx_type_table`]'s build-side transaction-type name/code
+/// table, derived from the same `hook_api.json` artifact as
+/// [`generate_rshooks_files`]'s `tx_type.rs`.
+fn generate_build_files(hook_api_json: &str) -> Result<BTreeMap<&'static str, String>> {
+    let spec: HookApiSpec =
+        serde_json::from_str(hook_api_json).context("deserializing hook_api.json")?;
+
+    let mut out = BTreeMap::new();
+    out.insert(
+        "tx_type_table.rs",
+        codegen::tx_type_table::generate(&spec.tts)?,
+    );
+
+    for name in GENERATED_FILES_BUILD {
+        if !out.contains_key(name) {
+            bail!("internal error: generator produced no content for {name}");
+        }
+    }
+    Ok(out)
+}
+
 /// A scratch directory, auto-removed on drop, carrying a copy of the repo's
 /// `rustfmt.toml` so `rustfmt` (run directly, not through `cargo fmt`)
 /// discovers the same style config it would inside the real tree.
@@ -377,12 +413,77 @@ fn format_all(
     Ok(formatted)
 }
 
+/// Stages `content` for `final_path` into a sibling temporary file (creating
+/// `final_path`'s parent directory first) and records the `(final_path,
+/// tmp_path)` pair in `staged` on success, so a later failure in the same
+/// batch can find every temp file written so far and remove it.
+fn stage_one<'a>(
+    final_path: &'a PathBuf,
+    content: &str,
+    idx: usize,
+    staged: &mut Vec<(&'a PathBuf, PathBuf)>,
+) -> Result<()> {
+    if let Some(parent) = final_path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+    }
+    let mut tmp_name = final_path
+        .file_name()
+        .with_context(|| format!("{} has no file name", final_path.display()))?
+        .to_os_string();
+    tmp_name.push(format!(".tmp-{}-{idx}", std::process::id()));
+    let tmp_path = final_path.with_file_name(tmp_name);
+    fs::write(&tmp_path, content).with_context(|| format!("writing {}", tmp_path.display()))?;
+    staged.push((final_path, tmp_path));
+    Ok(())
+}
+
+/// Best-effort removal of every temp file staged so far; used to unwind a
+/// batch that failed partway through, ignoring per-file removal errors since
+/// this only runs while already propagating a different error.
+fn cleanup_staged(staged: &[(&PathBuf, PathBuf)]) {
+    for (_, tmp_path) in staged {
+        let _ = fs::remove_file(tmp_path);
+    }
+}
+
+/// Writes every `(path, content)` pair in `files` as one batch: each file's
+/// content is first written to a sibling temporary file, and only once every
+/// write in the batch has succeeded are the temp files renamed into place.
+/// A same-directory rename is a metadata-only operation, so the window in
+/// which a failure (an I/O error such as a full disk, or a destination whose
+/// parent path collides with an existing file) can leave a destination path
+/// touched is limited to the temp-file-write phase, never to the destination
+/// files themselves — on that failure every temp file written so far is
+/// removed and no destination is touched. The rename phase itself cannot be
+/// made atomic across every file at once without a filesystem transaction,
+/// but by that point every file's content is already fully written and
+/// validated, so the only failures left are unrelated to the content this
+/// module generates.
+fn write_files_atomically(files: &[(PathBuf, String)]) -> Result<()> {
+    let mut staged: Vec<(&PathBuf, PathBuf)> = Vec::with_capacity(files.len());
+    for (idx, (final_path, content)) in files.iter().enumerate() {
+        if let Err(err) = stage_one(final_path, content, idx, &mut staged) {
+            cleanup_staged(&staged);
+            return Err(err);
+        }
+    }
+    for (final_path, tmp_path) in &staged {
+        if let Err(err) = fs::rename(tmp_path, final_path)
+            .with_context(|| format!("renaming {} into place", final_path.display()))
+        {
+            cleanup_staged(&staged);
+            return Err(err);
+        }
+    }
+    Ok(())
+}
+
 /// `cargo xtask gen-core`: writes `hook_api.json`, then the generated +
-/// `rustfmt`-formatted `.rs` files, into `crates/rshooks-core/` and (for
-/// [`codegen::sfield`]'s and [`codegen::tx_type`]'s output)
-/// `crates/rshooks/`, then runs `cargo fmt
-/// -p rshooks-core -p rshooks` as a belt-and-braces final pass over the
-/// real files.
+/// `rustfmt`-formatted `.rs` files, into `crates/rshooks-core/`, (for
+/// [`codegen::sfield`]'s and [`codegen::tx_type`]'s output) `crates/rshooks/`,
+/// and (for [`codegen::tx_type_table`]'s output) `crates/rshooks-build/`,
+/// then runs `cargo fmt -p rshooks-core -p rshooks -p rshooks-build` as a
+/// belt-and-braces final pass over the real files.
 pub fn run_update() -> Result<()> {
     let hook_api_json = build_hook_api_json()?;
     let protocol_formats_json = build_protocol_formats_json(&hook_api_json)?;
@@ -402,20 +503,42 @@ pub fn run_update() -> Result<()> {
     let generated_rshooks =
         generate_rshooks_files(&hook_api_json, &protocol_formats_json, &availability)?;
     let formatted_rshooks = format_all(&generated_rshooks)?;
+    let generated_build = generate_build_files(&hook_api_json)?;
+    let formatted_build = format_all(&generated_build)?;
 
     let json_path = crate_dir().join(HOOK_API_JSON);
-    fs::write(&json_path, &hook_api_json)
-        .with_context(|| format!("writing {}", json_path.display()))?;
-    println!("wrote {}", json_path.display());
-
     let protocol_json_path = crate_dir().join(PROTOCOL_FORMATS_JSON);
-    fs::write(&protocol_json_path, &protocol_formats_json)
-        .with_context(|| format!("writing {}", protocol_json_path.display()))?;
-    println!("wrote {}", protocol_json_path.display());
-
     let availability_path = crate_dir().join(FORMAT_AVAILABILITY_JSON);
-    fs::write(&availability_path, &availability_json)
-        .with_context(|| format!("writing {}", availability_path.display()))?;
+    let dir = src_dir();
+    let rshooks_dir = rshooks_src_dir();
+
+    let core_names: Vec<&'static str> = formatted.keys().copied().collect();
+    let rshooks_names: Vec<&'static str> = formatted_rshooks.keys().copied().collect();
+
+    let mut writes: Vec<(PathBuf, String)> = vec![
+        (json_path.clone(), hook_api_json),
+        (protocol_json_path.clone(), protocol_formats_json),
+        (availability_path.clone(), availability_json),
+    ];
+    writes.extend(
+        formatted
+            .into_iter()
+            .map(|(name, content)| (dir.join(name), content)),
+    );
+    writes.extend(
+        formatted_rshooks
+            .into_iter()
+            .map(|(name, content)| (rshooks_dir.join(name), content)),
+    );
+
+    // Every generated artifact is staged into a sibling temp file first and
+    // only moved into place once every write in the batch has succeeded, so
+    // an I/O failure partway through never leaves a mix of old and new
+    // generated files on disk.
+    write_files_atomically(&writes)?;
+
+    println!("wrote {}", json_path.display());
+    println!("wrote {}", protocol_json_path.display());
     println!("wrote {}", availability_path.display());
     for name in &added {
         println!("  classified {name} as `dormant` (newly declared upstream)");
@@ -427,37 +550,45 @@ pub fn run_update() -> Result<()> {
             added.len()
         );
     }
-
-    let dir = src_dir();
-    for (name, content) in &formatted {
-        let path = dir.join(name);
-        fs::write(&path, content).with_context(|| format!("writing {}", path.display()))?;
-        println!("wrote {}", path.display());
+    for name in &core_names {
+        println!("wrote {}", dir.join(name).display());
+    }
+    for name in &rshooks_names {
+        println!("wrote {}", rshooks_dir.join(name).display());
     }
 
-    let rshooks_dir = rshooks_src_dir();
-    for (name, content) in &formatted_rshooks {
-        let path = rshooks_dir.join(name);
+    let rshooks_build_dir = rshooks_build_src_dir();
+    for (name, content) in &formatted_build {
+        let path = rshooks_build_dir.join(name);
         fs::write(&path, content).with_context(|| format!("writing {}", path.display()))?;
         println!("wrote {}", path.display());
     }
 
     let status = Command::new("cargo")
-        .args(["fmt", "-p", "rshooks-core", "-p", "rshooks"])
+        .args([
+            "fmt",
+            "-p",
+            "rshooks-core",
+            "-p",
+            "rshooks",
+            "-p",
+            "rshooks-build",
+        ])
         .current_dir(repo_root())
         .status()
-        .context("running `cargo fmt -p rshooks-core -p rshooks`")?;
+        .context("running `cargo fmt -p rshooks-core -p rshooks -p rshooks-build`")?;
     if !status.success() {
-        bail!("`cargo fmt -p rshooks-core -p rshooks` failed");
+        bail!("`cargo fmt -p rshooks-core -p rshooks -p rshooks-build` failed");
     }
     Ok(())
 }
 
 /// `cargo xtask gen-core --check`: regenerates `hook_api.json` and formats
 /// the `.rs` files in a scratch directory, then byte-compares both against
-/// `crates/rshooks-core/hook_api.json`, `crates/rshooks-core/src/*.rs`, and
+/// `crates/rshooks-core/hook_api.json`, `crates/rshooks-core/src/*.rs`,
 /// [`codegen::sfield`]'s and [`codegen::tx_type`]'s `crates/rshooks/src/`
-/// output, without writing
+/// output, and [`codegen::tx_type_table`]'s
+/// `crates/rshooks-build/src/tx_type_table.rs` output, without writing
 /// anything there. Returns an error naming every mismatched file if any
 /// differ (the CI-facing exit-1 path); prints a confirmation and returns
 /// `Ok(())` when everything matches.
@@ -479,6 +610,8 @@ pub fn run_check() -> Result<()> {
     let generated_rshooks =
         generate_rshooks_files(&hook_api_json, &protocol_formats_json, &availability)?;
     let formatted_rshooks = format_all(&generated_rshooks)?;
+    let generated_build = generate_build_files(&hook_api_json)?;
+    let formatted_build = format_all(&generated_build)?;
 
     let mut mismatched = Vec::new();
 
@@ -518,9 +651,17 @@ pub fn run_check() -> Result<()> {
         }
     }
 
+    let rshooks_build_dir = rshooks_build_src_dir();
+    for (name, content) in &formatted_build {
+        let on_disk = read(&rshooks_build_dir.join(name)).unwrap_or_default();
+        if *content != on_disk {
+            mismatched.push(*name);
+        }
+    }
+
     if mismatched.is_empty() {
         println!(
-            "cargo xtask gen-core --check: crates/rshooks-core/hook_api.json, crates/rshooks-core/protocol_formats.json, crates/rshooks-core/src/*.rs, and crates/rshooks/src/sfield.rs + tx_type.rs + ledger_entry_type.rs + views/{{tx,ledger,inner}}.rs are up to date"
+            "cargo xtask gen-core --check: crates/rshooks-core/hook_api.json, crates/rshooks-core/protocol_formats.json, crates/rshooks-core/src/*.rs, crates/rshooks/src/sfield.rs + tx_type.rs + ledger_entry_type.rs + views/{{tx,ledger,inner}}.rs, and crates/rshooks-build/src/tx_type_table.rs are up to date"
         );
         Ok(())
     } else {
@@ -528,6 +669,106 @@ pub fn run_check() -> Result<()> {
             "cargo xtask gen-core --check: out of date: {}\n\
              run `cargo xtask gen-core` and commit the result",
             mismatched.join(", ")
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Test code is exempt from the workspace's panic-freedom lints
+    //! (`docs/DESIGN.md` §8).
+    #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
+    use super::*;
+
+    /// A scratch directory under [`std::env::temp_dir`], auto-removed on
+    /// drop, isolated per test the same way [`FmtScratch`] isolates
+    /// `rustfmt` runs.
+    struct TestDir(PathBuf);
+
+    impl TestDir {
+        fn new(label: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "xtask-gen-core-test-{label}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or_default()
+            ));
+            fs::create_dir_all(&dir).expect("creating test scratch dir");
+            Self(dir)
+        }
+
+        fn join(&self, name: &str) -> PathBuf {
+            self.0.join(name)
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn write_files_atomically_writes_every_file_on_success() {
+        let dir = TestDir::new("success");
+        let files = vec![
+            (dir.join("one.rs"), "one".to_string()),
+            (dir.join("nested/two.rs"), "two".to_string()),
+        ];
+
+        write_files_atomically(&files).expect("batch write should succeed");
+
+        assert_eq!(read(&dir.join("one.rs")).expect("one.rs"), "one");
+        assert_eq!(read(&dir.join("nested/two.rs")).expect("two.rs"), "two");
+        let leftover: Vec<_> = fs::read_dir(&dir.0)
+            .expect("reading scratch dir")
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.contains(".tmp-"))
+            .collect();
+        assert!(
+            leftover.is_empty(),
+            "no temp files should remain: {leftover:?}"
+        );
+    }
+
+    /// One entry's parent path collides with an existing plain file (so it
+    /// can never be created as a directory); the batch must fail without
+    /// touching the pre-existing file the earlier, otherwise-successful
+    /// entry would have overwritten.
+    #[test]
+    fn write_files_atomically_leaves_existing_files_untouched_on_failure() {
+        let dir = TestDir::new("failure");
+        fs::write(dir.join("existing.rs"), "original").expect("seeding existing.rs");
+        // A plain file where the second entry needs a directory: its
+        // `create_dir_all` must fail.
+        fs::write(dir.join("blocked"), "not a directory").expect("seeding blocked");
+
+        let files = vec![
+            (dir.join("existing.rs"), "updated".to_string()),
+            (dir.join("blocked/two.rs"), "two".to_string()),
+        ];
+
+        let err = write_files_atomically(&files).expect_err("batch write should fail");
+        assert!(err.to_string().contains("blocked"), "{err}");
+
+        assert_eq!(
+            read(&dir.join("existing.rs")).expect("existing.rs"),
+            "original",
+            "the file staged before the failing entry must not be applied"
+        );
+        let leftover: Vec<_> = fs::read_dir(&dir.0)
+            .expect("reading scratch dir")
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.contains(".tmp-"))
+            .collect();
+        assert!(
+            leftover.is_empty(),
+            "no temp files should remain: {leftover:?}"
         );
     }
 }

@@ -435,8 +435,10 @@ depositor sets per transaction — hence `hook_param`, not `otxn_param`):
 ```
 
 Omitting this `HookParameter` entirely (or setting `HookParameterValue`
-to `00`) leaves deposits unpaused — `deposits_paused()` treats "absent, or
-the wrong size" the same as `paused == 0`.
+to `00`) leaves deposits unpaused. A *present* `HookParameterValue` of the
+wrong size is a decode failure, not "unpaused" — `deposits_paused()` only
+treats genuine absence as `paused == 0`; a malformed value rolls the
+deposit back instead (see "Expected behavior" below).
 
 ### Measured cost of a composite name
 
@@ -494,6 +496,18 @@ No extra flags — see "Zero-cost: measured, not assumed" above.
   `nothing to withdraw`.
 - `action` anything other than `1`/`2` → rollback
   (`"typed-data: unknown INS action"`, code `3`).
+- `CFG` present but not exactly 12 bytes → rollback
+  (`"typed-data: CFG parameter malformed"`, code `10`) — never silently
+  falls back to the compiled-in default.
+- `deposit` while the `AdminName` pause switch is set → rollback
+  (`"typed-data: deposits are currently paused"`, code `9`).
+- `deposit` while the `AdminName` pause switch is present but not exactly
+  1 byte → rollback (`"typed-data: admin pause parameter malformed"`, code
+  `11`) — never silently treated as unpaused.
+- `deposit` whose amount would overflow the account's stored balance →
+  rollback (`"typed-data: deposit amount overflow"`, code `12`).
+- `deposit` whose lock window would overflow the ledger sequence →
+  rollback (`"typed-data: lock deadline overflow"`, code `13`).
 
 ## Error codes
 
@@ -510,3 +524,8 @@ No extra flags — see "Zero-cost: measured, not assumed" above.
 | `StillLocked` | 6 | a `withdraw` instruction, but the deposit's lock window hasn't elapsed yet |
 | `StateReadFailed` | 7 | reading the account's `DepositValue` failed with something other than "no entry" |
 | `StateSetFailed` | 8 | writing the updated `DepositValue` back failed |
+| `DepositsPaused` | 9 | a `deposit` instruction, but the `AdminName` pause switch is currently set |
+| `ConfigMalformed` | 10 | the `CFG` Hook parameter is present but failed to decode |
+| `PauseReadFailed` | 11 | the `AdminName` pause-switch parameter is present but failed to decode |
+| `AmountOverflow` | 12 | a `deposit` instruction whose amount would overflow the account's stored balance |
+| `DeadlineOverflow` | 13 | a `deposit` instruction whose lock window would overflow the ledger sequence |

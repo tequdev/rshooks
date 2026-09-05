@@ -1,7 +1,7 @@
 //! The unnest (ladder-flattening) pass: `docs/DESIGN.md` §6.2c.
 //!
-//! Runs for api-version 0 only, immediately after [`crate::flatten`] and
-//! before the guard pass. LLVM's stackifier lays out every diverging
+//! Runs immediately after [`crate::flatten`] and before the guard pass.
+//! LLVM's stackifier lays out every diverging
 //! early-exit (`rollback!`-style) as a tail after the end of a dedicated
 //! `block` wrapping the whole remaining body — an "error ladder" whose
 //! nesting grows linearly with the number of error paths a hook checks. The

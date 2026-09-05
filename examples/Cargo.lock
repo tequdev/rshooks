@@ -447,6 +447,7 @@ dependencies = [
  "k256",
  "rshooks",
  "rshooks-core",
+ "serde_json",
  "sha2",
 ]
 
@@ -670,6 +671,7 @@ name = "typed-data"
 version = "0.2.0"
 dependencies = [
  "rshooks",
+ "rshooks-testenv",
 ]
 
 [[package]]

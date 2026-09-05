@@ -694,6 +694,44 @@ mod tests {
         assert_eq!(slot_subfield(&mut ctx, 9, SF_SEQUENCE, 0), DOESNT_EXIST);
     }
 
+    /// A single field, nested `depth` levels deep (an empty innermost
+    /// object): `depth` copies of the `(type 14, field 2)` header opening
+    /// one level each, followed by `depth` `0xE1` terminators closing them
+    /// back out. Matches real xahaud's `get_stobject_length`
+    /// recursion-depth convention (`HookAPI.cpp:2901`; see also
+    /// `crate::emit_walk::STO_MAX_RECURSION_DEPTH`'s doc comment).
+    fn nested_object_chain(depth: u32) -> Vec<u8> {
+        let depth = depth as usize;
+        let mut out = vec![0xE2u8; depth]; // (type 14, field 2), repeated
+        out.extend(vec![0xE1u8; depth]); // OBJECT_END_MARKER, repeated
+        out
+    }
+
+    const SF_NESTED_OBJECT: u32 = (14 << 16) + 2;
+
+    #[test]
+    fn slot_subfield_root_accepts_nesting_up_to_the_real_hosts_limit() {
+        let mut ctx = fresh_ctx();
+        let kl = keylet(1);
+        let world = seeded_world(kl, &nested_object_chain(10));
+        let root = slot_set(&mut ctx, &world, &kl, 0) as u32;
+        let child = slot_subfield(&mut ctx, root, SF_NESTED_OBJECT, 0);
+        assert!(child > 0);
+        assert_eq!(ctx.slot_entry(child as u32).unwrap().kind, SlotKind::Object);
+    }
+
+    #[test]
+    fn slot_subfield_root_rejects_nesting_beyond_the_real_hosts_limit() {
+        let mut ctx = fresh_ctx();
+        let kl = keylet(1);
+        let world = seeded_world(kl, &[0xE2u8; 11]);
+        let root = slot_set(&mut ctx, &world, &kl, 0) as u32;
+        assert_eq!(
+            slot_subfield(&mut ctx, root, SF_NESTED_OBJECT, 0),
+            NOT_AN_OBJECT
+        );
+    }
+
     // -- slot_subarray / slot_count / array navigation --
 
     #[test]

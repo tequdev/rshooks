@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::io::{BufRead, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 
 use crate::carriers::{self, EntryDecl};
 use crate::metadata::{self, hook_hash};
-use crate::{ApiVersion, Options, entry_sidecar, sethook_template};
+use crate::{Options, entry_sidecar, sethook_template};
 
 /// CLI-facing inputs to a `rshooks build` invocation.
 #[derive(Debug, Clone, Default)]
@@ -22,8 +22,6 @@ pub struct ChainBuildArgs {
     pub manifest_path: Option<PathBuf>,
     /// Forwarded as `-p <package>`.
     pub package: Option<String>,
-    /// Only `0` (Guard-type) is currently supported for chain builds.
-    pub api_version: u8,
     /// Deprecated: insert missing loop guards instead of treating them as
     /// an error. Scheduled for removal; remove the compiler-generated loop
     /// at the source level (`rshooks::buf_eq_*`, `HookStatic`) or write the
@@ -57,14 +55,7 @@ pub struct ChainBuildArgs {
 /// publication. Prints progress and a final summary to stdout/stderr.
 #[allow(deprecated)]
 pub fn run(args: &ChainBuildArgs) -> Result<()> {
-    if args.api_version != 0 {
-        bail!(
-            "`rshooks build` only supports `--api-version 0` for #[hooks] chain builds \
-             (gas-type chain builds are not yet supported)"
-        );
-    }
     let opts = Options {
-        api_version: ApiVersion::V0,
         auto_guard: args.auto_guard,
         default_maxiter: args.default_maxiter,
         allow_oversize: args.allow_oversize,
@@ -79,6 +70,24 @@ pub fn run(args: &ChainBuildArgs) -> Result<()> {
     )?;
     let rustc = detect_rustc_version(&cargo);
 
+    std::fs::create_dir_all(&plan.private_target_dir).with_context(|| {
+        format!(
+            "creating cargo target directory {}",
+            plan.private_target_dir.display()
+        )
+    })?;
+    // Keyed on the cargo `--target-dir` itself, which is shared by every
+    // `rshooks build` invocation against this workspace regardless of
+    // `--out`: held from before the first cargo invocation through the last
+    // artifact read, closing the window where cargo finishes (re)writing
+    // the shared cdylib artifact and a concurrent build's cargo invocation
+    // overwrites it again before this process reads the bytes back. Waits
+    // for a concurrent holder instead of failing outright, because two
+    // builds sharing a target directory but publishing to different `--out`
+    // roots are a legitimate, non-conflicting scenario. Released on every
+    // exit path via `LockGuard`'s `Drop` impl.
+    let _target_lock = acquire_target_lock(&plan.private_target_dir)?;
+
     let root = args.out.clone().unwrap_or_else(|| {
         plan.target_directory
             .join("rshooks")
@@ -86,12 +95,11 @@ pub fn run(args: &ChainBuildArgs) -> Result<()> {
     });
     std::fs::create_dir_all(&root)
         .with_context(|| format!("creating output root {}", root.display()))?;
-    // Held for the *entire* chain build (discovery through publish), not
-    // just the final publish step: closes the window where a concurrent
-    // `rshooks build` sharing the same cargo target directory could
-    // overwrite the cdylib artifact between compiling it and reading it
-    // back. Released on every exit path via `LockGuard`'s `Drop` impl.
-    let _lock = acquire_lock(&root)?;
+    // Serializes generation-directory publish/prune/`current`-repoint
+    // bookkeeping for this specific output root. Distinct from
+    // `_target_lock`: two builds writing to different `--out` roots must
+    // not block each other here, only on the shared target directory above.
+    let _root_lock = acquire_lock(&root)?;
 
     println!("discovery build ({})", plan.package_name);
     let discovery_bytes = plan.run_discovery()?;
@@ -727,9 +735,12 @@ struct StagingGuard {
 }
 
 impl StagingGuard {
-    fn new(path: PathBuf) -> Result<Self> {
-        std::fs::create_dir_all(&path)
-            .with_context(|| format!("creating staging directory {}", path.display()))?;
+    /// Creates a brand-new, empty staging directory: fails with
+    /// `io::ErrorKind::AlreadyExists` if `path` already exists rather than
+    /// adopting its contents, so a leftover from a crashed run (or a reused
+    /// PID) is never silently reused as this build's staging area.
+    fn new(path: PathBuf) -> std::io::Result<Self> {
+        std::fs::create_dir(&path)?;
         Ok(Self {
             path,
             committed: false,
@@ -749,6 +760,73 @@ impl Drop for StagingGuard {
     }
 }
 
+/// Bound on how many candidate names [`create_staging_dir`] tries before
+/// giving up.
+const MAX_STAGING_DIR_ATTEMPTS: u32 = 64;
+
+/// Creates a fresh staging directory under `root` with a name unique to this
+/// attempt, retrying with a new candidate name if one is already occupied
+/// (e.g. a `.staging-<pid>` leftover from a crashed build sharing a reused
+/// PID). `root` must already exist.
+fn create_staging_dir(root: &Path) -> Result<StagingGuard> {
+    let pid = std::process::id();
+    let mut last_error = None;
+    for attempt in 0..MAX_STAGING_DIR_ATTEMPTS {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let path = root.join(format!(".staging-{pid}-{nanos}-{attempt}"));
+        match StagingGuard::new(path.clone()) {
+            Ok(guard) => return Ok(guard),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                last_error = Some(error);
+            }
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("creating staging directory {}", path.display()));
+            }
+        }
+    }
+    Err(match last_error {
+        Some(error) => anyhow::Error::new(error).context(format!(
+            "could not create a unique staging directory under {} after {MAX_STAGING_DIR_ATTEMPTS} attempts",
+            root.display()
+        )),
+        None => anyhow::anyhow!(
+            "could not create a unique staging directory under {}",
+            root.display()
+        ),
+    })
+}
+
+/// Best-effort cleanup of `.staging-*` directories left behind by a crashed
+/// build. Each is named uniquely per attempt (see [`create_staging_dir`]) so
+/// none is ever reused, but they should not accumulate forever; only entries
+/// older than [`PRUNE_GRACE_PERIOD`] are removed, so an in-flight sibling
+/// build's staging directory is never touched.
+fn prune_stale_staging_dirs(root: &Path) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    let now = SystemTime::now();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if !name.to_string_lossy().starts_with(".staging-") {
+            continue;
+        }
+        let eligible = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|modified| now.duration_since(modified).ok())
+            .is_some_and(is_prune_eligible);
+        if eligible {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
 /// Guards the publish advisory lock: removes the lock file on `Drop`.
 #[derive(Debug)]
 struct LockGuard {
@@ -763,15 +841,8 @@ impl Drop for LockGuard {
 
 fn acquire_lock(root: &Path) -> Result<LockGuard> {
     let lock_path = root.join(".lock");
-    match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&lock_path)
-    {
-        Ok(mut file) => {
-            let _ = writeln!(file, "{}", std::process::id());
-            Ok(LockGuard { path: lock_path })
-        }
+    match open_lock_file(&lock_path) {
+        Ok(file) => Ok(finish_lock(file, lock_path)),
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => bail!(
             "could not acquire the rshooks-build publish lock at {} (another build may be in \
              progress); if you're certain no build is running, a crashed process may have left \
@@ -782,6 +853,65 @@ fn acquire_lock(root: &Path) -> Result<LockGuard> {
             Err(error).with_context(|| format!("creating lock file {}", lock_path.display()))
         }
     }
+}
+
+/// Maximum time [`acquire_target_lock`] waits for a concurrent holder to
+/// release the shared cargo target-directory lock before giving up.
+const TARGET_LOCK_WAIT_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+/// Poll interval used while waiting in [`acquire_target_lock`].
+const TARGET_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(200);
+
+/// Like [`acquire_lock`], but for the shared cargo target directory: waits
+/// (polling) for a concurrent holder to release the lock instead of failing
+/// immediately, since two builds legitimately sharing a target directory
+/// (different `--out` roots, or different packages in the same workspace)
+/// should serialize rather than error.
+fn acquire_target_lock(dir: &Path) -> Result<LockGuard> {
+    acquire_target_lock_with(dir, TARGET_LOCK_WAIT_TIMEOUT, TARGET_LOCK_POLL_INTERVAL)
+}
+
+fn acquire_target_lock_with(
+    dir: &Path,
+    wait_timeout: Duration,
+    poll_interval: Duration,
+) -> Result<LockGuard> {
+    let lock_path = dir.join(".lock");
+    let deadline = Instant::now()
+        .checked_add(wait_timeout)
+        .unwrap_or_else(Instant::now);
+    loop {
+        match open_lock_file(&lock_path) {
+            Ok(file) => return Ok(finish_lock(file, lock_path)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                if Instant::now() >= deadline {
+                    bail!(
+                        "timed out waiting for the cargo target-directory build lock at {} \
+                         (another `rshooks build` sharing this target directory did not finish \
+                         in time); if you're certain no build is running, a crashed process may \
+                         have left this lock behind — remove the file and retry",
+                        lock_path.display()
+                    );
+                }
+                std::thread::sleep(poll_interval);
+            }
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("creating lock file {}", lock_path.display()));
+            }
+        }
+    }
+}
+
+fn open_lock_file(lock_path: &Path) -> std::io::Result<std::fs::File> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(lock_path)
+}
+
+fn finish_lock(mut file: std::fs::File, lock_path: PathBuf) -> LockGuard {
+    let _ = writeln!(file, "{}", std::process::id());
+    LockGuard { path: lock_path }
 }
 
 fn write_staged_file(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -807,9 +937,10 @@ fn publish(
 ) -> Result<PathBuf> {
     std::fs::create_dir_all(root)
         .with_context(|| format!("creating output root {}", root.display()))?;
+    prune_stale_staging_dirs(root);
 
-    let staging_path = root.join(format!(".staging-{}", std::process::id()));
-    let staging = StagingGuard::new(staging_path.clone())?;
+    let staging = create_staging_dir(root)?;
+    let staging_path = staging.path.clone();
 
     for (name, bytes) in staged_wasms {
         write_staged_file(&staging_path.join(name), bytes)?;
@@ -906,26 +1037,107 @@ fn retain_latest_generations(root: &Path, keep: usize) {
     }
 }
 
+/// Filename of the `current` pointer under a build's output root, plus its
+/// staging name while the next generation is being installed.
+const CURRENT_NAME: &str = "current";
+const CURRENT_TMP_NAME: &str = "current.tmp";
+
+/// Swaps a freshly staged `current.tmp` entry (already written by the
+/// caller) into place as `current`, disposing of whatever `current`
+/// previously pointed to. Platform independent: it treats both entries
+/// opaquely via [`remove_entry`], so the same code path serves Unix's
+/// symlink swap and Windows' directory-symlink/real-directory fallback, and
+/// is exercised by a host-independent unit test (`swap_current_entry_*`).
+///
+/// `std::fs::rename` cannot replace an existing directory (or, reliably, a
+/// directory-reparse-point symlink) on Windows, so rather than renaming
+/// straight over `current`, any existing `current` is first moved aside to
+/// a process-unique name, the staged entry is renamed into place, and only
+/// then is the moved-aside entry deleted.
+fn swap_current_entry(root: &Path) -> Result<()> {
+    let current = root.join(CURRENT_NAME);
+    let tmp = root.join(CURRENT_TMP_NAME);
+    let old = root.join(format!(".current-old-{}", std::process::id()));
+    remove_entry(&old);
+
+    match std::fs::rename(&current, &old) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("moving aside stale `current` under {}", root.display()));
+        }
+    }
+
+    let result = std::fs::rename(&tmp, &current)
+        .with_context(|| format!("publishing `current` under {}", root.display()));
+    remove_entry(&old);
+    result
+}
+
+/// Removes a `current`/`current.tmp` entry regardless of whether it is a
+/// symlink, a directory-reparse-point symlink, or a real directory.
+/// `symlink_metadata` does not follow links, so a symlink is always removed
+/// with `remove_file` (unlinking it without touching whatever it points
+/// at); only a real directory is removed with `remove_dir_all`.
+fn remove_entry(path: &Path) {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_dir() => {
+            let _ = std::fs::remove_dir_all(path);
+        }
+        Ok(_) => {
+            let _ = std::fs::remove_file(path);
+        }
+        Err(_) => {}
+    }
+}
+
 #[cfg(unix)]
 fn update_current(root: &Path, gen_name: &str) -> Result<()> {
     use std::os::unix::fs::symlink;
-    let tmp = root.join("current.tmp");
-    let _ = std::fs::remove_file(&tmp);
+    let tmp = root.join(CURRENT_TMP_NAME);
+    remove_entry(&tmp);
     symlink(gen_name, &tmp).with_context(|| format!("creating symlink {}", tmp.display()))?;
-    std::fs::rename(&tmp, root.join("current"))
-        .with_context(|| format!("publishing `current` symlink under {}", root.display()))
+    swap_current_entry(root)
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
 fn update_current(root: &Path, gen_name: &str) -> Result<()> {
-    let tmp = root.join("current.tmp");
-    std::fs::write(&tmp, gen_name).with_context(|| format!("writing {}", tmp.display()))?;
-    std::fs::rename(&tmp, root.join("current"))
-        .with_context(|| format!("publishing `current` marker under {}", root.display()))
+    use std::os::windows::fs::symlink_dir;
+    let tmp = root.join(CURRENT_TMP_NAME);
+    remove_entry(&tmp);
+    if symlink_dir(gen_name, &tmp).is_err() {
+        // Creating a directory symlink needs elevated privilege or
+        // Developer Mode; fall back to a real directory holding copies of
+        // the generation's files so `current/<artifact>` still resolves.
+        copy_dir_all(&root.join(gen_name), &tmp)
+            .with_context(|| format!("copying {gen_name} into {}", tmp.display()))?;
+    }
+    swap_current_entry(root)
+}
+
+#[cfg(windows)]
+fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
+    std::fs::create_dir_all(dst)
+        .with_context(|| format!("creating directory {}", dst.display()))?;
+    for entry in std::fs::read_dir(src).with_context(|| format!("reading {}", src.display()))? {
+        let entry = entry.with_context(|| format!("reading entry in {}", src.display()))?;
+        let dest_path = dst.join(entry.file_name());
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("reading file type of {}", entry.path().display()))?;
+        if file_type.is_dir() {
+            copy_dir_all(&entry.path(), &dest_path)?;
+        } else {
+            std::fs::copy(entry.path(), &dest_path)
+                .with_context(|| format!("copying {}", entry.path().display()))?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::indexing_slicing)]
+#[allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 mod tests {
     use super::*;
     use crate::carriers::OnDecl;
@@ -1129,12 +1341,18 @@ mod tests {
                 PathBuf::from(gen2.file_name().expect("gen2 name"))
             );
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
         {
-            let pointer = std::fs::read_to_string(root.join("current")).expect("current marker");
+            let artifact = root
+                .join("current")
+                .join("0.deposit.wasm")
+                .canonicalize()
+                .expect("current/0.deposit.wasm resolves as a directory entry");
             assert_eq!(
-                pointer,
-                gen2.file_name().expect("gen2 name").to_string_lossy()
+                artifact,
+                gen2.join("0.deposit.wasm")
+                    .canonicalize()
+                    .expect("gen2/0.deposit.wasm exists")
             );
         }
 
@@ -1147,6 +1365,105 @@ mod tests {
             !root.join(".lock").exists(),
             "lock is released once the whole build completes"
         );
+        std::fs::remove_dir_all(&root).expect("cleanup");
+    }
+
+    #[test]
+    fn swap_current_entry_replaces_a_real_directory_across_repeated_publishes() {
+        // Exercises the swap algorithm the Windows fallback relies on (a
+        // real directory rather than a symlink) so it is checked on every
+        // host, including the platforms this crate is actually built and
+        // tested on.
+        let root = temp_dir("swap-directory");
+        std::fs::create_dir_all(&root).expect("create root");
+
+        for (n, marker) in [(1u32, "one"), (2, "two"), (3, "three")] {
+            let tmp = root.join(CURRENT_TMP_NAME);
+            remove_entry(&tmp);
+            std::fs::create_dir_all(&tmp).expect("create tmp directory");
+            std::fs::write(tmp.join("artifact.txt"), marker).expect("write artifact");
+
+            swap_current_entry(&root).unwrap_or_else(|error| panic!("swap {n}: {error:#}"));
+
+            let content = std::fs::read_to_string(root.join(CURRENT_NAME).join("artifact.txt"))
+                .unwrap_or_else(|error| panic!("read current after swap {n}: {error}"));
+            assert_eq!(content, marker);
+        }
+
+        std::fs::remove_dir_all(&root).expect("cleanup");
+    }
+
+    #[test]
+    fn swap_current_entry_replaces_a_symlink_across_repeated_publishes() {
+        #[cfg(unix)]
+        use std::os::unix::fs::symlink;
+
+        // A dangling target is fine: the test only reads the pointer, not
+        // through it, matching how `update_current` never dereferences the
+        // generation it points at.
+        #[cfg(unix)]
+        fn install(tmp: &Path, target: &str) {
+            symlink(target, tmp).expect("create symlink");
+        }
+
+        #[cfg(not(unix))]
+        fn install(tmp: &Path, target: &str) {
+            std::fs::write(tmp, target).expect("create marker file");
+        }
+
+        let root = temp_dir("swap-symlink");
+        std::fs::create_dir_all(&root).expect("create root");
+
+        for (n, target) in [(1u32, "gen-1"), (2, "gen-2"), (3, "gen-3")] {
+            let tmp = root.join(CURRENT_TMP_NAME);
+            remove_entry(&tmp);
+            install(&tmp, target);
+
+            swap_current_entry(&root).unwrap_or_else(|error| panic!("swap {n}: {error:#}"));
+
+            #[cfg(unix)]
+            {
+                let resolved =
+                    std::fs::read_link(root.join(CURRENT_NAME)).expect("current is a symlink");
+                assert_eq!(resolved, PathBuf::from(target));
+            }
+            #[cfg(not(unix))]
+            {
+                let content =
+                    std::fs::read_to_string(root.join(CURRENT_NAME)).expect("current marker");
+                assert_eq!(content, target);
+            }
+        }
+
+        std::fs::remove_dir_all(&root).expect("cleanup");
+    }
+
+    #[test]
+    fn publish_does_not_reuse_a_stale_staging_directory_left_by_a_crashed_run() {
+        let root = temp_dir("stale-staging");
+        let lock = acquire_lock(&root).expect("acquire lock for the whole build");
+
+        // The exact name a naive `.staging-<pid>` implementation would pick,
+        // already populated by a crashed previous run (or a reused PID).
+        let naive_staging = root.join(format!(".staging-{}", std::process::id()));
+        std::fs::create_dir_all(&naive_staging).expect("create stale staging dir");
+        std::fs::write(
+            naive_staging.join("stale.txt"),
+            b"leftover from a crashed build",
+        )
+        .expect("write stale file");
+
+        let wasms = vec![("0.deposit.wasm".to_string(), b"AA".to_vec())];
+        let sidecars = vec![("0.deposit.metadata.json".to_string(), b"{}".to_vec())];
+        let gen1 = publish(&root, &wasms, &sidecars, b"{}", b"{}")
+            .expect("publish succeeds despite a stale staging directory");
+
+        assert!(gen1.join("0.deposit.wasm").exists());
+        assert!(
+            !gen1.join("stale.txt").exists(),
+            "published generation must not inherit a stale staging directory's contents"
+        );
+        drop(lock);
         std::fs::remove_dir_all(&root).expect("cleanup");
     }
 
@@ -1233,6 +1550,38 @@ mod tests {
         drop(guard);
         let _ = acquire_lock(&root).expect("lock is released after drop");
         std::fs::remove_dir_all(&root).expect("cleanup");
+    }
+
+    #[test]
+    fn acquire_target_lock_waits_for_a_concurrent_holder_instead_of_failing() {
+        let dir = temp_dir("target-lock-wait");
+        let guard = acquire_lock(&dir).expect("first lock succeeds");
+
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            drop(guard);
+        });
+
+        let waited =
+            acquire_target_lock_with(&dir, Duration::from_secs(5), Duration::from_millis(20))
+                .expect("waits out the concurrent holder rather than failing");
+        releaser.join().expect("releaser thread does not panic");
+        drop(waited);
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
+    fn acquire_target_lock_times_out_if_never_released() {
+        let dir = temp_dir("target-lock-timeout");
+        let guard = acquire_lock(&dir).expect("first lock succeeds");
+
+        let err =
+            acquire_target_lock_with(&dir, Duration::from_millis(100), Duration::from_millis(20))
+                .expect_err("must time out while the lock is held");
+        assert!(format!("{err:#}").contains("timed out waiting"));
+
+        drop(guard);
+        std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 
     #[test]

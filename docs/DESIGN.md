@@ -36,9 +36,8 @@ contracts) end to end:
 ### Non-goals (v1)
 
 - Publishing to crates.io (names/ownership decided later; `publish = false`).
-- Gas-type hook (HookApiVersion 1) *ergonomics*. The pipeline accepts
-  `--api-version 1` (skips guard handling) but rshooks v1 targets
-  Guard-type hooks.
+- Gas-type hooks (HookApiVersion 1). The toolchain targets Guard-type
+  hooks only.
 - Deployment tooling (SetHook submission, faucet, networks). Out of scope;
   rshooks-build stops at a valid `.wasm` plus a fee estimate.
 - WAT round-tripping, debugger, simulator.
@@ -51,7 +50,7 @@ These come from xahaud's SetHook validation (`SetHook.cpp`,
 - **C1. Export set**: the WASM may export only `hook` (and optionally
   `cbak`), both `(func (param i32) (result i64))`. Rust `cdylib` output also
   exports `memory` — it must be stripped, or SetHook fails `temMALFORMED`.
-- **C2. Guards**: for API version 0, every `loop` must begin with the exact
+- **C2. Guards**: every `loop` must begin with the exact
   instruction sequence `i32.const <id>; i32.const <maxiter>; call $_g`
   (result dropped). xahaud statically computes a worst-case instruction
   count from these; missing guards ⇒ rejection.
@@ -87,8 +86,9 @@ These come from xahaud's SetHook validation (`SetHook.cpp`,
   - **(b) Measured net effect, across all 13 examples** (rebuilt on the
     exact toolchain this repo pins): worst-case instruction count (WCE)
     improved in 6, stayed byte-for-byte unchanged in 3 (`02_state-counter`,
-    `07_xfl-math`, `81_govern` — their compiled output didn't move at all),
-    and increased only slightly (at most +12 instructions / +7%) in the
+    `07_xfl-math`, `80_governance`'s `govern` entry — their compiled
+    output didn't move at all), and increased only slightly (at most +12
+    instructions / +7%) in the
     remaining 4 (`01_accept-all`, `05_firewall`, `08_slot-ledger`,
     `10_emit-txn`) — no example regressed by more than a low double-digit
     instruction count. One example stands out as a large outlier
@@ -139,8 +139,8 @@ These come from xahaud's SetHook validation (`SetHook.cpp`,
     | `09_state-foreign` | 152 → 145 | 707 → 689 |
     | `10_emit-txn` | 322 → 331 | 1253 → 1272 |
     | `14_account-id-macro` | 365 → 294 | 1512 → 1391 |
-    | `80_reward` | 13698 → 13680 | 7205 → 7175 |
-    | `81_govern` | 44560 → 44560 | 14373 → 14373 |
+    | `80_governance` (`reward`) | 13698 → 13680 | 7205 → 7175 |
+    | `80_governance` (`govern`) | 44560 → 44560 | 14373 → 14373 |
 
     Every row's "after" build also passed `rshooks check` (no
     unguarded loops, nesting depth within the 32-level limit) and the full
@@ -377,19 +377,20 @@ In practice this means: default to `Err(_) => ...`/`.is_err()` at every Hook
 API call site, and reserve `Err(HookError::SpecificVariant) => ...` for the
 rare case that genuinely needs to distinguish one failure from another —
 budget for at most one such site per crate before nesting depth becomes a
-build-time concern. See `examples/80_reward` and `examples/81_govern`'s
-READMEs for concrete before/after nesting-depth numbers from real crates,
-each of which needs exactly one specific-variant match site.
+build-time concern. See `examples/80_governance`'s README for concrete
+before/after nesting-depth numbers from a real crate, whose `govern`/
+`reward` entries each need exactly one specific-variant match site.
 
 The same mechanism applies to any large generated decode-into-enum
 function, not just `HookError::from`: `TxType::from(u16)` (§5, `tx_type.rs`)
 is a ~74-arm match with the identical shape, so comparing `otxn_type()`
 against one specific named `TxType` variant (`otxn_type() == TxType::
-ClaimReward`, as `examples/80_reward`/`examples/81_govern` both do) is the
-`TxType` analogue of a specific-`HookError`-variant match site, subject to
-the same one-per-crate budgeting logic — both examples still build within
-the nesting limit with one of each (one `TxType`-specific comparison, plus
-whatever `HookError`-specific handling each already had), but a crate
+ClaimReward`, as `examples/80_governance`'s `govern`/`reward` entries both
+do) is the `TxType` analogue of a specific-`HookError`-variant match site,
+subject to the same one-per-crate budgeting logic — both entries still
+build within the nesting limit with one of each (one `TxType`-specific
+comparison, plus whatever `HookError`-specific handling each already had),
+but a crate
 piling up several specific-variant comparisons against *either* enum adds
 up against the same 32-level ceiling.
 
@@ -408,10 +409,11 @@ and `crate::api::state::value_or_absent` (shared by every
 DOESNT_EXIST` before any `HookError` is decoded, for exactly this reason —
 the `Err(HookError::from(code))` fallback path is unaffected, since every
 call site still only matches it as a bare `Err(_)`. Concretely: migrating
-`examples/80_reward`'s `"RR"`/`"RD"` state reads to `hook_state!` +
-`state_get_typed` needs this — without it, that migration pushes nesting
-from 24 to 70 (over the limit); with it, nesting stays at 24 — see
-`examples/80_reward/src/lib.rs` for the migrated call site. (One further
+`examples/80_governance`'s `reward` entry's `"RR"`/`"RD"` state reads to
+`hook_state!` + `state_get_typed` needs this — without it, that migration
+pushes nesting from 24 to 70 (over the limit); with it, nesting stays at
+24 — see `examples/80_governance/src/lib.rs` for the migrated call site.
+(One further
 wrinkle: the raw-code helpers this needs — `state_raw_code`,
 `state_u64_raw_code`, `state_foreign_raw_code` in
 `crates/rshooks/src/api/state.rs` — are
@@ -827,9 +829,9 @@ which this same invocation just generated at exactly that name's size.
 concrete, non-generic
 `impl` block can, the same restriction `FixedRead::read_exact`'s doc
 comment documents for the read side). Measured impact:
-`examples/81_govern`'s `IS{seat}` (a composite, runtime-varying name)
+`examples/80_governance`'s `IS{seat}` (a composite, runtime-varying name)
 went from **+607** worst-case instructions over the raw baseline to
-**0** — see `examples/81_govern/src/lib.rs`'s `IS{seat}` doc comment.
+**0** — see `examples/80_governance/src/lib.rs`'s `IS{seat}` doc comment.
 `examples/12_typed-data`'s composite `AdminName` parameter improved too
 (485 → 470 worst-case instructions), confirming the fix generalizes.
 Overriding `with_name_bytes` also *replaces* the trait default's own
@@ -1045,7 +1047,7 @@ back to this section instead of re-explaining it.
 
 | Domain | Endianness | Concrete evidence | Lives in |
 |---|---|---|---|
-| Xahau Binary (the protocol's own STObject/tx wire format) | **Big-endian** | `txn.rs`'s `txn_template!`-generated setters write every multi-byte field with an explicit big-endian encoding (`u32`/`u16` field values, the `tts` transaction-type code, native-amount drops — see e.g. the `.to_be_bytes()` calls building setter bodies and the `tts::$tt as u16).to_be_bytes()` STObject field header); `examples/80_reward/src/mint_txn.rs` and `examples/81_govern/src/txn.rs` (hand-rolled "Tx Builder" equivalents for the genesis hooks) do the same by hand throughout | `crates/rshooks/src/txn.rs`, `examples/80_reward`, `examples/81_govern` |
+| Xahau Binary (the protocol's own STObject/tx wire format) | **Big-endian** | `txn.rs`'s `txn_template!`-generated setters write every multi-byte field with an explicit big-endian encoding (`u32`/`u16` field values, the `tts` transaction-type code, native-amount drops — see e.g. the `.to_be_bytes()` calls building setter bodies and the `tts::$tt as u16).to_be_bytes()` STObject field header); `examples/80_governance/src/mint_txn.rs` and `examples/80_governance/src/txn.rs` (hand-rolled "Tx Builder" equivalents for the genesis hooks) do the same by hand throughout | `crates/rshooks/src/txn.rs`, `examples/80_governance` |
 | Xahau Binary — the Hook API host's "as-int64" mode | **Big-endian** | `state`/`state_foreign`/`otxn_field`/`slot` called with `write_ptr = 0, write_len = 0` return the entry's raw bytes packed big-endian into the non-negative `i64` result (xahaud `applyHook.cpp`, `data_as_int64`) | `api::state::state_u64`/`state_foreign_u64`, `api::otxn::otxn_field_u64` |
 | Xahau Binary — keylets | **Big-endian** | A keylet's first two bytes are the ledger-entry-type tag, big-endian, per xahaud's own keylet construction. rshooks never assembles keylet bytes itself — every `keylet_xxx` helper (`api/keylet.rs`) calls the host's `util_keylet` and receives an already-built, opaque `Keylet`/`[u8; 34]` back — this row documents the host's own convention, not code in this crate | xahaud host (`util_keylet`); wrapped opaquely by `crates/rshooks/src/api/keylet.rs` |
 | Xahau Binary — short state/param keys | **Big-endian-flavored zero-padding**: a key shorter than the fixed key width is **left**-padded with zero bytes by the host (the value's bytes end up at the *end* of the fixed-width key, not the front) | rshooks' `StateKeyEncode` layer (`[u8; N]`, `state_keys!`, `#[derive(HookKey)]`) sends a short key at its own real length and relies on this host-side left-pad directly — see §5.7 for the full rule; `pad_left!` (`crates/rshooks/src/macros.rs`) reproduces this same left-pad *locally*, for the rarer case of needing the already-padded bytes themselves as a value, not as a `state`/`state_set` argument | host left-pad: xahaud; local equivalent: `pad_left!` (`crates/rshooks/src/macros.rs`) |
@@ -1269,14 +1271,16 @@ integer literal there now needs a `u32` suffix; and `txn_template!` takes
 typed constants only.
 
 **Every example uses the typed layer.** No example calls a numbered slot
-function. The two production hooks needed care: `80_reward` measured nesting
-**68** with five typed reads inlined into its entry point (the limit is 32)
-and came back to 26 via an `#[inline(never)]` extraction *plus* replacing a
-4-way tuple `let (Ok(..), ..) = .. else` with sequential ones — the tuple
-pattern lowers to nested matches. `81_govern`, the hook with the least
-headroom in the repo, was unchanged at nesting 22 because `slot_path!`
-flattens a three-hop walk into one `if let` where the raw chain was three
-nested ones. Costs: 80_reward +220 instructions, 81_govern +83, both from
+function. The two production hook entries needed care:
+`examples/80_governance`'s `reward` entry measured nesting **68** with
+five typed reads inlined into its entry point (the limit is 32) and came
+back to 26
+via an `#[inline(never)]` extraction *plus* replacing a 4-way tuple `let
+(Ok(..), ..) = .. else` with sequential ones — the tuple pattern lowers to
+nested matches. Its `govern` entry, the hook with the least headroom in
+the repo, was unchanged at nesting 22 because `slot_path!` flattens a
+three-hop walk into one `if let` where the raw chain was three nested
+ones. Costs: `reward` +220 instructions, `govern` +83, both from
 `Result` plumbing and the 34-byte keylet copy `from_keylet` makes where the
 raw `slot_set` took a slice. `07_xfl-math` and `08_slot-ledger` got
 *cheaper* (−10 and −12), having dropped `slot_clear` calls the consuming
@@ -1429,10 +1433,12 @@ No walrus (C8).
 
 ```
 rshooks build [--manifest-path <dir/Cargo.toml>] [-p <crate>]
-                  [--api-version 0|1] [--out <dir>] [--allow-oversize]
+                  [--out <dir>] [--allow-oversize]
+                  [--no-optimize]
                   [--auto-guard] [--default-maxiter N]   # deprecated
-rshooks clean <in.wasm> [-o out.wasm] [--api-version 0|1]   # post-process only
-rshooks check <file.wasm> [--api-version 0|1]               # validate only, no output
+rshooks clean <in.wasm> [-o out.wasm] [--no-optimize]
+                  # post-process only (any toolchain's wasm, incl. C)
+rshooks check <file.wasm>               # validate only, no output
 ```
 
 `build` =
@@ -1492,14 +1498,14 @@ Input: cargo's wasm. Output: SetHook-shaped wasm.
 5. Verify entry signatures: `hook`/`cbak` must be `(i32) -> i64`; error out
    otherwise (catches a missing `extern "C"` or wrong signature early).
 
-### 6.2b Flatten pass (full inlining) — api-version 0
+### 6.2b Flatten pass (full inlining)
 
 Two rules of the real checker (`Guard.h`, discovered by running the vendored
 checker against our phase-4 artifacts, which the Rust reimplementation had
 wrongly accepted):
 
-- **R1**: every api-version-0 module must import `_g`, even if it contains
-  no loop at all.
+- **R1**: every module must import `_g`, even if it contains no loop at
+  all.
 - **R2**: every entry in the type section must be the type of an import or
   the `(i32) -> i64` entry-point type. A defined helper function with any
   other signature — notably `compiler_builtins` `memset`/`memcpy`/`bcmp`
@@ -1508,25 +1514,25 @@ wrongly accepted):
   (`#![no_builtins]` does not prevent these under fat LTO; verified
   empirically. Source-level avoidance is not reliable.)
 
-Consequently the cleaner is followed by a **flatten pass** for api-version
-0: inline every defined non-entry function into its callers, bottom-up in
-topological order (the call graph is acyclic — recursion is banned — so
-this terminates), then drop the inlined functions and rebuild the type
-section to exactly {import types} ∪ {entry type}. Inlining transform per
-call site: arguments are spilled to fresh locals, the callee body is
-spliced in wrapped in a `block` of the callee's result type, callee locals
-are remapped to appended caller locals, and every `return` in the callee
-becomes a `br` to the wrapper block (branch depths inside the body shift by
-one accordingly). Multiple call sites duplicate the body — a size cost that
-is acceptable and reported. `_g` is ensured present as an import for
-api-version 0 (added if absent, never GC'd) per R1.
+Consequently the cleaner is followed by a **flatten pass**: inline every
+defined non-entry function into its callers, bottom-up in topological order
+(the call graph is acyclic — recursion is banned — so this terminates),
+then drop the inlined functions and rebuild the type section to exactly
+{import types} ∪ {entry type}. Inlining transform per call site: arguments
+are spilled to fresh locals, the callee body is spliced in wrapped in a
+`block` of the callee's result type, callee locals are remapped to appended
+caller locals, and every `return` in the callee becomes a `br` to the
+wrapper block (branch depths inside the body shift by one accordingly).
+Multiple call sites duplicate the body — a size cost that is acceptable and
+reported. `_g` is ensured present as an import (added if absent, never
+GC'd) per R1.
 
 Inlining wraps a call site in a `block` only when the callee body actually
 contains a non-trailing `return` (the block exists solely as the rewritten
 `br` target); a trailing `return` is dropped and falls through, and
 return-free bodies are spliced bare.
 
-### 6.2c Unnest pass (ladder flattening) — api-version 0
+### 6.2c Unnest pass (ladder flattening)
 
 `Guard.h` rejects modules whose block nesting exceeds **32 levels**
 (`NESTING_LIMIT`, 16 before `GuardRuleDepth32`) during its worst-case
@@ -1570,8 +1576,8 @@ O(error paths) to O(real control structure). The duplicated tails cost a
 few bytes per branch site. Correctness is held by the same wasmi
 differential harness as flatten (identical results and host-call
 sequences pre/post pass). The validator (6.4) additionally computes max
-nesting depth, hard-erroring above 32 for api-version 0 (mirroring
-`GuardRuleDepth32`) and warning at ≥ 28; `build` prints the final depth.
+nesting depth, hard-erroring above 32 (mirroring `GuardRuleDepth32`) and
+warning at ≥ 28; `build` prints the final depth.
 
 The guard pass (6.3) runs **after** flattening and unnesting, so loops that
 arrive in `hook()` by inlining (memset/bcmp loops) get guards like any
@@ -1582,8 +1588,6 @@ recorded host stubs, asserting identical results and host-call sequences —
 an inlining bug must fail tests, not silently change hook semantics.
 
 ### 6.3 Guard pass (guard-checker equivalent + auto-insert)
-
-Skipped entirely when `--api-version 1`.
 
 For every function body, scan instructions; at each `loop` opcode:
 
@@ -1660,8 +1664,8 @@ renumbering machinery as GC).
 **After any mutation, the full guard verifier and validator (6.4) run again
 on the final bytes** — `build` never emits an artifact that `check` would
 reject; a bug in the insertion pass fails the build instead of shipping.
-For api-version 0 the authoritative final verdict comes from the vendored
-upstream checker (6.5), not from the Rust reimplementation.
+The authoritative final verdict comes from the vendored upstream checker
+(6.5), not from the Rust reimplementation.
 
 `emit()` reachability note: xahaud requires hooks that `emit` to have called
 `etxn_reserve`; that is runtime behavior, not validated here.
@@ -1688,12 +1692,12 @@ against xahaud source plus a known-good C-built hook fixture):
   reachability analysis; revisit only with conservative table analysis).
 - Call-graph cycle (recursion) — DFS over direct calls (C5); sound because
   `call_indirect` is banned.
-- For api-version 0: any unguarded `loop` (both `check` mode and the
-  post-mutation re-verification in `build`).
-- For api-version 0: missing `_g` import (6.2b R1), and any type-section
-  entry that is not an import's type or the entry-point type (6.2b R2).
-- For api-version 0: block nesting depth > 32 (`Guard.h` `NESTING_LIMIT`
-  under `GuardRuleDepth32`; warning from depth 28 — see 6.2c).
+- Any unguarded `loop` (both `check` mode and the post-mutation
+  re-verification in `build`).
+- Missing `_g` import (6.2b R1), and any type-section entry that is not an
+  import's type or the entry-point type (6.2b R2).
+- Block nesting depth > 32 (`Guard.h` `NESTING_LIMIT` under
+  `GuardRuleDepth32`; warning from depth 28 — see 6.2c).
 - Binary > 65,535 bytes. (`build` refuses to emit; `--allow-oversize`
   writes the artifact anyway for size-debugging, clearly marked INVALID.)
 
@@ -1708,12 +1712,19 @@ external wasm (including C-built hooks).
 
 ### 6.5 Verdict authority: the vendored upstream checker
 
-The final accept/reject verdict for API-version-0 modules comes from
+The guard-shape/WCE verdict comes from
 **xahaud's own guard checker, compiled into rshooks-build from vendored,
 byte-identical upstream source** — not from a Rust reimplementation. A port,
 however careful, can diverge from what the node actually runs; the checker
 is consensus logic, not a reference tool, so divergence means "rshooks-build
-says valid, SetHook says `temMALFORMED`" (or worse, vice versa).
+says valid, SetHook says `temMALFORMED`" (or worse, vice versa). Its
+authority is scoped to what it actually evaluates (guard prologue shape,
+R1/R2, block nesting, worst-case instruction count): an accepting verdict
+downgrades a Rust-only finding in that class to a warning, but never
+overrides a Rust hard error outside that class (MVP validity, the
+export/import set, structural sections, float opcodes, `call_indirect`,
+recursion, the size gate) — the native checker has no opinion on those at
+all, so its acceptance says nothing about them.
 
 Vendored files (upstream `Xahau/xahaud`, branch `release`, kept verbatim —
 never hand-edited; re-sync only via `scripts/sync-vendor.sh`, which also
@@ -1740,8 +1751,8 @@ compiler becomes a build requirement of rshooks-build.
 export shape, `call_indirect`, memory limits, custom sections, instruction
 legality), so the division of labor is:
 
-- **C++ vendored checker** — authoritative pass/fail for api-version 0, in
-  both `check` and post-transform `build`. Its captured log is printed on
+- **C++ vendored checker** — authoritative pass/fail, in both `check` and
+  post-transform `build`. Its captured log is printed on
   failure verbatim; on success the instruction counts are reported (they
   are also what SetHook fee estimation derives from). Note: these are
   *syntactic* worst-case counts (a host `call` counts as 1; host-function
@@ -1751,10 +1762,12 @@ legality), so the division of labor is:
   input, not a runtime ceiling.
 - **Rust pipeline (6.2–6.4)** — everything the checker does not do
   (cleaning, auto-guard insertion, the 65,535-byte size gate, fee
-  estimate, api-version 1 checks) plus pre-transform diagnostics with
-  precise function/offset locations, which upstream's log lacks. If the
-  Rust validator and the C++ checker ever disagree, the C++ verdict wins
-  and the disagreement is surfaced as a rshooks-build bug.
+  estimate) plus pre-transform diagnostics with precise function/offset
+  locations, which upstream's log lacks. If the Rust validator and the C++
+  checker disagree on a guard/WCE finding, the C++ verdict wins and the
+  disagreement is surfaced as a rshooks-build bug; a Rust hard error outside
+  that class always stands regardless of what the C++ checker says, since it
+  never evaluated that rule to begin with.
 
 The cleaner remains native Rust (upstream hook-cleaner is a separate
 project, and cleaning is a transform whose output the authoritative checker
@@ -1834,10 +1847,9 @@ only.
 ```
 
 `HookHash` is SHA512-Half of the exact final cleaned WASM bytes, matching
-`SetHook`'s hash of `CreateCode`. API-version-0 WCE values come from the
-vendored authoritative guard verdict; API version 1 writes `null` for both
-values because static WCE is not calculated for gas hooks. The final module's
-reachable `env::emit` import is also cross-checked against `HookCanEmit`: a
+`SetHook`'s hash of `CreateCode`. WCE values come from the vendored
+authoritative guard verdict. The final module's reachable `env::emit`
+import is also cross-checked against `HookCanEmit`: a
 declaration without emit usage and emit usage without a declaration both
 produce build warnings.
 

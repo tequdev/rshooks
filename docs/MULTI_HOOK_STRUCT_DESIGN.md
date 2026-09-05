@@ -101,10 +101,11 @@ represents the on-ledger `HookName`.
 ### 2.2 Current pain points
 
 1. **A chain (multiple hooks) has no project-level representation.**
-   Related hook groups on the same account, like `80_reward` and
-   `81_govern`, end up as separate crates and **duplicate** the state layout
-   they share (seat/member keys, `V*` voting keys). Duplicated declarations
-   silently drift apart.
+   Related hook groups on the same account, like the `reward` and `govern`
+   genesis hooks (later consolidated as `examples/80_governance`), end up
+   as separate crates and **duplicate** the state layout they share
+   (seat/member keys, `V*` voting keys). Duplicated declarations silently
+   drift apart.
 2. **Metadata is separated from the entry point.**
 3. **The hook/cbak pairing is implicit.**
 4. **Chain position isn't managed.** Which position in the `Hooks` array a
@@ -1058,8 +1059,9 @@ rewritability as the acceptance criterion:
 
 - Examples 01–15: stay single-hook, mechanically rewritten into the new
   form (subject to the migration table's acceptance criteria).
-- **`80_reward` + `81_govern` are consolidated into a single chain example
-  crate** (this consolidation is itself the proof of this proposal, so it's
+- **The `reward` and `govern` genesis hooks are consolidated into a single
+  chain example crate (`examples/80_governance`)** (this consolidation is
+  itself the proof of this proposal, so it's
   treated as a design task, not a mechanical rewrite). This unifies the
   shared key-layout types into the struct declaration and assigns indices
   (matching the genesis account's chain layout). **Phase allocation**:
