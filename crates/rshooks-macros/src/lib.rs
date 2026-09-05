@@ -67,14 +67,14 @@ fn dispatch_hooks_target(item: &TokenStream) -> HooksTarget {
             _ => break,
         }
     }
-    if let Some(TokenTree::Ident(id)) = iter.peek() {
-        if id.to_string() == "pub" {
+    if let Some(TokenTree::Ident(id)) = iter.peek()
+        && id.to_string() == "pub"
+    {
+        iter.next();
+        if let Some(TokenTree::Group(g)) = iter.peek()
+            && g.delimiter() == Delimiter::Parenthesis
+        {
             iter.next();
-            if let Some(TokenTree::Group(g)) = iter.peek() {
-                if g.delimiter() == Delimiter::Parenthesis {
-                    iter.next();
-                }
-            }
         }
     }
     match iter.peek() {
@@ -275,10 +275,10 @@ fn rewrite_stream(input: TokenStream) -> TokenStream {
 fn rewrite_tree(tt: TokenTree) -> TokenTree {
     match tt {
         TokenTree::Group(group) => {
-            if group.delimiter() == Delimiter::Bracket {
-                if let Some(ident) = try_concat_marker(group.stream()) {
-                    return TokenTree::Ident(ident);
-                }
+            if group.delimiter() == Delimiter::Bracket
+                && let Some(ident) = try_concat_marker(group.stream())
+            {
+                return TokenTree::Ident(ident);
             }
             let mut rewritten = Group::new(group.delimiter(), rewrite_stream(group.stream()));
             rewritten.set_span(group.span());

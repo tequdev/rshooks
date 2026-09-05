@@ -88,6 +88,28 @@ jobs:
       - name: Build no_std crates for wasm32v1-none (unstable draft-spec features)
         run: cargo build -p rshooks --target wasm32v1-none --release --features unstable-param-sig-interface,unstable-state-interface
 
+  msrv:
+    name: MSRV (1.88)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Overrides rust-toolchain.toml's 1.89.0 pin for this job by exporting
+      # RUSTUP_TOOLCHAIN, so plain `cargo` invocations below resolve to the
+      # declared `rust-version` floor instead of the pinned toolchain.
+      - name: Install Rust 1.88 (declared rust-version floor)
+        uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          targets: wasm32v1-none
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check (root workspace, host, all targets)
+        run: cargo check --workspace --all-targets
+
+      - name: Check (no_std crates, wasm32v1-none)
+        run: cargo check -p rshooks-core -p rshooks --target wasm32v1-none
+
   # Build & check every example (end-to-end): one independent job per
   # example (matrix, fail-fast: false), so one example failing never
   # blocks the others from running or reporting their own PR check. See

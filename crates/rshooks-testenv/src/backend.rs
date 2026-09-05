@@ -240,14 +240,14 @@ impl HostBackend for Backend {
     // position skips the override lookup entirely.
     fn hook_param(&self, name: &[u8]) -> Result<Vec<u8>, i64> {
         let w = self.world.borrow();
-        if let Some(hash) = w.current_hook_hash() {
-            if let Some(value) = w.hook_param_overrides.get(&(hash, name.to_vec())) {
-                return if value.is_empty() {
-                    Err(rshooks_core::DOESNT_EXIST)
-                } else {
-                    Ok(value.clone())
-                };
-            }
+        if let Some(hash) = w.current_hook_hash()
+            && let Some(value) = w.hook_param_overrides.get(&(hash, name.to_vec()))
+        {
+            return if value.is_empty() {
+                Err(rshooks_core::DOESNT_EXIST)
+            } else {
+                Ok(value.clone())
+            };
         }
         w.hook_params
             .get(name)

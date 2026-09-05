@@ -43,11 +43,11 @@ pub(crate) fn expand(input: TokenStream) -> TokenStream {
     let mut negative = false;
     let mut next = iter.next();
 
-    if let Some(TokenTree::Punct(p)) = &next {
-        if p.as_char() == '-' {
-            negative = true;
-            next = iter.next();
-        }
+    if let Some(TokenTree::Punct(p)) = &next
+        && p.as_char() == '-'
+    {
+        negative = true;
+        next = iter.next();
     }
 
     let literal = match next {

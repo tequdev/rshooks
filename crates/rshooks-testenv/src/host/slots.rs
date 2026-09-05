@@ -209,10 +209,10 @@ pub(crate) fn slot_set(
     // ever attempting the keylet/tx-hash lookup: `slot_into == 0`
     // (auto-assign) with every slot already occupied fails `NO_FREE_SLOTS`
     // even for input that would otherwise resolve to `DOESNT_EXIST`.
-    if slot_into == 0 {
-        if let Err(e) = ctx.resolve_slot(0) {
-            return e;
-        }
+    if slot_into == 0
+        && let Err(e) = ctx.resolve_slot(0)
+    {
+        return e;
     }
     if data.len() == 32 {
         return DOESNT_EXIST;
