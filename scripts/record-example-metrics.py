@@ -12,6 +12,11 @@ example change instead of editing README prose:
 would change — that is the GitHub Actions gate against a forgotten
 refresh.
 
+By default the script always runs `cargo build --release -p rshooks-build`
+first and uses the resulting `target/release/rshooks`, so Cargo's own
+freshness check governs whether anything recompiles. Pass `--rshooks` (or
+set `RSHOOKS`) to use an existing binary as-is and skip that build.
+
 Usage:
   scripts/record-example-metrics.py
   scripts/record-example-metrics.py --check
@@ -104,8 +109,8 @@ def ensure_rshooks(explicit: Path | None) -> Path:
             raise SystemExit(f"FATAL: RSHOOKS={path} is not a file")
         return path
     candidate = ROOT / "target" / "release" / "rshooks"
-    if candidate.is_file():
-        return candidate
+    # Always run the release build so Cargo's freshness check, not a stale
+    # binary sitting at `candidate`, decides whether a rebuild is needed.
     print("-- building rshooks-build (release) --", flush=True)
     subprocess.run(
         [
@@ -317,7 +322,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--rshooks",
         type=Path,
         default=None,
-        help="path to the rshooks CLI (default: target/release/rshooks, built if missing)",
+        help=(
+            "path to the rshooks CLI to use as-is, skipping the release build "
+            "(default: always run `cargo build --release -p rshooks-build` "
+            "and use target/release/rshooks)"
+        ),
     )
     parser.add_argument(
         "build_args",

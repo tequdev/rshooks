@@ -84,7 +84,7 @@ cargo run -p rshooks-build -- check examples/80_governance/out/current/1.reward.
 """
 
 [tasks."record-example-metrics"]
-description = "Rebuild every example and write examples/*/metrics.json (WCE / size / nesting). Pass --check to fail instead of writing; --skip-build to reuse out/current"
+description = "Build rshooks-build fresh, rebuild every example, and write examples/*/metrics.json (WCE / size / nesting). Pass --check to fail instead of writing; --skip-build to reuse out/current; --rshooks/RSHOOKS to reuse an existing rshooks binary instead of rebuilding it"
 run = "python3 scripts/record-example-metrics.py"
 
 [tasks."probe:testenv-parity"]
