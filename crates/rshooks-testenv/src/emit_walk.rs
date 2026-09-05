@@ -10,8 +10,9 @@
 //! (`HookAPI.cpp:68-96`) as having "no field-ordering or duplicate-field
 //! check"; this walker (which `sto_validate` calls directly) matches that.
 //! Structural rules enforced: canonical variable-length prefixes, correct
-//! inner-object/array terminators, no trailing bytes, and a depth limit of
-//! 2 (enough for `EmitDetails`/`Memos`, no general recursion).
+//! inner-object/array terminators, no trailing bytes, and a recursion-depth
+//! limit of [`STO_MAX_RECURSION_DEPTH`] matching real xahaud's
+//! `get_stobject_length` (`HookAPI.cpp:2901`).
 //! [`validate_emit_blob`] layers additional rules on top for `emit`'s
 //! acceptance grammar — see its own doc comment.
 //!
@@ -204,18 +205,27 @@ fn fixed_len_for_type(ty: u32) -> Option<usize> {
     }
 }
 
+/// The recursion-depth bound real xahaud's `HookAPI::get_stobject_length`
+/// enforces (`HookAPI.cpp:2901`: `if (recursion_depth > 10) return
+/// Unexpected(pe_excessive_nesting);`, checked on entry before parsing that
+/// level's field). This walker's `depth` parameter uses the identical
+/// convention — top-level fields parse at `depth == 0`, and each
+/// `STI_OBJECT`(14)/`STI_ARRAY`(15) recursion increments it by one before
+/// parsing the nested body — so the same bound applies unmodified here.
+const STO_MAX_RECURSION_DEPTH: u32 = 10;
+
 fn dispatch_value(data: &[u8], pos: &mut usize, ty: u32, depth: u32) -> Result<(), ()> {
     match ty {
         6 => skip_amount(data, pos),
         7 | 8 => skip_vl(data, pos),
         14 => {
-            if depth.checked_add(1).ok_or(())? > 2 {
+            if depth.checked_add(1).ok_or(())? > STO_MAX_RECURSION_DEPTH {
                 return Err(());
             }
             walk_object_body(data, pos, depth.wrapping_add(1)).map(|_| ())
         }
         15 => {
-            if depth.checked_add(1).ok_or(())? > 2 {
+            if depth.checked_add(1).ok_or(())? > STO_MAX_RECURSION_DEPTH {
                 return Err(());
             }
             walk_array_body(data, pos, depth.wrapping_add(1))
@@ -762,24 +772,59 @@ mod tests {
         assert!(validate_emit_blob(&blob, Some(&d)).is_err());
     }
 
+    /// A single top-level `Object`-typed(14) field nested `depth` levels
+    /// deep (an empty innermost object): `depth` copies of the
+    /// `(type 14, field 2)` header, each opening one more level, followed
+    /// by `depth` [`OBJECT_END_MARKER`]s closing them all back out. Its
+    /// fields parse at [`dispatch_value`]'s `depth` running from `0`
+    /// (the outer header itself) up to `depth - 1` (the innermost, empty
+    /// body) — see [`STO_MAX_RECURSION_DEPTH`]'s doc comment for the
+    /// convention.
+    fn nested_object_chain(depth: u32) -> Vec<u8> {
+        let depth = depth as usize;
+        let mut out = vec![0xE2u8; depth]; // (type 14, field 2), repeated
+        out.extend(vec![OBJECT_END_MARKER; depth]);
+        out
+    }
+
     #[test]
-    fn rejects_depth_beyond_two() {
-        // Three nested Object-typed (type 14) field headers in a row: an
-        // outer field at top level (depth 0 -> opens depth 1), one nested
-        // inside it (depth 1 -> opens depth 2), and one nested inside that
-        // (depth 2 -> would open depth 3, over the limit). The depth check
-        // fires as soon as the third header's value is dispatched, before
-        // any terminator is needed.
-        let depth_violation: &[u8] = &[
-            0xEE, // top level: (type 14, field 14) -> opens depth 1
-            0xE2, // depth 1:   (type 14, field 2)  -> opens depth 2
-            0xE5, // depth 2:   (type 14, field 5)  -> would open depth 3
-        ];
+    fn accepts_nesting_up_to_the_real_hosts_limit() {
+        // Real xahaud's `get_stobject_length` accepts recursion depths
+        // 0..=10 (`HookAPI.cpp:2901`); depth 3 (previously rejected by this
+        // walker's stricter, now-removed depth-2 limit) and depth 10 (the
+        // boundary) must both parse.
+        for depth in [2u32, 3, 10] {
+            let d = details();
+            let mut blob = minimal_payment(&d);
+            blob.extend_from_slice(&nested_object_chain(depth));
+            assert!(
+                validate_emit_blob(&blob, Some(&d)).is_ok(),
+                "depth {depth} should be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_depth_beyond_the_real_hosts_limit() {
+        // A chain of 11 nested Object-typed(14) headers: the 11th would
+        // open recursion depth 11, over `get_stobject_length`'s bound
+        // (`HookAPI.cpp:2901`). The depth check fires as soon as the 11th
+        // header's value is dispatched, before any terminator is needed.
+        let depth_violation: [u8; 11] = [0xE2u8; 11];
 
         let d = details();
         let mut blob = minimal_payment(&d);
-        blob.extend_from_slice(depth_violation);
+        blob.extend_from_slice(&depth_violation);
         assert!(validate_emit_blob(&blob, Some(&d)).is_err());
+    }
+
+    #[test]
+    fn walk_top_level_fields_matches_the_same_depth_bound() {
+        // `walk_top_level_fields` (the shared parser `sto_validate`/
+        // `sto_subfield`/`slot_subfield` all call directly) uses the exact
+        // same bound as [`validate_emit_blob`]'s tests above.
+        assert!(walk_top_level_fields(&nested_object_chain(10)).is_ok());
+        assert!(walk_top_level_fields(&[0xE2u8; 11]).is_err());
     }
 
     #[test]
