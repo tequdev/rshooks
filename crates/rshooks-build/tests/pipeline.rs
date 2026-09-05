@@ -640,8 +640,8 @@ fn auto_guard_inserts_exact_pattern_and_passes_revalidation() {
 // Validator hard-error rules
 
 // `_g` is imported (never called — no loops here) purely to satisfy R1
-// (`docs/DESIGN.md` §6.2b/§6.4): every api-version-0 module must import
-// `_g`, even without a single loop. This is a real, vendored-checker-
+// (`docs/DESIGN.md` §6.2b/§6.4): every module must import `_g`, even
+// without a single loop. This is a real, vendored-checker-
 // discovered rule, not a pipeline artifact — `build`/`clean` guarantee it
 // via the flatten pass, but `validate()` is exercised directly here,
 // bypassing that pass, so the fixture must supply it itself.
@@ -1021,8 +1021,8 @@ fn end_to_end_clean_and_check_is_idempotent() {
 fn run_pipeline_reports_fee_relevant_size() {
     // `MINIMAL_HOOK` has no loop and never calls `_g`, so it doesn't survive
     // the pipeline's final gate: the vendored upstream guard checker
-    // (`docs/DESIGN.md` §6.5) unconditionally requires every API-version-0
-    // module to import `_g`, regardless of loops. `GUARDED_LOOP_HOOK` calls
+    // (`docs/DESIGN.md` §6.5) unconditionally requires every module to
+    // import `_g`, regardless of loops. `GUARDED_LOOP_HOOK` calls
     // `_g` in a properly guarded loop, so it clears that gate and exercises
     // the fee-reporting behavior this test is actually about.
     let (out, report) =
@@ -1031,7 +1031,7 @@ fn run_pipeline_reports_fee_relevant_size() {
     assert!(report.warnings.is_empty() || report.warnings.iter().all(|w| !w.contains("INVALID")));
     assert!(
         report.guard_verdict.is_some(),
-        "api-version-0 success should carry the native checker's instruction counts"
+        "success should carry the native checker's instruction counts"
     );
     let fee = rshooks_build::estimate_fee(out.len());
     assert_eq!(fee.drops, fee.bytes * 5000);
@@ -1082,4 +1082,148 @@ fn clean_cli_warns_when_auto_guard_is_passed() {
         !control_stderr.contains("--auto-guard is deprecated"),
         "the warning must be conditional on the flag: {control_stderr}"
     );
+}
+
+// End-to-end: `run_pipeline` post-processes clang-shaped wasm
+
+/// Encodes a `target_features` custom-section payload (a feature count
+/// followed by one `(prefix, name)` entry per feature, each declared
+/// required with `+`) — the format clang emits for any non-`mvp` target
+/// CPU.
+fn target_features_payload(features: &[&str]) -> Vec<u8> {
+    fn write_leb128(mut n: u64, out: &mut Vec<u8>) {
+        loop {
+            let byte = (n & 0x7f) as u8;
+            n >>= 7;
+            if n == 0 {
+                out.push(byte);
+                break;
+            }
+            out.push(byte | 0x80);
+        }
+    }
+    let mut payload = Vec::new();
+    write_leb128(features.len() as u64, &mut payload);
+    for feature in features {
+        payload.push(b'+');
+        write_leb128(feature.len() as u64, &mut payload);
+        payload.extend_from_slice(feature.as_bytes());
+    }
+    payload
+}
+
+#[test]
+fn clang_shaped_module_with_helpers_flattens_to_valid_hook() {
+    // Mimics the shape of `clang --target=wasm32 -O0 -nostdlib
+    // -Wl,--no-entry -Wl,--allow-undefined -Wl,--export=hook
+    // -Wl,--export=cbak` output: non-inline helper functions (each called
+    // from both `hook` and `cbak`, so their bodies are duplicated across 2
+    // call sites), a guarded loop in one helper, a clang-style stack
+    // pointer global, an active data segment, and `producers`/
+    // `target_features` custom sections declaring post-MVP features clang
+    // emits for a non-`mvp` target CPU.
+    let src = r#"
+    (module
+      (import "env" "_g" (func $g (param i32 i32) (result i32)))
+      (import "env" "accept" (func $accept (param i32 i32 i64) (result i64)))
+      (import "env" "state" (func $state (param i32 i32 i32 i32) (result i64)))
+      (memory (export "memory") 2)
+      (global $__stack_pointer (mut i32) (i32.const 66592))
+      (data (i32.const 1024) "hello")
+
+      (func $sum (param i32 i32) (result i32)
+        (local $i i32)
+        (local $acc i32)
+        (loop $l
+          (call $g (i32.const 1) (i32.const 100))
+          drop
+          (local.set $acc
+            (i32.add (local.get $acc)
+              (i32.shr_s
+                (i32.shl
+                  (i32.load8_u (i32.add (local.get 0) (local.get $i)))
+                  (i32.const 24))
+                (i32.const 24))))
+          (local.set $i (i32.add (local.get $i) (i32.const 1)))
+          (br_if $l (i32.lt_u (local.get $i) (local.get 1))))
+        (local.get $acc))
+
+      (func $read_counter (result i64)
+        (call $state (i32.const 2048) (i32.const 8) (i32.const 1024) (i32.const 5)))
+
+      (func $bump (param i32) (result i32)
+        (local $sp i32)
+        (global.set $__stack_pointer
+          (i32.sub (global.get $__stack_pointer) (i32.const 16)))
+        (drop (call $read_counter))
+        (local.set $sp (global.get $__stack_pointer))
+        (global.set $__stack_pointer
+          (i32.add (global.get $__stack_pointer) (i32.const 16)))
+        (local.get $sp))
+
+      (func $hook (param i32) (result i64)
+        (drop (call $sum (i32.const 1024) (i32.const 5)))
+        (drop (call $bump (i32.const 0)))
+        (call $accept (i32.const 0) (i32.const 0) (i64.const 0)))
+
+      (func $cbak (param i32) (result i64)
+        (drop (call $sum (i32.const 1024) (i32.const 5)))
+        (drop (call $bump (i32.const 0)))
+        (i64.const 0))
+
+      (export "hook" (func $hook))
+      (export "cbak" (func $cbak)))
+    "#;
+    let input = wasm(src);
+    let input = append_custom_section(&input, "producers", b"whatever clang puts here");
+    let input = append_custom_section(
+        &input,
+        "target_features",
+        &target_features_payload(&["sign-ext", "mutable-globals"]),
+    );
+
+    let (out, report) = rshooks_build::run_pipeline(&input, &opts())
+        .expect("pipeline succeeds on clang-shaped input");
+
+    let mut exports = export_names(&out);
+    exports.sort();
+    assert_eq!(
+        exports,
+        vec!["cbak".to_string(), "hook".to_string()],
+        "only hook and cbak should remain exported (no memory export)"
+    );
+
+    let mut func_count = 0u32;
+    for payload in wasmparser::Parser::new(0).parse_all(&out) {
+        if let wasmparser::Payload::FunctionSection(r) = payload.expect("valid wasm") {
+            func_count = r.count();
+        }
+    }
+    assert_eq!(
+        func_count, 2,
+        "flatten should inline every helper into hook/cbak, leaving exactly 2 defined functions"
+    );
+
+    assert!(
+        !payload_kinds(&out).contains(&"custom"),
+        "no custom sections should survive the pipeline"
+    );
+
+    assert!(
+        report.guard_verdict.is_some(),
+        "a valid module should carry the native checker's verdict"
+    );
+    assert!(
+        report.warnings.is_empty(),
+        "no warnings expected (a DIVERGENCE warning would indicate a sign-extension leak): {:?}",
+        report.warnings
+    );
+
+    let segs = data_segments(&out);
+    assert!(
+        !segs.is_empty(),
+        "the active data segment must survive the pipeline"
+    );
+
+    rshooks_build::verify(&out, &opts()).expect("pipeline output should re-verify cleanly");
 }

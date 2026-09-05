@@ -5,9 +5,9 @@
 //! (after cleaning and the optional guard pass) and as the entirety of
 //! `check`, which runs it against arbitrary wasm (including C-built hooks).
 
+use crate::Options;
 use crate::guard::{find_g_index, guard_hint, scan_function_loops};
 use crate::ir;
-use crate::{ApiVersion, Options};
 
 /// A validation failure, split by whether the native upstream guard checker
 /// (`docs/DESIGN.md` §6.5) also evaluates the same rule.
@@ -56,13 +56,13 @@ pub const MAX_SIZE: usize = 65_535;
 /// warning.
 pub const SIZE_WARNING_THRESHOLD: usize = 56 * 1024;
 
-/// The maximum `block`/`loop`/`if` nesting depth a SetHook-legal
-/// api-version-0 module's function bodies may reach (`Guard.h`
-/// `NESTING_LIMIT` under `GuardRuleDepth32`; see `docs/DESIGN.md` §6.2c).
+/// The maximum `block`/`loop`/`if` nesting depth a SetHook-legal module's
+/// function bodies may reach (`Guard.h` `NESTING_LIMIT` under
+/// `GuardRuleDepth32`; see `docs/DESIGN.md` §6.2c).
 pub const MAX_NESTING_DEPTH: u32 = 32;
 
 /// Nesting depths at or above this level trigger an "approaching the limit"
-/// warning (api-version 0 only).
+/// warning.
 pub const NESTING_DEPTH_WARNING_THRESHOLD: u32 = 28;
 
 /// The result of a successful validation: any non-fatal warnings found.
@@ -75,14 +75,12 @@ pub struct ValidationReport {
     pub oversize_allowed: bool,
     /// The worst-case instruction counts reported by the vendored upstream
     /// guard checker (`docs/DESIGN.md` §6.5), when it ran and accepted the
-    /// module. Only ever set for API version 0, by
-    /// [`crate::verify`]/[`crate::run_pipeline`] — [`validate`] itself never
-    /// populates this field.
+    /// module. Only ever set by [`crate::verify`]/[`crate::run_pipeline`] —
+    /// [`validate`] itself never populates this field.
     pub guard_verdict: Option<crate::GuardVerdict>,
     /// The maximum `block`/`loop`/`if` nesting depth reached by any defined
-    /// function (0 if none). Computed for every api version so
-    /// `build`/`check` can always print it; only api-version 0
-    /// hard-errors/warns on it (`docs/DESIGN.md` §6.2c/§6.4).
+    /// function (0 if none), hard-erroring/warning above
+    /// [`MAX_NESTING_DEPTH`] (`docs/DESIGN.md` §6.2c/§6.4).
     pub max_nesting_depth: u32,
 }
 
@@ -323,35 +321,31 @@ pub fn validate(wasm: &[u8], opts: &Options) -> Result<ValidationReport, Validat
         ));
     }
 
-    // --- Guards, R1, R2 (API version 0 only; `docs/DESIGN.md` §6.2b/§6.4). ---
-    if opts.api_version == ApiVersion::V0 {
-        let g_index = find_g_index(&m);
+    // --- Guards, R1, R2 (`docs/DESIGN.md` §6.2b/§6.4). ---
+    let g_index = find_g_index(&m);
 
-        // R1: every api-version-0 module must import `_g`, even without any
-        // loop — the vendored upstream checker enforces this unconditionally.
-        if g_index.is_none() {
-            guard_errors.push(
-                "module does not import `_g` (env::_g, type (i32,i32)->i32) — required for \
-                 every api-version-0 module, even without loops (R1)"
-                    .to_string(),
-            );
-        }
-
-        // R2: every type-section entry must be the type of an import or the
-        // `(i32) -> i64` entry-point type. A defined helper function with any
-        // other signature (notably compiler_builtins memset/memcpy/bcmp,
-        // `(i32,i32,i32) -> i32`) makes the whole module invalid to the
-        // upstream checker; the flatten pass (§6.2b) enforces this for
-        // api-version-0 modules built through `rshooks-build`.
-        let entry_ty = (
-            [wasmparser::ValType::I32].as_slice(),
-            [wasmparser::ValType::I64].as_slice(),
+    // R1: every module must import `_g`, even without any loop — the
+    // vendored upstream checker enforces this unconditionally.
+    if g_index.is_none() {
+        guard_errors.push(
+            "module does not import `_g` (env::_g, type (i32,i32)->i32) — required for every \
+             module, even without loops (R1)"
+                .to_string(),
         );
-        let import_shapes: std::collections::HashSet<(
-            &[wasmparser::ValType],
-            &[wasmparser::ValType],
-        )> = m
-            .imports
+    }
+
+    // R2: every type-section entry must be the type of an import or the
+    // `(i32) -> i64` entry-point type. A defined helper function with any
+    // other signature (notably compiler_builtins memset/memcpy/bcmp,
+    // `(i32,i32,i32) -> i32`) makes the whole module invalid to the
+    // upstream checker; the flatten pass (§6.2b) enforces this for modules
+    // built through `rshooks-build`.
+    let entry_ty = (
+        [wasmparser::ValType::I32].as_slice(),
+        [wasmparser::ValType::I64].as_slice(),
+    );
+    let import_shapes: std::collections::HashSet<(&[wasmparser::ValType], &[wasmparser::ValType])> =
+        m.imports
             .iter()
             .filter_map(|imp| match imp.ty {
                 wasmparser::TypeRef::Func(idx) => m.types.get(idx as usize),
@@ -359,66 +353,60 @@ pub fn validate(wasm: &[u8], opts: &Options) -> Result<ValidationReport, Validat
             })
             .map(|ty| (ty.params(), ty.results()))
             .collect();
-        for (i, ty) in m.types.iter().enumerate() {
-            let shape = (ty.params(), ty.results());
-            if shape != entry_ty && !import_shapes.contains(&shape) {
-                guard_errors.push(format!(
-                    "type {i} (`({:?}) -> {:?}`) is neither an import's type nor the entry-point \
-                     type `(i32) -> i64` (R2) — this is only reachable if a defined helper \
-                     function was left un-inlined",
-                    ty.params(),
-                    ty.results()
-                ));
-            }
-        }
-
-        for (i, body) in m.code.iter().enumerate() {
-            let func_idx = m.num_imported_funcs() + i as u32;
-            match scan_function_loops(body, g_index) {
-                Ok(sites) => {
-                    for site in sites.iter().filter(|s| !s.guarded) {
-                        let mut msg = format!(
-                            "function {func_idx}, offset {}: `loop` is missing a guard (`i32.const; i32.const; call $_g`)",
-                            site.offset
-                        );
-                        if let Some(hint) = guard_hint(site.guess) {
-                            msg.push_str(" — ");
-                            msg.push_str(hint);
-                        }
-                        guard_errors.push(msg);
-                    }
-                }
-                Err(e) => errors.push(format!(
-                    "function {func_idx}: failed to scan for guards: {e}"
-                )),
-            }
+    for (i, ty) in m.types.iter().enumerate() {
+        let shape = (ty.params(), ty.results());
+        if shape != entry_ty && !import_shapes.contains(&shape) {
+            guard_errors.push(format!(
+                "type {i} (`({:?}) -> {:?}`) is neither an import's type nor the entry-point \
+                 type `(i32) -> i64` (R2) — this is only reachable if a defined helper \
+                 function was left un-inlined",
+                ty.params(),
+                ty.results()
+            ));
         }
     }
 
-    // --- Nesting depth: computed for every defined function, for every api
-    // version (so `build`/`check` can always print the module's overall
-    // max), but only api-version 0 hard-errors/warns on it — `Guard.h`
-    // `NESTING_LIMIT`/`GuardRuleDepth32` is guard-type only; see
-    // `docs/DESIGN.md` §6.2c/§6.4. ---
+    for (i, body) in m.code.iter().enumerate() {
+        let func_idx = m.num_imported_funcs() + i as u32;
+        match scan_function_loops(body, g_index) {
+            Ok(sites) => {
+                for site in sites.iter().filter(|s| !s.guarded) {
+                    let mut msg = format!(
+                        "function {func_idx}, offset {}: `loop` is missing a guard (`i32.const; i32.const; call $_g`)",
+                        site.offset
+                    );
+                    if let Some(hint) = guard_hint(site.guess) {
+                        msg.push_str(" — ");
+                        msg.push_str(hint);
+                    }
+                    guard_errors.push(msg);
+                }
+            }
+            Err(e) => errors.push(format!(
+                "function {func_idx}: failed to scan for guards: {e}"
+            )),
+        }
+    }
+
+    // --- Nesting depth: computed for every defined function; `Guard.h`
+    // `NESTING_LIMIT`/`GuardRuleDepth32`; see `docs/DESIGN.md` §6.2c/§6.4. ---
     let mut max_overall_depth: u32 = 0;
     for (i, body) in m.code.iter().enumerate() {
         let func_idx = m.num_imported_funcs() + i as u32;
         match ir::max_nesting_depth(body) {
             Ok(depth) => {
                 max_overall_depth = max_overall_depth.max(depth);
-                if opts.api_version == ApiVersion::V0 {
-                    if depth > MAX_NESTING_DEPTH {
-                        guard_errors.push(format!(
-                            "function {func_idx}: block/loop/if nesting depth is {depth}, \
-                             exceeding the {MAX_NESTING_DEPTH}-level limit (`Guard.h` \
-                             `NESTING_LIMIT` under `GuardRuleDepth32`)"
-                        ));
-                    } else if depth >= NESTING_DEPTH_WARNING_THRESHOLD {
-                        warnings.push(format!(
-                            "function {func_idx}: block/loop/if nesting depth is {depth}, \
-                             approaching the {MAX_NESTING_DEPTH}-level limit"
-                        ));
-                    }
+                if depth > MAX_NESTING_DEPTH {
+                    guard_errors.push(format!(
+                        "function {func_idx}: block/loop/if nesting depth is {depth}, \
+                         exceeding the {MAX_NESTING_DEPTH}-level limit (`Guard.h` \
+                         `NESTING_LIMIT` under `GuardRuleDepth32`)"
+                    ));
+                } else if depth >= NESTING_DEPTH_WARNING_THRESHOLD {
+                    warnings.push(format!(
+                        "function {func_idx}: block/loop/if nesting depth is {depth}, \
+                         approaching the {MAX_NESTING_DEPTH}-level limit"
+                    ));
                 }
             }
             Err(e) => errors.push(format!(
@@ -456,7 +444,7 @@ pub fn validate(wasm: &[u8], opts: &Options) -> Result<ValidationReport, Validat
 /// mutable globals have been part of the module encoding since the MVP
 /// (only cross-module global mutability was the later "mutable globals"
 /// proposal's concern).
-fn mvp_features() -> wasmparser::WasmFeatures {
+pub(crate) fn mvp_features() -> wasmparser::WasmFeatures {
     wasmparser::WasmFeatures::MUTABLE_GLOBAL
 }
 
@@ -528,14 +516,7 @@ mod tests {
         Options::default()
     }
 
-    fn opts_v1() -> Options {
-        Options {
-            api_version: ApiVersion::V1,
-            ..Options::default()
-        }
-    }
-
-    // R1: `_g` import required for every V0 module.
+    // R1: `_g` import required for every module.
     const NO_G_HOOK: &str = r#"
     (module
       (func $hook (param i32) (result i64) (i64.const 0))
@@ -546,11 +527,6 @@ mod tests {
     fn r1_v0_module_without_g_errors() {
         let err = validate(&wasm(NO_G_HOOK), &opts_v0()).unwrap_err();
         assert!(err.to_string().contains("R1"), "{err}");
-    }
-
-    #[test]
-    fn r1_does_not_apply_under_v1() {
-        validate(&wasm(NO_G_HOOK), &opts_v1()).expect("V1 has no R1 requirement");
     }
 
     // R2: every type must be an import's type or the entry-point type.
@@ -566,11 +542,6 @@ mod tests {
     fn r2_v0_stray_type_errors() {
         let err = validate(&wasm(STRAY_TYPE_HOOK), &opts_v0()).unwrap_err();
         assert!(err.to_string().contains("R2"), "{err}");
-    }
-
-    #[test]
-    fn r2_does_not_apply_under_v1() {
-        validate(&wasm(STRAY_TYPE_HOOK), &opts_v1()).expect("V1 has no R2 requirement");
     }
 
     // -- Nesting depth --------------------------------------------------------
@@ -603,13 +574,6 @@ mod tests {
             "{:?}",
             report.warnings
         );
-    }
-
-    #[test]
-    fn nesting_depth_33_is_fine_under_v1_but_still_reported() {
-        let report =
-            validate(&wasm(&nested_hook_src(33)), &opts_v1()).expect("V1 has no depth limit");
-        assert_eq!(report.max_nesting_depth, 33);
     }
 
     // -- Structural section rules ----------------------------------------------

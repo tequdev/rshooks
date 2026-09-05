@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 
 use crate::carriers::{self, EntryDecl};
 use crate::metadata::{self, hook_hash};
-use crate::{ApiVersion, Options, entry_sidecar, sethook_template};
+use crate::{Options, entry_sidecar, sethook_template};
 
 /// CLI-facing inputs to a `rshooks build` invocation.
 #[derive(Debug, Clone, Default)]
@@ -22,8 +22,6 @@ pub struct ChainBuildArgs {
     pub manifest_path: Option<PathBuf>,
     /// Forwarded as `-p <package>`.
     pub package: Option<String>,
-    /// Only `0` (Guard-type) is currently supported for chain builds.
-    pub api_version: u8,
     /// Deprecated: insert missing loop guards instead of treating them as
     /// an error. Scheduled for removal; remove the compiler-generated loop
     /// at the source level (`rshooks::buf_eq_*`, `HookStatic`) or write the
@@ -57,14 +55,7 @@ pub struct ChainBuildArgs {
 /// publication. Prints progress and a final summary to stdout/stderr.
 #[allow(deprecated)]
 pub fn run(args: &ChainBuildArgs) -> Result<()> {
-    if args.api_version != 0 {
-        bail!(
-            "`rshooks build` only supports `--api-version 0` for #[hooks] chain builds \
-             (gas-type chain builds are not yet supported)"
-        );
-    }
     let opts = Options {
-        api_version: ApiVersion::V0,
         auto_guard: args.auto_guard,
         default_maxiter: args.default_maxiter,
         allow_oversize: args.allow_oversize,

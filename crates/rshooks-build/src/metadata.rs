@@ -40,9 +40,9 @@ pub(crate) fn validate_transaction_types(field: &str, values: Option<&[String]>)
 /// Worst-case instruction counts for the Hook entry points.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct WorstCaseExecution {
-    /// Static WCE for `hook`, or `null` for gas-type Hooks.
+    /// Static WCE for `hook`.
     pub hook: Option<u64>,
-    /// Static WCE for `cbak`, or `null` for gas-type Hooks.
+    /// Static WCE for `cbak`.
     pub cbak: Option<u64>,
 }
 
