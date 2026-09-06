@@ -6,19 +6,34 @@ pub const DROPS_PER_BYTE: u64 = 5000;
 /// Drops per whole XAH (1 XAH = 1,000,000 drops).
 pub const DROPS_PER_XAH: u64 = 1_000_000;
 
-/// Estimates the SetHook fee, in drops, for a binary of the given size.
-#[must_use]
-pub fn estimate_fee(size_bytes: usize) -> u64 {
-    (size_bytes as u64).saturating_mul(DROPS_PER_BYTE)
+/// A fee estimate for a hook binary of a given size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FeeEstimate {
+    /// The size of the binary, in bytes.
+    pub bytes: u64,
+    /// The estimated SetHook fee, in drops.
+    pub drops: u64,
 }
 
-/// Formats a drop amount as whole XAH plus remainder drops, as a decimal
-/// string (e.g. `"1.234500"`).
+impl FeeEstimate {
+    /// The estimated fee, in whole XAH plus remainder drops, as a decimal
+    /// string (e.g. `"1.234500"`).
+    #[must_use]
+    pub fn xah_string(&self) -> String {
+        let whole = self.drops / DROPS_PER_XAH;
+        let frac = self.drops % DROPS_PER_XAH;
+        format!("{whole}.{frac:06}")
+    }
+}
+
+/// Estimates the SetHook fee for a binary of the given size.
 #[must_use]
-pub fn drops_to_xah_string(drops: u64) -> String {
-    let whole = drops / DROPS_PER_XAH;
-    let frac = drops % DROPS_PER_XAH;
-    format!("{whole}.{frac:06}")
+pub fn estimate_fee(size_bytes: usize) -> FeeEstimate {
+    let bytes = size_bytes as u64;
+    FeeEstimate {
+        bytes,
+        drops: bytes.saturating_mul(DROPS_PER_BYTE),
+    }
 }
 
 #[cfg(test)]
@@ -33,21 +48,24 @@ mod tests {
 
     #[test]
     fn estimate_fee_is_bytes_times_5000() {
-        assert_eq!(estimate_fee(1234), 1234 * 5000);
+        let fee = estimate_fee(1234);
+        assert_eq!(fee.bytes, 1234);
+        assert_eq!(fee.drops, 1234 * 5000);
     }
 
     #[test]
     fn xah_string_zero_pads_the_fraction() {
         // 1 byte = 5000 drops = "0.005000".
-        assert_eq!(drops_to_xah_string(estimate_fee(1)), "0.005000");
+        let fee = estimate_fee(1);
+        assert_eq!(fee.xah_string(), "0.005000");
     }
 
     #[test]
     fn xah_string_exact_multiple_of_a_million_drops() {
         // 200 bytes = 1,000,000 drops = exactly 1 XAH, fraction is 0.
-        let drops = estimate_fee(200);
-        assert_eq!(drops % DROPS_PER_XAH, 0);
-        assert_eq!(drops_to_xah_string(drops), "1.000000");
+        let fee = estimate_fee(200);
+        assert_eq!(fee.drops % DROPS_PER_XAH, 0);
+        assert_eq!(fee.xah_string(), "1.000000");
     }
 
     // `usize::MAX * 5000` only overflows `u64` on a 64-bit host; on a
@@ -55,6 +73,7 @@ mod tests {
     #[cfg(target_pointer_width = "64")]
     #[test]
     fn estimate_fee_saturates_on_overflow() {
-        assert_eq!(estimate_fee(usize::MAX), u64::MAX);
+        let fee = estimate_fee(usize::MAX);
+        assert_eq!(fee.drops, u64::MAX);
     }
 }

@@ -12,7 +12,7 @@
     clippy::indexing_slicing
 )]
 
-use rshooks_build::{NativeGuardError, clean, validate_guards_native};
+use rshooks_build::{NativeGuardError, Options, clean, validate_guards_native};
 
 /// Drift tripwire against `vendor/xahaud/SHA256SUMS` (the source of truth for
 /// the vendored hashes, regenerated only by `scripts/sync-vendor.sh`): an
@@ -85,7 +85,7 @@ const VALID_GUARDED_HOOK: &str = r#"
 
 fn cleaned(src: &str) -> Vec<u8> {
     let raw = wat::parse_str(src).expect("fixture is valid wat");
-    clean(&raw).expect("clean succeeds")
+    clean(&raw, &Options::default()).expect("clean succeeds")
 }
 
 #[test]

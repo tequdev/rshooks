@@ -82,6 +82,17 @@ impl_buf_eq!(
     ]
 );
 impl_buf_eq!(
+    buf_eq_40,
+    40,
+    [
+        u64[0, 1, 2, 3, 4, 5, 6, 7],
+        u64[8, 9, 10, 11, 12, 13, 14, 15],
+        u64[16, 17, 18, 19, 20, 21, 22, 23],
+        u64[24, 25, 26, 27, 28, 29, 30, 31],
+        u64[32, 33, 34, 35, 36, 37, 38, 39],
+    ]
+);
+impl_buf_eq!(
     buf_eq_48,
     48,
     [
@@ -91,6 +102,20 @@ impl_buf_eq!(
         u64[24, 25, 26, 27, 28, 29, 30, 31],
         u64[32, 33, 34, 35, 36, 37, 38, 39],
         u64[40, 41, 42, 43, 44, 45, 46, 47],
+    ]
+);
+impl_buf_eq!(
+    buf_eq_64,
+    64,
+    [
+        u64[0, 1, 2, 3, 4, 5, 6, 7],
+        u64[8, 9, 10, 11, 12, 13, 14, 15],
+        u64[16, 17, 18, 19, 20, 21, 22, 23],
+        u64[24, 25, 26, 27, 28, 29, 30, 31],
+        u64[32, 33, 34, 35, 36, 37, 38, 39],
+        u64[40, 41, 42, 43, 44, 45, 46, 47],
+        u64[48, 49, 50, 51, 52, 53, 54, 55],
+        u64[56, 57, 58, 59, 60, 61, 62, 63],
     ]
 );
 /// Loop-free, panic-free 160-bit big-endian ordering of two 20-byte buffers
@@ -186,8 +211,18 @@ mod tests {
     }
 
     #[test]
+    fn buf_eq_40_matches_slice_eq() {
+        check_eq_and_all_single_byte_diffs(buf_eq_40);
+    }
+
+    #[test]
     fn buf_eq_48_matches_slice_eq() {
         check_eq_and_all_single_byte_diffs(buf_eq_48);
+    }
+
+    #[test]
+    fn buf_eq_64_matches_slice_eq() {
+        check_eq_and_all_single_byte_diffs(buf_eq_64);
     }
 
     #[test]

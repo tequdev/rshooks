@@ -27,6 +27,14 @@ pub struct ValidationError {
     pub guard: Vec<String>,
 }
 
+impl ValidationError {
+    /// True if there is at least one finding and every finding is
+    /// guard-class (safe for [`crate::verify`] to downgrade wholesale).
+    pub fn is_guard_only(&self) -> bool {
+        self.hard.is_empty() && !self.guard.is_empty()
+    }
+}
+
 impl std::fmt::Display for ValidationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let joined: Vec<&str> = self

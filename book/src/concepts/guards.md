@@ -128,7 +128,7 @@ Two source-level idioms sidestep the compiler-generated loop entirely, and
 are preferred wherever they apply:
 
 **Fixed-size buffer equality** — `rshooks::buf_eq_8`/`_20`/`_32`/`_33`/
-`_34`/`_48` compare a buffer as a fixed sequence of word-sized
+`_34`/`_40`/`_48`/`_64` compare a buffer as a fixed sequence of word-sized
 (`u64`, with a narrower tail word where the size isn't a multiple of 8)
 chunks, built from source-level literal byte indices. The comparison is
 genuinely straight-line code — there is nothing for LLVM to lower into a

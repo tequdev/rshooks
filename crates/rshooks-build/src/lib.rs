@@ -24,7 +24,7 @@ mod validator;
 pub mod whitelist;
 
 pub use cleaner::clean;
-pub use fee::{drops_to_xah_string, estimate_fee};
+pub use fee::{FeeEstimate, estimate_fee};
 pub use flatten::{FlattenReport, flatten};
 pub use guard_native::{GuardVerdict, NativeGuardError, validate_guards_native};
 #[doc(hidden)]
@@ -63,7 +63,7 @@ pub fn run_pipeline(wasm: &[u8], opts: &Options) -> anyhow::Result<(Vec<u8>, Val
     } else {
         wasm.to_vec()
     };
-    let cleaned = cleaner::clean(&optimized)?;
+    let cleaned = cleaner::clean(&optimized, opts)?;
     let (flattened, flatten_report) = flatten::flatten(&cleaned)?;
     for note in &flatten_report.notes {
         eprintln!("note: {note}");

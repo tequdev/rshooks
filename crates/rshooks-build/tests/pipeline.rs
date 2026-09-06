@@ -128,7 +128,7 @@ fn cleaner_strips_memory_export_and_custom_sections() {
     let input = append_custom_section(&input, "producers", b"whatever");
     assert!(payload_kinds(&input).contains(&"custom"));
 
-    let cleaned = rshooks_build::clean(&input).expect("clean succeeds");
+    let cleaned = rshooks_build::clean(&input, &opts()).expect("clean succeeds");
 
     assert!(
         !payload_kinds(&cleaned).contains(&"custom"),
@@ -154,7 +154,7 @@ fn cleaner_keeps_cbak_when_present() {
       (export "hook" (func $hook))
       (export "cbak" (func $cbak)))
     "#;
-    let cleaned = rshooks_build::clean(&wasm(src)).expect("clean succeeds");
+    let cleaned = rshooks_build::clean(&wasm(src), &opts()).expect("clean succeeds");
     let mut exports = export_names(&cleaned);
     exports.sort();
     assert_eq!(exports, vec!["cbak".to_string(), "hook".to_string()]);
@@ -167,7 +167,7 @@ fn cleaner_errors_without_hook_export() {
       (func $notthehook (param i32) (result i64) (i64.const 0))
       (export "notthehook" (func $notthehook)))
     "#;
-    let err = rshooks_build::clean(&wasm(src)).unwrap_err();
+    let err = rshooks_build::clean(&wasm(src), &opts()).unwrap_err();
     assert!(
         err.to_string().contains("hook"),
         "error should mention the missing `hook` export: {err}"
@@ -186,7 +186,7 @@ fn gc_drops_unreachable_function_and_remaps_calls() {
         (call $accept (i32.const 0) (i32.const 0) (i64.const 0)))
       (export "hook" (func $hook)))
     "#;
-    let cleaned = rshooks_build::clean(&wasm(src)).expect("clean succeeds");
+    let cleaned = rshooks_build::clean(&wasm(src), &opts()).expect("clean succeeds");
 
     // Exactly 2 defined functions should remain (helper, hook) — `dead`
     // dropped — and hook's call to helper remapped from index 2 to 1.
@@ -271,7 +271,7 @@ fn cleaner_trims_trailing_zeros_from_active_data_segment() {
         (call $accept (i32.const 0) (i32.const 0) (i64.const 0)))
       (export "hook" (func $hook)))
     "#;
-    let cleaned = rshooks_build::clean(&wasm(src)).expect("clean succeeds");
+    let cleaned = rshooks_build::clean(&wasm(src), &opts()).expect("clean succeeds");
     let segs = data_segments(&cleaned);
     assert_eq!(
         segs,
@@ -819,10 +819,10 @@ fn end_to_end_clean_and_check_is_idempotent() {
     "#;
     let input = wasm(src);
 
-    let cleaned_once = rshooks_build::clean(&input).expect("clean succeeds");
+    let cleaned_once = rshooks_build::clean(&input, &opts()).expect("clean succeeds");
     rshooks_build::validate(&cleaned_once, &opts()).expect("cleaned output should validate");
 
-    let cleaned_twice = rshooks_build::clean(&cleaned_once).expect("re-clean succeeds");
+    let cleaned_twice = rshooks_build::clean(&cleaned_once, &opts()).expect("re-clean succeeds");
     assert_eq!(
         cleaned_once, cleaned_twice,
         "cleaning an already-clean module must be a no-op"
@@ -845,8 +845,8 @@ fn run_pipeline_reports_fee_relevant_size() {
         report.guard_verdict.is_some(),
         "success should carry the native checker's instruction counts"
     );
-    let drops = rshooks_build::estimate_fee(out.len());
-    assert_eq!(drops, out.len() as u64 * 5000);
+    let fee = rshooks_build::estimate_fee(out.len());
+    assert_eq!(fee.drops, fee.bytes * 5000);
 }
 
 // End-to-end: `run_pipeline` post-processes clang-shaped wasm

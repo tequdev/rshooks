@@ -147,12 +147,12 @@ fn print_report(report: &ValidationReport) {
 }
 
 fn print_size_and_fee(bytes: &[u8]) {
-    let drops = rshooks_build::estimate_fee(bytes.len());
-    println!("size: {} bytes", bytes.len());
+    let fee = rshooks_build::estimate_fee(bytes.len());
+    println!("size: {} bytes", fee.bytes);
     println!(
         "estimated SetHook fee: {} drops ({} XAH)",
-        drops,
-        rshooks_build::drops_to_xah_string(drops)
+        fee.drops,
+        fee.xah_string()
     );
 }
 

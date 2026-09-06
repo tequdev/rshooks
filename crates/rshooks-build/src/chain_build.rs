@@ -195,12 +195,12 @@ fn print_summary(
     staged_sidecars: &[(String, Vec<u8>)],
 ) {
     for (name, bytes) in staged_wasms {
-        let drops = crate::estimate_fee(bytes.len());
+        let fee = crate::estimate_fee(bytes.len());
         println!(
             "wrote {} ({} bytes, estimated SetHook fee {} drops)",
             gen_dir.join(name).display(),
-            bytes.len(),
-            drops
+            fee.bytes,
+            fee.drops
         );
     }
     for (name, _) in staged_sidecars {

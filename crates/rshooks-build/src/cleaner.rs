@@ -11,6 +11,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use anyhow::{Context, Result, bail};
 
+use crate::Options;
 use crate::encode;
 use crate::ir::{self, IndexRemapper};
 
@@ -26,7 +27,7 @@ use crate::ir::{self, IndexRemapper};
 ///
 /// Errors if the `hook` export is missing, or if `hook`/`cbak` do not have
 /// the required `(i32) -> i64` signature.
-pub fn clean(wasm: &[u8]) -> Result<Vec<u8>> {
+pub fn clean(wasm: &[u8], _opts: &Options) -> Result<Vec<u8>> {
     let m = ir::parse(wasm)?;
 
     // --- Locate and validate the retained exports (GC roots). ---
@@ -512,7 +513,7 @@ mod tests {
             (i64.const 0))
           (export "hook" (func $hook)))
         "#;
-        let cleaned = clean(&wasm(src)).expect("clean succeeds");
+        let cleaned = clean(&wasm(src), &Options::default()).expect("clean succeeds");
         assert_eq!(global_count(&cleaned), 2, "both globals must be kept");
     }
 
@@ -524,7 +525,7 @@ mod tests {
           (func $hook (param i32) (result i64) (i64.const 0))
           (export "hook" (func $hook)))
         "#;
-        let cleaned = clean(&wasm(src)).expect("clean succeeds");
+        let cleaned = clean(&wasm(src), &Options::default()).expect("clean succeeds");
         assert_eq!(global_count(&cleaned), 0);
     }
 
@@ -542,7 +543,7 @@ mod tests {
           (func $hook (param i32) (result i64) (i64.const 0))
           (export "hook" (func $hook)))
         "#;
-        let cleaned = clean(&wasm(src)).expect("clean succeeds");
+        let cleaned = clean(&wasm(src), &Options::default()).expect("clean succeeds");
         assert_eq!(
             global_count(&cleaned),
             1,
@@ -558,7 +559,7 @@ mod tests {
           (func $hook (param i32) (result i64) (i64.const 0))
           (export "hook" (func $hook)))
         "#;
-        let cleaned = clean(&wasm(src)).expect("clean succeeds");
+        let cleaned = clean(&wasm(src), &Options::default()).expect("clean succeeds");
         assert!(
             !import_names(&cleaned).contains(&"unused".to_string()),
             "unreachable import should have been GC'd"
@@ -576,7 +577,7 @@ mod tests {
             (i64.const 0))
           (export "hook" (func $hook)))
         "#;
-        let err = clean(&wasm(src)).unwrap_err();
+        let err = clean(&wasm(src), &Options::default()).unwrap_err();
         assert!(err.to_string().contains("call_indirect"), "{err}");
     }
 
@@ -587,7 +588,7 @@ mod tests {
           (func $hook (param i32) (result i32) (i32.const 0))
           (export "hook" (func $hook)))
         "#;
-        let err = clean(&wasm(src)).unwrap_err();
+        let err = clean(&wasm(src), &Options::default()).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("hook"), "{msg}");
         assert!(msg.contains("(i32) -> i64"), "{msg}");
@@ -601,7 +602,7 @@ mod tests {
           (export "hook" (func $hook))
           (data (i32.const 0) "AB"))
         "#;
-        let err = clean(&wasm(src)).unwrap_err();
+        let err = clean(&wasm(src), &Options::default()).unwrap_err();
         assert!(err.to_string().contains("memory"), "{err}");
     }
 }

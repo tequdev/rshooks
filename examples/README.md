@@ -221,7 +221,7 @@ node. Two source-level idioms avoid the compiler-generated loop entirely,
 and are preferred wherever they apply:
 
 - **Fixed-size buffer equality**: use `rshooks::buf_eq_8`/`_20`/`_32`/
-  `_33`/`_34`/`_48` (see `crates/rshooks/src/buf_eq.rs`) instead
+  `_33`/`_34`/`_40`/`_48`/`_64` (see `crates/rshooks/src/buf_eq.rs`) instead
   of `==`. Each function compares its buffer as a fixed sequence of
   word-sized (`u64`, with a narrower tail word where the size isn't a
   multiple of 8) chunks built from source-level literal byte indices, so the
