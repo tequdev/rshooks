@@ -55,8 +55,7 @@
 //! consumer's `Cargo.toml` gives the dependency (`hooks = { package =
 //! "rshooks", .. }`).
 
-use crate::err;
-use crate::shape::{StructShape, parse_struct};
+use crate::shape::{StructShape, max_len_expr, offset_consts, parse_struct, read_body, write_body};
 use proc_macro::TokenStream;
 
 /// Entry point invoked by `#[proc_macro_derive(HookData)]` in `lib.rs`.
@@ -96,44 +95,10 @@ fn layout_table_doc(shape: &StructShape) -> String {
 pub(crate) fn generate(shape: &StructShape) -> TokenStream {
     let name = &shape.name;
 
-    let mut max_len_expr = String::from("0usize");
-    for f in &shape.fields {
-        max_len_expr.push_str(&format!(
-            " + <{ty} as ::rshooks::convert::ToBytes>::MAX_LEN",
-            ty = f.ty
-        ));
-    }
-
-    let mut offset_consts = String::from("const __OFF_0: usize = 0usize;\n");
-    for (i, f) in shape.fields.iter().enumerate() {
-        offset_consts.push_str(&format!(
-            "const __OFF_{next}: usize = __OFF_{i} + <{ty} as ::rshooks::convert::ToBytes>::MAX_LEN;\n",
-            next = i.wrapping_add(1),
-            i = i,
-            ty = f.ty,
-        ));
-    }
-
-    let mut write_body = String::new();
-    for (i, f) in shape.fields.iter().enumerate() {
-        write_body.push_str(&format!(
-            "let _ = ::rshooks::convert::ToBytes::write(&self.{field}, &mut __dst[__OFF_{i}..__OFF_{next}]);\n",
-            field = f.name,
-            i = i,
-            next = i.wrapping_add(1),
-        ));
-    }
-
-    let mut read_body = String::new();
-    for (i, f) in shape.fields.iter().enumerate() {
-        read_body.push_str(&format!(
-            "{field}: <{ty} as ::rshooks::convert::FromBytes>::read(&__src[__OFF_{i}..__OFF_{next}])?,\n",
-            field = f.name,
-            ty = f.ty,
-            i = i,
-            next = i.wrapping_add(1),
-        ));
-    }
+    let max_len_expr = max_len_expr(&shape.fields);
+    let offset_consts = offset_consts(&shape.fields);
+    let write_body = write_body(&shape.fields);
+    let read_body = read_body(&shape.fields);
 
     let layout_doc = layout_table_doc(shape);
 
@@ -214,13 +179,5 @@ impl {name} {{
         read_body = read_body,
         layout_doc = layout_doc,
     );
-    let src = crate::krate::rewrite(src);
-
-    match src.parse::<TokenStream>() {
-        Ok(ts) => ts,
-        Err(_) => err(
-            shape.name_span,
-            "rshooks-macros: internal HookData codegen failed to parse",
-        ),
-    }
+    crate::shape::finish(src, shape.name_span, "HookData")
 }

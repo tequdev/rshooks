@@ -30,8 +30,9 @@
 use proc_macro::{Delimiter, Ident, Span, TokenStream, TokenTree};
 
 use crate::hooks_shared::{
-    AttrEntry, is_punct, parse_attr_entries, parse_balanced_angle, parse_byte_string_value,
-    parse_string_value, split_top_level_commas, step_angle_depth, to_upper_camel,
+    AttrEntry, hex_lower, hex_upper, is_punct, parse_attr_entries, parse_balanced_angle,
+    parse_byte_string_value, parse_string_value, render_carrier_export, split_top_level_commas,
+    step_angle_depth, to_upper_camel,
 };
 #[cfg(feature = "unstable-state-interface")]
 use crate::hooks_shared::{classify_fixed_sti_type_text, is_valid_interface_name};
@@ -194,18 +195,6 @@ impl Namespace {
         }
     }
 
-    /// The field-level attribute name that routes a field into this
-    /// namespace (`#[state]` / `#[hook_param]` / `#[otxn_param]`). Sourced
-    /// separately from [`Namespace::field_name`] so generated doc comments
-    /// name the attribute, not the outer struct's field.
-    fn attr_name(self) -> &'static str {
-        match self {
-            Namespace::State => "state",
-            Namespace::HookParam => "hook_param",
-            Namespace::OtxnParam => "otxn_param",
-        }
-    }
-
     /// All namespaces, in the fixed order they appear on the outer struct.
     const ALL: [Namespace; 3] = [Namespace::State, Namespace::HookParam, Namespace::OtxnParam];
 }
@@ -237,12 +226,6 @@ impl ParamKind {
         match self {
             ParamKind::HookParam => "HookParam",
             ParamKind::OtxnParam => "OtxnParam",
-        }
-    }
-    fn attr_name(self) -> &'static str {
-        match self {
-            ParamKind::HookParam => "hook_param",
-            ParamKind::OtxnParam => "otxn_param",
         }
     }
 }
@@ -539,13 +522,13 @@ fn parse_named_fields(stream: TokenStream) -> Result<Vec<ParsedField>, TokenStre
             ));
         };
 
-        let (wrapper, value_ty) = parse_field_type(&ty_tokens, kind, &field_name)?;
+        let (_wrapper, value_ty) = parse_field_type(&ty_tokens, kind, &field_name)?;
         // `parse_field_decl` first, so its feature-gate rejection (kind ==
         // "state_interface" with `unstable-state-interface` off) wins over
         // this shape check — same gate-ordering rule the sig interface
         // follows for `#[cbak(..)]` extra arguments (its own unconditional
         // rejection is checked first, the feature gate second).
-        let decl = parse_field_decl(kind, &args, &attr_ident, wrapper)?;
+        let decl = parse_field_decl(kind, &args, &attr_ident)?;
         if kind == "state_interface" && !matches!(value_ty.as_slice(), [TokenTree::Ident(_)]) {
             return Err(err(
                 field_name.span(),
@@ -610,15 +593,8 @@ fn parse_field_type<'a>(
         return Err(err(
             wrapper_id.span(),
             &format!(
-                "#[hooks]: `#[{attr}]` requires a `{expected_wrapper}<V>` field type, found \
-                 `{found}`",
-                attr = match kind {
-                    "state" => "state",
-                    "hook_param" => "hook_param",
-                    "state_interface" => "state_interface",
-                    _ => "otxn_param",
-                },
-                found = wrapper_id,
+                "#[hooks]: `#[{kind}]` requires a `{expected_wrapper}<V>` field type, found \
+                 `{wrapper_id}`"
             ),
         ));
     }
@@ -673,7 +649,6 @@ fn parse_field_decl(
     kind: &str,
     args: &[TokenTree],
     attr_ident: &TokenTree,
-    _wrapper: &str,
 ) -> Result<FieldDecl, TokenStream> {
     // `#[state_interface(id = .., key(..), value(..))]`'s `key(..)`/
     // `value(..)` arguments are groups, not `key = value` pairs, so it
@@ -761,7 +736,6 @@ fn parse_field_decl(
     let mut required = false;
     let mut required_span: Option<Span> = None;
     let mut default: Option<Vec<TokenTree>> = None;
-    let mut default_span: Option<Span> = None;
 
     for AttrEntry {
         key,
@@ -774,10 +748,7 @@ fn parse_field_decl(
                 if name.is_some() {
                     return Err(err(
                         key_span,
-                        &format!(
-                            "#[{}]: specify exactly one of `name` or `name_by`",
-                            param_kind.attr_name()
-                        ),
+                        &format!("#[{kind}]: specify exactly one of `name` or `name_by`"),
                     ));
                 }
                 let Some(tokens) = value else {
@@ -786,7 +757,7 @@ fn parse_field_decl(
                         "expected `name = b\"...\"` (a byte-string literal)",
                     ));
                 };
-                let mac = format!("#[{}]", param_kind.attr_name());
+                let mac = format!("#[{kind}]");
                 let (literal, decoded_len) =
                     parse_byte_string_value(Some(&tokens), key_span, &mac, "name")?;
                 if !(1..=32).contains(&decoded_len) {
@@ -804,10 +775,7 @@ fn parse_field_decl(
                 if name.is_some() {
                     return Err(err(
                         key_span,
-                        &format!(
-                            "#[{}]: specify exactly one of `name` or `name_by`",
-                            param_kind.attr_name()
-                        ),
+                        &format!("#[{kind}]: specify exactly one of `name` or `name_by`"),
                     ));
                 }
                 let Some(ty) = value else {
@@ -820,10 +788,7 @@ fn parse_field_decl(
                     return Err(err(key_span, "`required` takes no value"));
                 }
                 if required {
-                    return Err(err(
-                        key_span,
-                        &format!("#[{}]: duplicate `required`", param_kind.attr_name()),
-                    ));
+                    return Err(err(key_span, &format!("#[{kind}]: duplicate `required`")));
                 }
                 required = true;
                 required_span = Some(key_span);
@@ -833,44 +798,35 @@ fn parse_field_decl(
                     return Err(err(key_span, "expected `default = <expr>`"));
                 };
                 if default.is_some() {
-                    return Err(err(
-                        key_span,
-                        &format!("#[{}]: duplicate `default`", param_kind.attr_name()),
-                    ));
+                    return Err(err(key_span, &format!("#[{kind}]: duplicate `default`")));
                 }
                 default = Some(expr);
-                default_span = Some(key_span);
             }
             other => {
                 return Err(err(
                     key_span,
                     &format!(
-                        "#[{}]: unknown argument `{other}` (expected `name`, `name_by`, \
-                         `required` or `default`)",
-                        param_kind.attr_name()
+                        "#[{kind}]: unknown argument `{other}` (expected `name`, `name_by`, \
+                         `required` or `default`)"
                     ),
                 ));
             }
         }
     }
 
-    if let (Some(rs), Some(_)) = (required_span, default_span) {
+    if let Some(rs) = required_span
+        && default.is_some()
+    {
         return Err(err(
             rs,
-            &format!(
-                "#[{}]: `required` and `default` are mutually exclusive",
-                param_kind.attr_name()
-            ),
+            &format!("#[{kind}]: `required` and `default` are mutually exclusive"),
         ));
     }
 
     let Some(name) = name else {
         return Err(err(
             attr_ident.span(),
-            &format!(
-                "#[{}]: missing required `name = b\"...\"` or `name_by = <TypePath>`",
-                param_kind.attr_name()
-            ),
+            &format!("#[{kind}]: missing required `name = b\"...\"` or `name_by = <TypePath>`"),
         ));
     };
 
@@ -1275,7 +1231,7 @@ fn generate(parsed: &ParsedStruct, description: Option<&str>) -> TokenStream {
                 namespace_structs_text.push_str(&format!(
                     "/// The `#[{attr}]` entries declared on [`{struct_name}`].\n\
                      {vis_text} struct {ns_name} {{\n",
-                    attr = ns.attr_name(),
+                    attr = ns.field_name(),
                 ));
                 for (field_index, f) in ns_fields {
                     namespace_structs_text.push_str(&tokens_to_string(&f.other_attrs));
@@ -1300,9 +1256,8 @@ fn generate(parsed: &ParsedStruct, description: Option<&str>) -> TokenStream {
                     continue;
                 }
                 outer_struct_text.push_str(&format!(
-                    "/// The `#[{attr}]` entries declared on this struct.\n\
+                    "/// The `#[{field}]` entries declared on this struct.\n\
                      {vis_text} {field}: {struct_name}{suffix},\n",
-                    attr = ns.attr_name(),
                     field = ns.field_name(),
                     suffix = ns.struct_suffix(),
                 ));
@@ -1392,11 +1347,10 @@ fn generate(parsed: &ParsedStruct, description: Option<&str>) -> TokenStream {
             let payload_hex = hex_upper(&payload);
             let digest = sha256::sha256(&payload);
             let carrier_ident = format!("__rshooks_chain_{}", hex_lower(&digest));
-            out.push_str(&format!(
-                "#[cfg(target_arch = \"wasm32\")]\n\
-                 #[doc(hidden)]\n\
-                 #[unsafe(export_name = \"{CHAIN_EXPORT_PREFIX}{payload_hex}\")]\n\
-                 pub extern \"C\" fn {carrier_ident}(_reserved: u32) -> i64 {{ 0 }}\n"
+            out.push_str(&render_carrier_export(
+                CHAIN_EXPORT_PREFIX,
+                &payload_hex,
+                &carrier_ident,
             ));
         }
         Err(message) => return err(parsed.name.span(), &message),
@@ -2070,14 +2024,6 @@ fn encode_chain_json(
 
     serde_json::to_vec(&serde_json::Value::Object(object))
         .map_err(|e| format!("#[hooks]: failed to serialize chain carrier JSON: {e}"))
-}
-
-fn hex_upper(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02X}")).collect()
-}
-
-fn hex_lower(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 #[cfg(test)]

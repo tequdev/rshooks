@@ -748,7 +748,6 @@ dependencies = [
  "k256",
  "rshooks",
  "rshooks-core",
- "serde_json",
  "sha2",
 ]
 

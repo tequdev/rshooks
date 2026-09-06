@@ -31,8 +31,7 @@
 //! than through `<Self as ToBytes>::MAX_LEN` — since `Self` has no
 //! `ToBytes` impl to reference.
 
-use crate::err;
-use crate::shape::{StructShape, parse_struct};
+use crate::shape::{StructShape, max_len_expr, offset_consts, parse_struct, read_body};
 use proc_macro::TokenStream;
 
 /// Entry point invoked by `#[proc_macro_derive(ParamValue)]` in `lib.rs`.
@@ -52,34 +51,9 @@ pub(crate) fn generate(shape: &StructShape) -> TokenStream {
     // `Self` has no `ToBytes` impl here, so this sum over each field's own
     // `MAX_LEN` is inlined at every use site instead of referenced via
     // `<Self as ToBytes>::MAX_LEN`.
-    let mut total_len_expr = String::from("0usize");
-    for f in &shape.fields {
-        total_len_expr.push_str(&format!(
-            " + <{ty} as ::rshooks::convert::ToBytes>::MAX_LEN",
-            ty = f.ty
-        ));
-    }
-
-    let mut offset_consts = String::from("const __OFF_0: usize = 0usize;\n");
-    for (i, f) in shape.fields.iter().enumerate() {
-        offset_consts.push_str(&format!(
-            "const __OFF_{next}: usize = __OFF_{i} + <{ty} as ::rshooks::convert::ToBytes>::MAX_LEN;\n",
-            next = i.wrapping_add(1),
-            i = i,
-            ty = f.ty,
-        ));
-    }
-
-    let mut read_body = String::new();
-    for (i, f) in shape.fields.iter().enumerate() {
-        read_body.push_str(&format!(
-            "{field}: <{ty} as ::rshooks::convert::FromBytes>::read(&__src[__OFF_{i}..__OFF_{next}])?,\n",
-            field = f.name,
-            ty = f.ty,
-            i = i,
-            next = i.wrapping_add(1),
-        ));
-    }
+    let total_len_expr = max_len_expr(&shape.fields);
+    let offset_consts = offset_consts(&shape.fields);
+    let read_body = read_body(&shape.fields);
 
     let src = format!(
         "
@@ -118,13 +92,5 @@ impl ::rshooks::convert::FixedRead for {name} {{
         offset_consts = offset_consts,
         read_body = read_body,
     );
-    let src = crate::krate::rewrite(src);
-
-    match src.parse::<TokenStream>() {
-        Ok(ts) => ts,
-        Err(_) => err(
-            shape.name_span,
-            "rshooks-macros: internal ParamValue codegen failed to parse",
-        ),
-    }
+    crate::shape::finish(src, shape.name_span, "ParamValue")
 }

@@ -18,6 +18,40 @@ pub(crate) fn is_punct(tt: &TokenTree, ch: char) -> bool {
     matches!(tt, TokenTree::Punct(p) if p.as_char() == ch)
 }
 
+/// Renders `bytes` as uppercase hex — used to fold a JSON carrier payload
+/// into its own export name (`hooks_struct`'s struct carrier,
+/// `hooks_impl`'s entries carrier).
+pub(crate) fn hex_upper(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02X}")).collect()
+}
+
+/// Renders `bytes` as lowercase hex — used to build a carrier function's
+/// digest-derived identifier.
+pub(crate) fn hex_lower(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Renders the wasm-only, zero-argument carrier export function that
+/// ferries a hex-encoded JSON payload through its own export name (contract
+/// §B1 item 6 for the struct carrier; the entries carrier follows the same
+/// shape): `#[cfg(target_arch = "wasm32")] .. #[unsafe(export_name =
+/// "<export_prefix><payload_hex>")] pub extern "C" fn <carrier_ident>(_reserved:
+/// u32) -> i64 { 0 }`. Shared by `hooks_struct`'s struct carrier and
+/// `hooks_impl`'s entries carrier — identical shape, different export
+/// prefix.
+pub(crate) fn render_carrier_export(
+    export_prefix: &str,
+    payload_hex: &str,
+    carrier_ident: &str,
+) -> String {
+    format!(
+        "#[cfg(target_arch = \"wasm32\")]\n\
+         #[doc(hidden)]\n\
+         #[unsafe(export_name = \"{export_prefix}{payload_hex}\")]\n\
+         pub extern \"C\" fn {carrier_ident}(_reserved: u32) -> i64 {{ 0 }}\n"
+    )
+}
+
 /// Whether `tt` is a `Punct` token spelled `ch` with [`Spacing::Joint`] —
 /// i.e. immediately glued to the next token with no space, as in the `-`
 /// of `->` or the first `>` of a `>>` run.
