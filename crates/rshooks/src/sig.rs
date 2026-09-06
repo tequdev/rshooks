@@ -267,27 +267,7 @@ macro_rules! be_int_sig {
     };
 }
 
-impl SigParamType for u8 {
-    /// `STI_UINT8`.
-    const TYPE_BYTE: u8 = 0x10;
-
-    #[inline(always)]
-    fn read_sig(read: impl FnOnce(&mut [u8]) -> Result<usize>) -> Result<Self> {
-        let mut storage = core::mem::MaybeUninit::<[u8; 1]>::uninit();
-        // SAFETY: only read via `assume_init` below, once `written == 1`
-        // proves `read` wrote the byte.
-        let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
-        let written = read(buf)?;
-        if written == 1 {
-            // SAFETY: `written == 1` proves `read` wrote the byte.
-            let byte: [u8; 1] = unsafe { storage.assume_init() };
-            byte.first().copied().ok_or(HookError::TooSmall)
-        } else {
-            Err(HookError::TooSmall)
-        }
-    }
-}
-
+be_int_sig!(u8, 1, 0x10); // STI_UINT8
 be_int_sig!(u16, 2, 0x01); // STI_UINT16
 be_int_sig!(u32, 4, 0x02); // STI_UINT32
 be_int_sig!(u64, 8, 0x03); // STI_UINT64

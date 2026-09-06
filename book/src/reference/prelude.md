@@ -52,7 +52,7 @@ otxn/state accessors take. See [Slots and Ledger Objects](../data/slots.md).
 
 ## `buf_eq` helpers
 
-`crate::buf_eq::*` — `buf_eq_8`/`_20`/`_32`/`_33`/`_34`/`_40`/`_48`/`_64`:
+`crate::buf_eq::*` — `buf_eq_8`/`_20`/`_32`/`_33`/`_34`/`_48`:
 fixed-size buffer equality as straight-line word-compare code, avoiding the
 compiler-generated `bcmp`-style loop a plain `==` on a `[u8; N]` can lower to
 at `opt-level = "z"`. The same module also has `buf_cmp_20`, a loop-free
