@@ -1,5 +1,4 @@
 {
-  "hook_api_version": 0,
   "functions": [
     {
       "name": "_g",
@@ -14,8 +13,7 @@
         }
       ],
       "ret_c_type": "int32_t",
-      "doc": "int32_t _g(uint32_t guard_id, uint32_t maxiter)",
-      "hook_api_version": 0
+      "doc": "int32_t _g(uint32_t guard_id, uint32_t maxiter)"
     },
     {
       "name": "accept",
@@ -34,8 +32,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t accept(uint32_t read_ptr, uint32_t read_len, int64_t error_code)",
-      "hook_api_version": 0
+      "doc": "int64_t accept(uint32_t read_ptr, uint32_t read_len, int64_t error_code)"
     },
     {
       "name": "rollback",
@@ -54,8 +51,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t rollback(uint32_t read_ptr, uint32_t read_len, int64_t error_code)",
-      "hook_api_version": 0
+      "doc": "int64_t rollback(uint32_t read_ptr, uint32_t read_len, int64_t error_code)"
     },
     {
       "name": "util_raddr",
@@ -78,8 +74,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t util_raddr(uint32_t write_ptr, uint32_t write_len, uint32_t read_ptr, uint32_t read_len)",
-      "hook_api_version": 0
+      "doc": "int64_t util_raddr(uint32_t write_ptr, uint32_t write_len, uint32_t read_ptr, uint32_t read_len)"
     },
     {
       "name": "util_accid",
@@ -102,8 +97,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t util_accid(uint32_t write_ptr, uint32_t write_len, uint32_t read_ptr, uint32_t read_len)",
-      "hook_api_version": 0
+      "doc": "int64_t util_accid(uint32_t write_ptr, uint32_t write_len, uint32_t read_ptr, uint32_t read_len)"
     },
     {
       "name": "util_verify",
@@ -134,8 +128,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t util_verify(uint32_t dread_ptr, uint32_t dread_len, uint32_t sread_ptr, uint32_t sread_len, uint32_t kread_ptr, uint32_t kread_len)",
-      "hook_api_version": 0
+      "doc": "int64_t util_verify(uint32_t dread_ptr, uint32_t dread_len, uint32_t sread_ptr, uint32_t sread_len, uint32_t kread_ptr, uint32_t kread_len)"
     },
     {
       "name": "util_sha512h",
@@ -158,8 +151,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t util_sha512h(uint32_t write_ptr, uint32_t write_len, uint32_t read_ptr, uint32_t read_len)",
-      "hook_api_version": 0
+      "doc": "int64_t util_sha512h(uint32_t write_ptr, uint32_t write_len, uint32_t read_ptr, uint32_t read_len)"
     },
     {
       "name": "util_keylet",
@@ -202,8 +194,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t util_keylet(uint32_t write_ptr, uint32_t write_len, uint32_t keylet_type, uint32_t a, uint32_t b, uint32_t c, uint32_t d, uint32_t e, uint32_t f)",
-      "hook_api_version": 0
+      "doc": "int64_t util_keylet(uint32_t write_ptr, uint32_t write_len, uint32_t keylet_type, uint32_t a, uint32_t b, uint32_t c, uint32_t d, uint32_t e, uint32_t f)"
     },
     {
       "name": "sto_validate",
@@ -218,8 +209,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t sto_validate(uint32_t tread_ptr, uint32_t tread_len)",
-      "hook_api_version": 0
+      "doc": "int64_t sto_validate(uint32_t tread_ptr, uint32_t tread_len)"
     },
     {
       "name": "sto_subfield",
@@ -238,8 +228,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t sto_subfield(uint32_t read_ptr, uint32_t read_len, uint32_t field_id)",
-      "hook_api_version": 0
+      "doc": "int64_t sto_subfield(uint32_t read_ptr, uint32_t read_len, uint32_t field_id)"
     },
     {
       "name": "sto_subarray",
@@ -258,8 +247,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t sto_subarray(uint32_t read_ptr, uint32_t read_len, uint32_t array_id)",
-      "hook_api_version": 0
+      "doc": "int64_t sto_subarray(uint32_t read_ptr, uint32_t read_len, uint32_t array_id)"
     },
     {
       "name": "sto_emplace",
@@ -294,8 +282,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t sto_emplace(uint32_t write_ptr, uint32_t write_len, uint32_t sread_ptr, uint32_t sread_len, uint32_t fread_ptr, uint32_t fread_len, uint32_t field_id)",
-      "hook_api_version": 0
+      "doc": "int64_t sto_emplace(uint32_t write_ptr, uint32_t write_len, uint32_t sread_ptr, uint32_t sread_len, uint32_t fread_ptr, uint32_t fread_len, uint32_t field_id)"
     },
     {
       "name": "sto_erase",
@@ -322,15 +309,13 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t sto_erase(uint32_t write_ptr, uint32_t write_len, uint32_t read_ptr, uint32_t read_len, uint32_t field_id)",
-      "hook_api_version": 0
+      "doc": "int64_t sto_erase(uint32_t write_ptr, uint32_t write_len, uint32_t read_ptr, uint32_t read_len, uint32_t field_id)"
     },
     {
       "name": "etxn_burden",
       "params": [],
       "ret_c_type": "int64_t",
-      "doc": "int64_t etxn_burden()",
-      "hook_api_version": 0
+      "doc": "int64_t etxn_burden()"
     },
     {
       "name": "etxn_details",
@@ -345,8 +330,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t etxn_details(uint32_t write_ptr, uint32_t write_len)",
-      "hook_api_version": 0
+      "doc": "int64_t etxn_details(uint32_t write_ptr, uint32_t write_len)"
     },
     {
       "name": "etxn_fee_base",
@@ -361,8 +345,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t etxn_fee_base(uint32_t read_ptr, uint32_t read_len)",
-      "hook_api_version": 0
+      "doc": "int64_t etxn_fee_base(uint32_t read_ptr, uint32_t read_len)"
     },
     {
       "name": "etxn_reserve",
@@ -373,15 +356,13 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t etxn_reserve(uint32_t count)",
-      "hook_api_version": 0
+      "doc": "int64_t etxn_reserve(uint32_t count)"
     },
     {
       "name": "etxn_generation",
       "params": [],
       "ret_c_type": "int64_t",
-      "doc": "int64_t etxn_generation()",
-      "hook_api_version": 0
+      "doc": "int64_t etxn_generation()"
     },
     {
       "name": "etxn_nonce",
@@ -396,8 +377,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t etxn_nonce(uint32_t write_ptr, uint32_t write_len)",
-      "hook_api_version": 0
+      "doc": "int64_t etxn_nonce(uint32_t write_ptr, uint32_t write_len)"
     },
     {
       "name": "emit",
@@ -420,8 +400,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t emit(uint32_t write_ptr, uint32_t write_len, uint32_t read_ptr, uint32_t read_len)",
-      "hook_api_version": 0
+      "doc": "int64_t emit(uint32_t write_ptr, uint32_t write_len, uint32_t read_ptr, uint32_t read_len)"
     },
     {
       "name": "float_set",
@@ -436,8 +415,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t float_set(int32_t exponent, int64_t mantissa)",
-      "hook_api_version": 0
+      "doc": "int64_t float_set(int32_t exponent, int64_t mantissa)"
     },
     {
       "name": "float_multiply",
@@ -452,8 +430,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t float_multiply(int64_t float1, int64_t float2)",
-      "hook_api_version": 0
+      "doc": "int64_t float_multiply(int64_t float1, int64_t float2)"
     },
     {
       "name": "float_mulratio",
@@ -476,8 +453,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t float_mulratio(int64_t float1, uint32_t round_up, uint32_t numerator, uint32_t denominator)",
-      "hook_api_version": 0
+      "doc": "int64_t float_mulratio(int64_t float1, uint32_t round_up, uint32_t numerator, uint32_t denominator)"
     },
     {
       "name": "float_negate",
@@ -488,8 +464,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t float_negate(int64_t float1)",
-      "hook_api_version": 0
+      "doc": "int64_t float_negate(int64_t float1)"
     },
     {
       "name": "float_compare",
@@ -508,8 +483,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t float_compare(int64_t float1, int64_t float2, uint32_t mode)",
-      "hook_api_version": 0
+      "doc": "int64_t float_compare(int64_t float1, int64_t float2, uint32_t mode)"
     },
     {
       "name": "float_sum",
@@ -524,8 +498,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t float_sum(int64_t float1, int64_t float2)",
-      "hook_api_version": 0
+      "doc": "int64_t float_sum(int64_t float1, int64_t float2)"
     },
     {
       "name": "float_sto",
@@ -564,8 +537,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t float_sto(uint32_t write_ptr, uint32_t write_len, uint32_t cread_ptr, uint32_t cread_len, uint32_t iread_ptr, uint32_t iread_len, int64_t float1, uint32_t field_code)",
-      "hook_api_version": 0
+      "doc": "int64_t float_sto(uint32_t write_ptr, uint32_t write_len, uint32_t cread_ptr, uint32_t cread_len, uint32_t iread_ptr, uint32_t iread_len, int64_t float1, uint32_t field_code)"
     },
     {
       "name": "float_sto_set",
@@ -580,8 +552,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t float_sto_set(uint32_t read_ptr, uint32_t read_len)",
-      "hook_api_version": 0
+      "doc": "int64_t float_sto_set(uint32_t read_ptr, uint32_t read_len)"
     },
     {
       "name": "float_invert",
@@ -592,8 +563,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t float_invert(int64_t float1)",
-      "hook_api_version": 0
+      "doc": "int64_t float_invert(int64_t float1)"
     },
     {
       "name": "float_divide",
@@ -608,15 +578,13 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t float_divide(int64_t float1, int64_t float2)",
-      "hook_api_version": 0
+      "doc": "int64_t float_divide(int64_t float1, int64_t float2)"
     },
     {
       "name": "float_one",
       "params": [],
       "ret_c_type": "int64_t",
-      "doc": "int64_t float_one()",
-      "hook_api_version": 0
+      "doc": "int64_t float_one()"
     },
     {
       "name": "float_mantissa",
@@ -627,8 +595,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t float_mantissa(int64_t float1)",
-      "hook_api_version": 0
+      "doc": "int64_t float_mantissa(int64_t float1)"
     },
     {
       "name": "float_sign",
@@ -639,8 +606,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t float_sign(int64_t float1)",
-      "hook_api_version": 0
+      "doc": "int64_t float_sign(int64_t float1)"
     },
     {
       "name": "float_int",
@@ -659,8 +625,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t float_int(int64_t float1, uint32_t decimal_places, uint32_t abs)",
-      "hook_api_version": 0
+      "doc": "int64_t float_int(int64_t float1, uint32_t decimal_places, uint32_t abs)"
     },
     {
       "name": "float_log",
@@ -671,8 +636,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t float_log(int64_t float1)",
-      "hook_api_version": 0
+      "doc": "int64_t float_log(int64_t float1)"
     },
     {
       "name": "float_root",
@@ -687,29 +651,25 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t float_root(int64_t float1, uint32_t n)",
-      "hook_api_version": 0
+      "doc": "int64_t float_root(int64_t float1, uint32_t n)"
     },
     {
       "name": "fee_base",
       "params": [],
       "ret_c_type": "int64_t",
-      "doc": "int64_t fee_base()",
-      "hook_api_version": 0
+      "doc": "int64_t fee_base()"
     },
     {
       "name": "ledger_seq",
       "params": [],
       "ret_c_type": "int64_t",
-      "doc": "int64_t ledger_seq()",
-      "hook_api_version": 0
+      "doc": "int64_t ledger_seq()"
     },
     {
       "name": "ledger_last_time",
       "params": [],
       "ret_c_type": "int64_t",
-      "doc": "int64_t ledger_last_time()",
-      "hook_api_version": 0
+      "doc": "int64_t ledger_last_time()"
     },
     {
       "name": "ledger_last_hash",
@@ -724,8 +684,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t ledger_last_hash(uint32_t write_ptr, uint32_t write_len)",
-      "hook_api_version": 0
+      "doc": "int64_t ledger_last_hash(uint32_t write_ptr, uint32_t write_len)"
     },
     {
       "name": "ledger_nonce",
@@ -740,8 +699,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t ledger_nonce(uint32_t write_ptr, uint32_t write_len)",
-      "hook_api_version": 0
+      "doc": "int64_t ledger_nonce(uint32_t write_ptr, uint32_t write_len)"
     },
     {
       "name": "ledger_keylet",
@@ -772,8 +730,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t ledger_keylet(uint32_t write_ptr, uint32_t write_len, uint32_t lread_ptr, uint32_t lread_len, uint32_t hread_ptr, uint32_t hread_len)",
-      "hook_api_version": 0
+      "doc": "int64_t ledger_keylet(uint32_t write_ptr, uint32_t write_len, uint32_t lread_ptr, uint32_t lread_len, uint32_t hread_ptr, uint32_t hread_len)"
     },
     {
       "name": "hook_account",
@@ -788,8 +745,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t hook_account(uint32_t write_ptr, uint32_t write_len)",
-      "hook_api_version": 0
+      "doc": "int64_t hook_account(uint32_t write_ptr, uint32_t write_len)"
     },
     {
       "name": "hook_hash",
@@ -808,8 +764,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t hook_hash(uint32_t write_ptr, uint32_t write_len, int32_t hook_no)",
-      "hook_api_version": 0
+      "doc": "int64_t hook_hash(uint32_t write_ptr, uint32_t write_len, int32_t hook_no)"
     },
     {
       "name": "hook_param_set",
@@ -840,8 +795,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t hook_param_set(uint32_t read_ptr, uint32_t read_len, uint32_t kread_ptr, uint32_t kread_len, uint32_t hread_ptr, uint32_t hread_len)",
-      "hook_api_version": 0
+      "doc": "int64_t hook_param_set(uint32_t read_ptr, uint32_t read_len, uint32_t kread_ptr, uint32_t kread_len, uint32_t hread_ptr, uint32_t hread_len)"
     },
     {
       "name": "hook_param",
@@ -864,15 +818,13 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t hook_param(uint32_t write_ptr, uint32_t write_len, uint32_t read_ptr, uint32_t read_len)",
-      "hook_api_version": 0
+      "doc": "int64_t hook_param(uint32_t write_ptr, uint32_t write_len, uint32_t read_ptr, uint32_t read_len)"
     },
     {
       "name": "hook_again",
       "params": [],
       "ret_c_type": "int64_t",
-      "doc": "int64_t hook_again()",
-      "hook_api_version": 0
+      "doc": "int64_t hook_again()"
     },
     {
       "name": "hook_skip",
@@ -891,15 +843,13 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t hook_skip(uint32_t read_ptr, uint32_t read_len, uint32_t flags)",
-      "hook_api_version": 0
+      "doc": "int64_t hook_skip(uint32_t read_ptr, uint32_t read_len, uint32_t flags)"
     },
     {
       "name": "hook_pos",
       "params": [],
       "ret_c_type": "int64_t",
-      "doc": "int64_t hook_pos()",
-      "hook_api_version": 0
+      "doc": "int64_t hook_pos()"
     },
     {
       "name": "slot",
@@ -918,8 +868,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t slot(uint32_t write_ptr, uint32_t write_len, uint32_t slot)",
-      "hook_api_version": 0
+      "doc": "int64_t slot(uint32_t write_ptr, uint32_t write_len, uint32_t slot)"
     },
     {
       "name": "slot_clear",
@@ -930,8 +879,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t slot_clear(uint32_t slot)",
-      "hook_api_version": 0
+      "doc": "int64_t slot_clear(uint32_t slot)"
     },
     {
       "name": "slot_count",
@@ -942,8 +890,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t slot_count(uint32_t slot)",
-      "hook_api_version": 0
+      "doc": "int64_t slot_count(uint32_t slot)"
     },
     {
       "name": "slot_set",
@@ -962,8 +909,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t slot_set(uint32_t read_ptr, uint32_t read_len, uint32_t slot)",
-      "hook_api_version": 0
+      "doc": "int64_t slot_set(uint32_t read_ptr, uint32_t read_len, uint32_t slot)"
     },
     {
       "name": "slot_size",
@@ -974,8 +920,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t slot_size(uint32_t slot)",
-      "hook_api_version": 0
+      "doc": "int64_t slot_size(uint32_t slot)"
     },
     {
       "name": "slot_subarray",
@@ -994,8 +939,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t slot_subarray(uint32_t parent_slot, uint32_t array_id, uint32_t new_slot)",
-      "hook_api_version": 0
+      "doc": "int64_t slot_subarray(uint32_t parent_slot, uint32_t array_id, uint32_t new_slot)"
     },
     {
       "name": "slot_subfield",
@@ -1014,8 +958,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t slot_subfield(uint32_t parent_slot, uint32_t field_id, uint32_t new_slot)",
-      "hook_api_version": 0
+      "doc": "int64_t slot_subfield(uint32_t parent_slot, uint32_t field_id, uint32_t new_slot)"
     },
     {
       "name": "slot_type",
@@ -1030,8 +973,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t slot_type(uint32_t slot_no, uint32_t flags)",
-      "hook_api_version": 0
+      "doc": "int64_t slot_type(uint32_t slot_no, uint32_t flags)"
     },
     {
       "name": "slot_float",
@@ -1042,8 +984,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t slot_float(uint32_t slot_no)",
-      "hook_api_version": 0
+      "doc": "int64_t slot_float(uint32_t slot_no)"
     },
     {
       "name": "state_set",
@@ -1066,8 +1007,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t state_set(uint32_t read_ptr, uint32_t read_len, uint32_t kread_ptr, uint32_t kread_len)",
-      "hook_api_version": 0
+      "doc": "int64_t state_set(uint32_t read_ptr, uint32_t read_len, uint32_t kread_ptr, uint32_t kread_len)"
     },
     {
       "name": "state_foreign_set",
@@ -1106,8 +1046,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t state_foreign_set(uint32_t read_ptr, uint32_t read_len, uint32_t kread_ptr, uint32_t kread_len, uint32_t nread_ptr, uint32_t nread_len, uint32_t aread_ptr, uint32_t aread_len)",
-      "hook_api_version": 0
+      "doc": "int64_t state_foreign_set(uint32_t read_ptr, uint32_t read_len, uint32_t kread_ptr, uint32_t kread_len, uint32_t nread_ptr, uint32_t nread_len, uint32_t aread_ptr, uint32_t aread_len)"
     },
     {
       "name": "state",
@@ -1130,8 +1069,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t state(uint32_t write_ptr, uint32_t write_len, uint32_t kread_ptr, uint32_t kread_len)",
-      "hook_api_version": 0
+      "doc": "int64_t state(uint32_t write_ptr, uint32_t write_len, uint32_t kread_ptr, uint32_t kread_len)"
     },
     {
       "name": "state_foreign",
@@ -1170,8 +1108,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t state_foreign(uint32_t write_ptr, uint32_t write_len, uint32_t kread_ptr, uint32_t kread_len, uint32_t nread_ptr, uint32_t nread_len, uint32_t aread_ptr, uint32_t aread_len)",
-      "hook_api_version": 0
+      "doc": "int64_t state_foreign(uint32_t write_ptr, uint32_t write_len, uint32_t kread_ptr, uint32_t kread_len, uint32_t nread_ptr, uint32_t nread_len, uint32_t aread_ptr, uint32_t aread_len)"
     },
     {
       "name": "trace",
@@ -1198,8 +1135,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t trace(uint32_t mread_ptr, uint32_t mread_len, uint32_t dread_ptr, uint32_t dread_len, uint32_t as_hex)",
-      "hook_api_version": 0
+      "doc": "int64_t trace(uint32_t mread_ptr, uint32_t mread_len, uint32_t dread_ptr, uint32_t dread_len, uint32_t as_hex)"
     },
     {
       "name": "trace_num",
@@ -1218,8 +1154,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t trace_num(uint32_t read_ptr, uint32_t read_len, int64_t number)",
-      "hook_api_version": 0
+      "doc": "int64_t trace_num(uint32_t read_ptr, uint32_t read_len, int64_t number)"
     },
     {
       "name": "trace_float",
@@ -1238,15 +1173,13 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t trace_float(uint32_t read_ptr, uint32_t read_len, int64_t float1)",
-      "hook_api_version": 0
+      "doc": "int64_t trace_float(uint32_t read_ptr, uint32_t read_len, int64_t float1)"
     },
     {
       "name": "otxn_burden",
       "params": [],
       "ret_c_type": "int64_t",
-      "doc": "int64_t otxn_burden()",
-      "hook_api_version": 0
+      "doc": "int64_t otxn_burden()"
     },
     {
       "name": "otxn_field",
@@ -1265,15 +1198,13 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t otxn_field(uint32_t write_ptr, uint32_t write_len, uint32_t field_id)",
-      "hook_api_version": 0
+      "doc": "int64_t otxn_field(uint32_t write_ptr, uint32_t write_len, uint32_t field_id)"
     },
     {
       "name": "otxn_generation",
       "params": [],
       "ret_c_type": "int64_t",
-      "doc": "int64_t otxn_generation()",
-      "hook_api_version": 0
+      "doc": "int64_t otxn_generation()"
     },
     {
       "name": "otxn_id",
@@ -1292,15 +1223,13 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t otxn_id(uint32_t write_ptr, uint32_t write_len, uint32_t flags)",
-      "hook_api_version": 0
+      "doc": "int64_t otxn_id(uint32_t write_ptr, uint32_t write_len, uint32_t flags)"
     },
     {
       "name": "otxn_type",
       "params": [],
       "ret_c_type": "int64_t",
-      "doc": "int64_t otxn_type()",
-      "hook_api_version": 0
+      "doc": "int64_t otxn_type()"
     },
     {
       "name": "otxn_slot",
@@ -1311,8 +1240,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t otxn_slot(uint32_t slot_no)",
-      "hook_api_version": 0
+      "doc": "int64_t otxn_slot(uint32_t slot_no)"
     },
     {
       "name": "otxn_param",
@@ -1335,8 +1263,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t otxn_param(uint32_t write_ptr, uint32_t write_len, uint32_t read_ptr, uint32_t read_len)",
-      "hook_api_version": 0
+      "doc": "int64_t otxn_param(uint32_t write_ptr, uint32_t write_len, uint32_t read_ptr, uint32_t read_len)"
     },
     {
       "name": "meta_slot",
@@ -1347,8 +1274,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t meta_slot(uint32_t slot_no)",
-      "hook_api_version": 0
+      "doc": "int64_t meta_slot(uint32_t slot_no)"
     },
     {
       "name": "xpop_slot",
@@ -1363,8 +1289,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t xpop_slot(uint32_t slot_no_tx, uint32_t slot_no_meta)",
-      "hook_api_version": 0
+      "doc": "int64_t xpop_slot(uint32_t slot_no_tx, uint32_t slot_no_meta)"
     },
     {
       "name": "prepare",
@@ -1387,8 +1312,7 @@
         }
       ],
       "ret_c_type": "int64_t",
-      "doc": "int64_t prepare(uint32_t write_ptr, uint32_t write_len, uint32_t read_ptr, uint32_t read_len)",
-      "hook_api_version": 0
+      "doc": "int64_t prepare(uint32_t write_ptr, uint32_t write_len, uint32_t read_ptr, uint32_t read_len)"
     }
   ],
   "error_codes": [

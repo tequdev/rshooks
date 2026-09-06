@@ -7,11 +7,7 @@ publish.workspace = true
 
 [lib]
 crate-type = ["cdylib", "rlib"]
-# `rlib` lets the `tests/` integration tests link this crate as an ordinary
-# dependency. This crate is still no_std with no `test` crate available for
-# wasm32v1-none, so the lib target's own unit-test harness stays disabled
-# (`test = false`) — `tests/` integration tests are a separate target and
-# are unaffected by this setting.
+# rlib lets tests/ link this crate; no_std has no test crate, see examples/README.md.
 test = false
 
 [dependencies]

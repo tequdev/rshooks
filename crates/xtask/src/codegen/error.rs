@@ -3,7 +3,7 @@
 
 use anyhow::Result;
 
-use super::{push_const, with_generated_marker};
+use super::const_table;
 use crate::ir::ConstSpec;
 use crate::render::expect_decimal;
 
@@ -32,10 +32,12 @@ fn doc_lines(name: &str) -> Vec<String> {
 
 /// Renders `error.rs`'s full contents from `error.h`'s parsed [`ConstSpec`]s.
 pub fn generate(error_codes: &[ConstSpec]) -> Result<String> {
-    let mut body = String::from("\n");
-    for d in error_codes {
-        let value = expect_decimal(&d.name, &d.c_expr)?;
-        push_const(&mut body, &doc_lines(&d.name), &d.name, "i64", &value);
-    }
-    Ok(with_generated_marker("error.h", MODULE_DOC) + &body)
+    const_table(
+        "error.h",
+        MODULE_DOC,
+        "i64",
+        error_codes,
+        expect_decimal,
+        doc_lines,
+    )
 }

@@ -7,9 +7,7 @@ publish.workspace = true
 
 [lib]
 crate-type = ["cdylib"]
-# This crate is no_std with no `test` crate available for wasm32v1-none;
-# disable the (impossible) unit-test harness target rather than let
-# `cargo test`/`--all-targets` fail trying to build one.
+# no_std, no test crate for wasm32v1-none; see examples/README.md.
 test = false
 
 [dependencies]

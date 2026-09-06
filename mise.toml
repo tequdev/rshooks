@@ -55,40 +55,17 @@ description = "Build every example through rshooks-build and check the output (e
 run = """
 set -e
 
-# Every single-hook example's `#[hook(0, ..)]` entry fn is named `main`, so
-# each produces `0.main.wasm` under its own generation root.
-for dir in \
-  01_accept-all 02_state-counter 03_hook-params 04_errors 05_firewall \
-  06_guard-patterns 07_xfl-math 08_slot-ledger 09_state-foreign 10_emit-txn \
-  12_typed-data 13_keylets 14_account-id-macro 15_slot-objects 17_sto-writer \
-  18_typed-views 21_txn-template-nested \
-; do
-  cargo run -p rshooks-build -- build --manifest-path "examples/${dir}/Cargo.toml" --out "examples/${dir}/out"
-  cargo run -p rshooks-build -- check "examples/${dir}/out/current/0.main.wasm"
+for manifest in examples/*/Cargo.toml; do
+  dir="$(dirname "$manifest")"
+  cargo run -p rshooks-build -- build --manifest-path "$manifest" --out "$dir/out"
+  for wasm in "$dir"/out/current/*.wasm; do
+    cargo run -p rshooks-build -- check "$wasm"
+  done
 done
-
-# 16_typed-results declares two hooks in one chain: `0.deposit` and
-# `1.reset`.
-cargo run -p rshooks-build -- build --manifest-path examples/16_typed-results/Cargo.toml --out examples/16_typed-results/out
-cargo run -p rshooks-build -- check examples/16_typed-results/out/current/0.deposit.wasm
-cargo run -p rshooks-build -- check examples/16_typed-results/out/current/1.reset.wasm
-
-# 19_param-signature's `#[hook(0, ..)]` entry fn is named `increment`, not
-# `main` (docs/PARAM_SIGNATURE_DESIGN.md's own worked example).
-cargo run -p rshooks-build -- build --manifest-path examples/19_param-signature/Cargo.toml --out examples/19_param-signature/out
-cargo run -p rshooks-build -- check examples/19_param-signature/out/current/0.increment.wasm
-
-cargo run -p rshooks-build -- build --manifest-path examples/20_state-interface/Cargo.toml --out examples/20_state-interface/out
-cargo run -p rshooks-build -- check examples/20_state-interface/out/current/0.main.wasm
-
-# 80_governance declares two hooks in one chain: `0.govern` and `1.reward`.
-cargo run -p rshooks-build -- build --manifest-path examples/80_governance/Cargo.toml --out examples/80_governance/out
-cargo run -p rshooks-build -- check examples/80_governance/out/current/0.govern.wasm
-cargo run -p rshooks-build -- check examples/80_governance/out/current/1.reward.wasm
 """
 
 [tasks."record-example-metrics"]
-description = "Build rshooks-build fresh, rebuild every example, and write examples/*/metrics.json (WCE / size / nesting). Pass --check to fail instead of writing; --skip-build to reuse out/current; --rshooks/RSHOOKS to reuse an existing rshooks binary instead of rebuilding it"
+description = "Build rshooks-build fresh, rebuild every example, and write examples/*/metrics.json (WCE / size / nesting). Pass --check to fail instead of writing; --skip-build to reuse out/current; --rshooks to reuse an existing rshooks binary instead of rebuilding it"
 run = "python3 scripts/record-example-metrics.py"
 
 [tasks."probe:testenv-parity"]

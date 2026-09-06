@@ -5,7 +5,7 @@
 //! `crates/rshooks-core/vendor/xahaud-hook/sfcodes.h`.
 //!
 //! Each code packs a type code and a field index: `(type << 16) + index`,
-//! mirrored verbatim from the header (325 fields).
+//! mirrored verbatim from the header.
 
 /// C: `sfCloseResolution` (sfcodes.h)
 pub const sfCloseResolution: u32 = (16 << 16) + 1;

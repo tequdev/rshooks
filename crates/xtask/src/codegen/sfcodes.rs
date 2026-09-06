@@ -3,7 +3,7 @@
 
 use anyhow::Result;
 
-use super::{push_const, with_generated_marker};
+use super::const_table;
 use crate::ir::ConstSpec;
 use crate::render::render_shift_add;
 
@@ -14,17 +14,18 @@ const MODULE_DOC: &str = "\
 //! `crates/rshooks-core/vendor/xahaud-hook/sfcodes.h`.
 //!
 //! Each code packs a type code and a field index: `(type << 16) + index`,
-//! mirrored verbatim from the header (325 fields).
+//! mirrored verbatim from the header.
 ";
 
 /// Renders `sfcodes.rs`'s full contents from `sfcodes.h`'s parsed
 /// [`ConstSpec`]s.
 pub fn generate(sfcodes: &[ConstSpec]) -> Result<String> {
-    let mut body = String::from("\n");
-    for d in sfcodes {
-        let value = render_shift_add(&d.c_expr)?;
-        let doc = vec![format!("C: `{}` (sfcodes.h)", d.name)];
-        push_const(&mut body, &doc, &d.name, "u32", &value);
-    }
-    Ok(with_generated_marker("sfcodes.h", MODULE_DOC) + &body)
+    const_table(
+        "sfcodes.h",
+        MODULE_DOC,
+        "u32",
+        sfcodes,
+        |_, value| render_shift_add(value),
+        |name| vec![format!("C: `{name}` (sfcodes.h)")],
+    )
 }

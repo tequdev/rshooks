@@ -35,7 +35,7 @@ pub fn generate(tts: &[ConstSpec]) -> Result<String> {
     let mut codes = Vec::with_capacity(tts.len());
 
     for d in tts {
-        let value = expect_decimal(&d.name, &d.c_expr)?;
+        let value = expect_decimal(&d.name, &d.value)?;
         let variant = variant_name(&d.name)?;
         writeln!(names, "    \"{variant}\",").context("writing transaction type name")?;
         codes.push(value);

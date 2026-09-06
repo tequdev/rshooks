@@ -146,7 +146,7 @@ pub fn generate(sfcodes: &[ConstSpec], field_tiers: &BTreeMap<String, Tier>) -> 
         let tier = field_tiers.get(&d.name).copied().unwrap_or(Tier::Active);
         rendered.push(d);
 
-        let value = render_shift_add(&d.c_expr)?;
+        let value = render_shift_add(&d.value)?;
         let type_id = serialized_type_id(&value)
             .with_context(|| format!("deriving the serialized type ID of `{}`", d.name))?;
         let ty = value_type(type_id).unwrap_or("crate::types::Opaque");
