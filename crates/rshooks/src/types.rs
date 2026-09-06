@@ -1,12 +1,17 @@
 //! Fixed-size protocol buffer newtypes.
 //!
 //! Each type below (`AccountId`, `Hash`, `Keylet`, ...) is a
-//! `#[repr(transparent)]` tuple struct wrapping a `[u8; N]`, not a bare type
-//! alias — `#[repr(transparent)]` guarantees the wrapper has exactly the
-//! inner array's layout, size, and alignment (zero-cost, FFI-compatible
-//! with a raw `[u8; N]`), so the newtype only adds type-level distinctness
-//! (an `AccountId` and a `Hash` can no longer be passed to each other's
-//! slots by accident).
+//! `#[repr(C, align(8))]` tuple struct wrapping a `[u8; N]`, not a bare type
+//! alias. `repr(C)` keeps the array at offset 0, so a pointer to the newtype
+//! is a pointer to the raw `[u8; N]` the host writes; the 8-byte alignment
+//! is what lets LLVM copy the value with whole `i64` loads and stores on
+//! `wasm32v1-none` (a bare `[u8; N]` has alignment 1, and every copy out of
+//! it lowers to a fragmented, partly byte-wise chain). The newtype may be
+//! padded past `N` bytes (`size_of::<AccountId>()` is 24, not 20); every
+//! byte-length constant in this module still names the protocol length.
+//! Beyond that the newtype only adds type-level distinctness (an
+//! `AccountId` and a `Hash` can no longer be passed to each other's slots
+//! by accident).
 //!
 //! The inner field is `pub` (`AccountId(pub [u8; 20])`) and every type
 //! implements [`core::ops::Deref`]/[`core::ops::DerefMut`] (target
@@ -96,7 +101,7 @@ pub const IOU_AMOUNT_LEN: usize = 48;
 /// and trust the returned length; do not assume it is always fully written.
 pub const EMIT_DETAILS_MAX_LEN: usize = 138;
 
-/// Defines one `#[repr(transparent)]` fixed-size buffer newtype, plus its
+/// Defines one `#[repr(C, align(8))]` fixed-size buffer newtype, plus its
 /// `Deref`/`DerefMut`/`AsRef`/`AsMut`/`From`/`Default`/`zeroed`/`ToBytes`/
 /// `FromBytes`/`FixedRead`/`PartialEq`/`Eq` impls. See the module doc
 /// comment for the rationale.
@@ -108,7 +113,7 @@ pub const EMIT_DETAILS_MAX_LEN: usize = 138;
 macro_rules! fixed_bytes_type {
     ($(#[$meta:meta])* $name:ident, $len:expr, $eq_fn:path) => {
         $(#[$meta])*
-        #[repr(transparent)]
+        #[repr(C, align(8))]
         #[derive(Clone, Copy, Debug, Eq)]
         pub struct $name(pub [u8; $len]);
 
@@ -204,6 +209,12 @@ macro_rules! fixed_bytes_type {
         }
 
         impl FixedRead for $name {
+            // Zero-initialized on purpose: an uninitialized `Scratch`
+            // viewed through a raw `&mut [u8]` makes LLVM treat the value
+            // as untyped bytes and scalarize it byte-wise on
+            // `wasm32v1-none`, which costs more instructions than the
+            // zeroing stores it would save (measured: +71% WCE on
+            // `05_firewall`'s sender compare).
             #[inline(always)]
             fn read_exact(read: impl FnOnce(&mut [u8]) -> Result<usize>) -> Result<Self> {
                 let mut out = Self::zeroed();
@@ -750,12 +761,12 @@ mod tests {
     }
 
     #[test]
-    fn repr_transparent_matches_inner_array_size() {
-        assert_eq!(core::mem::size_of::<AccountId>(), ACC_ID_LEN);
-        assert_eq!(
-            core::mem::align_of::<AccountId>(),
-            core::mem::align_of::<[u8; ACC_ID_LEN]>()
-        );
+    fn newtypes_are_word_aligned_with_the_array_at_offset_zero() {
+        assert_eq!(core::mem::align_of::<AccountId>(), 8);
+        assert_eq!(core::mem::align_of::<Keylet>(), 8);
+        assert!(core::mem::size_of::<AccountId>() >= ACC_ID_LEN);
+        let id = AccountId([7u8; ACC_ID_LEN]);
+        assert_eq!(core::ptr::from_ref(&id).cast::<u8>(), id.0.as_ptr());
     }
 
     /// Builds a 48-byte `IouAmount` with a distinctive 8-byte value

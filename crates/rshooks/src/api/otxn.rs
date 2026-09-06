@@ -259,7 +259,9 @@ impl OtxnFieldValue for Amount {
 
     #[inline(always)]
     fn read_otxn_field(field: SField<Self>) -> Result<Self::Output> {
-        let mut storage = core::mem::MaybeUninit::<[u8; crate::types::IOU_AMOUNT_LEN]>::uninit();
+        let mut storage = core::mem::MaybeUninit::<
+            crate::convert::Scratch<{ crate::types::IOU_AMOUNT_LEN }>,
+        >::uninit();
         // SAFETY: only the `..written` prefix `otxn_field` reports writing
         // is ever read below.
         let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
@@ -280,7 +282,9 @@ impl OtxnFieldValue for Issue {
     /// `TooSmall`.
     #[inline(always)]
     fn read_otxn_field(field: SField<Self>) -> Result<Self::Output> {
-        let mut storage = core::mem::MaybeUninit::<[u8; slot_obj::ISSUE_MAX_READ_LEN]>::uninit();
+        let mut storage = core::mem::MaybeUninit::<
+            crate::convert::Scratch<{ slot_obj::ISSUE_MAX_READ_LEN }>,
+        >::uninit();
         // SAFETY: only the `..written` prefix `otxn_field` reports writing
         // is ever read below.
         let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };

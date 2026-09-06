@@ -184,14 +184,16 @@ pub fn util_keylet_buf(
     e: u32,
     f: u32,
 ) -> Result<Keylet> {
-    let mut storage = core::mem::MaybeUninit::<[u8; crate::types::KEYLET_LEN]>::uninit();
+    let mut storage = core::mem::MaybeUninit::<Keylet>::uninit();
     // SAFETY: only read via `assume_init` below, once `written == KEYLET_LEN`
     // proves the host wrote every byte.
-    let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
+    let buf = unsafe {
+        core::slice::from_raw_parts_mut(storage.as_mut_ptr().cast::<u8>(), crate::types::KEYLET_LEN)
+    };
     let written = util_keylet(buf, keylet_type, a, b, c, d, e, f)?;
     if written == crate::types::KEYLET_LEN {
         // SAFETY: `written == KEYLET_LEN` proves the host wrote every byte.
-        Ok(Keylet(unsafe { storage.assume_init() }))
+        Ok(unsafe { storage.assume_init() })
     } else {
         Err(HookError::TooSmall)
     }
