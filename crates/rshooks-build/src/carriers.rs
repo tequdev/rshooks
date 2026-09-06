@@ -517,13 +517,15 @@ pub fn resolve_trigger_masks(on: &OnDecl) -> Result<TriggerMasks> {
 mod tests {
     use super::*;
 
-    fn upper_hex(input: &[u8]) -> String {
-        input.iter().map(|byte| format!("{byte:02X}")).collect()
-    }
-
     fn wasm_with_carriers(chain_json: &str, hooks_json: &str) -> Vec<u8> {
-        let chain_marker = format!("{CHAIN_EXPORT_PREFIX}{}", upper_hex(chain_json.as_bytes()));
-        let hooks_marker = format!("{HOOKS_EXPORT_PREFIX}{}", upper_hex(hooks_json.as_bytes()));
+        let chain_marker = format!(
+            "{CHAIN_EXPORT_PREFIX}{}",
+            metadata::encode_upper_hex(chain_json.as_bytes())
+        );
+        let hooks_marker = format!(
+            "{HOOKS_EXPORT_PREFIX}{}",
+            metadata::encode_upper_hex(hooks_json.as_bytes())
+        );
         wat::parse_str(format!(
             r#"
             (module
@@ -613,7 +615,7 @@ mod tests {
         let marker = format!(
             "{}{}",
             metadata::METADATA_EXPORT_PREFIX,
-            upper_hex(br#"{"name":"Probe"}"#)
+            metadata::encode_upper_hex(br#"{"name":"Probe"}"#)
         );
         let wasm = wat::parse_str(format!(
             r#"

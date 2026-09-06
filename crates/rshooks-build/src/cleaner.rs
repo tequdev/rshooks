@@ -11,7 +11,6 @@ use std::collections::{BTreeSet, HashMap};
 
 use anyhow::{Context, Result, bail};
 
-use crate::Options;
 use crate::encode;
 use crate::ir::{self, IndexRemapper};
 
@@ -27,7 +26,7 @@ use crate::ir::{self, IndexRemapper};
 ///
 /// Errors if the `hook` export is missing, or if `hook`/`cbak` do not have
 /// the required `(i32) -> i64` signature.
-pub fn clean(wasm: &[u8], _opts: &Options) -> Result<Vec<u8>> {
+pub fn clean(wasm: &[u8]) -> Result<Vec<u8>> {
     let m = ir::parse(wasm)?;
 
     // --- Locate and validate the retained exports (GC roots). ---
@@ -37,15 +36,19 @@ pub fn clean(wasm: &[u8], _opts: &Options) -> Result<Vec<u8>> {
         .find(|e| e.name == "hook" && matches!(e.kind, wasmparser::ExternalKind::Func))
         .map(|e| e.index)
         .context("module is missing the required `hook` export")?;
-    check_entry_signature(&m, hook_old_idx, "hook")?;
+    if let Some(msg) = ir::check_entry_signature(&m, hook_old_idx, "hook") {
+        bail!(msg);
+    }
 
     let cbak_old_idx = m
         .exports
         .iter()
         .find(|e| e.name == "cbak" && matches!(e.kind, wasmparser::ExternalKind::Func))
         .map(|e| e.index);
-    if let Some(idx) = cbak_old_idx {
-        check_entry_signature(&m, idx, "cbak")?;
+    if let Some(idx) = cbak_old_idx
+        && let Some(msg) = ir::check_entry_signature(&m, idx, "cbak")
+    {
+        bail!(msg);
     }
 
     let mut roots = vec![hook_old_idx];
@@ -335,26 +338,6 @@ fn trim_trailing_zeros(data: &[u8]) -> Option<&[u8]> {
     data.get(..=last_nonzero)
 }
 
-/// Verifies that function `idx` has the required `hook`/`cbak` signature:
-/// exactly `(i32) -> i64`.
-fn check_entry_signature(m: &ir::ParsedModule, idx: u32, export_name: &str) -> Result<()> {
-    let type_idx = m
-        .func_type_index(idx)
-        .with_context(|| format!("`{export_name}` export does not refer to a function"))?;
-    let ty = m
-        .types
-        .get(type_idx as usize)
-        .with_context(|| format!("`{export_name}` export has an invalid type index"))?;
-    if ty.params() != [wasmparser::ValType::I32] || ty.results() != [wasmparser::ValType::I64] {
-        bail!(
-            "`{export_name}` must have signature `(i32) -> i64`, found `({:?}) -> {:?}`",
-            ty.params(),
-            ty.results()
-        );
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 #[allow(
     clippy::expect_used,
@@ -494,10 +477,6 @@ mod tests {
         wat::parse_str(src).expect("fixture is valid wat")
     }
 
-    fn opts() -> Options {
-        Options::default()
-    }
-
     fn global_count(wasm: &[u8]) -> u32 {
         let mut count = 0;
         for payload in wasmparser::Parser::new(0).parse_all(wasm) {
@@ -533,7 +512,7 @@ mod tests {
             (i64.const 0))
           (export "hook" (func $hook)))
         "#;
-        let cleaned = clean(&wasm(src), &opts()).expect("clean succeeds");
+        let cleaned = clean(&wasm(src)).expect("clean succeeds");
         assert_eq!(global_count(&cleaned), 2, "both globals must be kept");
     }
 
@@ -545,7 +524,7 @@ mod tests {
           (func $hook (param i32) (result i64) (i64.const 0))
           (export "hook" (func $hook)))
         "#;
-        let cleaned = clean(&wasm(src), &opts()).expect("clean succeeds");
+        let cleaned = clean(&wasm(src)).expect("clean succeeds");
         assert_eq!(global_count(&cleaned), 0);
     }
 
@@ -563,7 +542,7 @@ mod tests {
           (func $hook (param i32) (result i64) (i64.const 0))
           (export "hook" (func $hook)))
         "#;
-        let cleaned = clean(&wasm(src), &opts()).expect("clean succeeds");
+        let cleaned = clean(&wasm(src)).expect("clean succeeds");
         assert_eq!(
             global_count(&cleaned),
             1,
@@ -579,7 +558,7 @@ mod tests {
           (func $hook (param i32) (result i64) (i64.const 0))
           (export "hook" (func $hook)))
         "#;
-        let cleaned = clean(&wasm(src), &opts()).expect("clean succeeds");
+        let cleaned = clean(&wasm(src)).expect("clean succeeds");
         assert!(
             !import_names(&cleaned).contains(&"unused".to_string()),
             "unreachable import should have been GC'd"
@@ -597,7 +576,7 @@ mod tests {
             (i64.const 0))
           (export "hook" (func $hook)))
         "#;
-        let err = clean(&wasm(src), &opts()).unwrap_err();
+        let err = clean(&wasm(src)).unwrap_err();
         assert!(err.to_string().contains("call_indirect"), "{err}");
     }
 
@@ -608,7 +587,7 @@ mod tests {
           (func $hook (param i32) (result i32) (i32.const 0))
           (export "hook" (func $hook)))
         "#;
-        let err = clean(&wasm(src), &opts()).unwrap_err();
+        let err = clean(&wasm(src)).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("hook"), "{msg}");
         assert!(msg.contains("(i32) -> i64"), "{msg}");
@@ -622,7 +601,7 @@ mod tests {
           (export "hook" (func $hook))
           (data (i32.const 0) "AB"))
         "#;
-        let err = clean(&wasm(src), &opts()).unwrap_err();
+        let err = clean(&wasm(src)).unwrap_err();
         assert!(err.to_string().contains("memory"), "{err}");
     }
 }

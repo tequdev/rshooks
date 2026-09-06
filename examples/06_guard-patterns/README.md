@@ -9,8 +9,7 @@ numbers from this repo's own toolchain, not just prose.
 
 1. How to write a hand-guarded loop with a **provably exact** `maxiter`.
 2. Why comparing fixed-size byte arrays with `==` is a trap on
-   `wasm32v1-none`, and how to avoid it entirely (rather than reach for
-   `--auto-guard` after the fact).
+   `wasm32v1-none`, and how to avoid it entirely.
 3. What `guard_m!`'s `$n` disambiguator is actually protecting against —
    verified by deliberately breaking it and observing what does (and does
    not) catch the mistake.
@@ -51,7 +50,7 @@ instruction count for no benefit. **How to choose `maxiter`, in general:**
 work from a bound you can actually justify from the data's shape (a fixed
 array's length, a documented protocol limit, a value read from
 `hook_param` and validated) — never from "a number that felt safe," which
-is exactly the trap `--auto-guard`'s default of 16 sets (see §2).
+is exactly the trap a guessed bound like 16 sets (see §2).
 
 ## 2. Why not `==`
 
@@ -65,22 +64,12 @@ hand-written loop above compares via `a.get(i)`/`b.get(i)` instead of
 LLVM at `opt-level = "z"` lowers a bare `[u8; 20]` equality check to a call
 into a `compiler_builtins` `bcmp`-style function containing a real,
 unguarded loop — one that never appears as a `loop` keyword anywhere in
-the crate's own source. `firewall` (`examples/05_firewall`) hit exactly
-this in an earlier version that wrote `sender == blocked` directly, and as
-a result needed:
-
-```sh
-cargo run -p rshooks-build -- build --manifest-path examples/05_firewall/Cargo.toml \
-  --auto-guard --default-maxiter 24
-```
-
-`--auto-guard`'s own default (`--default-maxiter 16`) would build
-successfully for that same loop yet risks a real on-ledger
+the crate's own source. A guard bolted onto that loop with a guessed
+bound such as 16 would build successfully yet risk a real on-ledger
 `GUARD_VIOLATION`: the compare can run up to 20 iterations, one more than
-16 covers. `firewall`'s README works through the exact reasoning for `24`
-— though `firewall`'s current source needs none of this, since it compares
-with `buf_eq_20` explicitly (and its `AccountId`s' own `==` would be
-loop-free too, same as here). This example's `accounts_equal` sidesteps
+16 covers. `firewall` (`examples/05_firewall`) compares with `buf_eq_20`
+explicitly for this reason (and its `AccountId`s' own `==` is loop-free
+too, same as here). This example's `accounts_equal` sidesteps
 the whole problem another way: because the loop is hand-written, its
 `guard!` is present in the source and its `maxiter` is exact —
 `rshooks build` needs **no extra flags at all** for this function.
@@ -164,7 +153,7 @@ cargo run -p rshooks-build -- build --manifest-path examples/06_guard-patterns/C
 
 No extra flags needed: both `accounts_equal` and the two `guard_m!` demo
 loops are hand-written and guarded in the source; there is no
-compiler-generated loop anywhere in this crate to auto-guard.
+compiler-generated loop anywhere in this crate.
 
 ## Expected behavior
 

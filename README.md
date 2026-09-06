@@ -114,8 +114,8 @@ only through unreachable raw-wasm exports the cleaner strips, so none of
 it changes the final wasm's bytes, hash, or instruction count.
 
 See [`examples/README.md`](examples/README.md) for details, including the
-compiler-generated-loop pitfall that used to require `--auto-guard` (none
-of these examples need it any more).
+compiler-generated-loop pitfall and the source-level idioms
+(`rshooks::buf_eq_*`, `HookStatic`) that avoid it.
 
 ## E2E tests
 

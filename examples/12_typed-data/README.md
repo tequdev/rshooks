@@ -235,7 +235,7 @@ added, removed, or reordered.
 `docs/DESIGN.md` and this crate's own doc comments repeatedly warn that a
 "clean-looking" abstraction can silently introduce an unguarded loop
 (`memcpy`/`memset`/`bcmp` lowering — see `examples/06_guard-patterns` and
-the root README's "`--auto-guard`" section). `#[derive(HookKey)]`/
+the root README's "On compiler-generated loops" section). `#[derive(HookKey)]`/
 `#[derive(HookData)]`/`#[derive(ParamValue)]` avoid that by construction
 (every offset is a compile-time constant, every per-field copy an inlined
 `ToBytes::write`/`FromBytes::read` call — see `HookData`'s doc comment's
@@ -272,9 +272,9 @@ the derive's number; the point isn't that hand-packing can't be made this
 cheap, it's that the derive *always* generates that shape, by construction,
 without a hook author having to discover and apply the trick themselves.)
 
-No `--auto-guard`/`--default-maxiter` flags are needed for either version —
+No extra flags are needed for either version —
 `rshooks check` reports both as guard-clean at the source level (see
-`examples/README.md`'s "On `--auto-guard`" section for what that means and
+`examples/README.md`'s "On compiler-generated loops" section for what that means and
 why it's the idiom this crate prefers).
 
 ## Hook parameter hex encoding
@@ -465,8 +465,7 @@ gets and an all-zero stored entry does not. (Both earlier rows were
 measured before that change, on otherwise byte-identical sources; they
 remain a valid A/B for the `AdminName` question they were built to answer.)
 
-Still guard-clean at the source level throughout: no `--auto-guard`/
-`--default-maxiter` needed for any of the three.
+Still guard-clean at the source level throughout, for all three.
 
 ## Build
 

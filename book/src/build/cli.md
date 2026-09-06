@@ -26,8 +26,6 @@ rshooks build --manifest-path path/to/Cargo.toml
 |---|---|---|
 | `--manifest-path <PATH>` | cargo's default (current directory) | Path to the crate's `Cargo.toml`, forwarded to every cargo invocation. |
 | `-p, --package <NAME>` | none | Build only the named package, forwarded to cargo's `-p`. Useful when `--manifest-path` points at a workspace. |
-| `--auto-guard` | off | **Deprecated**, scheduled for removal. Insert missing loop guards instead of treating an unguarded loop as a build error. Applies per index. See [Guards and Loops](../concepts/guards.md) for the source-level alternatives. |
-| `--default-maxiter <N>` | `16` | **Deprecated**, scheduled for removal. The `maxiter` value used for auto-inserted guards, when `--auto-guard` is set. See [Guards and Loops](../concepts/guards.md) for the source-level alternatives. |
 | `--out <DIR>` | `target/rshooks/<crate-name>` under the workspace's target directory | Output **root**: generation directories (`gen-<N>/`) are written under it, with `current` symlinked to the latest complete, validated one. |
 | `--allow-oversize` | off | Write each index's output even if it exceeds the 65,535-byte SetHook size limit. The result is still clearly marked invalid in the printed report. |
 | `--no-optimize` | off | Skip the Binaryen `wasm-opt` `-Oz` size-optimization pass that otherwise runs on each entry's raw wasm before cleaning. |
@@ -90,8 +88,6 @@ sites. See [Guards and Loops](../concepts/guards.md).
 |---|---|---|
 | `input` (positional) | — | The input wasm file. Required. |
 | `-o, --out <PATH>` | `<input>.clean.wasm` | Where to write the cleaned binary. |
-| `--auto-guard` | off | **Deprecated**, scheduled for removal. Insert missing loop guards instead of treating them as an error. See [Guards and Loops](../concepts/guards.md) for the source-level alternatives. |
-| `--default-maxiter <N>` | `16` | **Deprecated**, scheduled for removal. `maxiter` used for auto-inserted guards. See [Guards and Loops](../concepts/guards.md) for the source-level alternatives. |
 | `--allow-oversize` | off | Write the output even if it exceeds the 65,535-byte SetHook limit. |
 | `--no-optimize` | off | Skip the Binaryen `wasm-opt` `-Oz` size-optimization pass that otherwise runs on the raw wasm before cleaning. |
 

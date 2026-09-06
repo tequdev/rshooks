@@ -4,7 +4,6 @@
 //! migration hint (see `docs/MULTI_HOOK_STRUCT_DESIGN.md` §7).
 
 use std::collections::BTreeSet;
-use std::fmt::Write as _;
 
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
@@ -104,34 +103,29 @@ pub(crate) fn hook_mask(values: Option<&[String]>) -> Result<Option<String>> {
     if bytes.iter().all(|byte| *byte == 0) {
         return Ok(None);
     }
-    Ok(Some(
-        bytes.iter().map(|byte| format!("{byte:02X}")).collect(),
-    ))
+    Ok(Some(encode_upper_hex(&bytes)))
 }
 
 pub(crate) fn utf8_hex(value: &str) -> String {
-    value
-        .as_bytes()
-        .iter()
-        .map(|byte| format!("{byte:02X}"))
-        .collect()
+    encode_upper_hex(value.as_bytes())
 }
 
 /// Computes Xahau's HookHash: the uppercase first 32 bytes of SHA-512.
 #[must_use]
 pub fn hook_hash(wasm: &[u8]) -> String {
     let digest = Sha512::digest(wasm);
-    let mut out = String::with_capacity(64);
-    for byte in digest.iter().take(32) {
-        // Writing to a String cannot fail.
-        let _ = write!(out, "{byte:02X}");
-    }
-    out
+    let bytes: Vec<u8> = digest.iter().take(32).copied().collect();
+    encode_upper_hex(&bytes)
 }
 
 pub(crate) fn uses_reachable_emit(wasm: &[u8]) -> Result<bool> {
     let module = crate::ir::parse(wasm).context("parsing final wasm for `emit` usage")?;
     Ok(module.find_func_import("env", "emit").is_some())
+}
+
+/// Encodes `bytes` as an uppercase hex string, two digits per byte.
+pub(crate) fn encode_upper_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02X}")).collect()
 }
 
 pub(crate) fn decode_upper_hex(encoded: &str) -> Result<Vec<u8>> {

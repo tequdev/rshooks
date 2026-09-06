@@ -77,8 +77,8 @@ These come from xahaud's SetHook validation (`SetHook.cpp`,
     pinned toolchain by bisecting the exact byte boundary in both
     directions). Any local zero-init scratch buffer in the 33..=64 byte
     range — e.g. a 34-byte `Keylet` — becomes safe by construction at
-    `opt-level = 3` with no `--auto-guard`, no hand-sized `maxiter`, and
-    no `static`-buffer workaround needed. This — not raw execution speed,
+    `opt-level = 3` with no hand-sized `maxiter` and no `static`-buffer
+    workaround needed. This — not raw execution speed,
     which the Hook API's static WCE metering does not reward — is why
     `opt-level = 3` is the workspace default: it removes an entire class
     of "clean Rust source, unguarded-loop build failure" surprises for
@@ -109,10 +109,7 @@ These come from xahaud's SetHook validation (`SetHook.cpp`,
     unguarded-loop `memset` call regardless of this setting, and still
     needs the `static`/`HookStatic` idiom (§6.3's "static-buffer idiom",
     `examples/README.md`'s "Statics for templates and large buffers")
-    rather than relying on `opt-level` alone. `rshooks-build`'s
-    `--auto-guard` escape hatch (§6.3) is deprecated, and remains the
-    wrong default for the reasons given there, independent of this
-    setting.
+    rather than relying on `opt-level` alone.
   - Raising `-C llvm-args`-level memset/memcpy/memmove store thresholds
     directly (rather than the whole crate's `opt-level`) was investigated
     and found to have **no effect at all** on `wasm32v1-none`:
@@ -691,9 +688,8 @@ N=1/4/8 breakdown behind these marginal-cost figures).
   `guard_m!(m, n)` → `_g((1u32 << 31) + (line!() << 16) + (n), (m) + 1)`
   (same id formula as C `GUARDM`) for multiple loops on one line. All
   arithmetic explicit `u32` with `wrapping_add`-free constants.
-  Guards are the developer's responsibility by default (see 6.3); the
-  deprecated opt-in auto-guard pass exists mainly for compiler-generated
-  loops.
+  Guards are the developer's responsibility (see 6.3): a compiler-generated
+  loop needs a source-level fix, not a build-time insertion pass.
 - `trace!("msg")`, `trace!("msg", data)`, `trace_num!`, `trace_float!` —
   compiled to nothing unless **rshooks's** `trace` feature is enabled
   (traces cost bytes and execution; examples enable it in dev). The feature
@@ -802,7 +798,7 @@ pub extern "C" fn hook(_reserved: u32) -> i64 {
   transcribers can't express directly, and reuses the same struct-shape
   parsing/codegen `#[derive(HookKey)]`/`#[derive(HookData)]`/
   `#[derive(ParamName)]`/`#[derive(ParamValue)]` already provide (see
-  `rshooks-macros`'s `decl_pair` module) rather than duplicating it in a
+  `rshooks-macros`'s `shape` module) rather than duplicating it in a
   macro-by-example. Still hand-rolled `proc_macro::TokenStream` parsing, no
   `syn`/`quote` (same reasoning as `#[hook]`/`#[cbak]` above): a flat,
   randomly-indexable token buffer with 2–3-token bounded lookahead is
@@ -1436,7 +1432,6 @@ No walrus (C8).
 rshooks build [--manifest-path <dir/Cargo.toml>] [-p <crate>]
                   [--out <dir>] [--allow-oversize]
                   [--no-optimize]
-                  [--auto-guard] [--default-maxiter N]   # deprecated
 rshooks clean <in.wasm> [-o out.wasm] [--no-optimize]
                   # post-process only (any toolchain's wasm, incl. C)
 rshooks check <file.wasm>               # validate only, no output
@@ -1454,8 +1449,8 @@ rshooks check <file.wasm>               # validate only, no output
    size and estimated SetHook fee (`bytes × 5000` drops). When metadata was
    declared, also write `<out>/<crate>.json` with the final HookHash and WCE.
 
-`check` runs only 6.4 (+ guard verification instead of insertion) — usable
-against any wasm, including C-built hooks.
+`check` runs only 6.4 (+ guard verification, same as `build`'s 6.3) —
+usable against any wasm, including C-built hooks.
 
 ### 6.2 Cleaner (hook-cleaner equivalent)
 
@@ -1588,38 +1583,33 @@ executed pre- and post-flatten in a wasm interpreter (dev-dependency) with
 recorded host stubs, asserting identical results and host-call sequences —
 an inlining bug must fail tests, not silently change hook semantics.
 
-### 6.3 Guard pass (guard-checker equivalent + auto-insert)
+### 6.3 Guard pass (guard-checker equivalent)
 
 For every function body, scan instructions; at each `loop` opcode:
 
 - If the body already starts with `i32.const a; i32.const b; call $_g`
   (optionally followed by `drop`) — accept it, record `(a, b)`.
-- Otherwise it is a **hard error by default**, reported with function index
+- Otherwise it is a **hard error**, reported with function index
   and instruction offset (pure guard-checker behavior, same as `check`).
-  Developers fix it with `guard!` at the top of the loop body.
-- With the deprecated opt-in `--auto-guard` (accepted with a warning,
-  scheduled for removal), the missing guard is instead inserted:
-  `i32.const <id>; i32.const <maxiter>; call $_g; drop` immediately after
-  the `loop` blocktype, id = `(1 << 30) + n` (sequential — disjoint from
-  the `(1 << 31) + …` space used by `guard!`/`guard_m!`), maxiter =
-  `--default-maxiter` (default 16, deliberately small). Auto-guard exists
-  primarily for **compiler-generated loops** the developer never wrote —
+  Developers fix it with `guard!` at the top of the loop body — including
+  for **compiler-generated loops** the developer never wrote:
   `compiler_builtins` `memcpy`/`memset` loops are the known offenders on
-  `wasm32v1-none` (no bulk-memory ⇒ byte loops). Whether examples can stay
-  guard-clean without it is validated empirically in phase 4; if they
-  cannot, revisit the default with that evidence.
+  `wasm32v1-none` (no bulk-memory ⇒ byte loops), fixed at the source level
+  (`rshooks::buf_eq_*`, `HookStatic`) rather than by inserting a guard
+  after the fact.
 
-Rationale for default-off (review finding): silent insertion with a small
-maxiter can turn into runtime `GUARD_VIOLATION`s, and it hides the real
-worst-case instruction budget that SetHook fee estimation is based on.
+Rationale (review finding): silent insertion with a small maxiter can turn
+into runtime `GUARD_VIOLATION`s, and it hides the real worst-case
+instruction budget that SetHook fee estimation is based on — an earlier
+opt-in auto-insertion pass was removed for exactly this reason.
 
 **Phase-4 empirical results** (2026-07-23, confirming both sides of this
 trade-off):
 - Compiler-generated loops are real. `firewall`'s `[u8; 20]` equality
   lowers to a bcmp-style byte-compare loop; `emit-txn`'s 320-byte buffer
   zero-init lowers to a `compiler_builtins`-style memset function with 5
-  loop constructs. Neither has any loop in Rust source; both need
-  `--auto-guard`.
+  loop constructs. Neither has any loop in Rust source; both need a
+  source-level fix.
 - Straight-line hooks (`accept-all`) and hooks whose only loops are
   source-level with `guard!` (`state-counter`) build clean with no flags —
   the strict default is workable.
@@ -1645,7 +1635,7 @@ trade-off):
   `rshooks::static_cell::HookStatic<T>` (take-once cell: `take()` yields
   the one `&'static mut`, second call returns `None`; the only `unsafe`
   lives inside rshooks, and hook code needs no `unsafe` and no clippy
-  allows). This removed emit-txn's memset entirely: no `--auto-guard`,
+  allows). This removed emit-txn's memset entirely:
   WCE 6798 → 331 and 1272 bytes total (current-toolchain measurement, at
   this workspace's `opt-level = 3` default — see C6 above; exact figures
   drift with compiler versions and profile settings, `rshooks build`
@@ -1655,12 +1645,8 @@ trade-off):
   `unsafe { &mut *&raw mut }` plus a `clippy::deref_addrof` allow at
   every site). Source-level avoidance of
   *initialization* libcalls is thus reliable via statics; comparison
-  libcalls (bcmp from `[u8; N]` `==`) still need `--auto-guard` (see
-  firewall).
-
-If a guard was inserted and `_g` is not imported, the import is added
-(import section rewrite ⇒ function index shift ⇒ handled by the same
-renumbering machinery as GC).
+  libcalls (bcmp from `[u8; N]` `==`) need the same treatment at the
+  source level — `rshooks::buf_eq_*` (see firewall).
 
 **After any mutation, the full guard verifier and validator (6.4) run again
 on the final bytes** — `build` never emits an artifact that `check` would
@@ -1762,7 +1748,7 @@ legality), so the division of labor is:
   10 vs static 7 (see docs/E2E-TESTING.md). They are a fee-estimation
   input, not a runtime ceiling.
 - **Rust pipeline (6.2–6.4)** — everything the checker does not do
-  (cleaning, auto-guard insertion, the 65,535-byte size gate, fee
+  (cleaning, the 65,535-byte size gate, fee
   estimate) plus pre-transform diagnostics with precise function/offset
   locations, which upstream's log lacks. If the Rust validator and the C++
   checker disagree on a guard/WCE finding, the C++ verdict wins and the

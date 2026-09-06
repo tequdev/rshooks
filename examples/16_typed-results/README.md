@@ -71,7 +71,7 @@ Two rules this example follows deliberately, both measured in
 cargo run -p rshooks-build -- build --manifest-path examples/16_typed-results/Cargo.toml
 ```
 
-No extra flags needed — both entries are guard-clean without `--auto-guard`.
+No extra flags needed — both entries are guard-clean at the source level.
 
 ## Unit tests
 

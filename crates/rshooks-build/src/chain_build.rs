@@ -2,14 +2,13 @@
 //! + per-index `--cfg` reselected builds).
 
 use std::collections::BTreeMap;
-use std::io::{BufRead, Read as _, Write as _};
+use std::io::{BufRead, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 
 use crate::carriers::{self, EntryDecl};
 use crate::metadata::{self, hook_hash};
@@ -22,20 +21,6 @@ pub struct ChainBuildArgs {
     pub manifest_path: Option<PathBuf>,
     /// Forwarded as `-p <package>`.
     pub package: Option<String>,
-    /// Deprecated: insert missing loop guards instead of treating them as
-    /// an error. Scheduled for removal; remove the compiler-generated loop
-    /// at the source level (`rshooks::buf_eq_*`, `HookStatic`) or write the
-    /// loop by hand with `guard!` instead.
-    #[deprecated(
-        note = "the auto-guard transform is scheduled for removal; remove the \
-                compiler-generated loop at the source level (`rshooks::buf_eq_*`, `HookStatic`) \
-                or write the loop by hand with `guard!`"
-    )]
-    pub auto_guard: bool,
-    /// Deprecated: `maxiter` used for auto-inserted guards. Only meaningful
-    /// with the deprecated [`ChainBuildArgs::auto_guard`].
-    #[deprecated(note = "only meaningful with the deprecated `auto_guard`")]
-    pub default_maxiter: u32,
     /// Output ROOT directory (default: `<target>/rshooks/<crate-name>`).
     pub out: Option<PathBuf>,
     /// Permit oversized per-entry output.
@@ -53,11 +38,8 @@ pub struct ChainBuildArgs {
 /// Runs the full v2 chain build: discovery, per-index selected builds,
 /// pipeline, sidecar/template generation, and generation-directory
 /// publication. Prints progress and a final summary to stdout/stderr.
-#[allow(deprecated)]
 pub fn run(args: &ChainBuildArgs) -> Result<()> {
     let opts = Options {
-        auto_guard: args.auto_guard,
-        default_maxiter: args.default_maxiter,
         allow_oversize: args.allow_oversize,
         optimize: !args.no_optimize,
     };
@@ -213,12 +195,12 @@ fn print_summary(
     staged_sidecars: &[(String, Vec<u8>)],
 ) {
     for (name, bytes) in staged_wasms {
-        let fee = crate::estimate_fee(bytes.len());
+        let drops = crate::estimate_fee(bytes.len());
         println!(
             "wrote {} ({} bytes, estimated SetHook fee {} drops)",
             gen_dir.join(name).display(),
-            fee.bytes,
-            fee.drops
+            bytes.len(),
+            drops
         );
     }
     for (name, _) in staged_sidecars {
@@ -335,7 +317,7 @@ fn emit_truth_table_warnings(
 
 /// The invariant inputs to every `cargo`/`rustc` invocation in one build
 /// (discovery and all per-index selected builds): resolved package
-/// identity, workspace paths, and the authoritative lockfile digest.
+/// identity and workspace paths.
 struct BuildPlan {
     cargo: PathBuf,
     manifest_path: Option<PathBuf>,
@@ -345,8 +327,6 @@ struct BuildPlan {
     cdylib_target_name: String,
     target_directory: PathBuf,
     private_target_dir: PathBuf,
-    lockfile_path: PathBuf,
-    lockfile_digest: [u8; 32],
 }
 
 impl BuildPlan {
@@ -428,7 +408,6 @@ impl BuildPlan {
         if !lockfile_path.exists() {
             run_generate_lockfile(cargo, manifest_path)?;
         }
-        let lockfile_digest = digest_file(&lockfile_path)?;
 
         Ok(Self {
             cargo: cargo.to_path_buf(),
@@ -439,22 +418,7 @@ impl BuildPlan {
             cdylib_target_name,
             target_directory,
             private_target_dir,
-            lockfile_path,
-            lockfile_digest,
         })
-    }
-
-    fn verify_lockfile_unchanged(&self) -> Result<()> {
-        let digest = digest_file(&self.lockfile_path)?;
-        if digest != self.lockfile_digest {
-            bail!(
-                "the workspace lockfile at {} changed during the build; this must not happen \
-                 under `--locked` and indicates a concurrent `cargo` invocation or a build \
-                 script that rewrites the lockfile",
-                self.lockfile_path.display()
-            );
-        }
-        Ok(())
     }
 
     fn base_cargo_args(&self, subcommand: &str) -> Vec<String> {
@@ -530,7 +494,6 @@ impl BuildPlan {
         }
 
         let status = child.wait().context("waiting for cargo")?;
-        self.verify_lockfile_unchanged()?;
         if !status.success() {
             bail!("cargo invocation failed ({status})");
         }
@@ -645,14 +608,6 @@ fn run_generate_lockfile(cargo: &Path, manifest_path: Option<&Path>) -> Result<(
     Ok(())
 }
 
-fn digest_file(path: &Path) -> Result<[u8; 32]> {
-    let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
-    let digest = Sha256::digest(&bytes);
-    let mut out = [0u8; 32];
-    out.copy_from_slice(&digest);
-    Ok(out)
-}
-
 /// Locates the `cargo` executable to invoke. The user's shell PATH is
 /// inherited verbatim, so this just needs to find *a* `cargo` on it — the
 /// same one the user's shell would run.
@@ -674,12 +629,6 @@ fn find_cargo() -> Result<PathBuf> {
     )
 }
 
-/// Maximum time to wait for a `rustc -V` probe before giving up. Guards
-/// against a broken/blocking shim (e.g. a rustup proxy that hangs or tries
-/// to download a toolchain) hanging the whole build.
-const RUSTC_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
-const RUSTC_PROBE_POLL_INTERVAL: Duration = Duration::from_millis(50);
-
 /// Detects the `rustc` toolchain that performed this build, for the
 /// sidecar's `builder` provenance record. Prefers the `rustc` that sits
 /// next to the resolved `cargo`, then falls back to whatever `rustc` is on
@@ -694,117 +643,36 @@ fn detect_rustc_version(cargo: &Path) -> Option<String> {
 }
 
 fn run_rustc_version(rustc: &Path) -> Option<String> {
-    let mut child = Command::new(rustc)
+    let output = Command::new(rustc)
         .arg("-V")
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+        .output()
         .ok()?;
-
-    let deadline = Instant::now()
-        .checked_add(RUSTC_PROBE_TIMEOUT)
-        .unwrap_or_else(Instant::now);
-    let status = loop {
-        match child.try_wait().ok()? {
-            Some(status) => break status,
-            None if Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-            None => std::thread::sleep(RUSTC_PROBE_POLL_INTERVAL),
-        }
-    };
-
-    if !status.success() {
+    if !output.status.success() {
         return None;
     }
-
-    let mut stdout = String::new();
-    child.stdout.take()?.read_to_string(&mut stdout).ok()?;
+    let stdout = String::from_utf8(output.stdout).ok()?;
     let first_line = stdout.lines().next()?.trim();
     (!first_line.is_empty()).then(|| first_line.to_string())
 }
 
-/// Guards a staging directory: removes it on `Drop` unless [`commit`] was
-/// called. [`commit`]: StagingGuard::commit
-struct StagingGuard {
-    path: PathBuf,
-    committed: bool,
-}
-
-impl StagingGuard {
-    /// Creates a brand-new, empty staging directory: fails with
-    /// `io::ErrorKind::AlreadyExists` if `path` already exists rather than
-    /// adopting its contents, so a leftover from a crashed run (or a reused
-    /// PID) is never silently reused as this build's staging area.
-    fn new(path: PathBuf) -> std::io::Result<Self> {
-        std::fs::create_dir(&path)?;
-        Ok(Self {
-            path,
-            committed: false,
-        })
-    }
-
-    fn commit(mut self) {
-        self.committed = true;
-    }
-}
-
-impl Drop for StagingGuard {
-    fn drop(&mut self) {
-        if !self.committed {
-            let _ = std::fs::remove_dir_all(&self.path);
-        }
-    }
-}
-
-/// Bound on how many candidate names [`create_staging_dir`] tries before
-/// giving up.
-const MAX_STAGING_DIR_ATTEMPTS: u32 = 64;
-
-/// Creates a fresh staging directory under `root` with a name unique to this
-/// attempt, retrying with a new candidate name if one is already occupied
-/// (e.g. a `.staging-<pid>` leftover from a crashed build sharing a reused
-/// PID). `root` must already exist.
-fn create_staging_dir(root: &Path) -> Result<StagingGuard> {
-    let pid = std::process::id();
-    let mut last_error = None;
-    for attempt in 0..MAX_STAGING_DIR_ATTEMPTS {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|duration| duration.as_nanos())
-            .unwrap_or(0);
-        let path = root.join(format!(".staging-{pid}-{nanos}-{attempt}"));
-        match StagingGuard::new(path.clone()) {
-            Ok(guard) => return Ok(guard),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                last_error = Some(error);
-            }
-            Err(error) => {
-                return Err(error)
-                    .with_context(|| format!("creating staging directory {}", path.display()));
-            }
-        }
-    }
-    Err(match last_error {
-        Some(error) => anyhow::Error::new(error).context(format!(
-            "could not create a unique staging directory under {} after {MAX_STAGING_DIR_ATTEMPTS} attempts",
-            root.display()
-        )),
-        None => anyhow::anyhow!(
-            "could not create a unique staging directory under {}",
-            root.display()
-        ),
-    })
+/// Creates a fresh staging directory under `root`, named uniquely by
+/// `tempfile` so a `.staging-*` leftover from a crashed build (e.g. a reused
+/// PID) is never adopted. Removed on `Drop` unless [`tempfile::TempDir::keep`]
+/// is called once the caller has published it (renamed it into place).
+/// `root` must already exist.
+fn create_staging_dir(root: &Path) -> Result<tempfile::TempDir> {
+    tempfile::Builder::new()
+        .prefix(".staging-")
+        .tempdir_in(root)
+        .with_context(|| format!("creating staging directory under {}", root.display()))
 }
 
 /// Best-effort cleanup of `.staging-*` directories left behind by a crashed
-/// build. Each is named uniquely per attempt (see [`create_staging_dir`]) so
-/// none is ever reused, but they should not accumulate forever; only entries
-/// older than [`PRUNE_GRACE_PERIOD`] are removed, so an in-flight sibling
-/// build's staging directory is never touched.
+/// build. Each is named uniquely by `tempfile` (see [`create_staging_dir`])
+/// so none is ever reused, but they should not accumulate forever; only
+/// entries older than [`PRUNE_GRACE_PERIOD`] are removed, so an in-flight
+/// sibling build's staging directory is never touched.
 fn prune_stale_staging_dirs(root: &Path) {
     let Ok(entries) = std::fs::read_dir(root) else {
         return;
@@ -940,7 +808,7 @@ fn publish(
     prune_stale_staging_dirs(root);
 
     let staging = create_staging_dir(root)?;
-    let staging_path = staging.path.clone();
+    let staging_path = staging.path().to_path_buf();
 
     for (name, bytes) in staged_wasms {
         write_staged_file(&staging_path.join(name), bytes)?;
@@ -956,7 +824,7 @@ fn publish(
     let gen_dir = root.join(&gen_name);
     std::fs::rename(&staging_path, &gen_dir)
         .with_context(|| format!("publishing staged artifacts to {}", gen_dir.display()))?;
-    staging.commit();
+    let _ = staging.keep();
 
     update_current(root, &gen_name)?;
     retain_latest_generations(root, 2);
@@ -1582,24 +1450,5 @@ mod tests {
 
         drop(guard);
         std::fs::remove_dir_all(&dir).expect("cleanup");
-    }
-
-    #[test]
-    fn staging_guard_removes_directory_unless_committed() {
-        let root = temp_dir("staging");
-        let staging_path = root.join(".staging-test");
-        {
-            let _guard = StagingGuard::new(staging_path.clone()).expect("create staging");
-            assert!(staging_path.exists());
-        }
-        assert!(
-            !staging_path.exists(),
-            "uncommitted staging is removed on drop"
-        );
-
-        let guard = StagingGuard::new(staging_path.clone()).expect("create staging");
-        guard.commit();
-        assert!(staging_path.exists(), "committed staging survives drop");
-        std::fs::remove_dir_all(&root).expect("cleanup");
     }
 }

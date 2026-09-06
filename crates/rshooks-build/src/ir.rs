@@ -459,6 +459,32 @@ pub(crate) fn body_needs_remap(
     Ok(false)
 }
 
+/// Checks that export `idx` (named `export_name`, e.g. `"hook"`/`"cbak"`)
+/// refers to a function with the required `(i32) -> i64` signature, and
+/// returns an error message describing the mismatch if it does not.
+pub(crate) fn check_entry_signature(
+    m: &ParsedModule,
+    idx: u32,
+    export_name: &str,
+) -> Option<String> {
+    let Some(type_idx) = m.func_type_index(idx) else {
+        return Some(format!(
+            "`{export_name}` export does not refer to a function"
+        ));
+    };
+    let Some(ty) = m.types.get(type_idx as usize) else {
+        return Some(format!("`{export_name}` export has an invalid type index"));
+    };
+    if ty.params() != [wasmparser::ValType::I32] || ty.results() != [wasmparser::ValType::I64] {
+        return Some(format!(
+            "`{export_name}` must have signature `(i32) -> i64`, found `({:?}) -> {:?}`",
+            ty.params(),
+            ty.results()
+        ));
+    }
+    None
+}
+
 /// Remaps a const expression (global initializer / data-segment offset)
 /// through the given remapper.
 pub(crate) fn remap_const_expr(
