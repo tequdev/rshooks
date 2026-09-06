@@ -37,9 +37,12 @@ fn rshooks_crate_dir() -> std::path::PathBuf {
 }
 
 /// Finds the identifier right after a `fn ` keyword occurrence starting at
-/// byte offset `idx` in `line` (`idx` already known to point at `"fn "`).
+/// byte offset `idx` in `line` (`idx` already known to point at `"fn "`),
+/// skipping one leading `$` so a `macro_rules!` body's `fn $name(` still
+/// counts as a fn declaration.
 fn identifier_after(line: &str, idx: usize) -> Option<String> {
     let rest = line.get(idx + 3..)?;
+    let rest = rest.strip_prefix('$').unwrap_or(rest);
     let name: String = rest
         .chars()
         .take_while(|c| c.is_alphanumeric() || *c == '_')
