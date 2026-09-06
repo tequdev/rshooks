@@ -66,7 +66,7 @@
 //!
 //! # P2-D extension: field/array navigation primitives
 //!
-//! [`FieldSpan`], [`walk_top_level_fields`]/[`walk_object_fields`],
+//! [`FieldSpan`], [`walk_top_level_fields`]/[`walk_top_level_fields_or_object`],
 //! [`walk_array_elements`] (per-element spans), and [`field_value_payload`]
 //! (the **value-only** payload range a stored slot or `sto_subfield`
 //! reports, VL length-prefix stripped for VL/AccountID fields) are
@@ -234,7 +234,7 @@ fn dispatch_value(data: &[u8], pos: &mut usize, ty: u32, depth: u32) -> Result<(
             if depth.checked_add(1).ok_or(())? > STO_MAX_RECURSION_DEPTH {
                 return Err(());
             }
-            walk_object_body(data, pos, depth.wrapping_add(1)).map(|_| ())
+            walk_fields(data, pos, depth.wrapping_add(1), true).map(|_| ())
         }
         15 => {
             if depth.checked_add(1).ok_or(())? > STO_MAX_RECURSION_DEPTH {
@@ -289,14 +289,6 @@ fn walk_fields(
         });
     }
     Ok(fields)
-}
-
-pub(crate) fn walk_object_body(
-    data: &[u8],
-    pos: &mut usize,
-    depth: u32,
-) -> Result<Vec<FieldSpan>, ()> {
-    walk_fields(data, pos, depth, true)
 }
 
 /// The STI_OBJECT type code — every STArray element's field header must
@@ -376,14 +368,16 @@ pub(crate) fn walk_array_elements(data: &[u8]) -> Result<Vec<(usize, usize)>, ()
 /// `crate::host::sto`'s navigation (P2-D) in addition to this module's own
 /// [`validate_emit_blob`].
 pub(crate) fn walk_top_level_fields(data: &[u8]) -> Result<Vec<FieldSpan>, ()> {
-    walk_top_level(data)
+    let mut pos = 0usize;
+    walk_fields(data, &mut pos, 0, false)
 }
 
-/// [`walk_top_level_fields`] when `in_object` is `false`, or
-/// [`walk_object_body`] (depth `0`, a fresh budget — see `crate::host::slots`'
-/// module doc for why each slot's content is parsed with its own fresh
-/// depth budget rather than one shared across slot hops) when `true`.
-/// `crate::host::slots::slot_subfield`'s one call site: a
+/// [`walk_top_level_fields`]'s parse (a fresh depth-`0` budget, `in_object`
+/// selecting whether `data` carries a wrapping terminator) with the
+/// no-terminator/has-terminator choice left to the caller — see
+/// `crate::host::slots`' module doc for why each slot's content is parsed
+/// with its own fresh depth budget rather than one shared across slot hops.
+/// `crate::host::slots::slot_subfield`'s and `crate::otxn`'s call sites: a
 /// [`crate::invocation::SlotKind::Root`] parent has no wrapping terminator
 /// (`in_object = false`); a [`crate::invocation::SlotKind::Object`] parent's
 /// stored bytes already end in `0xE1` (`in_object = true`).
@@ -391,17 +385,8 @@ pub(crate) fn walk_top_level_fields_or_object(
     data: &[u8],
     in_object: bool,
 ) -> Result<Vec<FieldSpan>, ()> {
-    if in_object {
-        let mut pos = 0usize;
-        walk_object_body(data, &mut pos, 0)
-    } else {
-        walk_top_level_fields(data)
-    }
-}
-
-fn walk_top_level(data: &[u8]) -> Result<Vec<FieldSpan>, ()> {
     let mut pos = 0usize;
-    walk_fields(data, &mut pos, 0, false)
+    walk_fields(data, &mut pos, 0, in_object)
 }
 
 fn field_bytes(data: &[u8], range: (usize, usize)) -> Option<&[u8]> {
@@ -468,7 +453,7 @@ fn reject_duplicate_fields(fields: &[FieldSpan], data: &[u8]) -> Result<(), ()> 
         if ty == STI_OBJECT {
             let body = data.get(f.value_range.0..f.value_range.1).ok_or(())?;
             let mut pos = 0usize;
-            let nested = walk_object_body(body, &mut pos, 0)?;
+            let nested = walk_fields(body, &mut pos, 0, true)?;
             reject_duplicate_fields(&nested, body)?;
         } else if ty == STI_ARRAY {
             let body = data.get(f.value_range.0..f.value_range.1).ok_or(())?;
@@ -476,7 +461,7 @@ fn reject_duplicate_fields(fields: &[FieldSpan], data: &[u8]) -> Result<(), ()> 
                 let element = body.get(start..end).ok_or(())?;
                 let mut pos = 0usize;
                 decode_header(element, &mut pos)?;
-                let nested = walk_object_body(element, &mut pos, 0)?;
+                let nested = walk_fields(element, &mut pos, 0, true)?;
                 reject_duplicate_fields(&nested, element)?;
             }
         }
@@ -519,7 +504,7 @@ pub(crate) fn validate_emit_blob(
     ledger_seq: u32,
     min_fee: u64,
 ) -> Result<(), ()> {
-    let fields = walk_top_level(blob)?;
+    let fields = walk_top_level_fields(blob)?;
 
     reject_duplicate_fields(&fields, blob)?;
 
@@ -663,7 +648,7 @@ fn is_pseudo_tx_type(tx_type: TxType) -> bool {
 /// `None` only if the blob is malformed in a way the walker should already
 /// have rejected (defensive).
 pub(crate) fn top_level_transaction_type(blob: &[u8]) -> Option<TxType> {
-    let fields = walk_top_level(blob).ok()?;
+    let fields = walk_top_level_fields(blob).ok()?;
     let field = fields.iter().find(|f| f.code == SF_TRANSACTION_TYPE)?;
     let bytes = field_bytes(blob, field.value_range)?;
     let arr: [u8; 2] = bytes.try_into().ok()?;
@@ -1185,9 +1170,8 @@ mod tests {
     #[test]
     fn accepts_nesting_up_to_the_real_hosts_limit() {
         // Real xahaud's `get_stobject_length` accepts recursion depths
-        // 0..=10 (`HookAPI.cpp:2901`); depth 3 (previously rejected by this
-        // walker's stricter, now-removed depth-2 limit) and depth 10 (the
-        // boundary) must both parse.
+        // 0..=10 (`HookAPI.cpp:2901`); depth 3 and depth 10 (the boundary)
+        // must both parse.
         for depth in [2u32, 3, 10] {
             let d = details();
             let mut blob = minimal_payment(&d);

@@ -121,15 +121,13 @@ didn't build — see [The `rshooks` CLI](../build/cli.md) for its full
 flag reference, and [`build`](../build/cli.md)'s and [`clean`](../build/cli.md)'s
 as well.
 
-## A note on `--auto-guard`
+## A note on compiler-generated loops
 
-Guards are your responsibility by default: an unguarded loop is treated as
-a hard build error, on the principle that a missing `guard!` in your own
-source is a bug, not something the toolchain should paper over. The
-`--auto-guard` flag exists mainly for loops the *compiler* generates that
-never appear in your Rust source at all (certain array-equality and
-buffer-zeroing patterns can lower to an unguarded loop at the WASM level).
-It is deprecated and scheduled for removal. It's covered in full,
-including why it's a footgun if used carelessly and the source-level
-idioms that avoid needing it in the first place, in the
+Guards are your responsibility: an unguarded loop is treated as a hard
+build error, on the principle that a missing `guard!` in your own source
+is a bug, not something the toolchain should paper over. This includes
+loops the *compiler* generates that never appear in your Rust source at
+all (certain array-equality and buffer-zeroing patterns can lower to an
+unguarded loop at the WASM level). The source-level idioms that avoid
+those loops entirely are covered in the
 [Guards and Loops](../concepts/guards.md) chapter.

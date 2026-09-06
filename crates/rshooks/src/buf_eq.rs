@@ -118,7 +118,6 @@ impl_buf_eq!(
         u64[56, 57, 58, 59, 60, 61, 62, 63],
     ]
 );
-
 /// Loop-free, panic-free 160-bit big-endian ordering of two 20-byte buffers
 /// (e.g. two [`crate::types::AccountId`]s).
 ///
@@ -224,87 +223,6 @@ mod tests {
     #[test]
     fn buf_eq_64_matches_slice_eq() {
         check_eq_and_all_single_byte_diffs(buf_eq_64);
-    }
-
-    #[test]
-    fn buf_eq_20_detects_difference_at_every_position() {
-        let a = [0u8; 20];
-        for i in 0..20 {
-            let mut b = a;
-            if let Some(byte) = b.get_mut(i) {
-                *byte = 1;
-            }
-            assert!(
-                !buf_eq_20(&a, &b),
-                "difference at index {i} should be detected"
-            );
-        }
-    }
-
-    #[test]
-    fn buf_eq_8_basic() {
-        assert!(buf_eq_8(
-            &[1, 2, 3, 4, 5, 6, 7, 8],
-            &[1, 2, 3, 4, 5, 6, 7, 8]
-        ));
-        assert!(!buf_eq_8(
-            &[1, 2, 3, 4, 5, 6, 7, 8],
-            &[1, 2, 3, 4, 5, 6, 7, 9]
-        ));
-    }
-
-    #[test]
-    fn buf_eq_32_basic() {
-        let a = [0xABu8; 32];
-        let mut b = a;
-        assert!(buf_eq_32(&a, &b));
-        b[31] = 0xAC;
-        assert!(!buf_eq_32(&a, &b));
-    }
-
-    #[test]
-    fn buf_eq_33_basic() {
-        let a = [0x11u8; 33];
-        let mut b = a;
-        assert!(buf_eq_33(&a, &b));
-        b[0] = 0x12;
-        assert!(!buf_eq_33(&a, &b));
-    }
-
-    #[test]
-    fn buf_eq_34_basic() {
-        let a = [0x22u8; 34];
-        let mut b = a;
-        assert!(buf_eq_34(&a, &b));
-        b[17] = 0x23;
-        assert!(!buf_eq_34(&a, &b));
-    }
-
-    #[test]
-    fn buf_eq_40_basic() {
-        let a = [0x44u8; 40];
-        let mut b = a;
-        assert!(buf_eq_40(&a, &b));
-        b[39] = 0x45;
-        assert!(!buf_eq_40(&a, &b));
-    }
-
-    #[test]
-    fn buf_eq_48_basic() {
-        let a = [0x33u8; 48];
-        let mut b = a;
-        assert!(buf_eq_48(&a, &b));
-        b[47] = 0x34;
-        assert!(!buf_eq_48(&a, &b));
-    }
-
-    #[test]
-    fn buf_eq_64_basic() {
-        let a = [0x55u8; 64];
-        let mut b = a;
-        assert!(buf_eq_64(&a, &b));
-        b[63] = 0x56;
-        assert!(!buf_eq_64(&a, &b));
     }
 
     #[test]

@@ -119,7 +119,7 @@ cargo run -p rshooks-build -- build --manifest-path examples/19_param-signature/
 ```
 
 No extra flags — this hook has no compiler-generated loop at this
-optimization level (see `examples/README.md`'s "On `--auto-guard`"
+optimization level (see `examples/README.md`'s "On compiler-generated loops"
 section). The built `0.increment.wasm`'s current worst-case instruction
 count, size, and max nesting depth live in
 [`metrics.json`](./metrics.json), refreshed by `mise run

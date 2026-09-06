@@ -47,10 +47,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::ir::ConstSpec;
 use crate::protocol_parse::{
-    self, FieldEntry, InnerObjectDecl, LedgerEntryDecl, PSEUDO_STI_MIN, Presence as ParsedPresence,
-    SFieldDecl, TxDecl,
+    self, FieldEntry, InnerObjectDecl, LedgerEntryDecl, PSEUDO_STI_MIN, SFieldDecl, TxDecl,
 };
 use crate::render::render_shift_add;
+
+/// How a format declares a field may appear, and one entry of a format's
+/// field list — both identical, field-for-field, to their
+/// [`crate::protocol_parse`] counterparts, so the artifact reuses the parsed
+/// shapes directly instead of duplicating them.
+pub use crate::protocol_parse::{FieldEntry as FieldSpec, Presence};
 
 /// The schema version written to [`ProtocolFormats::version`]; see this
 /// module's "Versioning and the extension contract".
@@ -76,54 +81,6 @@ pub struct SFieldDef {
     /// Further macro arguments (`SField::sMD_Never`, …), verbatim and
     /// uninterpreted.
     pub extras: Vec<String>,
-}
-
-/// How a format declares a field may appear.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Presence {
-    /// `soeREQUIRED`.
-    Required,
-    /// `soeOPTIONAL`.
-    Optional,
-    /// `soeDEFAULT`: may be omitted from the wire form. This is *not* a
-    /// default value — upstream encodes no such value, and neither does this
-    /// artifact.
-    Default,
-}
-
-impl From<ParsedPresence> for Presence {
-    fn from(p: ParsedPresence) -> Self {
-        match p {
-            ParsedPresence::Required => Self::Required,
-            ParsedPresence::Optional => Self::Optional,
-            ParsedPresence::Default => Self::Default,
-        }
-    }
-}
-
-/// One entry of a format's field list.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FieldSpec {
-    /// The referenced field's name (`sfAmount`). Always resolvable in
-    /// [`ProtocolFormats::sfields`] — [`build`] fails otherwise.
-    pub sfield: String,
-    /// Its declared presence.
-    pub presence: Presence,
-    /// Further tokens in the entry (`soeMPTSupported`), verbatim and
-    /// uninterpreted: a renderer that does not model them ignores them, and
-    /// one that does gets them unmangled.
-    pub extras: Vec<String>,
-}
-
-impl From<&FieldEntry> for FieldSpec {
-    fn from(e: &FieldEntry) -> Self {
-        Self {
-            sfield: e.sfield.clone(),
-            presence: e.presence.into(),
-            extras: e.extras.clone(),
-        }
-    }
 }
 
 /// One transaction format, from `transactions.macro`.
@@ -199,7 +156,7 @@ pub struct ProtocolFormats {
 /// cross-validation below genuinely compares against the constant `rshooks`
 /// ships, not against a second interpretation of the header.
 fn sfcode_value(spec: &ConstSpec) -> Result<u32> {
-    let rendered = render_shift_add(&spec.c_expr)
+    let rendered = render_shift_add(&spec.value)
         .with_context(|| format!("rendering the sfcodes.h value of `{}`", spec.name))?;
     let inner = rendered
         .strip_prefix('(')
@@ -300,7 +257,7 @@ fn field_specs(
             );
         }
     }
-    Ok(entries.iter().map(FieldSpec::from).collect())
+    Ok(entries.to_vec())
 }
 
 /// Builds the complete [`ProtocolFormats`] from the six vendored protocol
@@ -432,12 +389,6 @@ mod tests {
 
     fn sfcodes() -> Vec<ConstSpec> {
         crate::parse::scan_defines(SFCODES_H)
-            .iter()
-            .map(|d| ConstSpec {
-                name: d.name.clone(),
-                c_expr: d.value.clone(),
-            })
-            .collect()
     }
 
     fn corpus() -> ProtocolFormats {
@@ -823,7 +774,7 @@ mod tests {
     fn spec(name: &str, expr: &str) -> ConstSpec {
         ConstSpec {
             name: name.into(),
-            c_expr: expr.into(),
+            value: expr.into(),
         }
     }
 

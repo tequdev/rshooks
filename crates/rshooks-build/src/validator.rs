@@ -153,10 +153,10 @@ pub fn validate(wasm: &[u8], opts: &Options) -> Result<ValidationReport, Validat
     }
     match hook_idx {
         None => errors.push("missing required `hook` export".to_string()),
-        Some(idx) => check_entry_signature(&m, idx, "hook", &mut errors),
+        Some(idx) => errors.extend(ir::check_entry_signature(&m, idx, "hook")),
     }
     if let Some(idx) = cbak_idx {
-        check_entry_signature(&m, idx, "cbak", &mut errors);
+        errors.extend(ir::check_entry_signature(&m, idx, "cbak"));
     }
 
     // --- Imports: module must be `env`, name must be whitelisted, and the
@@ -446,31 +446,6 @@ pub fn validate(wasm: &[u8], opts: &Options) -> Result<ValidationReport, Validat
 /// proposal's concern).
 pub(crate) fn mvp_features() -> wasmparser::WasmFeatures {
     wasmparser::WasmFeatures::MUTABLE_GLOBAL
-}
-
-fn check_entry_signature(
-    m: &ir::ParsedModule,
-    idx: u32,
-    export_name: &str,
-    errors: &mut Vec<String>,
-) {
-    let Some(type_idx) = m.func_type_index(idx) else {
-        errors.push(format!(
-            "`{export_name}` export does not refer to a function"
-        ));
-        return;
-    };
-    let Some(ty) = m.types.get(type_idx as usize) else {
-        errors.push(format!("`{export_name}` export has an invalid type index"));
-        return;
-    };
-    if ty.params() != [wasmparser::ValType::I32] || ty.results() != [wasmparser::ValType::I64] {
-        errors.push(format!(
-            "`{export_name}` must have signature `(i32) -> i64`, found `({:?}) -> {:?}`",
-            ty.params(),
-            ty.results()
-        ));
-    }
 }
 
 fn signature_matches(ty: &wasmparser::FuncType, entry: &crate::whitelist::ApiFn) -> bool {

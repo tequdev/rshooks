@@ -2,8 +2,8 @@
 //!
 //! Every derive/attribute/macro in this crate is re-exported as
 //! `rshooks::...`, and every generator here builds its output as source
-//! text (see [`crate::hook_data`]'s module doc comment for why), so they
-//! have historically hardcoded `::rshooks::` on the assumption that every
+//! text (see [`crate::hook_data`]'s module doc comment for why), each with
+//! `::rshooks::` written as a placeholder on the assumption that every
 //! invoking crate depends on `rshooks` under that exact name. Two cases
 //! break that assumption: a consumer that renames the dependency (`hooks =
 //! { package = "rshooks", .. }`), and `rshooks`'s own crate-internal use of
@@ -28,8 +28,8 @@ pub(crate) enum KratePath {
 }
 
 /// Resolves [`KratePath`] for the crate currently being compiled, via
-/// `CARGO_MANIFEST_DIR`. Falls back to `::rshooks` (the previous hardcoded
-/// behavior) when resolution fails, e.g. outside a normal Cargo build.
+/// `CARGO_MANIFEST_DIR`. Falls back to `::rshooks` when resolution fails,
+/// e.g. outside a normal Cargo build.
 pub(crate) fn resolve() -> KratePath {
     match crate_name("rshooks") {
         Ok(FoundCrate::Itself) if is_rustdoc_test() => {

@@ -14,8 +14,8 @@ refresh.
 
 By default the script always runs `cargo build --release -p rshooks-build`
 first and uses the resulting `target/release/rshooks`, so Cargo's own
-freshness check governs whether anything recompiles. Pass `--rshooks` (or
-set `RSHOOKS`) to use an existing binary as-is and skip that build.
+freshness check governs whether anything recompiles. Pass `--rshooks` to
+use an existing binary as-is and skip that build.
 
 Usage:
   scripts/record-example-metrics.py
@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import subprocess
 import sys
@@ -71,42 +70,11 @@ def dump_metrics(document: dict[str, Any]) -> str:
     return json.dumps(document, indent=2) + "\n"
 
 
-def canonical_entry(
-    *,
-    artifact: str,
-    index: int,
-    hook_fn: str,
-    size: int,
-    wce_hook: int | None,
-    wce_cbak: int | None,
-    max_nesting: int,
-) -> dict[str, Any]:
-    return {
-        "artifact": artifact,
-        "index": index,
-        "hook_fn": hook_fn,
-        "bytes": size,
-        "wce": {"hook": wce_hook, "cbak": wce_cbak},
-        "max_nesting": max_nesting,
-    }
-
-
-def canonical_document(entries: list[dict[str, Any]]) -> dict[str, Any]:
-    ordered = sorted(entries, key=lambda e: (e["index"], e["hook_fn"]))
-    return {"schema": SCHEMA, "entries": ordered}
-
-
 def ensure_rshooks(explicit: Path | None) -> Path:
     if explicit is not None:
         path = explicit.expanduser().resolve()
         if not path.is_file():
             raise SystemExit(f"FATAL: --rshooks {path} is not a file")
-        return path
-    env = os.environ.get("RSHOOKS")
-    if env:
-        path = Path(env).expanduser().resolve()
-        if not path.is_file():
-            raise SystemExit(f"FATAL: RSHOOKS={path} is not a file")
         return path
     candidate = ROOT / "target" / "release" / "rshooks"
     # Always run the release build so Cargo's freshness check, not a stale
@@ -148,20 +116,13 @@ def run_rshooks(bin_path: Path, args: list[str], *, capture: bool) -> subprocess
     return completed
 
 
-def build_example(bin_path: Path, example: str, extra_args: list[str]) -> None:
+def build_example(bin_path: Path, example: str) -> None:
     manifest = EXAMPLES_DIR / example / "Cargo.toml"
     out = EXAMPLES_DIR / example / "out"
     print(f"-- building {example} --", flush=True)
     run_rshooks(
         bin_path,
-        [
-            "build",
-            "--manifest-path",
-            str(manifest),
-            "--out",
-            str(out),
-            *extra_args,
-        ],
+        ["build", "--manifest-path", str(manifest), "--out", str(out)],
         capture=False,
     )
 
@@ -222,20 +183,20 @@ def collect_entry(bin_path: Path, wasm: Path) -> dict[str, Any]:
             f"!= check WCE (hook={check_hook} cbak={check_cbak})"
         )
 
-    return canonical_entry(
-        artifact=wasm.name,
-        index=index,
-        hook_fn=hook_fn,
-        size=wasm.stat().st_size,
-        wce_hook=meta_hook,
-        wce_cbak=meta_cbak,
-        max_nesting=max_nesting,
-    )
+    return {
+        "artifact": wasm.name,
+        "index": index,
+        "hook_fn": hook_fn,
+        "bytes": wasm.stat().st_size,
+        "wce": {"hook": meta_hook, "cbak": meta_cbak},
+        "max_nesting": max_nesting,
+    }
 
 
 def collect_example(bin_path: Path, example: str) -> dict[str, Any]:
     entries = [collect_entry(bin_path, wasm) for wasm in list_wasms(example)]
-    return canonical_document(entries)
+    ordered = sorted(entries, key=lambda e: (e["index"], e["hook_fn"]))
+    return {"schema": SCHEMA, "entries": ordered}
 
 
 def unified_diff(path: Path, expected: str, actual: str) -> str:
@@ -256,12 +217,11 @@ def process_example(
     bin_path: Path,
     example: str,
     skip_build: bool,
-    extra_args: list[str],
     check: bool,
 ) -> bool:
     """Return True if the snapshot matches (check) or was written (record)."""
     if not skip_build:
-        build_example(bin_path, example, extra_args)
+        build_example(bin_path, example)
     document = collect_example(bin_path, example)
     actual = dump_metrics(document)
     path = metrics_path(example)
@@ -328,11 +288,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "and use target/release/rshooks)"
         ),
     )
-    parser.add_argument(
-        "build_args",
-        nargs="*",
-        help="extra arguments forwarded to `rshooks build` (after --)",
-    )
     return parser.parse_args(argv)
 
 
@@ -356,7 +311,6 @@ def main(argv: list[str]) -> int:
             bin_path=bin_path,
             example=example,
             skip_build=args.skip_build,
-            extra_args=args.build_args,
             check=args.check,
         )
         if not ok:

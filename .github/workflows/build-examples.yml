@@ -1,39 +1,9 @@
 name: Build examples (reusable)
 
-# Reusable workflow: the ONE place that builds every crate under examples/
-# through rshooks-build and validates the output. Called from both ci.yml
-# (as its `examples` job) and e2e.yml (as its `build-hooks` job) so the
-# two workflows can never drift out of sync with each other again — the
-# historical failure mode here was a *step* being added to one workflow's
-# hand-written per-example list and forgotten in the other's (or forgotten
-# entirely for a new example). There is now only one list, and it isn't
-# even hand-written: the `discover` job below derives it from
-# examples/*/Cargo.toml, so adding a new example directory needs zero
-# workflow edits (a per-example flag override, if the example needs one,
-# is the only case that still touches this file — see the `discover` job).
-#
-# Jobs (all independent except `build` and `unit-tests-examples`, which need
-# `discover`):
-#   discover           - lists examples/*/Cargo.toml and emits the build matrix,
-#                        plus the list of testenv-wired (host-testable) packages
-#   build-tool         - builds `rshooks-build` once (release) and shares the
-#                        binary via artifact, so it isn't rebuilt per example
-#   clippy             - lints the whole examples workspace once (not per-example)
-#   testenv-parity     - continuous zero-wasm-impact probe (design doc §7)
-#   unit-tests-examples - off-chain unit tests (rshooks-testenv harness), run for
-#                        every package `discover` reports as testenv-wired
-#   build              - matrix job, one leg per example, fail-fast: false so one
-#                        example failing never blocks the others from completing.
-#                        After build/check, each leg also asserts
-#                        examples/<dir>/metrics.json matches the just-built
-#                        WCE / size / nesting (scripts/record-example-metrics.py
-#                        --check --skip-build).
-#
-# mise.toml's `build-examples` task (the local equivalent) is intentionally
-# NOT generated from this same discovery logic — it's plain shell so it
-# stays readable and debuggable when run by hand; keep its per-example
-# invocations and comments in sync with the flag overrides declared in
-# `discover` below when either changes.
+# Reusable workflow: builds every crate under examples/ through
+# rshooks-build and validates the output. Called from both ci.yml (as its
+# `examples` job) and e2e.yml (as its `build-hooks` job); the `discover`
+# job derives the build matrix from examples/*/Cargo.toml.
 
 on:
   workflow_call: {}
@@ -60,26 +30,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Per-example `rshooks build` flag overrides. This is the
-          # ONLY place per-example build flags are declared for CI — add
-          # one line per example that needs non-default flags (keyed by
-          # its examples/ directory name) and both ci.yml and e2e.yml
-          # pick it up automatically, with no further workflow edits.
-          declare -A EXTRA_ARGS=(
-            # [11_gas-counter]="--api-version 1"
-            # 13_keylets needed --auto-guard --default-maxiter 34 before
-            # this workspace's opt-level = 3 default (examples/Cargo.toml,
-            # docs/DESIGN.md's §2 C6) raised the zero-init-inlining
-            # threshold past Keylet's 34 bytes - no longer needed.
-          )
-
           matrix='[]'
           for manifest in examples/*/Cargo.toml; do
             dir="$(dirname "$manifest")"
             name="$(basename "$dir")"
-            args="${EXTRA_ARGS[$name]:-}"
-            entry="$(jq -nc --arg name "$name" --arg dir "$dir" --arg args "$args" \
-              '{name: $name, dir: $dir, args: $args}')"
+            entry="$(jq -nc --arg name "$name" --arg dir "$dir" \
+              '{name: $name, dir: $dir}')"
             matrix="$(jq -c --argjson e "$entry" '. + [$e]' <<<"$matrix")"
           done
 
@@ -228,7 +184,7 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x bin/rshooks
-          bin/rshooks build --manifest-path "${{ matrix.dir }}/Cargo.toml" --out "${{ matrix.dir }}/out" ${{ matrix.args }}
+          bin/rshooks build --manifest-path "${{ matrix.dir }}/Cargo.toml" --out "${{ matrix.dir }}/out"
           for wasm in "${{ matrix.dir }}/out/current"/*.wasm; do
             bin/rshooks check "$wasm"
           done

@@ -58,8 +58,8 @@ pub use rshooks_core as raw;
 /// author names directly, so it stays reachable only at `decl::`.
 pub use decl::{HookParam, OtxnParam, State};
 
-/// Implementation-detail handshake between the (forthcoming) `#[hooks]`
-/// struct macro and `#[hooks]` impl macro.
+/// Implementation-detail handshake between the `#[hooks]` struct macro and
+/// `#[hooks]` impl macro.
 #[doc(hidden)]
 pub mod __internal {
     /// Implemented (by generated code) on a chain-struct type by the

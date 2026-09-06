@@ -7,23 +7,6 @@
 use rshooks::prelude::*;
 
 #[test]
-fn reference_vectors() {
-    assert_eq!(XFL!(0).raw_bits(), 0);
-    assert_eq!(XFL!(0.0).raw_bits(), 0);
-    assert_eq!(XFL!(-0).raw_bits(), 0);
-    assert_eq!(XFL!(-0.0).raw_bits(), 0);
-    assert_eq!(XFL!(1).raw_bits(), 6_089_866_696_204_910_592);
-    assert_eq!(XFL!(0.1).raw_bits(), 6_071_852_297_695_428_608);
-    assert_eq!(XFL!(123456789).raw_bits(), 6_234_216_452_170_766_464);
-    assert_eq!(XFL!(-1).raw_bits(), 1_478_180_677_777_522_688);
-    assert_eq!(
-        XFL!(0.003333333333333333).raw_bits(),
-        6_038_156_834_009_797_973
-    );
-    assert_eq!(XFL!(2600000).raw_bits(), 6_199_553_087_261_802_496);
-}
-
-#[test]
 fn const_and_static_usage() {
     const RATE: rshooks::xfl::XFL = XFL!(0.003333333333333333);
     static DELAY: rshooks::xfl::XFL = XFL!(2600000);

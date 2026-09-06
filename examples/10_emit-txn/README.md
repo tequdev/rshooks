@@ -35,8 +35,8 @@ compiler-generated loop exists:
 
 This static-buffer idiom is the recommended pattern for any hook with
 templates or large buffers: it shrinks the binary, cuts the worst-case
-instruction count, and avoids needing `--auto-guard` for loops the author
-never wrote. The static is a `HookStatic` (rshooks): `take()` yields its
+instruction count, and leaves no compiler-generated loop for the author
+to guard. The static is a `HookStatic` (rshooks): `take()` yields its
 one exclusive `&'static mut` safely — no `unsafe` in the hook — with
 exclusivity guaranteed by a take-once flag (sound because hooks are
 single-threaded and every invocation runs in a fresh wasm instance; see

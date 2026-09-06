@@ -38,8 +38,7 @@
 //! shared via [`crate::shape`]; only the `ToBytes`-only-plus-length-assert
 //! generation differs.
 
-use crate::err;
-use crate::shape::{StructShape, parse_struct};
+use crate::shape::{StructShape, max_len_expr, offset_consts, parse_struct, write_body};
 use proc_macro::TokenStream;
 
 /// Entry point invoked by `#[proc_macro_derive(ParamName)]` in `lib.rs`.
@@ -57,33 +56,9 @@ pub fn derive(input: TokenStream) -> TokenStream {
 pub(crate) fn generate(shape: &StructShape) -> TokenStream {
     let name = &shape.name;
 
-    let mut max_len_expr = String::from("0usize");
-    for f in &shape.fields {
-        max_len_expr.push_str(&format!(
-            " + <{ty} as ::rshooks::convert::ToBytes>::MAX_LEN",
-            ty = f.ty
-        ));
-    }
-
-    let mut offset_consts = String::from("const __OFF_0: usize = 0usize;\n");
-    for (i, f) in shape.fields.iter().enumerate() {
-        offset_consts.push_str(&format!(
-            "const __OFF_{next}: usize = __OFF_{i} + <{ty} as ::rshooks::convert::ToBytes>::MAX_LEN;\n",
-            next = i.wrapping_add(1),
-            i = i,
-            ty = f.ty,
-        ));
-    }
-
-    let mut write_body = String::new();
-    for (i, f) in shape.fields.iter().enumerate() {
-        write_body.push_str(&format!(
-            "let _ = ::rshooks::convert::ToBytes::write(&self.{field}, &mut __dst[__OFF_{i}..__OFF_{next}]);\n",
-            field = f.name,
-            i = i,
-            next = i.wrapping_add(1),
-        ));
-    }
+    let max_len_expr = max_len_expr(&shape.fields);
+    let offset_consts = offset_consts(&shape.fields);
+    let write_body = write_body(&shape.fields);
 
     let src = format!(
         "
@@ -113,15 +88,7 @@ impl ::rshooks::convert::ToBytes for {name} {{
         write_body = write_body,
         length_assert = param_name_length_assert(name),
     );
-    let src = crate::krate::rewrite(src);
-
-    match src.parse::<TokenStream>() {
-        Ok(ts) => ts,
-        Err(_) => err(
-            shape.name_span,
-            "rshooks-macros: internal ParamName codegen failed to parse",
-        ),
-    }
+    crate::shape::finish(src, shape.name_span, "ParamName")
 }
 
 /// Generates the compile-time assert that `<name as ToBytes>::MAX_LEN` is

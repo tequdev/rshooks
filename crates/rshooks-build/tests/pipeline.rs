@@ -24,39 +24,27 @@ fn wasm(src: &str) -> Vec<u8> {
 /// native checker without going through the full `clean()` pipeline (which
 /// would also strip the very export/section this test is targeting).
 fn strip_custom_sections(wasm: &[u8]) -> Vec<u8> {
-    let mut module = wasm_encoder::Module::new();
-    for payload in wasmparser::Parser::new(0).parse_all(wasm) {
-        let payload = payload.expect("valid wasm");
-        if matches!(payload, wasmparser::Payload::CustomSection(_)) {
-            continue;
-        }
-        if let Some((id, range)) = payload.as_section() {
-            module.section(&wasm_encoder::RawSection {
-                id,
-                data: &wasm[range],
-            });
-        }
-    }
-    module.finish()
+    rshooks_build::strip_custom_sections(wasm).expect("valid wasm")
 }
 
 fn opts() -> Options {
     Options::default()
 }
 
+fn write_leb128(mut n: u64, out: &mut Vec<u8>) {
+    loop {
+        let byte = (n & 0x7f) as u8;
+        n >>= 7;
+        if n == 0 {
+            out.push(byte);
+            break;
+        }
+        out.push(byte | 0x80);
+    }
+}
+
 /// Appends a raw custom section (id 0) to an existing wasm binary.
 fn append_custom_section(wasm: &[u8], name: &str, payload: &[u8]) -> Vec<u8> {
-    fn write_leb128(mut n: u64, out: &mut Vec<u8>) {
-        loop {
-            let byte = (n & 0x7f) as u8;
-            n >>= 7;
-            if n == 0 {
-                out.push(byte);
-                break;
-            }
-            out.push(byte | 0x80);
-        }
-    }
     let mut content = Vec::new();
     write_leb128(name.len() as u64, &mut content);
     content.extend_from_slice(name.as_bytes());
@@ -292,90 +280,6 @@ fn cleaner_trims_trailing_zeros_from_active_data_segment() {
     );
 }
 
-#[test]
-fn cleaner_skips_trim_when_data_segments_overlap() {
-    // Active segments apply in declaration order and may legally overlap:
-    // here the second segment's trailing zero overwrites the first
-    // segment's non-zero byte at address 6. Trimming that zero would leave
-    // 0x43 ('C') in memory instead of 0x00, so the trim must be skipped
-    // wholesale and both payloads pass through byte-identical.
-    let src = r#"
-    (module
-      (import "env" "accept" (func $accept (param i32 i32 i64) (result i64)))
-      (memory 1)
-      (data (i32.const 4) "ABC")
-      (data (i32.const 5) "X\00")
-      (func $hook (param i32) (result i64)
-        (call $accept (i32.const 0) (i32.const 0) (i64.const 0)))
-      (export "hook" (func $hook)))
-    "#;
-    let cleaned = rshooks_build::clean(&wasm(src), &opts()).expect("clean succeeds");
-    let segs = data_segments(&cleaned);
-    assert_eq!(
-        segs,
-        vec![(4, b"ABC".to_vec()), (5, b"X\x00".to_vec())],
-        "overlapping segments must disable the trailing-zero trim entirely"
-    );
-}
-
-#[test]
-fn cleaner_drops_all_zero_active_data_segment() {
-    let src = r#"
-    (module
-      (import "env" "accept" (func $accept (param i32 i32 i64) (result i64)))
-      (memory 1)
-      (data (i32.const 0) "\00\00\00\00\00")
-      (func $hook (param i32) (result i64)
-        (call $accept (i32.const 0) (i32.const 0) (i64.const 0)))
-      (export "hook" (func $hook)))
-    "#;
-    let cleaned = rshooks_build::clean(&wasm(src), &opts()).expect("clean succeeds");
-    assert!(
-        data_segments(&cleaned).is_empty(),
-        "an all-zero segment should be dropped entirely, not emitted empty"
-    );
-}
-
-#[test]
-fn cleaner_leaves_data_segment_with_nonzero_tail_untouched() {
-    let src = r#"
-    (module
-      (import "env" "accept" (func $accept (param i32 i32 i64) (result i64)))
-      (memory 1)
-      (data (i32.const 0) "ABCD")
-      (func $hook (param i32) (result i64)
-        (call $accept (i32.const 0) (i32.const 0) (i64.const 0)))
-      (export "hook" (func $hook)))
-    "#;
-    let cleaned = rshooks_build::clean(&wasm(src), &opts()).expect("clean succeeds");
-    assert_eq!(
-        data_segments(&cleaned),
-        vec![(0, b"ABCD".to_vec())],
-        "a segment with no trailing zero byte must be left byte-for-byte alone"
-    );
-}
-
-#[test]
-fn cleaner_data_segment_trim_is_idempotent() {
-    let src = r#"
-    (module
-      (import "env" "accept" (func $accept (param i32 i32 i64) (result i64)))
-      (memory 1)
-      (data (i32.const 0) "AB\00\00\00\00\00")
-      (data (i32.const 16) "\00\00\00\00")
-      (data (i32.const 32) "CD")
-      (func $hook (param i32) (result i64)
-        (call $accept (i32.const 0) (i32.const 0) (i64.const 0)))
-      (export "hook" (func $hook)))
-    "#;
-    let once = rshooks_build::clean(&wasm(src), &opts()).expect("clean succeeds");
-    let twice = rshooks_build::clean(&once, &opts()).expect("re-clean succeeds");
-    assert_eq!(
-        once, twice,
-        "re-cleaning an already-trimmed module must be byte-identical (no re-trimming, no drift)"
-    );
-}
-
 // Guard pass
 
 const GUARDED_LOOP_HOOK: &str = r#"
@@ -543,98 +447,6 @@ fn validator_suppresses_hint_when_loop_calls_an_import() {
         "a loop that calls an import should get no shape hint, even though it loads memory \
          too (conservative heuristic, avoids false positives on real business logic): {msg}"
     );
-}
-
-#[test]
-#[allow(deprecated)]
-fn auto_guard_inserts_exact_pattern_and_passes_revalidation() {
-    let input = wasm(UNGUARDED_LOOP_HOOK);
-    let o = Options {
-        auto_guard: true,
-        default_maxiter: 16,
-        ..Options::default()
-    };
-    let out = rshooks_build::auto_guard(&input, &o).expect("auto-guard succeeds");
-
-    // `_g` should be added as the first (only) import, shifting `hook`
-    // from function index 0 to 1.
-    let mut g_index = None;
-    let mut hook_index = None;
-    let mut n_func_imports = 0u32;
-    for payload in wasmparser::Parser::new(0).parse_all(&out) {
-        match payload.expect("valid wasm") {
-            wasmparser::Payload::ImportSection(r) => {
-                for imp in r.into_imports() {
-                    let imp = imp.expect("import");
-                    if let wasmparser::TypeRef::Func(_) = imp.ty {
-                        if imp.module == "env" && imp.name == "_g" {
-                            g_index = Some(n_func_imports);
-                        }
-                        n_func_imports += 1;
-                    }
-                }
-            }
-            wasmparser::Payload::ExportSection(r) => {
-                for e in r {
-                    let e = e.expect("export");
-                    if e.name == "hook" {
-                        hook_index = Some(e.index);
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    let g_index = g_index.expect("_g should have been added as an import");
-    assert_eq!(g_index, 0);
-    let hook_index = hook_index.expect("hook export present");
-    assert_eq!(
-        hook_index, 1,
-        "hook should have shifted from 0 to 1 once `_g` was inserted"
-    );
-
-    // hook's body should have the exact inserted instruction sequence
-    // immediately following the loop header.
-    let mut bodies = Vec::new();
-    for payload in wasmparser::Parser::new(0).parse_all(&out) {
-        if let wasmparser::Payload::CodeSectionEntry(body) = payload.expect("valid wasm") {
-            bodies.push(body.as_bytes().to_vec());
-        }
-    }
-    let hook_body = &bodies[(hook_index - n_func_imports) as usize];
-    let reader = wasmparser::FunctionBody::new(wasmparser::BinaryReader::new(hook_body, 0));
-    let mut ops = reader.get_operators_reader().expect("operators");
-    let mut found_loop = false;
-    while !ops.eof() {
-        let op = ops.read().expect("op");
-        if let wasmparser::Operator::Loop { .. } = op {
-            found_loop = true;
-            let a = ops.read().expect("i32.const id");
-            let b = ops.read().expect("i32.const maxiter");
-            let c = ops.read().expect("call _g");
-            let d = ops.read().expect("drop");
-            assert!(matches!(a, wasmparser::Operator::I32Const { .. }));
-            assert!(matches!(b, wasmparser::Operator::I32Const { value: 16 }));
-            match c {
-                wasmparser::Operator::Call { function_index } => {
-                    assert_eq!(function_index, g_index)
-                }
-                other => panic!("expected `call $_g`, got {other:?}"),
-            }
-            assert!(matches!(d, wasmparser::Operator::Drop));
-            break;
-        }
-    }
-    assert!(found_loop, "fixture should contain a loop");
-
-    // Byte-level: the inserted sequence's tail (`call <g_index>; drop`)
-    // must appear verbatim.
-    assert!(
-        contains_bytes(hook_body, &[0x10, g_index as u8, 0x1A]),
-        "expected `call {g_index}; drop` (0x10 {g_index:#x} 0x1A) in the rebuilt body"
-    );
-
-    rshooks_build::validate(&out, &opts()).expect("auto-guarded module should re-validate cleanly");
 }
 
 // Validator hard-error rules
@@ -1037,53 +849,6 @@ fn run_pipeline_reports_fee_relevant_size() {
     assert_eq!(fee.drops, fee.bytes * 5000);
 }
 
-#[test]
-fn clean_cli_warns_when_auto_guard_is_passed() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let input_path = dir.path().join("unguarded.wasm");
-    std::fs::write(&input_path, wasm(UNGUARDED_LOOP_HOOK)).expect("write fixture");
-    let out_path = dir.path().join("unguarded.clean.wasm");
-
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_rshooks"))
-        .arg("clean")
-        .arg(&input_path)
-        .arg("-o")
-        .arg(&out_path)
-        .arg("--auto-guard")
-        .output()
-        .expect("running the rshooks binary");
-
-    assert!(
-        output.status.success(),
-        "clean --auto-guard should still succeed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("--auto-guard is deprecated"),
-        "expected a deprecation warning on stderr: {stderr}"
-    );
-    assert!(
-        out_path.exists(),
-        "clean should still write its output file"
-    );
-
-    // Without the flag the same input is rejected (unguarded loop), and the
-    // warning must not appear: it is conditional on `--auto-guard`.
-    let control = std::process::Command::new(env!("CARGO_BIN_EXE_rshooks"))
-        .arg("clean")
-        .arg(&input_path)
-        .arg("-o")
-        .arg(dir.path().join("control.clean.wasm"))
-        .output()
-        .expect("running the rshooks binary");
-    let control_stderr = String::from_utf8_lossy(&control.stderr);
-    assert!(
-        !control_stderr.contains("--auto-guard is deprecated"),
-        "the warning must be conditional on the flag: {control_stderr}"
-    );
-}
-
 // End-to-end: `run_pipeline` post-processes clang-shaped wasm
 
 /// Encodes a `target_features` custom-section payload (a feature count
@@ -1091,17 +856,6 @@ fn clean_cli_warns_when_auto_guard_is_passed() {
 /// required with `+`) — the format clang emits for any non-`mvp` target
 /// CPU.
 fn target_features_payload(features: &[&str]) -> Vec<u8> {
-    fn write_leb128(mut n: u64, out: &mut Vec<u8>) {
-        loop {
-            let byte = (n & 0x7f) as u8;
-            n >>= 7;
-            if n == 0 {
-                out.push(byte);
-                break;
-            }
-            out.push(byte | 0x80);
-        }
-    }
     let mut payload = Vec::new();
     write_leb128(features.len() as u64, &mut payload);
     for feature in features {

@@ -34,16 +34,7 @@ type BackendResult<T> = core::result::Result<T, i64>;
 /// decoded through [`res`], the same as every raw host call's return code.
 #[inline(always)]
 pub(crate) fn write_bytes(out: &mut [u8], r: BackendResult<Vec<u8>>) -> HookResult<usize> {
-    match r {
-        Ok(value) => match out.get_mut(..value.len()) {
-            Some(dst) => {
-                dst.copy_from_slice(&value);
-                Ok(value.len())
-            }
-            None => Err(HookError::TooSmall),
-        },
-        Err(code) => res(code).map(|v| v as usize),
-    }
+    res(write_bytes_code(out, r)).map(|v| v as usize)
 }
 
 /// Fixed-size counterpart to [`write_bytes`], for `HostBackend` methods
@@ -79,16 +70,7 @@ pub(crate) fn write_array<const N: usize>(
 /// value.len)`), never the value's full length when it was truncated.
 #[inline(always)]
 pub(crate) fn write_bytes_truncate(out: &mut [u8], r: BackendResult<Vec<u8>>) -> HookResult<usize> {
-    match r {
-        Ok(value) => {
-            let n = out.len().min(value.len());
-            if let (Some(dst), Some(src)) = (out.get_mut(..n), value.get(..n)) {
-                dst.copy_from_slice(src);
-            }
-            Ok(n)
-        }
-        Err(code) => res(code).map(|v| v as usize),
-    }
+    res(write_bytes_truncate_code(out, r)).map(|v| v as usize)
 }
 
 /// Raw-code counterpart to [`write_bytes_truncate`] — same truncating
@@ -134,18 +116,7 @@ pub(crate) fn write_bytes_uninit(
     out: &mut [core::mem::MaybeUninit<u8>],
     r: BackendResult<Vec<u8>>,
 ) -> HookResult<usize> {
-    match r {
-        Ok(value) => match out.get_mut(..value.len()) {
-            Some(dst) => {
-                for (slot, byte) in dst.iter_mut().zip(value.iter()) {
-                    slot.write(*byte);
-                }
-                Ok(value.len())
-            }
-            None => Err(HookError::TooSmall),
-        },
-        Err(code) => res(code).map(|v| v as usize),
-    }
+    res(write_bytes_uninit_code(out, r)).map(|v| v as usize)
 }
 
 /// Raw-code counterpart to [`write_bytes_uninit`].

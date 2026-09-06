@@ -11,9 +11,6 @@ importers:
       '@transia/hooks-toolkit':
         specifier: ^2.0.0
         version: 2.0.0
-      dotenv:
-        specifier: ^16.4.1
-        version: 16.6.1
       xahau:
         specifier: ^4.0.3
         version: 4.1.1
@@ -563,6 +560,7 @@ packages:
 
   crypto-js@4.2.0:
     resolution: {integrity: sha512-KALDyEYgpY+Rlob/iriUtjV6d5Eq+Y191A5g4UqLAi8CyGP9N1+FdVbkc1SxKc2r4YAYqG8JzO2KGL+AizD70Q==}
+    deprecated: Active development of CryptoJS has been discontinued. This library is no longer maintained.
 
   debug@4.4.3:
     resolution: {integrity: sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==}

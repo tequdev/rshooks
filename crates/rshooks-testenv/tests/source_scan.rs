@@ -1,20 +1,12 @@
-//! Source-scan tests (design §2.1), two of them:
-//!
-//! 1. [`inventory_matches_a_fresh_grep_of_the_bridged_families`] asserts
-//!    set-equality between `crates/rshooks/testenv-call-sites.txt` and a
-//!    fresh grep of every direct `rshooks_core::<fn>(` call site under
-//!    `crates/rshooks/src/api/*.rs` (plus `xfl.rs`/`xfl_unchecked.rs`, and
-//!    `keylet.rs`'s `util_keylet_buf(`/`util_keylet(` calls — see
-//!    [`find_raw_call_in_keylet`]). This only keeps the inventory honest
-//!    against a fresh grep — it does not prove any call site is actually
-//!    intercepted under `testenv`, since a raw call and its own bridging
-//!    cfg guard could both vanish together without the grep noticing.
-//! 2. [`every_raw_call_site_has_an_enclosing_testenv_guard`] catches that
-//!    case: for every raw call site the grep in (1) finds, it requires the
-//!    literal text `feature = "testenv"` to appear somewhere in the
-//!    enclosing `fn`'s body (a brace-depth walk — see
-//!    [`fn_body_end_line`]). Deleting an entire interception block makes
-//!    this test fail even though (1) would stay green.
+//! Source-scan test (design §2.1):
+//! [`every_raw_call_site_has_an_enclosing_testenv_guard`] scans every direct
+//! `rshooks_core::<fn>(` call site under `crates/rshooks/src/api/*.rs`
+//! (plus `xfl.rs`/`xfl_unchecked.rs`, and `keylet.rs`'s
+//! `util_keylet_buf(`/`util_keylet(` calls — see [`find_raw_call_in_keylet`])
+//! and requires the literal text `feature = "testenv"` to appear somewhere
+//! in the enclosing `fn`'s body (a brace-depth walk — see
+//! [`fn_body_end_line`]). Deleting an interception block makes this test
+//! fail.
 
 #![allow(
     clippy::panic,
@@ -23,11 +15,7 @@
     missing_docs
 )]
 
-use std::collections::BTreeSet;
 use std::path::Path;
-
-/// One inventory/grep row: `(file, wrapper_fn, raw_fn)`.
-type Row = (String, String, String);
 
 const BRIDGED_FAMILY_FILES: &[&str] = &[
     "state.rs",
@@ -48,39 +36,13 @@ fn rshooks_crate_dir() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../rshooks")
 }
 
-fn parse_inventory(path: &Path) -> BTreeSet<Row> {
-    let content = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
-    let mut set = BTreeSet::new();
-    for raw_line in content.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        // Strip a trailing `# comment` (used on unbridged-section rows).
-        let line = match line.split_once('#') {
-            Some((code, _)) => code.trim(),
-            None => line,
-        };
-        let Some((lhs, rhs)) = line.split_once("->") else {
-            panic!("unexpected inventory line shape: {raw_line:?}");
-        };
-        let Some((file_part, wrapper)) = lhs.trim().split_once("::") else {
-            panic!("unexpected inventory lhs shape: {lhs:?}");
-        };
-        set.insert((
-            file_part.trim().to_string(),
-            wrapper.trim().to_string(),
-            rhs.trim().to_string(),
-        ));
-    }
-    set
-}
-
 /// Finds the identifier right after a `fn ` keyword occurrence starting at
-/// byte offset `idx` in `line` (`idx` already known to point at `"fn "`).
+/// byte offset `idx` in `line` (`idx` already known to point at `"fn "`),
+/// skipping one leading `$` so a `macro_rules!` body's `fn $name(` still
+/// counts as a fn declaration.
 fn identifier_after(line: &str, idx: usize) -> Option<String> {
     let rest = line.get(idx + 3..)?;
+    let rest = rest.strip_prefix('$').unwrap_or(rest);
     let name: String = rest
         .chars()
         .take_while(|c| c.is_alphanumeric() || *c == '_')
@@ -175,76 +137,6 @@ fn find_raw_call_in_keylet(line: &str) -> Option<String> {
     }
 }
 
-fn grep_raw_call_sites(api_dir: &Path) -> BTreeSet<Row> {
-    let mut set = BTreeSet::new();
-    for file_name in BRIDGED_FAMILY_FILES {
-        let path = api_dir.join(file_name);
-        let content = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
-        let mut current_fn: Option<String> = None;
-        for line in content.lines() {
-            let trimmed = line.trim_start();
-            if trimmed.starts_with("#[cfg(") && contains_word(trimmed, "test") {
-                break; // stop at the first test module in this file
-            }
-            if let Some(name) = find_fn_name(trimmed) {
-                current_fn = Some(name);
-            }
-            let raw = if *file_name == "keylet.rs" {
-                find_raw_call_in_keylet(line)
-            } else {
-                find_raw_call(line)
-            };
-            if let Some(raw) = raw
-                && let Some(f) = &current_fn
-            {
-                set.insert((format!("api/{file_name}"), f.clone(), raw));
-            }
-        }
-    }
-    // `xfl.rs`/`xfl_unchecked.rs` (crate root, not under `api/`) each have
-    // their own raw call sites, scanned as honorary members of the "float"
-    // bridged family.
-    for file_name in ["xfl.rs", "xfl_unchecked.rs"] {
-        let path = api_dir.parent().unwrap_or(api_dir).join(file_name);
-        let content = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
-        let mut current_fn: Option<String> = None;
-        for line in content.lines() {
-            let trimmed = line.trim_start();
-            if trimmed.starts_with("#[cfg(") && contains_word(trimmed, "test") {
-                break;
-            }
-            if let Some(name) = find_fn_name(trimmed) {
-                current_fn = Some(name);
-            }
-            if let Some(raw) = find_raw_call(line)
-                && let Some(f) = &current_fn
-            {
-                set.insert((file_name.to_string(), f.clone(), raw));
-            }
-        }
-    }
-    set
-}
-
-#[test]
-fn inventory_matches_a_fresh_grep_of_the_bridged_families() {
-    let crate_dir = rshooks_crate_dir();
-    let inventory = parse_inventory(&crate_dir.join("testenv-call-sites.txt"));
-    let grep = grep_raw_call_sites(&crate_dir.join("src/api"));
-
-    let missing_from_inventory: Vec<_> = grep.difference(&inventory).collect();
-    let stale_in_inventory: Vec<_> = inventory.difference(&grep).collect();
-
-    assert!(
-        missing_from_inventory.is_empty() && stale_in_inventory.is_empty(),
-        "testenv-call-sites.txt is out of sync with crates/rshooks/src/api/*.rs:\n\
-         call sites present in source but missing from the inventory: {missing_from_inventory:#?}\n\
-         inventory rows with no matching call site in source: {stale_in_inventory:#?}"
-    );
-}
-
 /// Brace-depth walk from `start_line` (already known to contain a `fn `
 /// declaration) to the line where that function's body closes. A single
 /// lightweight heuristic — raw `{`/`}` counting, no string/comment
@@ -275,8 +167,7 @@ fn fn_body_end_line(lines: &[&str], start_line: usize) -> usize {
 
 /// One raw call site whose enclosing `fn` body carries no `feature =
 /// "testenv"` cfg marker anywhere in it. `(label, fn_name)`, `label`
-/// matching [`grep_raw_call_sites`]'s row shape (`"api/<file>.rs"` or the
-/// bare `xfl.rs`/`xfl_unchecked.rs` name).
+/// matching `"api/<file>.rs"` or the bare `xfl.rs`/`xfl_unchecked.rs` name.
 fn find_unbridged_call_sites(api_dir: &Path) -> Vec<(String, String)> {
     const MARKER: &str = "feature = \"testenv\"";
     let mut offenders = Vec::new();

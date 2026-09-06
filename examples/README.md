@@ -116,8 +116,14 @@ cargo run -p rshooks-build -- build --manifest-path examples/02_state-counter/Ca
 cargo run -p rshooks-build -- check examples/02_state-counter/out/current/0.main.wasm
 ```
 
-See each example's own README for its exact command — none need the
-deprecated `--auto-guard` (see below for why).
+See each example's own README for its exact command — none need any
+extra build flag (see "On compiler-generated loops" below for why).
+
+Every example manifest sets `test = false` on its `[lib]` target: these
+crates are `no_std` with no `test` crate available for `wasm32v1-none`, so
+the lib target's own (impossible) unit-test harness stays disabled and
+`cargo test`/`--all-targets` does not try to build one; a separate `tests/`
+integration-test target, where present, is unaffected.
 
 ## Recorded cost (WCE / size / nesting)
 
@@ -157,7 +163,7 @@ root workspace's panic-free set) and by review:
   code table.
 - Loops carry `guard!`/`guard_m!` when the bound is known at the source
   level. Some loops in the compiled output are *not* written in the
-  source at all — see "On `--auto-guard`" below.
+  source at all — see "On compiler-generated loops" below.
 - Runtime arithmetic (`+`, `-`, `*`, ...) on non-constant values is
   avoided; `clippy::arithmetic_side_effects` is `warn` in `[lints]`, but
   the workspace's `-D warnings` clippy invocation promotes it to a hard
@@ -188,7 +194,7 @@ is sound because hooks execute single-threaded and every invocation runs
 in a freshly instantiated wasm instance.
 
 Converting `emit-txn` to this idiom removed its only compiler-generated
-loops entirely (no `--auto-guard` needed) and cut its worst-case
+loops entirely and cut its worst-case
 instruction count by an order of magnitude at this workspace's
 `opt-level = 3` default (see `docs/DESIGN.md` §2 C6; each example's
 current figures live in its `metrics.json`, and the `rshooks build`
@@ -196,7 +202,7 @@ output prints the authoritative values). The take-once flag costs a few dozen by
 raw `static mut` — the
 price of keeping hook code free of `unsafe`.
 
-## On `--auto-guard`
+## On compiler-generated loops
 
 `rshooks build` defaults to treating an unguarded `loop` as a hard
 error (see `docs/DESIGN.md` §6.3 and §10.1) — missing a `guard!` in your
@@ -208,12 +214,11 @@ though no loop appears in the Rust source at all** — array/slice equality
 (`[u8; N] == [u8; N]`) lowers to a `bcmp`-style byte-compare loop, and large
 buffer zero-inits/copies lower to `memset`/`memcpy`-style loops.
 
-The deprecated `--auto-guard` (with a carefully sized `--default-maxiter`)
-papers over this, but it is a footgun: the CLI only validates guard *shape*, not
-that `maxiter` covers the loop's true runtime bound, so an under-sized
-`maxiter` builds clean and then fails with `GUARD_VIOLATION` on a live
-node. Two source-level idioms avoid the compiler-generated loop (and the
-`--auto-guard` footgun) entirely, and are preferred wherever they apply:
+The CLI only validates guard *shape*, not that a `maxiter` covers the
+loop's true runtime bound, so a guard bolted onto such a loop after the
+fact would build clean and then fail with `GUARD_VIOLATION` on a live
+node. Two source-level idioms avoid the compiler-generated loop entirely,
+and are preferred wherever they apply:
 
 - **Fixed-size buffer equality**: use `rshooks::buf_eq_8`/`_20`/`_32`/
   `_33`/`_34`/`_40`/`_48`/`_64` (see `crates/rshooks/src/buf_eq.rs`) instead
@@ -221,16 +226,13 @@ node. Two source-level idioms avoid the compiler-generated loop (and the
   word-sized (`u64`, with a narrower tail word where the size isn't a
   multiple of 8) chunks built from source-level literal byte indices, so the
   comparison is genuinely straight-line code — there is nothing for LLVM to
-  lower into a loop. `firewall` used to need
-  `--auto-guard --default-maxiter 24` for exactly this reason (its
-  `sender == blocked` account comparison); switching to `buf_eq_20` removed
-  the loop (and the flag) entirely, and the word-at-a-time comparison
-  further dropped `firewall`'s worst-case instruction count from 419 to 122.
+  lower into a loop. `firewall` compares its `sender`/`blocked` accounts
+  with `buf_eq_20` for exactly this reason.
 - **Statics for templates and large buffers** (below): removes
   compiler-generated `memset`/`memcpy` loops the same way, for the
   initialization/copy case `buf_eq` doesn't cover.
 
-None of these examples need `--auto-guard`: `accept-all` and
+None of these examples has an unguarded loop: `accept-all` and
 `state-counter` never had a compiler-generated loop to begin with (no
 buffer copy/compare in them is large enough, at this optimization level,
 for LLVM to prefer an out-of-line loop over inline stores); `emit-txn`
@@ -244,8 +246,7 @@ README for why, including an empirical check of what `guard_m!`'s `$n`
 does and doesn't protect against); and `account-id-macro`'s buffers (a
 20-byte `AccountId`, a 34-byte r-address) are compared with `buf_eq_20`/
 `buf_eq_34` and are far too small for LLVM to prefer an out-of-line loop
-regardless. `--auto-guard` is deprecated in `rshooks` (accepted with a
-build-time warning, scheduled for removal). For a loop none of these
+regardless. For a loop none of these
 idioms cover, write the loop by hand with `guard!` so its `maxiter` is
 explicit and justified from the loop's true worst-case iteration count
 (found via disassembly), never guessed.

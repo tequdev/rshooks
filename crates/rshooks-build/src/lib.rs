@@ -1,9 +1,8 @@
 //! Builds and validates SetHook-compatible WebAssembly modules.
 //!
 //! The pipeline cleans the module, applies the API-version-specific
-//! transformations, optionally runs the deprecated auto-guard insertion
-//! pass, and validates the result. This host-side crate permits ordinary
-//! index-space arithmetic.
+//! transformations, and validates the result. This host-side crate permits
+//! ordinary index-space arithmetic.
 #![allow(clippy::arithmetic_side_effects)]
 
 pub mod carriers;
@@ -27,29 +26,15 @@ pub mod whitelist;
 pub use cleaner::clean;
 pub use fee::{FeeEstimate, estimate_fee};
 pub use flatten::{FlattenReport, flatten};
-#[allow(deprecated)]
-pub use guard::auto_guard;
 pub use guard_native::{GuardVerdict, NativeGuardError, validate_guards_native};
+#[doc(hidden)]
+pub use optimizer::strip_custom_sections;
 pub use unnest::{UnnestReport, unnest};
 pub use validator::{ValidationError, ValidationReport, validate};
 
 /// Options threaded through every pipeline stage.
 #[derive(Debug, Clone)]
 pub struct Options {
-    /// Deprecated: insert missing loop guards instead of reporting an
-    /// error. Scheduled for removal; remove the compiler-generated loop at
-    /// the source level (`rshooks::buf_eq_*`, `HookStatic`) or write the
-    /// loop by hand with `guard!` instead.
-    #[deprecated(
-        note = "the auto-guard transform is scheduled for removal; remove the \
-                compiler-generated loop at the source level (`rshooks::buf_eq_*`, `HookStatic`) \
-                or write the loop by hand with `guard!`"
-    )]
-    pub auto_guard: bool,
-    /// Deprecated: the `maxiter` value used for auto-inserted guards. Only
-    /// meaningful with the deprecated [`Options::auto_guard`].
-    #[deprecated(note = "only meaningful with the deprecated `auto_guard`")]
-    pub default_maxiter: u32,
     /// Permit oversized output from build operations. Validation still reports it.
     pub allow_oversize: bool,
     /// Run Binaryen's `wasm-opt` `-Oz` size optimization as the first
@@ -57,12 +42,9 @@ pub struct Options {
     pub optimize: bool,
 }
 
-#[allow(deprecated)]
 impl Default for Options {
     fn default() -> Self {
         Self {
-            auto_guard: false,
-            default_maxiter: 16,
             allow_oversize: false,
             optimize: true,
         }
@@ -71,9 +53,8 @@ impl Default for Options {
 
 /// Runs the full transformation and validation pipeline.
 ///
-/// The module is flattened and unnested before guard processing. Returns the
+/// The module is flattened and unnested before guard checking. Returns the
 /// transformed bytes and their validation report.
-#[allow(deprecated)]
 pub fn run_pipeline(wasm: &[u8], opts: &Options) -> anyhow::Result<(Vec<u8>, ValidationReport)> {
     // wasm-opt runs first, on the raw wasm, before cleaning: see
     // `optimizer` for why this ordering is load-bearing.
@@ -91,13 +72,8 @@ pub fn run_pipeline(wasm: &[u8], opts: &Options) -> anyhow::Result<(Vec<u8>, Val
     for note in &unnest_report.notes {
         eprintln!("note: {note}");
     }
-    let guarded = if opts.auto_guard {
-        guard::auto_guard(&unnested, opts)?
-    } else {
-        unnested
-    };
-    let report = verify(&guarded, opts)?;
-    Ok((guarded, report))
+    let report = verify(&unnested, opts)?;
+    Ok((unnested, report))
 }
 
 /// Validates `wasm`.
@@ -194,11 +170,8 @@ mod tests {
     use super::*;
 
     #[test]
-    #[allow(deprecated)]
     fn options_default_values_are_pinned() {
         let o = Options::default();
-        assert!(!o.auto_guard);
-        assert_eq!(o.default_maxiter, 16);
         assert!(!o.allow_oversize);
         assert!(o.optimize);
     }

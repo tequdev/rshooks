@@ -80,18 +80,11 @@ sync_group() {
             fi
         done
 
-        for f in ${files}; do
-            b="$(basename "${f}")"
-            want="$(awk -v f="${b}" '$2 == f {print $1}' "${sums_file}")"
-            got="$(sha256 "${vendor_dir}/${b}")"
-            if [ "${want}" != "${got}" ]; then
-                echo "DRIFT: [${name}] ${b} does not match SHA256SUMS (want ${want}, got ${got})" >&2
-                group_status=1
-            fi
-        done
+        # SHA256SUMS itself is checked against the vendored files by each
+        # crate's own `vendored_files_match_recorded_sha256` test.
 
         if [ "${group_status}" -eq 0 ]; then
-            echo "OK: [${name}] vendored files are byte-identical to ${REPO}@${BRANCH} and match SHA256SUMS"
+            echo "OK: [${name}] vendored files are byte-identical to ${REPO}@${BRANCH}"
         else
             overall_status=1
         fi

@@ -19,4 +19,4 @@ or, from the repo root:
 cargo run -p rshooks-build -- build --manifest-path examples/01_accept-all/Cargo.toml
 ```
 
-No extra flags needed — this example is guard-clean without `--auto-guard`.
+No extra flags needed — this example is guard-clean at the source level.

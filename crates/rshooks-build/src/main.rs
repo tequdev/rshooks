@@ -33,17 +33,6 @@ enum Cmd {
         /// Build only the named package (forwarded to `cargo -p`).
         #[arg(short = 'p', long)]
         package: Option<String>,
-        /// Deprecated: insert missing loop guards instead of treating them
-        /// as an error. Scheduled for removal; remove the
-        /// compiler-generated loop at the source level
-        /// (rshooks::buf_eq_*, HookStatic) or write the loop by hand with
-        /// guard! instead.
-        #[arg(long)]
-        auto_guard: bool,
-        /// Deprecated: maxiter used for auto-inserted guards. Only
-        /// meaningful with the deprecated --auto-guard.
-        #[arg(long, default_value_t = 16)]
-        default_maxiter: u32,
         /// Output ROOT directory (default: `<target>/rshooks/<crate-name>`).
         /// Generations are published under `<root>/gen-<n>`, with
         /// `<root>/current` pointing at the latest.
@@ -83,17 +72,6 @@ enum Cmd {
         /// `<input>.clean.wasm`).
         #[arg(short = 'o', long)]
         out: Option<PathBuf>,
-        /// Deprecated: insert missing loop guards instead of treating them
-        /// as an error. Scheduled for removal; remove the
-        /// compiler-generated loop at the source level
-        /// (rshooks::buf_eq_*, HookStatic) or write the loop by hand with
-        /// guard! instead.
-        #[arg(long)]
-        auto_guard: bool,
-        /// Deprecated: maxiter used for auto-inserted guards. Only
-        /// meaningful with the deprecated --auto-guard.
-        #[arg(long, default_value_t = 16)]
-        default_maxiter: u32,
         /// Write the output even if it exceeds the 65,535-byte SetHook
         /// limit (clearly marked invalid).
         #[arg(long)]
@@ -111,26 +89,12 @@ enum Cmd {
     },
 }
 
-/// Prints a build-time deprecation warning for `--auto-guard` to stderr.
-/// Called once per invocation, before running the pipeline, whenever the
-/// flag is set on either `Build` or `Clean`.
-fn warn_auto_guard_deprecated() {
-    eprintln!(
-        "warning: --auto-guard is deprecated and scheduled for removal; remove the \
-         compiler-generated loop at the source level (rshooks::buf_eq_*, HookStatic) or write \
-         the loop by hand with guard! instead"
-    );
-}
-
-#[allow(deprecated)]
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Cmd::Build {
             manifest_path,
             package,
-            auto_guard,
-            default_maxiter,
             out,
             allow_oversize,
             no_optimize,
@@ -138,14 +102,9 @@ fn main() -> Result<()> {
             namespace,
             override_flag,
         } => {
-            if auto_guard {
-                warn_auto_guard_deprecated();
-            }
             let args = ChainBuildArgs {
                 manifest_path,
                 package,
-                auto_guard,
-                default_maxiter,
                 out,
                 allow_oversize,
                 no_optimize,
@@ -158,17 +117,10 @@ fn main() -> Result<()> {
         Cmd::Clean {
             input,
             out,
-            auto_guard,
-            default_maxiter,
             allow_oversize,
             no_optimize,
         } => {
-            if auto_guard {
-                warn_auto_guard_deprecated();
-            }
             let opts = Options {
-                auto_guard,
-                default_maxiter,
                 allow_oversize,
                 optimize: !no_optimize,
             };

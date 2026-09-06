@@ -78,7 +78,7 @@ pub fn generate(tts: &[ConstSpec]) -> Result<String> {
     let mut known_codes = Vec::with_capacity(tts.len());
 
     for d in tts {
-        let value = expect_decimal(&d.name, &d.c_expr)?;
+        let value = expect_decimal(&d.name, &d.value)?;
         let variant = variant_name(&d.name)?;
         writeln!(variants, "    /// `{}` ({value}).", d.name).context("writing variant doc")?;
         writeln!(variants, "    {variant},").context("writing variant")?;

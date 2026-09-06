@@ -14,12 +14,87 @@ use crate::err;
 use proc_macro::{Delimiter, Spacing, Span, TokenStream, TokenTree};
 use std::iter::Peekable;
 
+/// Sums every field's `<FieldType as ToBytes>::MAX_LEN`, as a source-text
+/// expression — the shared shape behind `HookKey`/`HookData`/`ParamName`'s
+/// `ToBytes::MAX_LEN` const and `ParamValue`'s inline total-length
+/// expression (see each module's own doc comment for why `ParamValue`
+/// cannot instead reference `<Self as ToBytes>::MAX_LEN`).
+pub(crate) fn max_len_expr(fields: &[FieldShape]) -> String {
+    let mut expr = String::from("0usize");
+    for f in fields {
+        expr.push_str(&format!(
+            " + <{ty} as ::rshooks::convert::ToBytes>::MAX_LEN",
+            ty = f.ty
+        ));
+    }
+    expr
+}
+
+/// Emits the `const __OFF_N: usize = __OFF_{N-1} + <FieldTypeN as
+/// ToBytes>::MAX_LEN;` chain every fixed-offset derive indexes its
+/// `write`/`read` body against — see [`crate::hook_data`]'s "Codegen
+/// strategy" doc section.
+pub(crate) fn offset_consts(fields: &[FieldShape]) -> String {
+    let mut consts = String::from("const __OFF_0: usize = 0usize;\n");
+    for (i, f) in fields.iter().enumerate() {
+        consts.push_str(&format!(
+            "const __OFF_{next}: usize = __OFF_{i} + <{ty} as ::rshooks::convert::ToBytes>::MAX_LEN;\n",
+            next = i.wrapping_add(1),
+            i = i,
+            ty = f.ty,
+        ));
+    }
+    consts
+}
+
+/// Emits one `ToBytes::write` call per field, into `__dst[__OFF_i..__OFF_{i+1}]`
+/// — shared by every derive that generates a `ToBytes` impl.
+pub(crate) fn write_body(fields: &[FieldShape]) -> String {
+    let mut body = String::new();
+    for (i, f) in fields.iter().enumerate() {
+        body.push_str(&format!(
+            "let _ = ::rshooks::convert::ToBytes::write(&self.{field}, &mut __dst[__OFF_{i}..__OFF_{next}]);\n",
+            field = f.name,
+            i = i,
+            next = i.wrapping_add(1),
+        ));
+    }
+    body
+}
+
+/// Emits one `FromBytes::read` call per field, from `__src[__OFF_i..__OFF_{i+1}]`
+/// — shared by every derive that generates a `FromBytes` impl.
+pub(crate) fn read_body(fields: &[FieldShape]) -> String {
+    let mut body = String::new();
+    for (i, f) in fields.iter().enumerate() {
+        body.push_str(&format!(
+            "{field}: <{ty} as ::rshooks::convert::FromBytes>::read(&__src[__OFF_{i}..__OFF_{next}])?,\n",
+            field = f.name,
+            ty = f.ty,
+            i = i,
+            next = i.wrapping_add(1),
+        ));
+    }
+    body
+}
+
+/// Rewrites `src`'s hardcoded `::rshooks::` paths for the invoking crate
+/// (see [`crate::krate::rewrite`]) and parses it into the derive's final
+/// `TokenStream`, or a `compile_error!` at `name_span` naming `derive_name`
+/// if the generated source itself fails to parse — the shared tail of
+/// every fixed-offset derive's `generate` function.
+pub(crate) fn finish(src: String, name_span: Span, derive_name: &str) -> TokenStream {
+    let src = crate::krate::rewrite(src);
+    match src.parse::<TokenStream>() {
+        Ok(ts) => ts,
+        Err(_) => err(
+            name_span,
+            &format!("rshooks-macros: internal {derive_name} codegen failed to parse"),
+        ),
+    }
+}
+
 /// One `name: Type` field, as captured from the input tokens.
-///
-/// `Clone` because [`crate::decl_pair`] generates the identical per-field
-/// codegen twice per struct-shaped invocation — once for the declared
-/// key/name type, once for the entity that mirrors its fields.
-#[derive(Clone)]
 pub struct FieldShape {
     /// The field's name, verbatim.
     pub name: String,
@@ -49,7 +124,7 @@ pub struct StructShape {
 /// valid item (rustc parses it before invoking the derive), so this never
 /// needs to report an error — an attribute here is always exactly `#`
 /// followed by a bracketed group.
-fn skip_attrs(iter: &mut Peekable<impl Iterator<Item = TokenTree>>) {
+pub(crate) fn skip_attrs(iter: &mut Peekable<impl Iterator<Item = TokenTree>>) {
     loop {
         match iter.peek() {
             Some(TokenTree::Punct(p)) if p.as_char() == '#' => {
@@ -62,7 +137,7 @@ fn skip_attrs(iter: &mut Peekable<impl Iterator<Item = TokenTree>>) {
 }
 
 /// Advances past an optional leading `pub`/`pub(...)` visibility.
-fn skip_vis(iter: &mut Peekable<impl Iterator<Item = TokenTree>>) {
+pub(crate) fn skip_vis(iter: &mut Peekable<impl Iterator<Item = TokenTree>>) {
     if let Some(TokenTree::Ident(id)) = iter.peek()
         && id.to_string() == "pub"
     {

@@ -506,11 +506,18 @@ fn read_exact_bytes<const N: usize>(no: u32) -> Result<[u8; N]> {
 // Container-only operations
 // ---------------------------------------------------------------------------
 
+/// Shared body for `SlotObject::<STArray>::count` and
+/// `SlotObject::<Opaque>::count`.
+#[inline(always)]
+fn slot_element_count(no: u32) -> Result<u32> {
+    api::slot::slot_count(no)
+}
+
 impl SlotObject<STArray> {
     /// The number of elements in the array. Borrows.
     #[inline(always)]
     pub fn count(&self) -> Result<u32> {
-        api::slot::slot_count(self.no)
+        slot_element_count(self.no)
     }
 }
 
@@ -518,7 +525,7 @@ impl SlotObject<Opaque> {
     /// The number of elements, if the slot in fact holds an array. Borrows.
     #[inline(always)]
     pub fn count(&self) -> Result<u32> {
-        api::slot::slot_count(self.no)
+        slot_element_count(self.no)
     }
 
     /// Whether the slot holds a native (XAH) amount, if it holds an amount

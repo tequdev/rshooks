@@ -26,8 +26,9 @@ use std::collections::BTreeSet;
 use proc_macro::{Delimiter, Group, Ident, Punct, Spacing, Span, TokenStream, TokenTree};
 
 use crate::hooks_shared::{
-    AttrEntry, classify_fixed_sti_type_text, is_punct, is_valid_interface_name, parse_attr_entries,
-    parse_balanced_angle, parse_string_value, split_top_level_commas,
+    AttrEntry, classify_fixed_sti_type_text, hex_lower, hex_upper, is_punct,
+    is_valid_interface_name, parse_attr_entries, parse_balanced_angle, parse_string_value,
+    render_carrier_export, split_top_level_commas,
 };
 use crate::shape::tokens_to_string;
 use crate::{err, sha256};
@@ -1842,11 +1843,10 @@ fn render_entries_module(
     let payload_hex = hex_upper(&payload);
     let digest = sha256::sha256(&payload);
     let carrier_ident = format!("__rshooks_hooks_{}", hex_lower(&digest));
-    mod_body.push_str(&format!(
-        "#[cfg(target_arch = \"wasm32\")]\n\
-         #[doc(hidden)]\n\
-         #[unsafe(export_name = \"{ENTRIES_EXPORT_PREFIX}{payload_hex}\")]\n\
-         pub extern \"C\" fn {carrier_ident}(_reserved: u32) -> i64 {{ 0 }}\n"
+    mod_body.push_str(&render_carrier_export(
+        ENTRIES_EXPORT_PREFIX,
+        &payload_hex,
+        &carrier_ident,
     ));
 
     mod_body.push_str(&format!(
@@ -2130,14 +2130,6 @@ fn encode_entries_json(struct_name: &str, entries: &[EntryJson]) -> Result<Vec<u
 
 fn names_or_null(list: Option<&Vec<String>>) -> serde_json::Value {
     list.map_or(serde_json::Value::Null, |l| l.to_vec().into())
-}
-
-fn hex_upper(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02X}")).collect()
-}
-
-fn hex_lower(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 #[cfg(test)]

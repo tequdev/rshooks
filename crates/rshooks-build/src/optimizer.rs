@@ -58,7 +58,10 @@ pub fn optimize(wasm: &[u8]) -> Result<Vec<u8>> {
 /// and `producers`) removed, preserving every other section byte-for-byte
 /// and in order. See the module doc comment for why this must run before
 /// `wasm-opt`.
-fn strip_custom_sections(wasm: &[u8]) -> Result<Vec<u8>> {
+///
+/// `pub` (but `#[doc(hidden)]`) only so integration tests can build the same
+/// custom-section-free fixtures the native guard checker requires.
+pub fn strip_custom_sections(wasm: &[u8]) -> Result<Vec<u8>> {
     let mut module = wasm_encoder::Module::new();
     for payload in wasmparser::Parser::new(0).parse_all(wasm) {
         let payload = payload.context("parsing wasm module for custom-section stripping")?;

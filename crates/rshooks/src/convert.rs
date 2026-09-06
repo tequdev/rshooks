@@ -95,155 +95,47 @@ pub trait FromBytes: Sized {
     fn read(buf: &[u8]) -> Result<Self>;
 }
 
-impl ToBytes for u8 {
-    const MAX_LEN: usize = 1;
+/// Implements [`ToBytes`]/[`FromBytes`] for a fixed-width little-endian
+/// integer type, differing only in the type and its byte width.
+macro_rules! impl_int_bytes {
+    ($ty:ty, $len:literal) => {
+        impl ToBytes for $ty {
+            const MAX_LEN: usize = $len;
 
-    #[inline(always)]
-    fn write(&self, buf: &mut [u8]) -> usize {
-        match buf.get_mut(..1) {
-            Some(dst) => {
-                dst.copy_from_slice(&self.to_le_bytes());
-                1
+            #[inline(always)]
+            fn write(&self, buf: &mut [u8]) -> usize {
+                match buf.get_mut(..$len) {
+                    Some(dst) => {
+                        dst.copy_from_slice(&self.to_le_bytes());
+                        $len
+                    }
+                    None => 0,
+                }
             }
-            None => 0,
-        }
-    }
 
-    #[inline(always)]
-    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
-        f(&self.to_le_bytes())
-    }
-}
-
-impl FromBytes for u8 {
-    #[inline(always)]
-    fn read(buf: &[u8]) -> Result<Self> {
-        let src = buf.get(..1).ok_or(HookError::TooSmall)?;
-        let mut arr = [0u8; 1];
-        arr.copy_from_slice(src);
-        Ok(u8::from_le_bytes(arr))
-    }
-}
-
-impl ToBytes for u16 {
-    const MAX_LEN: usize = 2;
-
-    #[inline(always)]
-    fn write(&self, buf: &mut [u8]) -> usize {
-        match buf.get_mut(..2) {
-            Some(dst) => {
-                dst.copy_from_slice(&self.to_le_bytes());
-                2
+            #[inline(always)]
+            fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+                f(&self.to_le_bytes())
             }
-            None => 0,
         }
-    }
 
-    #[inline(always)]
-    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
-        f(&self.to_le_bytes())
-    }
-}
-
-impl FromBytes for u16 {
-    #[inline(always)]
-    fn read(buf: &[u8]) -> Result<Self> {
-        let src = buf.get(..2).ok_or(HookError::TooSmall)?;
-        let mut arr = [0u8; 2];
-        arr.copy_from_slice(src);
-        Ok(u16::from_le_bytes(arr))
-    }
-}
-
-impl ToBytes for u32 {
-    const MAX_LEN: usize = 4;
-
-    #[inline(always)]
-    fn write(&self, buf: &mut [u8]) -> usize {
-        match buf.get_mut(..4) {
-            Some(dst) => {
-                dst.copy_from_slice(&self.to_le_bytes());
-                4
+        impl FromBytes for $ty {
+            #[inline(always)]
+            fn read(buf: &[u8]) -> Result<Self> {
+                let src = buf.get(..$len).ok_or(HookError::TooSmall)?;
+                let mut arr = [0u8; $len];
+                arr.copy_from_slice(src);
+                Ok(<$ty>::from_le_bytes(arr))
             }
-            None => 0,
         }
-    }
-
-    #[inline(always)]
-    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
-        f(&self.to_le_bytes())
-    }
+    };
 }
 
-impl FromBytes for u32 {
-    #[inline(always)]
-    fn read(buf: &[u8]) -> Result<Self> {
-        let src = buf.get(..4).ok_or(HookError::TooSmall)?;
-        let mut arr = [0u8; 4];
-        arr.copy_from_slice(src);
-        Ok(u32::from_le_bytes(arr))
-    }
-}
-
-impl ToBytes for u64 {
-    const MAX_LEN: usize = 8;
-
-    #[inline(always)]
-    fn write(&self, buf: &mut [u8]) -> usize {
-        match buf.get_mut(..8) {
-            Some(dst) => {
-                dst.copy_from_slice(&self.to_le_bytes());
-                8
-            }
-            None => 0,
-        }
-    }
-
-    #[inline(always)]
-    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
-        f(&self.to_le_bytes())
-    }
-}
-
-impl FromBytes for u64 {
-    #[inline(always)]
-    fn read(buf: &[u8]) -> Result<Self> {
-        let src = buf.get(..8).ok_or(HookError::TooSmall)?;
-        let mut arr = [0u8; 8];
-        arr.copy_from_slice(src);
-        Ok(u64::from_le_bytes(arr))
-    }
-}
-
-impl ToBytes for i64 {
-    const MAX_LEN: usize = 8;
-
-    #[inline(always)]
-    fn write(&self, buf: &mut [u8]) -> usize {
-        match buf.get_mut(..8) {
-            Some(dst) => {
-                dst.copy_from_slice(&self.to_le_bytes());
-                8
-            }
-            None => 0,
-        }
-    }
-
-    #[inline(always)]
-    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
-        f(&self.to_le_bytes())
-    }
-}
-
-impl FromBytes for i64 {
-    #[inline(always)]
-    fn read(buf: &[u8]) -> Result<Self> {
-        let src = buf.get(..8).ok_or(HookError::TooSmall)?;
-        let mut arr = [0u8; 8];
-        arr.copy_from_slice(src);
-        Ok(i64::from_le_bytes(arr))
-    }
-}
+impl_int_bytes!(u8, 1);
+impl_int_bytes!(u16, 2);
+impl_int_bytes!(u32, 4);
+impl_int_bytes!(u64, 8);
+impl_int_bytes!(i64, 8);
 
 impl ToBytes for crate::xfl::XFL {
     // An XFL is an opaque wrapper over a raw `i64` bit pattern (see

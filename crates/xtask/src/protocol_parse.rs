@@ -29,6 +29,7 @@
 use std::collections::BTreeMap;
 
 use anyhow::{Result, anyhow, bail};
+use serde::{Deserialize, Serialize};
 
 use crate::parse::parse_c_int;
 
@@ -55,7 +56,8 @@ pub struct SFieldDecl {
 
 /// How a format declares a field may appear: the `soe*` token of a
 /// `{sfX, soeY}` entry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Presence {
     /// `soeREQUIRED`.
     Required,
@@ -82,7 +84,7 @@ impl Presence {
 }
 
 /// One `{sfX, soeY[, extra...]}` entry of a format's field list.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FieldEntry {
     /// The referenced field's name (`sfAmount`).
     pub sfield: String,

@@ -72,7 +72,7 @@ the same host-left-padded on-ledger slot as the C hook
 cargo run -p rshooks-build -- build --manifest-path examples/02_state-counter/Cargo.toml
 ```
 
-No extra flags needed — this example is guard-clean without `--auto-guard`.
+No extra flags needed — this example is guard-clean at the source level.
 
 ## Unit tests
 
@@ -109,8 +109,7 @@ still pays the generic-buffer cost. Current WCE and wasm size live in
 [`metrics.json`](./metrics.json) (refreshed by `mise run
 record-example-metrics`); a hand-rolled-buffer version of this same hook
 measures close to parity — not a dramatic gap. Still guard-clean at the
-source level — no
-`--auto-guard`/`--default-maxiter` needed. For a hook this simple (one
+source level. For a hook this simple (one
 `u64` counter, one key), the raw layer is the cheaper choice; this
 example uses the typed layer anyway because its purpose is to be the
 smallest possible tutorial for it — see `examples/12_typed-data` for the

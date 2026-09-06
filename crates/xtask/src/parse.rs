@@ -14,13 +14,20 @@
 //! vendored headers actually use.
 
 use anyhow::{Context, Result, anyhow, bail};
+use serde::{Deserialize, Serialize};
 
 /// One object-like `#define NAME VALUE` macro, in file order.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Define {
     /// The macro name.
     pub name: String,
     /// The macro's literal replacement text (untouched C expression text).
+    /// Serialized as `c_expr`: [`crate::codegen`] renders it per family
+    /// (plain decimal, 8-hex-digit grouped, `(a << 16) + b` shift-add, or
+    /// `ls_flags` alias path), so `hook_api.json` calls it what it is there —
+    /// an unrendered C expression — while this parser keeps the name that
+    /// matches its own vocabulary.
+    #[serde(rename = "c_expr")]
     pub value: String,
 }
 
@@ -66,20 +73,24 @@ pub fn scan_defines(src: &str) -> Vec<Define> {
 /// One member of a C enum: the member's name and its literal `= value`
 /// expression text. Which enum it belongs to is [`EnumGroup::name`] on the
 /// group it's stored in.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnumMember {
     /// The member's name.
     pub name: String,
-    /// The member's literal `= value` expression text.
+    /// The member's literal `= value` expression text. Serialized as
+    /// `c_expr`, matching [`Define::value`].
+    #[serde(rename = "c_expr")]
     pub value: String,
 }
 
 /// A contiguous group of enum members sharing one `enum NAME { ... };`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnumGroup {
     /// The enum's name (its `NAME` in `enum NAME { ... }`).
     pub name: String,
-    /// The enum's members, in declaration order.
+    /// The enum's members, in declaration order. Serialized as `items`,
+    /// matching `hook_api.json`'s constant-group shape.
+    #[serde(rename = "items")]
     pub members: Vec<EnumMember>,
 }
 

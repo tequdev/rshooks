@@ -3,7 +3,7 @@
 
 use anyhow::Result;
 
-use super::{push_const, with_generated_marker};
+use super::const_table;
 use crate::ir::ConstSpec;
 use crate::render::expect_decimal;
 
@@ -16,11 +16,7 @@ const MODULE_DOC: &str = "\
 
 /// Renders `tts.rs`'s full contents from `tts.h`'s parsed [`ConstSpec`]s.
 pub fn generate(tts: &[ConstSpec]) -> Result<String> {
-    let mut body = String::from("\n");
-    for d in tts {
-        let value = expect_decimal(&d.name, &d.c_expr)?;
-        let doc = vec![format!("C: `{}` (tts.h)", d.name)];
-        push_const(&mut body, &doc, &d.name, "u16", &value);
-    }
-    Ok(with_generated_marker("tts.h", MODULE_DOC) + &body)
+    const_table("tts.h", MODULE_DOC, "u16", tts, expect_decimal, |name| {
+        vec![format!("C: `{name}` (tts.h)")]
+    })
 }

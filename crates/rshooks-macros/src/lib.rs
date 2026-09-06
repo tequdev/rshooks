@@ -58,25 +58,8 @@ enum HooksTarget {
 /// module is dispatched to; this only needs to disambiguate the two.
 fn dispatch_hooks_target(item: &TokenStream) -> HooksTarget {
     let mut iter = item.clone().into_iter().peekable();
-    loop {
-        match iter.peek() {
-            Some(TokenTree::Punct(p)) if p.as_char() == '#' => {
-                iter.next();
-                iter.next();
-            }
-            _ => break,
-        }
-    }
-    if let Some(TokenTree::Ident(id)) = iter.peek()
-        && id.to_string() == "pub"
-    {
-        iter.next();
-        if let Some(TokenTree::Group(g)) = iter.peek()
-            && g.delimiter() == Delimiter::Parenthesis
-        {
-            iter.next();
-        }
-    }
+    shape::skip_attrs(&mut iter);
+    shape::skip_vis(&mut iter);
     match iter.peek() {
         Some(TokenTree::Ident(id)) if id.to_string() == "struct" => HooksTarget::Struct,
         Some(TokenTree::Ident(id)) if id.to_string() == "impl" => HooksTarget::Impl,
@@ -306,7 +289,7 @@ fn try_concat_marker(stream: TokenStream) -> Option<Ident> {
     }
     let first = tokens.first()?;
     let last = tokens.last()?;
-    if !is_punct(first, '<') || !is_punct(last, '>') {
+    if !hooks_shared::is_punct(first, '<') || !hooks_shared::is_punct(last, '>') {
         return None;
     }
     let middle = tokens.get(1..tokens.len().saturating_sub(1))?;
@@ -322,9 +305,4 @@ fn try_concat_marker(stream: TokenStream) -> Option<Ident> {
         return None;
     }
     Some(Ident::new(&text, Span::call_site()))
-}
-
-/// Whether `tt` is a bare `Punct` token spelled `ch`.
-fn is_punct(tt: &TokenTree, ch: char) -> bool {
-    matches!(tt, TokenTree::Punct(p) if p.as_char() == ch)
 }

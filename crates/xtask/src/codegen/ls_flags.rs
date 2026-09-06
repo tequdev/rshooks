@@ -29,8 +29,8 @@ pub fn generate(groups: &[ConstGroup]) -> Result<String> {
         body.push_str("// enum ");
         body.push_str(&group.name);
         body.push('\n');
-        for member in &group.items {
-            let value = render_literal(&member.c_expr)?;
+        for member in &group.members {
+            let value = render_literal(&member.value)?;
             let doc = vec![format!(
                 "C: `{}` (ls_flags.h, `enum {}`)",
                 member.name, group.name

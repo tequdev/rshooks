@@ -136,62 +136,18 @@ macro_rules! be_int_si {
     };
 }
 
-impl SiFieldType for u8 {
-    /// `STI_UINT8`.
-    const TYPE_BYTE: u8 = 0x10;
-    const WIDTH: usize = 1;
-
-    #[inline(always)]
-    fn write_si(&self, out: &mut [u8]) {
-        if let Some(dst) = out.get_mut(0) {
-            *dst = *self;
-        }
-    }
-
-    #[inline(always)]
-    fn read_si(bytes: &[u8]) -> Self {
-        bytes.first().copied().unwrap_or(0)
-    }
-}
-
+be_int_si!(u8, 1, 0x10); // STI_UINT8
 be_int_si!(u16, 2, 0x01); // STI_UINT16
 be_int_si!(u32, 4, 0x02); // STI_UINT32
 be_int_si!(u64, 8, 0x03); // STI_UINT64
 
-/// Generates a verbatim-bytes [`SiFieldType`] impl for `[u8; $len]` itself —
-/// the "byte-array types are copied verbatim" half of
-/// `docs/STATE_INTERFACE_DESIGN.md` §1.5.
+/// Generates a verbatim-bytes [`SiFieldType`] impl for `[u8; $len]` itself or
+/// a `fixed_bytes_type!` newtype (`crate::types`) wrapping it — the
+/// "byte-array types are copied verbatim" half of
+/// `docs/STATE_INTERFACE_DESIGN.md` §1.5. Works for both via
+/// `AsRef<[u8]>`/`From<[u8; $len]>`, which `[u8; $len]` satisfies trivially
+/// (identity) and every `fixed_bytes_type!` newtype derives.
 macro_rules! array_si {
-    ($len:literal, $type_byte:literal) => {
-        impl SiFieldType for [u8; $len] {
-            const TYPE_BYTE: u8 = $type_byte;
-            const WIDTH: usize = $len;
-
-            #[inline(always)]
-            fn write_si(&self, out: &mut [u8]) {
-                if let Some(dst) = out.get_mut(..$len) {
-                    dst.copy_from_slice(self);
-                }
-            }
-
-            #[inline(always)]
-            fn read_si(bytes: &[u8]) -> Self {
-                let mut buf = [0u8; $len];
-                if let Some(src) = bytes.get(..$len) {
-                    buf.copy_from_slice(src);
-                }
-                buf
-            }
-        }
-    };
-}
-
-array_si!(16, 0x04); // STI_UINT128
-array_si!(32, 0x05); // STI_UINT256
-
-/// Generates a verbatim-bytes [`SiFieldType`] impl for a `fixed_bytes_type!`
-/// newtype (`crate::types`) wrapping `[u8; $len]`.
-macro_rules! newtype_si {
     ($ty:ty, $len:literal, $type_byte:literal) => {
         impl SiFieldType for $ty {
             const TYPE_BYTE: u8 = $type_byte;
@@ -200,7 +156,7 @@ macro_rules! newtype_si {
             #[inline(always)]
             fn write_si(&self, out: &mut [u8]) {
                 if let Some(dst) = out.get_mut(..$len) {
-                    dst.copy_from_slice(&self.0);
+                    dst.copy_from_slice(self.as_ref());
                 }
             }
 
@@ -210,16 +166,18 @@ macro_rules! newtype_si {
                 if let Some(src) = bytes.get(..$len) {
                     buf.copy_from_slice(src);
                 }
-                Self(buf)
+                buf.into()
             }
         }
     };
 }
 
-newtype_si!(crate::types::Hash, 32, 0x05); // STI_UINT256
-newtype_si!(crate::types::AccountId, 20, 0x08); // STI_ACCOUNT
-array_si!(20, 0x11); // STI_UINT160
-newtype_si!(crate::types::CurrencyCode, 20, 0x1A); // STI_CURRENCY
+array_si!([u8; 16], 16, 0x04); // STI_UINT128
+array_si!([u8; 32], 32, 0x05); // STI_UINT256
+array_si!(crate::types::Hash, 32, 0x05); // STI_UINT256
+array_si!(crate::types::AccountId, 20, 0x08); // STI_ACCOUNT
+array_si!([u8; 20], 20, 0x11); // STI_UINT160
+array_si!(crate::types::CurrencyCode, 20, 0x1A); // STI_CURRENCY
 
 /// XAS-010d `XFL` — big-endian raw `int64` bit pattern, no validity check.
 ///

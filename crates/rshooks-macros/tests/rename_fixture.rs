@@ -1,7 +1,8 @@
-//! Regression test for the `rshooks` dependency-rename bug: `rshooks`'s
-//! generated code used to hardcode `::rshooks::` paths, which broke as
-//! soon as a consumer renamed the dependency (`hooks = { package =
-//! "rshooks", .. }`). `tests/rename-fixture` is a standalone crate (its own
+//! Regression test for the `rshooks` dependency-rename case: `rshooks`'s
+//! generated code hardcodes `::rshooks::` as a placeholder path, rewritten
+//! at expansion time (`rshooks-macros`'s `krate` module) to whatever a
+//! consumer renames the dependency to (`hooks = { package = "rshooks", .. }`).
+//! `tests/rename-fixture` is a standalone crate (its own
 //! `[workspace]`, so it never joins this repo's workspace) that depends on
 //! `rshooks` exactly that way and exercises every derive/attribute/macro
 //! this crate implements.

@@ -114,30 +114,18 @@ bulk-memory instructions), this happens for:
 - **Large buffer zero-init or copy** — a big stack-local `[0u8; N]`, or a
   large `memcpy`-shaped copy, lowers to a `memset`/`memcpy`-style loop.
 
-`examples/05_firewall` used to hit exactly this: an earlier version of its
-account comparison, written as `sender == blocked`, needed to be built
-with:
-
-```sh
-cargo run -p rshooks-build -- build --manifest-path examples/05_firewall/Cargo.toml \
-  --auto-guard --default-maxiter 24
-```
-
-`rshooks build` defaults to treating an unguarded loop as a hard
-build error — missing a `guard!` in your own code is a bug, not something
-to silently paper over. `--auto-guard` is the escape hatch for loops the
-guard checker finds that your source never wrote. `examples/05_firewall`'s
-current source (`examples/05_firewall/src/lib.rs`) avoids all of this: it
-compares with `buf_eq_20` explicitly and needs no extra flags — and today,
-`AccountId`'s own `==` would itself already be loop-free too (see the
-callout above), since its `PartialEq` delegates to `buf_eq_20`
-internally.
+`rshooks build` treats an unguarded loop as a hard build error — missing
+a `guard!` in your own code is a bug, not something to silently paper
+over — so a compiler-generated loop like this needs a source-level fix,
+not a build flag. `examples/05_firewall/src/lib.rs` compares accounts with
+`buf_eq_20` explicitly for exactly this reason, and `AccountId`'s own `==`
+is itself already loop-free too (see the callout above), since its
+`PartialEq` delegates to `buf_eq_20` internally.
 
 ### The two idioms that avoid it
 
-Rather than reach for `--auto-guard` after the fact, two source-level
-idioms sidestep the compiler-generated loop entirely, and are preferred
-wherever they apply:
+Two source-level idioms sidestep the compiler-generated loop entirely, and
+are preferred wherever they apply:
 
 **Fixed-size buffer equality** — `rshooks::buf_eq_8`/`_20`/`_32`/`_33`/
 `_34`/`_40`/`_48`/`_64` compare a buffer as a fixed sequence of word-sized
@@ -155,14 +143,11 @@ if buf_eq_20(&sender, &blocked) {
 }
 ```
 
-Historically, switching `firewall`'s `sender == blocked` from a derived
-array comparison to `buf_eq_20` removed both the loop and the
-`--auto-guard` flag entirely, and the word-at-a-time comparison further
-dropped its worst-case instruction count from 419 to 122. `buf_eq_20` is
-still what the example calls today, and the measurement still holds — it's
-just no longer the *only* loop-free option for two `AccountId`s, since the
-type's own `==` now delegates to `buf_eq_20` as well (see the callout
-above).
+`firewall`'s account comparison calls `buf_eq_20` for this reason: it
+removes the compiler-generated loop entirely, and the word-at-a-time
+comparison keeps its worst-case instruction count well below a derived
+array comparison's. `AccountId`'s own `==` delegates to `buf_eq_20` as
+well (see the callout above), so either spelling is loop-free.
 
 **Statics for templates and large buffers** — covered in
 [Anatomy of a Hook](anatomy.md#statics-for-templates-and-large-buffers):
@@ -174,30 +159,6 @@ its only compiler-generated loops entirely and cut its worst-case
 instruction count by an order of magnitude (6798 → 331, at this
 toolchain's `opt-level = 3` default — exact numbers drift a little
 between compiler versions).
-
-## When `--auto-guard --default-maxiter` is the last resort
-
-`--auto-guard` is deprecated: it is still accepted, with a build-time
-warning, but is scheduled for removal. The supported path for a loop
-neither idiom above covers is a hand-written loop with an explicit
-`guard!`, so its `maxiter` is chosen deliberately rather than guessed.
-Where the deprecated flag is still in use, treat it as a last resort, not
-a default habit — it is a real footgun for one specific reason: **the CLI only validates guard shape, not that
-`maxiter` covers the loop's true runtime bound.** An under-sized
-`--default-maxiter` builds clean — the guard checker sees a syntactically
-valid guard call at the top of the loop and is satisfied — and then fails
-with `GUARD_VIOLATION` only later, on a live node, the first time the
-loop's actual input pushes it past the value you guessed.
-
-`firewall`'s own README works through this concretely: `--auto-guard`'s
-own default (`--default-maxiter 16`) would build successfully for its
-20-byte account comparison, yet risks a real on-ledger `GUARD_VIOLATION`,
-since the compare can run up to 20 iterations — four more than 16 covers.
-Getting to a safe `24` there meant reasoning about the loop's true
-worst-case bound from first principles, not trusting the flag's default.
-If you do reach for `--auto-guard`, size `--default-maxiter` from the
-loop's true worst-case iteration count — found via disassembly, not
-guessed — every time.
 
 ## A nested-guarded-loop pitfall: unrolling that duplicates the inner loop
 
@@ -270,5 +231,5 @@ its failure mode if a future toolchain ever stopped honoring
   including the safety argument for its take-once exclusivity.
 - [Accept, Rollback, and Errors](errors.md) covers how a hook actually
   terminates once its checks — guarded loops included — are done.
-- [The rshooks CLI](../build/cli.md) covers the deprecated `--auto-guard`
-  and `--default-maxiter` build flags in full.
+- [The rshooks CLI](../build/cli.md) covers the full `build`/`clean`/`check`
+  flag reference.
