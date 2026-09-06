@@ -279,22 +279,17 @@ impl World {
     }
 
     /// Snapshot of every field a rolled-back/restored invocation must undo:
-    /// the state map, the committed-emission list, and (P2-E) the three
-    /// control-leftover commit targets (`hook_param_overrides`/
-    /// `hook_again_requested`/`skip_directives`) — design §3 deliverable 3,
-    /// "rollback must not leak them". `crate::env::TestEnv::run_entry` only
-    /// writes those three on the `ExitType::Accept` arm, so today a
-    /// rollback never actually mutates them and restoring is a defensive
-    /// no-op, kept so the invariant holds without re-verifying at each call
-    /// site. Everything else (params, otxn, ledger fields, grants) is not
-    /// writable by a hook invocation and needs no snapshot/restore.
+    /// the state map and the committed-emission list. `hook_param_overrides`/
+    /// `hook_again_requested`/`skip_directives` are only ever written by
+    /// `crate::env::TestEnv::run_entry` on the `ExitType::Accept` arm (see
+    /// `crate::host::control`'s module doc), so a rollback never mutates
+    /// them and they need no snapshot/restore. Everything else (params,
+    /// otxn, ledger fields, grants) is not writable by a hook invocation
+    /// and needs no snapshot/restore either.
     pub(crate) fn snapshot(&self) -> WorldSnapshot {
         WorldSnapshot {
             state: self.state.clone(),
             committed_emissions_len: self.committed_emissions.len(),
-            hook_param_overrides: self.hook_param_overrides.clone(),
-            hook_again_requested: self.hook_again_requested,
-            skip_directives_len: self.skip_directives.len(),
         }
     }
 
@@ -302,9 +297,6 @@ impl World {
         self.state = snap.state;
         self.committed_emissions
             .truncate(snap.committed_emissions_len);
-        self.hook_param_overrides = snap.hook_param_overrides;
-        self.hook_again_requested = snap.hook_again_requested;
-        self.skip_directives.truncate(snap.skip_directives_len);
     }
 }
 
@@ -312,9 +304,6 @@ impl World {
 pub(crate) struct WorldSnapshot {
     state: HashMap<StateAddr, Vec<u8>>,
     committed_emissions_len: usize,
-    hook_param_overrides: HashMap<([u8; 32], Vec<u8>), Vec<u8>>,
-    hook_again_requested: bool,
-    skip_directives_len: usize,
 }
 
 /// Left-pad-normalizes a hook-state key per design §5.3 / xahaud's own
