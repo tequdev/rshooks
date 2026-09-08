@@ -17,8 +17,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # Fails when crates/rshooks-build/vendor/xahaud/{Guard.h,Enum.h,hook_api.macro}
-      # differ from Xahau/xahaud@release, or when SHA256SUMS does not match
-      # the files on disk. Re-sync with scripts/sync-vendor.sh, review the
+      # differ from the xahaud commit pinned in scripts/sync-vendor.sh, when
+      # the other vendor groups differ from Xahau/xahaud@release, or when
+      # SHA256SUMS does not match the files on disk. Re-sync with scripts/sync-vendor.sh, review the
       # diff, run `cargo test -p rshooks-build`, and commit.
-      - name: Check vendored files against upstream release branch
+      - name: Check vendored files against upstream
         run: ./scripts/sync-vendor.sh --check

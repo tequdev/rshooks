@@ -86,13 +86,15 @@ wrote out/current/sethook.template.meta.json
 ```
 
 `build` itself doesn't print the guard checker's or validator's numbers —
-those land in that entry's `<index>.<fn>.metadata.json` sidecar (the `WCE`
-object) instead. To see them on the terminal, run `rshooks check` against
+those land in that entry's `<index>.<fn>.metadata.json` sidecar (the `WCE`,
+`execution_cost` and `execution_fee_drops` objects) instead. To see them on the terminal, run `rshooks check` against
 the binary `build` just wrote:
 
 ```text
 $ rshooks check out/current/0.main.wasm
 worst-case instructions: hook=14 cbak=0
+worst-case execution cost: hook=214 cbak=0
+estimated execution fee: hook=22 drops cbak=0 drops
 max nesting depth: 0
 OK: out/current/0.main.wasm is a valid SetHook wasm binary
 size: 174 bytes
@@ -103,6 +105,11 @@ estimated SetHook fee: 870000 drops (0.870000 XAH)
   on instructions the host will ever execute for each entry point. It only
   appears for API version 0 (Guard-type) modules — a Gas-type module has no
   static bound of this kind.
+- **`worst-case execution cost`** is the same bound in HookFeeV2 cost
+  units: one per instruction, plus 100 for every Hook API call (including
+  the `_g` guard call itself), with loop multipliers applied. The
+  **`estimated execution fee`** is that cost at 10 units per drop, rounded
+  up to a whole drop.
 - **`max nesting depth`** is the deepest block/loop/if nesting in the final
   module, checked against the host's structural limit — 32 for a
   Guard-type module. This is the number [Hook Chains](../concepts/chains.md)

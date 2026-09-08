@@ -7,13 +7,19 @@
 #                                    # each group's SHA256SUMS (review with
 #                                    # `git diff`)
 #   scripts/sync-vendor.sh --check   # verify: fail (exit 1) if any group's
-#                                    # vendored files differ from the
-#                                    # upstream release branch or from its
+#                                    # vendored files differ from their
+#                                    # upstream ref (release branch, or the
+#                                    # pinned guard-checker commit) or from
 #                                    # SHA256SUMS; writes nothing. Used by CI.
 set -eu
 
 REPO="Xahau/xahaud"
 BRANCH="release"
+# The guard checker is pinned to the xahaud commit that
+# tequdev/guard-checker v0.1.1-HookFeeV2-1 was built from (branch HookFeeV2),
+# so `rshooks-build` computes the same HookFeeV2 execution cost as that
+# release binary.
+GUARD_CHECKER_REF="1d5cdfbb43152ba88e5f50fe776ac47bc966ca1a"
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -39,19 +45,21 @@ trap 'rm -rf "${TMP_DIR}"' EXIT INT TERM
 
 overall_status=0
 
-#   sync_group <label> <vendor-dir> <upstream-dir> <file>...
+#   sync_group <label> <vendor-dir> <upstream-dir> <ref> <file>...
 #
-# Pass an empty <upstream-dir> and repo-relative file paths when a group spans
-# multiple upstream directories. Files are always vendored by basename.
+# <ref> is a branch name or a full commit SHA. Pass an empty <upstream-dir>
+# and repo-relative file paths when a group spans multiple upstream
+# directories. Files are always vendored by basename.
 sync_group() {
     name="$1"
     vendor_rel="$2"
     vendor_dir="${ROOT_DIR}/${vendor_rel}"
     upstream_path="$3"
-    shift 3
+    ref="$4"
+    shift 4
     files="$*"
 
-    base_url="https://raw.githubusercontent.com/${REPO}/refs/heads/${BRANCH}"
+    base_url="https://raw.githubusercontent.com/${REPO}/${ref}"
     if [ -n "${upstream_path}" ]; then
         base_url="${base_url}/${upstream_path}"
     fi
@@ -59,7 +67,7 @@ sync_group() {
     group_tmp="${TMP_DIR}/${name}"
     mkdir -p "${group_tmp}"
 
-    echo "[${name}] fetching from ${REPO}@${BRANCH}/${upstream_path} ..."
+    echo "[${name}] fetching from ${REPO}@${ref}/${upstream_path} ..."
     for f in ${files}; do
         b="$(basename "${f}")"
         if ! curl -sfL "${base_url}/${f}" -o "${group_tmp}/${b}"; then
@@ -74,7 +82,7 @@ sync_group() {
         for f in ${files}; do
             b="$(basename "${f}")"
             if ! cmp -s "${group_tmp}/${b}" "${vendor_dir}/${b}"; then
-                echo "DRIFT: [${name}] ${b} differs from upstream ${REPO}@${BRANCH}" >&2
+                echo "DRIFT: [${name}] ${b} differs from upstream ${REPO}@${ref}" >&2
                 diff -u "${vendor_dir}/${b}" "${group_tmp}/${b}" | head -40 >&2 || true
                 group_status=1
             fi
@@ -91,7 +99,7 @@ sync_group() {
         done
 
         if [ "${group_status}" -eq 0 ]; then
-            echo "OK: [${name}] vendored files are byte-identical to ${REPO}@${BRANCH} and match SHA256SUMS"
+            echo "OK: [${name}] vendored files are byte-identical to ${REPO}@${ref} and match SHA256SUMS"
         else
             overall_status=1
         fi
@@ -119,18 +127,20 @@ sync_group() {
     if [ "${changed}" -eq 1 ]; then
         echo "[${name}] vendored files updated. Review with:  git diff ${vendor_rel}"
     else
-        echo "[${name}] already in sync with ${REPO}@${BRANCH}"
+        echo "[${name}] already in sync with ${REPO}@${ref}"
     fi
 }
 
 sync_group "guard-checker" \
     "crates/rshooks-build/vendor/xahaud" \
     "include/xrpl/hook" \
+    "${GUARD_CHECKER_REF}" \
     Guard.h Enum.h hook_api.macro
 
 sync_group "hook-headers" \
     "crates/rshooks-core/vendor/xahaud-hook" \
     "hook" \
+    "${BRANCH}" \
     error.h extern.h hookapi.h ls_flags.h macro.h sfcodes.h tts.h tx_flags.h
 
 # These files span two upstream directories, hence the empty upstream path.
@@ -139,6 +149,7 @@ sync_group "hook-headers" \
 sync_group "protocol-formats" \
     "crates/rshooks-core/vendor/xahaud-protocol" \
     "" \
+    "${BRANCH}" \
     include/xrpl/protocol/detail/sfields.macro \
     include/xrpl/protocol/detail/transactions.macro \
     include/xrpl/protocol/detail/ledger_entries.macro \

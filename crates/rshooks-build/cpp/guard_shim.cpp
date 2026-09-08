@@ -23,7 +23,10 @@ extern "C" {
 //
 // Returns:
 //   0 — valid: `*out_hook_cost` / `*out_cbak_cost` are the worst-case
-//       instruction counts `validateGuards` computed for `hook()` / `cbak()`.
+//       instruction counts `validateGuards` computed for `hook()` / `cbak()`,
+//       and `*out_hook_exec_cost` / `*out_cbak_exec_cost` are its HookFeeV2
+//       worst-case execution costs (instructions plus
+//       `hook_api::api_call_cost` per Hook API call, in cost units).
 //   1 — invalid: the module failed a guard-checker rule. The checker's log
 //       (identical to what a real node would produce) is copied into
 //       `log_buf`.
@@ -45,6 +48,8 @@ int rshooks_validate_guards(
     size_t wasm_len,
     uint64_t* out_hook_cost,
     uint64_t* out_cbak_cost,
+    uint64_t* out_hook_exec_cost,
+    uint64_t* out_cbak_exec_cost,
     char* log_buf,
     size_t log_cap,
     size_t* out_log_len)
@@ -75,6 +80,7 @@ int rshooks_validate_guards(
             wasm_vec,
             guard_log,
             std::string("rshooks-build"),
+            /* returnCost */ false,
             whitelist,
             rules_version);
 
@@ -85,8 +91,26 @@ int rshooks_validate_guards(
             return 1;
         }
 
+        // `validateGuards` reports either the instruction count or the
+        // execution cost per call, selected by `returnCost`; the second
+        // pass re-runs the same checker (log suppressed) for the cost.
+        auto cost = validateGuards(
+            wasm_vec,
+            std::nullopt,
+            std::string("rshooks-build"),
+            /* returnCost */ true,
+            whitelist,
+            rules_version);
+
+        if (!cost)
+        {
+            return 1;
+        }
+
         *out_hook_cost = verdict->first;
         *out_cbak_cost = verdict->second;
+        *out_hook_exec_cost = cost->first;
+        *out_cbak_exec_cost = cost->second;
         return 0;
     }
     catch (const std::exception& e)

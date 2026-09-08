@@ -1,7 +1,13 @@
-//! SetHook fee estimation: `docs/DESIGN.md` §6.1 — `bytes * 5000` drops.
+//! SetHook fee estimation: `docs/DESIGN.md` §6.1 — `bytes * 5000` drops —
+//! and the HookFeeV2 execution fee: `ceil(cost / 10)` drops.
 
 /// Drops of XAH per byte of hook binary, per SetHook's fee schedule.
 pub const DROPS_PER_BYTE: u64 = 5000;
+
+/// HookFeeV2 execution-cost units per drop (`hook_api::cost_units_per_drop`
+/// in the vendored `Enum.h`): an instruction is one unit and a Hook API
+/// call is `hook_api::api_call_cost` units on top of its call instruction.
+pub const COST_UNITS_PER_DROP: u64 = 10;
 
 /// Drops per whole XAH (1 XAH = 1,000,000 drops).
 pub const DROPS_PER_XAH: u64 = 1_000_000;
@@ -24,6 +30,13 @@ impl FeeEstimate {
         let frac = self.drops % DROPS_PER_XAH;
         format!("{whole}.{frac:06}")
     }
+}
+
+/// Converts a HookFeeV2 worst-case execution cost into drops, rounding up
+/// to a whole drop.
+#[must_use]
+pub fn execution_fee_drops(cost_units: u64) -> u64 {
+    cost_units.div_ceil(COST_UNITS_PER_DROP)
 }
 
 /// Estimates the SetHook fee for a binary of the given size.
@@ -51,6 +64,15 @@ mod tests {
         let fee = estimate_fee(1234);
         assert_eq!(fee.bytes, 1234);
         assert_eq!(fee.drops, 1234 * 5000);
+    }
+
+    #[test]
+    fn execution_fee_rounds_up_to_a_whole_drop() {
+        assert_eq!(execution_fee_drops(0), 0);
+        assert_eq!(execution_fee_drops(1), 1);
+        assert_eq!(execution_fee_drops(10), 1);
+        assert_eq!(execution_fee_drops(11), 2);
+        assert_eq!(execution_fee_drops(u64::MAX), u64::MAX / 10 + 1);
     }
 
     #[test]

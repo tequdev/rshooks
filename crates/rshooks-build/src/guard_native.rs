@@ -26,15 +26,20 @@ unsafe extern "C" {
         wasm_len: usize,
         out_hook_cost: *mut u64,
         out_cbak_cost: *mut u64,
+        out_hook_exec_cost: *mut u64,
+        out_cbak_exec_cost: *mut u64,
         log_buf: *mut c_char,
         log_cap: usize,
         out_log_len: *mut usize,
     ) -> i32;
 }
 
-/// The worst-case instruction counts the upstream checker computed for a
-/// module's `hook()` and `cbak()` entry points. These are also what SetHook
-/// fee estimation is derived from upstream.
+/// The worst-case instruction counts and HookFeeV2 execution costs the
+/// upstream checker computed for a module's `hook()` and `cbak()` entry
+/// points. The execution cost is what HookFeeV2 fee estimation is derived
+/// from: every instruction costs one unit and every Hook API call
+/// (including `_g`) costs `hook_api::api_call_cost` units on top, with
+/// [`crate::fee::COST_UNITS_PER_DROP`] units per drop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GuardVerdict {
     /// Worst-case instruction count for `hook()`.
@@ -43,6 +48,11 @@ pub struct GuardVerdict {
     /// `cbak` export (the checker still returns a pair; upstream reports 0
     /// for the absent entry point).
     pub cbak_cost: u64,
+    /// Worst-case execution cost for `hook()`, in HookFeeV2 cost units.
+    pub hook_exec_cost: u64,
+    /// Worst-case execution cost for `cbak()`, in HookFeeV2 cost units.
+    /// Zero if the module has no `cbak` export.
+    pub cbak_exec_cost: u64,
 }
 
 /// Why the native checker did not return a verdict.
@@ -113,6 +123,8 @@ impl std::error::Error for NativeGuardError {}
 pub fn validate_guards_native(wasm: &[u8]) -> Result<GuardVerdict, NativeGuardError> {
     let mut hook_cost: u64 = 0;
     let mut cbak_cost: u64 = 0;
+    let mut hook_exec_cost: u64 = 0;
+    let mut cbak_exec_cost: u64 = 0;
     let mut log_buf = vec![0u8; LOG_BUF_CAPACITY];
     let mut log_len: usize = 0;
 
@@ -123,8 +135,9 @@ pub fn validate_guards_native(wasm: &[u8]) -> Result<GuardVerdict, NativeGuardEr
     // are passed together, so the C++ side's `memcpy` (bounded by
     // `min(text.size(), log_cap)`, see `guard_shim.cpp`) cannot write past
     // the end of the allocation. `out_hook_cost`/`out_cbak_cost`/
-    // `out_log_len` are `&mut` locals of the right type, so they are valid
-    // for the single write the shim performs to each. The function has no
+    // `out_hook_exec_cost`/`out_cbak_exec_cost`/`out_log_len` are `&mut`
+    // locals of the right type, so they are valid for the single write the
+    // shim performs to each. The function has no
     // documented preconditions beyond these (no global state, safe to call
     // repeatedly).
     let status = unsafe {
@@ -133,6 +146,8 @@ pub fn validate_guards_native(wasm: &[u8]) -> Result<GuardVerdict, NativeGuardEr
             wasm.len(),
             &mut hook_cost,
             &mut cbak_cost,
+            &mut hook_exec_cost,
+            &mut cbak_exec_cost,
             log_buf.as_mut_ptr().cast::<c_char>(),
             log_buf.len(),
             &mut log_len,
@@ -147,6 +162,8 @@ pub fn validate_guards_native(wasm: &[u8]) -> Result<GuardVerdict, NativeGuardEr
         0 => Ok(GuardVerdict {
             hook_cost,
             cbak_cost,
+            hook_exec_cost,
+            cbak_exec_cost,
         }),
         1 => Err(NativeGuardError::Invalid {
             log: log_text(),

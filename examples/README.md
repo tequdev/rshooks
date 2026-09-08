@@ -119,12 +119,13 @@ cargo run -p rshooks-build -- check examples/02_state-counter/out/current/0.main
 See each example's own README for its exact command — none need the
 deprecated `--auto-guard` (see below for why).
 
-## Recorded cost (WCE / size / nesting)
+## Recorded cost (WCE / execution cost / size / nesting)
 
 Each crate records its current `rshooks build`/`check` numbers in
 [`metrics.json`](./01_accept-all/metrics.json) next to `src/` — worst-case
-instruction count (`WCE.hook` / `WCE.cbak`), wasm size in bytes, and max
-block-nesting depth. After a library or example change that moves those
+instruction count (`wce.hook` / `wce.cbak`), HookFeeV2 worst-case execution
+cost and its fee rounded up to whole drops (`cost.*`, `fee_drops.*`), wasm
+size in bytes, and max block-nesting depth. After a library or example change that moves those
 numbers, refresh the snapshots instead of editing README prose:
 
 ```sh

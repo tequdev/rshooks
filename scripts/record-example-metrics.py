@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record or check each example's WCE / size / nesting snapshot.
+"""Record or check each example's WCE / execution cost / size / nesting snapshot.
 
 Each `examples/<dir>/metrics.json` is the source of truth for that crate's
 current `rshooks build`/`check` numbers. Refresh after a library or
@@ -38,12 +38,19 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES_DIR = ROOT / "examples"
-SCHEMA = "rshooks-example-metrics-v1"
+SCHEMA = "rshooks-example-metrics-v2"
 METRICS_NAME = "metrics.json"
 
 NESTING_RE = re.compile(r"^max nesting depth: (\d+)\s*$", re.MULTILINE)
 WCE_LINE_RE = re.compile(
     r"^worst-case instructions: hook=(\d+) cbak=(\d+)\s*$", re.MULTILINE
+)
+COST_LINE_RE = re.compile(
+    r"^worst-case execution cost: hook=(\d+) cbak=(\d+)\s*$", re.MULTILINE
+)
+FEE_LINE_RE = re.compile(
+    r"^estimated execution fee: hook=(\d+) drops cbak=(\d+) drops\s*$",
+    re.MULTILINE,
 )
 
 
@@ -67,7 +74,7 @@ def current_dir(example: str) -> Path:
 def dump_metrics(document: dict[str, Any]) -> str:
     # Insertion order is part of the snapshot contract so git diffs stay
     # stable: schema, then entries sorted by (index, hook_fn), each entry
-    # in artifact/index/hook_fn/bytes/wce/max_nesting order.
+    # in artifact/index/hook_fn/bytes/wce/cost/fee_drops/max_nesting order.
     return json.dumps(document, indent=2) + "\n"
 
 
@@ -79,6 +86,10 @@ def canonical_entry(
     size: int,
     wce_hook: int | None,
     wce_cbak: int | None,
+    cost_hook: int | None,
+    cost_cbak: int | None,
+    fee_hook: int | None,
+    fee_cbak: int | None,
     max_nesting: int,
 ) -> dict[str, Any]:
     return {
@@ -87,6 +98,8 @@ def canonical_entry(
         "hook_fn": hook_fn,
         "bytes": size,
         "wce": {"hook": wce_hook, "cbak": wce_cbak},
+        "cost": {"hook": cost_hook, "cbak": cost_cbak},
+        "fee_drops": {"hook": fee_hook, "cbak": fee_cbak},
         "max_nesting": max_nesting,
     }
 
@@ -185,18 +198,26 @@ def sidecar_for(wasm: Path) -> Path:
     return wasm.with_name(wasm.name[: -len(".wasm")] + ".metadata.json")
 
 
-def parse_check_output(stdout: str, wasm: Path) -> tuple[int, int, int]:
+def parse_check_output(stdout: str, wasm: Path) -> tuple[list[int], int]:
+    """Return ([wce_hook, wce_cbak, cost_hook, cost_cbak, fee_hook, fee_cbak], nesting)."""
     nesting_match = NESTING_RE.search(stdout)
     if nesting_match is None:
         raise SystemExit(
             f"FATAL: {wasm}: `rshooks check` did not print max nesting depth:\n{stdout}"
         )
-    wce_match = WCE_LINE_RE.search(stdout)
-    if wce_match is None:
-        raise SystemExit(
-            f"FATAL: {wasm}: `rshooks check` did not print worst-case instructions:\n{stdout}"
-        )
-    return int(wce_match.group(1)), int(wce_match.group(2)), int(nesting_match.group(1))
+    figures: list[int] = []
+    for label, pattern in (
+        ("worst-case instructions", WCE_LINE_RE),
+        ("worst-case execution cost", COST_LINE_RE),
+        ("estimated execution fee", FEE_LINE_RE),
+    ):
+        match = pattern.search(stdout)
+        if match is None:
+            raise SystemExit(
+                f"FATAL: {wasm}: `rshooks check` did not print {label}:\n{stdout}"
+            )
+        figures.extend((int(match.group(1)), int(match.group(2))))
+    return figures, int(nesting_match.group(1))
 
 
 def collect_entry(bin_path: Path, wasm: Path) -> dict[str, Any]:
@@ -207,28 +228,38 @@ def collect_entry(bin_path: Path, wasm: Path) -> dict[str, Any]:
     try:
         index = int(meta["index"])
         hook_fn = str(meta["hook_fn"])
-        wce = meta["WCE"]
-        meta_hook = wce["hook"]
-        meta_cbak = wce["cbak"]
+        meta_figures = [
+            meta[key][entry]
+            for key in ("WCE", "execution_cost", "execution_fee_drops")
+            for entry in ("hook", "cbak")
+        ]
     except (KeyError, TypeError, ValueError) as exc:
-        raise SystemExit(f"FATAL: {sidecar}: expected index/hook_fn/WCE: {exc}") from exc
+        raise SystemExit(
+            f"FATAL: {sidecar}: expected index/hook_fn/WCE/execution_cost/"
+            f"execution_fee_drops: {exc}"
+        ) from exc
 
     completed = run_rshooks(bin_path, ["check", str(wasm)], capture=True)
-    check_hook, check_cbak, max_nesting = parse_check_output(completed.stdout, wasm)
+    check_figures, max_nesting = parse_check_output(completed.stdout, wasm)
 
-    if meta_hook != check_hook or meta_cbak != check_cbak:
+    if meta_figures != check_figures:
         raise SystemExit(
-            f"FATAL: {wasm}: sidecar WCE (hook={meta_hook} cbak={meta_cbak}) "
-            f"!= check WCE (hook={check_hook} cbak={check_cbak})"
+            f"FATAL: {wasm}: sidecar figures {meta_figures} != check figures "
+            f"{check_figures} (wce/cost/fee, hook then cbak)"
         )
 
+    wce_hook, wce_cbak, cost_hook, cost_cbak, fee_hook, fee_cbak = meta_figures
     return canonical_entry(
         artifact=wasm.name,
         index=index,
         hook_fn=hook_fn,
         size=wasm.stat().st_size,
-        wce_hook=meta_hook,
-        wce_cbak=meta_cbak,
+        wce_hook=wce_hook,
+        wce_cbak=wce_cbak,
+        cost_hook=cost_hook,
+        cost_cbak=cost_cbak,
+        fee_hook=fee_hook,
+        fee_cbak=fee_cbak,
         max_nesting=max_nesting,
     )
 
@@ -292,6 +323,8 @@ def process_example(
         print(
             f"      {entry['artifact']}: {entry['bytes']} bytes  "
             f"WCE hook={entry['wce']['hook']} cbak={entry['wce']['cbak']}  "
+            f"cost hook={entry['cost']['hook']} cbak={entry['cost']['cbak']}  "
+            f"fee hook={entry['fee_drops']['hook']} cbak={entry['fee_drops']['cbak']} drops  "
             f"nesting={entry['max_nesting']}"
         )
     return True
@@ -299,7 +332,7 @@ def process_example(
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Record or check examples/*/metrics.json (WCE / bytes / nesting)."
+        description="Record or check examples/*/metrics.json (WCE / cost / fee / bytes / nesting)."
     )
     parser.add_argument(
         "--check",

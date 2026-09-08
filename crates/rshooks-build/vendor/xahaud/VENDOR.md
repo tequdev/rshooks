@@ -8,10 +8,13 @@ Rust reimplementation. These files are never hand-edited.
 ## Provenance
 
 - Upstream repository: `Xahau/xahaud`
-- Branch: `release`
+- Commit: `1d5cdfbb43152ba88e5f50fe776ac47bc966ca1a` (branch `HookFeeV2`) —
+  the commit the `tequdev/guard-checker` release `v0.1.1-HookFeeV2-1`
+  binaries are built from, pinned as `GUARD_CHECKER_REF` in
+  `scripts/sync-vendor.sh`
 - Files: `Guard.h`, `Enum.h`, `hook_api.macro`, all from
-  `include/xrpl/hook/` on that branch
-- Last synced: 2026-07-24
+  `include/xrpl/hook/` at that commit
+- Last synced: 2026-09-08
 - Recorded hashes: [`SHA256SUMS`](SHA256SUMS) (single source of truth;
   regenerated only by the sync script)
 
@@ -19,12 +22,14 @@ Rust reimplementation. These files are never hand-edited.
 
 - **Never hand-edit these three files.** Re-sync only with
   `scripts/sync-vendor.sh` (run from the repo root), which downloads all
-  three from the `release` branch, overwrites the vendored copies, and
-  regenerates `SHA256SUMS`. Review the resulting `git diff` and re-run
+  three from the pinned commit, overwrites the vendored copies, and
+  regenerates `SHA256SUMS`. To move to another guard-checker release,
+  change `GUARD_CHECKER_REF` to the xahaud commit its `xahaud` submodule
+  points at. Review the resulting `git diff` and re-run
   `cargo test -p rshooks-build` before committing — an upstream change can
   change checker behavior.
 - `scripts/sync-vendor.sh --check` verifies (without writing) that the
-  vendored files are byte-identical to upstream `release` AND match
+  vendored files are byte-identical to the pinned upstream commit AND match
   `SHA256SUMS`. CI runs this on every push/PR and weekly on a schedule
   (`.github/workflows/vendor-sync.yml`), so upstream drift surfaces as a
   failing workflow instead of a silent divergence.

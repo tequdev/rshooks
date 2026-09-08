@@ -25,7 +25,7 @@ mod validator;
 pub mod whitelist;
 
 pub use cleaner::clean;
-pub use fee::{FeeEstimate, estimate_fee};
+pub use fee::{COST_UNITS_PER_DROP, FeeEstimate, estimate_fee, execution_fee_drops};
 pub use flatten::{FlattenReport, flatten};
 #[allow(deprecated)]
 pub use guard::auto_guard;
@@ -276,6 +276,8 @@ mod tests {
         GuardVerdict {
             hook_cost: 1,
             cbak_cost: 0,
+            hook_exec_cost: 1,
+            cbak_exec_cost: 0,
         }
     }
 

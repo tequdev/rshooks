@@ -202,6 +202,14 @@ exist). For `AcceptAll`, `out/current/` contains:
     "hook": 14,
     "cbak": 0
   },
+  "execution_cost": {
+    "hook": 214,
+    "cbak": 0
+  },
+  "execution_fee_drops": {
+    "hook": 22,
+    "cbak": 0
+  },
   "builder": {
     "name": "rshooks-build",
     "version": "0.2.0",
@@ -240,7 +248,10 @@ exist). For `AcceptAll`, `out/current/` contains:
 
 The **`WCE`** (worst-case execution) numbers are the static, guard-derived
 upper bound on instructions the host will ever execute for this entry's
-`hook`/`cbak` — the same figures the pipeline printed to the terminal. The
+`hook`/`cbak` — the same figures `rshooks check` prints to the terminal.
+**`execution_cost`** is that bound in HookFeeV2 cost units (an instruction
+is one unit, a Hook API call adds 100) and **`execution_fee_drops`** is the
+cost at 10 units per drop, rounded up. The
 **`HookHash`** is Xahau's hash of the deployed binary: the uppercase hex of
 the first 32 bytes of the wasm's SHA-512 digest — this is what identifies
 the exact Hook code on-ledger, independent of which account installed it.

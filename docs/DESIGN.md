@@ -1727,8 +1727,10 @@ export/import set, structural sections, float opcodes, `call_indirect`,
 recursion, the size gate) — the native checker has no opinion on those at
 all, so its acceptance says nothing about them.
 
-Vendored files (upstream `Xahau/xahaud`, branch `release`, kept verbatim —
-never hand-edited; re-sync only via `scripts/sync-vendor.sh`, which also
+Vendored files (upstream `Xahau/xahaud`, pinned by `scripts/sync-vendor.sh`
+to the commit the `tequdev/guard-checker` release binaries are built from —
+currently `HookFeeV2`, see `vendor/xahaud/VENDOR.md` — kept verbatim, never
+hand-edited; re-sync only via `scripts/sync-vendor.sh`, which also
 regenerates the `SHA256SUMS` tripwire file; CI verifies byte-identity
 against upstream on every push/PR and weekly —
 `.github/workflows/vendor-sync.yml`):
@@ -1834,6 +1836,8 @@ only.
   "HookName": "656D69742D7478",
   "HookHash": "DDAF35A1...64 uppercase hex characters",
   "WCE": { "hook": 4150, "cbak": 0 },
+  "execution_cost": { "hook": 9450, "cbak": 0 },
+  "execution_fee_drops": { "hook": 945, "cbak": 0 },
   "builder": {
     "name": "rshooks-build",
     "version": "0.2.0",
@@ -1848,9 +1852,14 @@ only.
 ```
 
 `HookHash` is SHA512-Half of the exact final cleaned WASM bytes, matching
-`SetHook`'s hash of `CreateCode`. API-version-0 WCE values come from the
-vendored authoritative guard verdict; API version 1 writes `null` for both
-values because static WCE is not calculated for gas hooks. The final module's
+`SetHook`'s hash of `CreateCode`. API-version-0 `WCE`, `execution_cost` and
+`execution_fee_drops` values come from the vendored authoritative guard
+verdict: `WCE` is the worst-case instruction count, `execution_cost` the
+HookFeeV2 worst-case cost (one unit per instruction plus
+`hook_api::api_call_cost` units per Hook API call, loop multipliers
+applied), and `execution_fee_drops` that cost rounded up to whole drops at
+`hook_api::cost_units_per_drop` units each. API version 1 writes `null` for
+all of them because no static bound is calculated for gas hooks. The final module's
 reachable `env::emit` import is also cross-checked against `HookCanEmit`: a
 declaration without emit usage and emit usage without a declaration both
 produce build warnings.

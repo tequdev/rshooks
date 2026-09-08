@@ -208,6 +208,15 @@ fn print_report(report: &ValidationReport) {
             "worst-case instructions: hook={} cbak={}",
             verdict.hook_cost, verdict.cbak_cost
         );
+        println!(
+            "worst-case execution cost: hook={} cbak={}",
+            verdict.hook_exec_cost, verdict.cbak_exec_cost
+        );
+        println!(
+            "estimated execution fee: hook={} drops cbak={} drops",
+            rshooks_build::execution_fee_drops(verdict.hook_exec_cost),
+            rshooks_build::execution_fee_drops(verdict.cbak_exec_cost)
+        );
     }
     println!("max nesting depth: {}", report.max_nesting_depth);
 }

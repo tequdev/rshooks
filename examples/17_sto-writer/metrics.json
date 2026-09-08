@@ -1,5 +1,5 @@
 {
-  "schema": "rshooks-example-metrics-v1",
+  "schema": "rshooks-example-metrics-v2",
   "entries": [
     {
       "artifact": "0.main.wasm",
@@ -9,6 +9,14 @@
       "wce": {
         "hook": 681,
         "cbak": 7
+      },
+      "cost": {
+        "hook": 2981,
+        "cbak": 107
+      },
+      "fee_drops": {
+        "hook": 299,
+        "cbak": 11
       },
       "max_nesting": 5
     }

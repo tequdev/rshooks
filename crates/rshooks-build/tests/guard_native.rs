@@ -103,6 +103,14 @@ fn native_checker_accepts_valid_guarded_hook() {
         verdict.cbak_cost, 0,
         "no cbak export exists in this fixture"
     );
+    // HookFeeV2: every Hook API call (`_g` per iteration, `accept` once)
+    // adds `api_call_cost` units on top of its call instruction.
+    assert!(
+        verdict.hook_exec_cost >= verdict.hook_cost + 100,
+        "execution cost should exceed the instruction count by at least one \
+         api call: {verdict:?}"
+    );
+    assert_eq!(verdict.cbak_exec_cost, 0);
 }
 
 #[test]

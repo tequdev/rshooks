@@ -382,7 +382,7 @@ enum class hook_return_code : int64_t {
     INVALID_KEY = -41,   // user supplied key was not valid
     NOT_A_STRING = -42,  // nul terminator missing from a string argument
     MEM_OVERLAP = -43,   // one or more specified buffers are the same memory
-    TOO_MANY_STATE_MODIFICATIONS = -44,  // more than 5000 modified state
+    TOO_MANY_STATE_MODIFICATIONS = -44,  // more than 256 modified state
                                          // entires in the combined hook chains
     TOO_MANY_NAMESPACES = -45
 };
@@ -400,6 +400,13 @@ const uint8_t max_nonce = 255;
 const uint8_t max_emit = 255;
 const uint8_t max_params = 16;
 const double fee_base_multiplier = 1.1f;
+
+// HookFeeV2 execution cost units: every wasm instruction costs one unit and
+// every hook api call costs api_call_cost units on top of its call
+// instruction. cost_units_per_drop units make one drop, so an instruction
+// costs 0.1 drop and an api call 10 drops.
+const uint32_t api_call_cost = 100;
+const uint32_t cost_units_per_drop = 10;
 
 using APIWhitelist = std::map<std::string, std::vector<uint8_t>>;
 

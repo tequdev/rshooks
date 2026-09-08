@@ -37,13 +37,23 @@ pub(crate) fn validate_transaction_types(field: &str, values: Option<&[String]>)
     Ok(())
 }
 
-/// Worst-case instruction counts for the Hook entry points.
+/// One static per-entry-point figure from the guard checker (worst-case
+/// instruction count, HookFeeV2 execution cost, or the fee derived from
+/// it), or `null` for gas-type Hooks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct WorstCaseExecution {
-    /// Static WCE for `hook`, or `null` for gas-type Hooks.
+    /// The figure for `hook`, or `null` for gas-type Hooks.
     pub hook: Option<u64>,
-    /// Static WCE for `cbak`, or `null` for gas-type Hooks.
+    /// The figure for `cbak`, or `null` for gas-type Hooks.
     pub cbak: Option<u64>,
+}
+
+impl WorstCaseExecution {
+    /// Both entry points `null` (gas-type Hooks, or no native verdict).
+    pub const NONE: Self = Self {
+        hook: None,
+        cbak: None,
+    };
 }
 
 /// Toolchain provenance for a sidecar, recorded so a build can be

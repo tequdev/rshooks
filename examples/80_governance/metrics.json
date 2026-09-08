@@ -1,5 +1,5 @@
 {
-  "schema": "rshooks-example-metrics-v1",
+  "schema": "rshooks-example-metrics-v2",
   "entries": [
     {
       "artifact": "0.govern.wasm",
@@ -8,6 +8,14 @@
       "bytes": 12475,
       "wce": {
         "hook": 24941,
+        "cbak": 0
+      },
+      "cost": {
+        "hook": 84242,
+        "cbak": 0
+      },
+      "fee_drops": {
+        "hook": 8425,
         "cbak": 0
       },
       "max_nesting": 25
@@ -19,6 +27,14 @@
       "bytes": 6219,
       "wce": {
         "hook": 11367,
+        "cbak": 0
+      },
+      "cost": {
+        "hook": 34967,
+        "cbak": 0
+      },
+      "fee_drops": {
+        "hook": 3497,
         "cbak": 0
       },
       "max_nesting": 21

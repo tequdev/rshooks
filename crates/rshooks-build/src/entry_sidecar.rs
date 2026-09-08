@@ -10,6 +10,7 @@ use serde::{Serialize, Serializer, ser::SerializeMap};
 
 use crate::ValidationReport;
 use crate::carriers::{ChainCarrier, ChainDecls, EntryDecl, resolve_trigger_masks};
+use crate::fee::execution_fee_drops;
 use crate::metadata::{BuilderInfo, WorstCaseExecution, hook_hash, hook_mask, utf8_hex};
 
 /// The built sidecar bytes plus non-fatal warnings (currently: `HookName`
@@ -46,14 +47,27 @@ pub fn build_entry_sidecar(
         }
     }
 
-    let wce = report.guard_verdict.map_or(
-        WorstCaseExecution {
-            hook: None,
-            cbak: None,
-        },
-        |verdict| WorstCaseExecution {
-            hook: Some(verdict.hook_cost),
-            cbak: Some(verdict.cbak_cost),
+    let (wce, execution_cost, execution_fee_drops) = report.guard_verdict.map_or(
+        (
+            WorstCaseExecution::NONE,
+            WorstCaseExecution::NONE,
+            WorstCaseExecution::NONE,
+        ),
+        |verdict| {
+            (
+                WorstCaseExecution {
+                    hook: Some(verdict.hook_cost),
+                    cbak: Some(verdict.cbak_cost),
+                },
+                WorstCaseExecution {
+                    hook: Some(verdict.hook_exec_cost),
+                    cbak: Some(verdict.cbak_exec_cost),
+                },
+                WorstCaseExecution {
+                    hook: Some(execution_fee_drops(verdict.hook_exec_cost)),
+                    cbak: Some(execution_fee_drops(verdict.cbak_exec_cost)),
+                },
+            )
         },
     );
 
@@ -62,6 +76,8 @@ pub fn build_entry_sidecar(
         chain: chain.clone(),
         hook_hash: hook_hash(final_wasm),
         wce,
+        execution_cost,
+        execution_fee_drops,
         builder: BuilderInfo::current(rustc),
     };
 
@@ -77,6 +93,8 @@ struct EntrySidecarDocument {
     chain: ChainCarrier,
     hook_hash: String,
     wce: WorstCaseExecution,
+    execution_cost: WorstCaseExecution,
+    execution_fee_drops: WorstCaseExecution,
     builder: BuilderInfo,
 }
 
@@ -115,6 +133,8 @@ impl Serialize for EntrySidecarDocument {
         }
         map.serialize_entry("HookHash", &self.hook_hash)?;
         map.serialize_entry("WCE", &self.wce)?;
+        map.serialize_entry("execution_cost", &self.execution_cost)?;
+        map.serialize_entry("execution_fee_drops", &self.execution_fee_drops)?;
         map.serialize_entry("builder", &self.builder)?;
         map.serialize_entry(
             "human",
@@ -224,6 +244,28 @@ mod tests {
         );
         assert_eq!(value["human"]["HookCanEmit"][0], "Payment");
         assert_eq!(value["human"]["HookName"], "dep");
+    }
+
+    #[test]
+    fn execution_cost_and_fee_follow_the_native_verdict() {
+        let report = ValidationReport {
+            guard_verdict: Some(crate::GuardVerdict {
+                hook_cost: 14,
+                cbak_cost: 0,
+                hook_exec_cost: 214,
+                cbak_exec_cost: 0,
+            }),
+            ..ValidationReport::default()
+        };
+        let built = build_entry_sidecar(&entry(omitted_on()), &chain(), b"AAAA", &report, None)
+            .expect("sidecar builds");
+        let value: serde_json::Value = serde_json::from_slice(&built.bytes).expect("valid json");
+
+        assert_eq!(value["WCE"]["hook"], 14);
+        assert_eq!(value["execution_cost"]["hook"], 214);
+        assert_eq!(value["execution_cost"]["cbak"], 0);
+        assert_eq!(value["execution_fee_drops"]["hook"], 22);
+        assert_eq!(value["execution_fee_drops"]["cbak"], 0);
     }
 
     #[test]

@@ -108,7 +108,8 @@ transaction covering every index the crate declares. Each sidecar's
 top-level fields are deployable raw SetHook values (transaction masks, hex
 `HookName`); the readable form of the same declarations is under `human`.
 Sidecars also carry the final binary's `HookHash`, static worst-case
-instruction count (`WCE`), and a `builder` block recording the toolchain
+instruction count (`WCE`), HookFeeV2 worst-case execution cost and its fee
+in drops (`execution_cost`, `execution_fee_drops`), and a `builder` block recording the toolchain
 that produced them, for deterministic reproduction later — all carried
 only through unreachable raw-wasm exports the cleaner strips, so none of
 it changes the final wasm's bytes, hash, or instruction count.
