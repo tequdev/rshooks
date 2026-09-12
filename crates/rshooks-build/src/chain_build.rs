@@ -617,7 +617,7 @@ fn find_cargo() -> Result<PathBuf> {
     }
     if let Ok(path) = std::env::var("PATH") {
         for dir in std::env::split_paths(&path) {
-            let candidate = dir.join("cargo");
+            let candidate = dir.join(format!("cargo{}", std::env::consts::EXE_SUFFIX));
             if candidate.is_file() {
                 return Ok(candidate);
             }
@@ -635,7 +635,9 @@ fn find_cargo() -> Result<PathBuf> {
 /// `PATH`. Never fails the build: any spawn or parse problem returns
 /// `None`.
 fn detect_rustc_version(cargo: &Path) -> Option<String> {
-    let sibling = cargo.parent().map(|dir| dir.join("rustc"));
+    let sibling = cargo
+        .parent()
+        .map(|dir| dir.join(format!("rustc{}", std::env::consts::EXE_SUFFIX)));
     sibling
         .into_iter()
         .chain(std::iter::once(PathBuf::from("rustc")))
