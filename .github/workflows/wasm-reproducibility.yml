@@ -59,16 +59,17 @@ jobs:
           done
 
       - name: Collect wasm digests
-        shell: bash
+        shell: python
         run: |
-          set -euo pipefail
-          mkdir -p digests
-          for wasm in examples/*/out/current/*.wasm; do
-            rel="${wasm#examples/}"
-            rel="${rel/\/out\/current\//\/}"
-            echo "$(shasum -a 256 "$wasm" | cut -d' ' -f1)  $rel"
-          done | sort -k2 > "digests/${{ matrix.os }}.txt"
-          cat "digests/${{ matrix.os }}.txt"
+          import hashlib, pathlib
+          lines = []
+          for wasm in sorted(pathlib.Path("examples").glob("*/out/current/*.wasm")):
+              digest = hashlib.sha256(wasm.read_bytes()).hexdigest()
+              lines.append(f"{digest}  {wasm.parts[1]}/{wasm.name}\n")
+          out = pathlib.Path("digests/${{ matrix.os }}.txt")
+          out.parent.mkdir(exist_ok=True)
+          out.write_text("".join(lines), newline="\n")
+          print("".join(lines), end="")
 
       - name: Upload wasm digests
         uses: actions/upload-artifact@v7
