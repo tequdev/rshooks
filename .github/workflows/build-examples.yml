@@ -1,9 +1,9 @@
 name: Build examples (reusable)
 
 # Reusable workflow: builds every crate under examples/ through
-# rshooks-build and validates the output. Called from both ci.yml (as its
-# `examples` job) and e2e.yml (as its `build-hooks` job); the `discover`
-# job derives the build matrix from examples/*/Cargo.toml.
+# rshooks-build and validates the output. Called from ci.yml as its
+# `examples` job, whose `e2e` job then deploys the uploaded artifacts; the
+# `discover` job derives the build matrix from examples/*/Cargo.toml.
 
 on:
   workflow_call: {}

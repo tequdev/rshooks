@@ -4,6 +4,13 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Every five days: GitHub evicts Actions caches unused for 7 days, and a
+  # pull request can only restore caches saved on main, so an idle main
+  # would leave every new PR rebuilding Binaryen (wasm-opt-sys) from
+  # scratch in each Rust job.
+  schedule:
+    - cron: "0 6 */5 * *"
+  workflow_dispatch:
   # Lets publish.yml re-run every check here against the exact commit it is
   # about to publish, rather than trusting an unrelated earlier CI run.
   workflow_call: {}
@@ -14,6 +21,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  XAHAUD_VERSION: 2026.6.21-release+3350
 
 jobs:
   fmt:
@@ -32,8 +40,12 @@ jobs:
         working-directory: examples
         run: cargo fmt --all --check
 
-  build-test:
-    name: Lint, build & test (root workspace)
+  # Clippy and the test build resolve different feature sets, so their
+  # build-script outputs (notably Binaryen behind wasm-opt-sys) are not
+  # shared; running them as separate jobs puts the two builds side by side
+  # instead of back to back.
+  lint:
+    name: Clippy (root workspace)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -42,12 +54,6 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
 
       - uses: Swatinem/rust-cache@v2
-
-      - name: Generated rshooks-core sources are up to date
-        run: cargo run -q -p xtask -- gen-core --check
-
-      - name: Every version reference tracks the root workspace version
-        run: cargo run -q -p xtask -- check-versions
 
       - name: Clippy (host, deny warnings)
         run: cargo clippy --workspace --all-targets -- -D warnings
@@ -67,9 +73,25 @@ jobs:
       - name: Clippy (wasm32v1-none, unstable draft-spec features, deny warnings)
         run: cargo clippy -p rshooks --target wasm32v1-none --features unstable-param-sig-interface,unstable-state-interface -- -D warnings
 
-      - name: Build
-        run: cargo build --workspace
+  build-test:
+    name: Build & test (root workspace)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
 
+      - name: Install Rust toolchain (per rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Generated rshooks-core sources are up to date
+        run: cargo run -q -p xtask -- gen-core --check
+
+      - name: Every version reference tracks the root workspace version
+        run: cargo run -q -p xtask -- check-versions
+
+      # `cargo test` builds every lib, bin and test target; there is no
+      # separate `cargo build` step for it to duplicate.
       - name: Test
         run: cargo test --workspace
 
@@ -114,8 +136,106 @@ jobs:
   # example (matrix, fail-fast: false), so one example failing never
   # blocks the others from running or reporting their own PR check. See
   # build-examples.yml for the discovery/build/clippy jobs this expands
-  # into — it's the single source of truth shared with e2e.yml's
-  # `build-hooks` job, so the two workflows can't drift out of sync.
+  # into; the `e2e` job below deploys the artifacts it uploads.
   examples:
     name: Build & check examples (end-to-end)
     uses: ./.github/workflows/build-examples.yml
+
+  e2e:
+    name: Deploy & test on standalone Xahau
+    needs: examples
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download example hook binaries
+        uses: actions/download-artifact@v7
+        with:
+          pattern: example-hooks-*
+          path: examples-out
+
+      # `examples/scripts/copy-wasm.mjs` reads each artifact from
+      # `out/current/<index>.<entry-fn>.wasm`, matching `rshooks build`'s
+      # own publication layout (see mise.toml's `build-examples` task) —
+      # reconstruct that same layout from the flat per-example artifact
+      # downloaded above. Also place any uploaded `sethook.template.json`
+      # (see build-examples.yml's "Upload hook binary" step) the same way,
+      # for e2e suites that read the generated template directly (e.g.
+      # `e2e/test/param-signature.test.ts`) instead of hand-writing its
+      # declarations.
+      - name: Place downloaded wasm/template files back under examples/*/out/current/
+        run: |
+          set -e
+          for dir in examples-out/example-hooks-*; do
+            example="$(basename "$dir" | sed 's/^example-hooks-//')"
+            mkdir -p "examples/${example}/out/current"
+            cp "$dir"/*.wasm "examples/${example}/out/current/"
+            if [ -f "$dir/sethook.template.json" ]; then
+              cp "$dir/sethook.template.json" "examples/${example}/out/current/"
+            fi
+          done
+          find examples -name '*.wasm' -o -name 'sethook.template.json'
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install e2e dependencies
+        run: pnpm --dir e2e install
+
+      - name: Typecheck e2e suite
+        run: pnpm --dir e2e run typecheck
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      # `xrpld-lab` is a PyPI package (not vendored config): using it
+      # here, identically to `mise run e2e:node-up` locally, avoids hand-
+      # rolling a genesis-ledger generator. hooks-toolkit-ts's own CI
+      # pattern does exactly that (a vendored `.ci-config/genesis.js`) but
+      # that repo - and hence that script - is GPL-3.0-or-later, which
+      # cannot be vendored into this MIT-licensed repo; driving the same
+      # published CLI tool as a subprocess has no such issue and keeps
+      # local/CI provisioning identical (both `up:standalone`).
+      - name: Install xrpld-lab
+        run: pip install xrpld-lab==3.1.2 'anyio<4.15'
+
+      - name: Start standalone Xahau node
+        run: |
+          xrpld-lab up:standalone --protocol xahau --version "${{ env.XAHAUD_VERSION }}"
+          curl -fsSL -o "workspace/xahau-${{ env.XAHAUD_VERSION }}/xahaud.${{ env.XAHAUD_VERSION }}" \
+            "https://build.xahau.tech/${{ env.XAHAUD_VERSION }}"
+          chmod +x "workspace/xahau-${{ env.XAHAUD_VERSION }}/xahaud.${{ env.XAHAUD_VERSION }}"
+          perl -pi -e 's/"None"/""/' "workspace/xahau-${{ env.XAHAUD_VERSION }}/Dockerfile"
+          xrpld-lab up --name "xahau-${{ env.XAHAUD_VERSION }}"
+
+      - name: Wait for the node to answer admin RPC
+        run: |
+          for _ in $(seq 1 30); do
+            if curl -sf -X POST http://0.0.0.0:5005 -d '{"method":"server_info"}' \
+                | grep -q '"build_version"'; then
+              echo "node is up"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "node did not become ready in time" >&2
+          docker logs xahau --tail 200 || true
+          exit 1
+
+      - name: Run e2e suite
+        run: pnpm --dir e2e test
+
+      - name: Node debug log (on failure)
+        if: failure()
+        run: docker logs xahau --tail 500 || true
+
+      - name: Stop standalone Xahau node
+        if: always()
+        run: xrpld-lab down:standalone --protocol xahau --version "${{ env.XAHAUD_VERSION }}" || true
