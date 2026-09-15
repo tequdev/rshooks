@@ -1,17 +1,16 @@
 import {
   ExecutionUtility,
   Xrpld,
-  clearAllHooksV3,
+  clearAllHooks,
   hexNamespace,
   readHookBinaryHexFromNS,
   serverUrl,
-  setHooksV3,
+  setHooks,
   setupClient,
   teardownClient,
-  type SetHookParams,
   type XrplIntegrationTestContext,
   type iHook,
-} from '@transia/hooks-toolkit'
+} from '@xahau/hooks-toolkit'
 import { calculateHookOn } from 'xahau'
 import { HookFlags } from 'xahau/dist/npm/models/common/xahau'
 
@@ -31,23 +30,23 @@ describe('account-id-macro', () => {
       HookNamespace: hexNamespace(namespace),
       HookApiVersion: 0,
     }
-    await setHooksV3({
+    await setHooks({
       client: testContext.client,
-      seed: testContext.master.seed,
+      wallet: testContext.master,
       hooks: [{ Hook: hook }],
-    } as unknown as SetHookParams)
+    })
   })
 
   afterAll(async () => {
     // Hook deletion on the standalone master account can return `tefINTERNAL`.
     try {
-      await clearAllHooksV3({
+      await clearAllHooks({
         client: testContext.client,
-        seed: testContext.master.seed,
-      } as unknown as SetHookParams)
+        wallet: testContext.master,
+      })
     } catch (e) {
       console.warn(
-        'account-id-macro: clearAllHooksV3 on master failed (known xahaud ' +
+        'account-id-macro: clearAllHooks on master failed (known xahaud ' +
           'master-account hook-deletion failure) - ' +
           'ignoring:',
         e,
