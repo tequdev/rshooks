@@ -5,7 +5,7 @@
       "artifact": "0.govern.wasm",
       "index": 0,
       "hook_fn": "govern",
-      "bytes": 12475,
+      "bytes": 12176,
       "wce": {
         "hook": 24941,
         "cbak": 0
@@ -16,7 +16,7 @@
       "artifact": "1.reward.wasm",
       "index": 1,
       "hook_fn": "reward",
-      "bytes": 6219,
+      "bytes": 6100,
       "wce": {
         "hook": 11367,
         "cbak": 0

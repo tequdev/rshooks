@@ -144,7 +144,10 @@ For `Governance`'s `govern` entry (index `0`, `on = [Invoke]`,
   "builder": {
     "name": "rshooks-build",
     "version": "0.2.0",
-    "rustc": "rustc 1.89.0 (29483883e 2025-08-04)"
+    "rustc": "rustc 1.89.0 (29483883e 2025-08-04)",
+    "cargo_args": ["rustc", "--release", "--locked", "--target", "wasm32v1-none", "--crate-type", "cdylib"],
+    "rustc_args": ["--cfg", "rshooks_entry=\"0\"", "--check-cfg", "cfg(rshooks_entry,values(\"0\",\"1\",\"2\",\"3\",\"4\",\"5\",\"6\",\"7\",\"8\",\"9\"))", "-C", "link-arg=-zstack-size=131072", "-C", "link-arg=--initial-memory=262144", "-C", "link-arg=--no-growable-memory"],
+    "wasm_opt": true
   },
   "human": {
     "HookOn": ["Invoke"],
@@ -192,6 +195,13 @@ Fields not covered already on this page:
   its type code (an XAS-010d type code), and the full declared
   `HookParameterName` as uppercase hex, the same value the generated
   `HookParameters` declaration entries below use verbatim.
+- **`builder.cargo_args`/`builder.rustc_args`/`builder.wasm_opt`** — the
+  reproducibility record: the machine-independent `cargo` arguments and the
+  verbatim `rustc` arguments (after `--`) this entry was built with, plus
+  whether the `wasm-opt -Oz` pipeline pass ran. Linear memory is linked as 4
+  pages, fixed as both the initial and maximum size, with a 2-page stack,
+  because xahaud's guard checker rejects `memory.grow` — the link arguments
+  above are how that's enforced, not a runtime check.
 - **`chain`** — this crate's **shared** schema, transcribed identically
   into every entry's sidecar (not filtered down to what this one entry
   actually uses — see [Hook Chains](../concepts/chains.md#the-shared-schema-why-this-is-the-models-biggest-win)

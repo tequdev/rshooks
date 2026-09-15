@@ -76,7 +76,7 @@ successfully:
 ```text
 discovery build (accept-all)
 building entry 0 (`main`)
-wrote out/current/0.main.wasm (174 bytes, estimated SetHook fee 870000 drops)
+wrote out/current/0.main.wasm (172 bytes, estimated SetHook fee 860000 drops)
 wrote out/current/0.main.metadata.json
 wrote out/current/sethook.template.json
 wrote out/current/sethook.template.meta.json
@@ -92,8 +92,8 @@ $ rshooks check out/current/0.main.wasm
 worst-case instructions: hook=14 cbak=0
 max nesting depth: 0
 OK: out/current/0.main.wasm is a valid SetHook wasm binary
-size: 174 bytes
-estimated SetHook fee: 870000 drops (0.870000 XAH)
+size: 172 bytes
+estimated SetHook fee: 860000 drops (0.860000 XAH)
 ```
 
 - **`worst-case instructions`** is the guard checker's static upper bound

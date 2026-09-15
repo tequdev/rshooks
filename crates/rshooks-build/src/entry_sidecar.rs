@@ -26,13 +26,34 @@ pub struct EntrySidecarBuild {
 /// Builds one entry's sidecar document from its carrier declaration, the
 /// shared chain summary, and the final (post-pipeline) wasm bytes/report.
 /// `rustc` is the already-detected `rustc -V` first line (`None` if
-/// detection failed or wasn't attempted).
+/// detection failed or wasn't attempted). The `builder` block records only
+/// this provenance; see [`build_entry_sidecar_with`] to also record the
+/// reproducibility flags (`cargo_args`/`rustc_args`/`wasm_opt`).
 pub fn build_entry_sidecar(
     entry: &EntryDecl,
     chain: &ChainCarrier,
     final_wasm: &[u8],
     report: &ValidationReport,
     rustc: Option<String>,
+) -> Result<EntrySidecarBuild> {
+    build_entry_sidecar_with(
+        entry,
+        chain,
+        final_wasm,
+        report,
+        BuilderInfo::current(rustc),
+    )
+}
+
+/// Like [`build_entry_sidecar`], but with a caller-supplied `builder`
+/// provenance record, letting `chain_build::run` attach the exact
+/// `cargo`/`rustc` arguments and `wasm-opt` flag this entry was built with.
+pub fn build_entry_sidecar_with(
+    entry: &EntryDecl,
+    chain: &ChainCarrier,
+    final_wasm: &[u8],
+    report: &ValidationReport,
+    builder: BuilderInfo,
 ) -> Result<EntrySidecarBuild> {
     let mut warnings = Vec::new();
     if let Some(name) = &entry.hook_name {
@@ -62,7 +83,7 @@ pub fn build_entry_sidecar(
         chain: chain.clone(),
         hook_hash: hook_hash(final_wasm),
         wce,
-        builder: BuilderInfo::current(rustc),
+        builder,
     };
 
     let mut bytes =
@@ -324,6 +345,31 @@ mod tests {
             "5F534900000208076163636F756E740205746F6B656E"
         );
         assert_eq!(si[0]["value_hex"], "020306616D6F756E74020775706461746564");
+    }
+
+    #[test]
+    fn builder_flags_round_trip_through_build_entry_sidecar_with() {
+        let report = ValidationReport::default();
+        let builder = BuilderInfo::with_flags(
+            Some("rustc 1.89.0 (test)".to_string()),
+            vec!["rustc".to_string(), "--release".to_string()],
+            vec!["--cfg".to_string(), "rshooks_entry=\"0\"".to_string()],
+            true,
+        );
+        let built =
+            build_entry_sidecar_with(&entry(omitted_on()), &chain(), b"AAAA", &report, builder)
+                .expect("sidecar builds");
+        let value: serde_json::Value = serde_json::from_slice(&built.bytes).expect("valid json");
+
+        assert_eq!(
+            value["builder"]["rustc_args"],
+            serde_json::json!(["--cfg", "rshooks_entry=\"0\""])
+        );
+        assert_eq!(
+            value["builder"]["cargo_args"],
+            serde_json::json!(["rustc", "--release"])
+        );
+        assert_eq!(value["builder"]["wasm_opt"], true);
     }
 
     #[test]
