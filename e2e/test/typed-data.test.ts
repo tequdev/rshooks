@@ -2,17 +2,16 @@ import {
   ExecutionUtility,
   StateUtility,
   Xrpld,
-  clearAllHooksV3,
+  clearAllHooks,
   hexNamespace,
   readHookBinaryHexFromNS,
   serverUrl,
-  setHooksV3,
+  setHooks,
   setupClient,
   teardownClient,
-  type SetHookParams,
   type XrplIntegrationTestContext,
   type iHook,
-} from '@transia/hooks-toolkit'
+} from '@xahau/hooks-toolkit'
 import {
   calculateHookOn,
   convertStringToHex,
@@ -122,18 +121,18 @@ describe('typed-data', () => {
       HookApiVersion: 0,
       HookParameters: [hookParam('CFG', cfgHex(MIN_DROPS, LOCK_LEDGERS))],
     }
-    await setHooksV3({
+    await setHooks({
       client: testContext.client,
-      seed: testContext.hook1.seed,
+      wallet: testContext.hook1,
       hooks: [{ Hook: hook }],
-    } as unknown as SetHookParams)
+    })
   })
 
   afterAll(async () => {
-    await clearAllHooksV3({
+    await clearAllHooks({
       client: testContext.client,
-      seed: testContext.hook1.seed,
-    } as unknown as SetHookParams)
+      wallet: testContext.hook1,
+    })
     await teardownClient(testContext)
   })
 
@@ -306,11 +305,11 @@ describe('typed-data', () => {
           },
         ],
       }
-      await setHooksV3({
+      await setHooks({
         client: testContext.client,
-        seed: testContext.hook1.seed,
+        wallet: testContext.hook1,
         hooks: [{ Hook: hook }],
-      } as unknown as SetHookParams)
+      })
     })
 
     afterAll(async () => {
@@ -325,11 +324,11 @@ describe('typed-data', () => {
         HookApiVersion: 0,
         HookParameters: [hookParam('CFG', cfgHex(MIN_DROPS, LOCK_LEDGERS))],
       }
-      await setHooksV3({
+      await setHooks({
         client: testContext.client,
-        seed: testContext.hook1.seed,
+        wallet: testContext.hook1,
         hooks: [{ Hook: hook }],
-      } as unknown as SetHookParams)
+      })
     })
 
     it('rejects a deposit while the AdminName pause switch is set', async () => {

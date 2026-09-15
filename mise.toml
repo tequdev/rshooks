@@ -17,8 +17,8 @@ cargo fmt --all --manifest-path examples/Cargo.toml
 
 [tasks.lint]
 description = "Lint the root workspace (all targets, plus rshooks in each amendment-availability state) and the examples workspace (wasm32v1-none), denying warnings"
-# Mirrored by hand in .github/workflows/ci.yml's build-test job (Clippy
-# steps); keep the feature combinations in sync with that job.
+# Mirrored by hand in .github/workflows/ci.yml's lint job; keep the
+# feature combinations in sync with that job.
 run = """
 cargo clippy --workspace --all-targets -- -D warnings
 # Cover the active-only and widest-wins generated surfaces too.

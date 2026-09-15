@@ -37,7 +37,7 @@ mise run e2e:node-down
 
 ## What the tests verify
 
-The suite deploys example hooks with `@transia/hooks-toolkit`, triggers them,
+The suite deploys example hooks with `@xahau/hooks-toolkit`, triggers them,
 and inspects transaction metadata and ledger state. Coverage includes:
 
 - Hook acceptance and rollback results
