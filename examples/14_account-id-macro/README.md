@@ -72,7 +72,7 @@ at `cargo build` time, never inside the wasm module.
 ## Expected behavior
 
 Installed on the genesis/master account (`rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh`,
-`@transia/hooks-toolkit`'s `testContext.master`) and invoked:
+`@xahau/hooks-toolkit`'s `testContext.master`) and invoked:
 
 - `hook_account()` matches `OWNER`, `util_accid()` matches `OWNER`, and
   `util_raddr()` round-trips to `OWNER_RADDR` → accept, code `0`.

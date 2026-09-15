@@ -1,17 +1,16 @@
 import {
   ExecutionUtility,
   Xrpld,
-  clearAllHooksV3,
+  clearAllHooks,
   hexNamespace,
   readHookBinaryHexFromNS,
   serverUrl,
-  setHooksV3,
+  setHooks,
   setupClient,
   teardownClient,
-  type SetHookParams,
   type XrplIntegrationTestContext,
   type iHook,
-} from '@transia/hooks-toolkit'
+} from '@xahau/hooks-toolkit'
 import {
   calculateHookOn,
   convertStringToHex,
@@ -116,11 +115,11 @@ describe('slot-objects (typed slot layer)', () => {
       HookNamespace: hexNamespace(namespace),
       HookApiVersion: 0,
     }
-    await setHooksV3({
+    await setHooks({
       client: testContext.client,
-      seed: testContext.hook1.seed,
+      wallet: testContext.hook1,
       hooks: [{ Hook: hook }],
-    } as unknown as SetHookParams)
+    })
 
     // Run each group separately to stay within the instruction limit.
     for (const group of [
@@ -182,10 +181,10 @@ describe('slot-objects (typed slot layer)', () => {
   })
 
   afterAll(async () => {
-    await clearAllHooksV3({
+    await clearAllHooks({
       client: testContext.client,
-      seed: testContext.hook1.seed,
-    } as unknown as SetHookParams)
+      wallet: testContext.hook1,
+    })
     await teardownClient(testContext)
   })
 
