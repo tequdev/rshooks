@@ -133,4 +133,4 @@ mise run e2e:node-down   # stops it
 
 `e2e/` is an isolated pnpm package (not part of any Cargo or pnpm
 workspace) using the same stack as this machine's other hook repos:
-vitest + `@transia/hooks-toolkit` + `xahau`.
+vitest + `@xahau/hooks-toolkit` + `xahau`.

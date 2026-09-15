@@ -11,7 +11,7 @@
     "trace": "docker logs --tail 100 -f xahau 2>&1 | cut -d ' ' -f 5- | grep -a -E 'Publishing ledger|HookInfo|HookTrace|HookError|HookEmit|preclaim result'"
   },
   "dependencies": {
-    "@transia/hooks-toolkit": "^2.0.0",
+    "@xahau/hooks-toolkit": "^2.1.0",
     "xahau": "^4.0.3"
   },
   "devDependencies": {

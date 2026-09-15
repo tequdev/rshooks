@@ -1,17 +1,16 @@
 import {
   ExecutionUtility,
   Xrpld,
-  clearAllHooksV3,
+  clearAllHooks,
   hexNamespace,
   readHookBinaryHexFromNS,
   serverUrl,
-  setHooksV3,
+  setHooks,
   setupClient,
   teardownClient,
-  type SetHookParams,
   type XrplIntegrationTestContext,
   type iHook,
-} from '@transia/hooks-toolkit'
+} from '@xahau/hooks-toolkit'
 import { calculateHookOn, convertStringToHex, decodeAccountID } from 'xahau'
 import { HookFlags } from 'xahau/dist/npm/models/common/xahau'
 
@@ -62,11 +61,11 @@ async function installGovern(
       ...extra,
     ],
   } as iHook
-  await setHooksV3({
+  await setHooks({
     client: testContext.client,
-    seed: table.seed,
+    wallet: table,
     hooks: [{ Hook: hook }],
-  } as unknown as SetHookParams)
+  })
 }
 
 async function invoke(
@@ -106,10 +105,10 @@ describe('govern: L2 table setup', () => {
   })
 
   afterAll(async () => {
-    await clearAllHooksV3({
+    await clearAllHooks({
       client: testContext.client,
-      seed: testContext.hook1.seed,
-    } as unknown as SetHookParams)
+      wallet: testContext.hook1,
+    })
     await teardownClient(testContext)
   })
 
@@ -146,10 +145,10 @@ describe('govern: L2 table seat voting', () => {
   })
 
   afterAll(async () => {
-    await clearAllHooksV3({
+    await clearAllHooks({
       client: testContext.client,
-      seed: testContext.hook1.seed,
-    } as unknown as SetHookParams)
+      wallet: testContext.hook1,
+    })
     await teardownClient(testContext)
   })
 
@@ -199,10 +198,10 @@ describe('govern: L1 table (real genesis account) reward-rate vote', () => {
   })
 
   afterAll(async () => {
-    await clearAllHooksV3({
+    await clearAllHooks({
       client: testContext.client,
-      seed: testContext.master.seed,
-    } as unknown as SetHookParams)
+      wallet: testContext.master,
+    })
     await teardownClient(testContext)
   })
 
@@ -255,10 +254,10 @@ describe('govern: L1 table (real genesis account) — intentional IRR/IRD length
   })
 
   afterAll(async () => {
-    await clearAllHooksV3({
+    await clearAllHooks({
       client: testContext.client,
-      seed: testContext.master.seed,
-    } as unknown as SetHookParams)
+      wallet: testContext.master,
+    })
     await teardownClient(testContext)
   })
 

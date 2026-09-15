@@ -15,18 +15,17 @@ import {
   ExecutionUtility,
   StateUtility,
   Xrpld,
-  clearAllHooksV3,
-  clearHookStateV3,
+  clearAllHooks,
+  clearHookState,
   hexNamespace,
   readHookBinaryHexFromNS,
   serverUrl,
-  setHooksV3,
+  setHooks,
   setupClient,
   teardownClient,
-  type SetHookParams,
   type XrplIntegrationTestContext,
   type iHook,
-} from '@transia/hooks-toolkit'
+} from '@xahau/hooks-toolkit'
 import { calculateHookOn, decodeAccountID, type TransactionMetadata } from 'xahau'
 import { HookFlags } from 'xahau/dist/npm/models/common/xahau'
 import { sigParam, u16BEHex } from './sig-param'
@@ -84,11 +83,11 @@ describe('param-signature', () => {
       // Installed verbatim from the generated template (see header comment).
       HookParameters: declaredHookParameters,
     } as iHook
-    await setHooksV3({
+    await setHooks({
       client: testContext.client,
-      seed: testContext.hook1.seed,
+      wallet: testContext.hook1,
       hooks: [{ Hook: hook }],
-    } as unknown as SetHookParams)
+    })
   })
 
   afterAll(async () => {
@@ -96,15 +95,15 @@ describe('param-signature', () => {
       Flags: HookFlags.hsfNSDelete,
       HookNamespace: hookNamespace,
     }
-    await clearHookStateV3({
+    await clearHookState({
       client: testContext.client,
-      seed: testContext.hook1.seed,
+      wallet: testContext.hook1,
       hooks: [{ Hook: clearStateHook }],
-    } as unknown as SetHookParams)
-    await clearAllHooksV3({
+    })
+    await clearAllHooks({
       client: testContext.client,
-      seed: testContext.hook1.seed,
-    } as unknown as SetHookParams)
+      wallet: testContext.hook1,
+    })
     await teardownClient(testContext)
   })
 
