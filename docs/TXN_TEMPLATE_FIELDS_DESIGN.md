@@ -61,8 +61,18 @@ txn_template! {
   | <name>: object(sfX) { <field>* }              // STObject, closed by 0xE1
   | <name>: array(sfX) [ <element>* ]             // STArray, named elements, closed by 0xF1
   | <name>: array(sfX) [ <Elem>: object(sfY) { <field>* } ; <N> ]  // STArray, homogeneous, indexed
+  | <name>: sfX $(= <expr>)?                      // inferred scalar kind (§2.7)
+  | <name>: sfX { <field>* }                      // inferred object
+  | <name>: sfX [ <element>* ]                    // inferred array
+  | <name>: sfX [ <Elem>: sfY { <field>* } ; <N> ] // inferred array, homogeneous, indexed
+  | <name>: sfX = NativeAmount(<u64 drops>)                 // default-shape: infers native_amount (§2.7)
+  | <name>: sfX = IouAmount(<XFL>, <CurrencyCode>, <AccountId>)  // default-shape: infers amount (§2.7)
+  | <name>: sfX = []                              // default-shape: infers empty_vl (§2.7)
+  | <name>: sfX = [ <elem>+ ]                     // default-shape: infers fixed_vl, N from the literal (§2.7)
+  | <name>: sfX = *<byte string literal>          // default-shape: infers fixed_vl, N from the literal (§2.7)
 
 <element> := <name>: object(sfX) { <field>* }     // only objects directly inside an array
+           | <name>: sfX { <field>* }             // inferred object element
 ```
 
 Trailing commas are accepted everywhere a field list is accepted (as today), except after
@@ -279,6 +289,85 @@ declared default whose length doesn't match `N` is a compile-time type error (`l
 
 Only fixed-length `VL` is covered here — `Vector256`/`PathSet` and a genuinely
 variable-length blob stay deferred (§6).
+
+### 2.7 Inferred kinds
+
+```rust,ignore
+flags: sfFlags = tfCANONICAL,          // infers u32_field
+account: sfAccount,                    // infers account_id
+invoice_id: sfInvoiceID,               // infers hash256
+amounts: sfAmounts [ Entry: sfAmountEntry { amount: amount(sfAmount) }; 2 ],
+memos: sfMemos [ m: sfMemo { memo_type: fixed_vl(sfMemoType, 4) } ],
+```
+
+`macro_rules!` cannot inspect an identifier's STI directly, so inference is dispatched at
+the type level. `sti_of(sfcode)` (already used by every explicit kind's own STI-agreement
+check) is a `const fn`, so `Infer<{ sti_of(sfcode) }>` — a unit struct generic over a
+`u32` const parameter — is a concrete, nameable type from inside the macro. One
+`impl InferKind for Infer<{ STI_X }>` per inferable STI supplies everything a bare
+`field: sfXxx` declaration needs: the setter's value type (an associated GAT,
+`Value<'a>`), the wire size (`LEN`, plus a `PREFIX` for `account_id`'s VL length byte),
+the `FIELDS` kind tag, and the `write` call itself. `INFERABLE`/`HAS_DEFAULT` back the two
+compile-time `assert!`s that reject an ambiguous STI or a default/no-default mismatch. A
+non-inferable STI (`AMOUNT`, `VL`, `ISSUE`, `OBJECT`/`ARRAY` without a body, `PATHSET`,
+`VECTOR256`, `UINT192`, `NUMBER`, `XCHAIN_BRIDGE`) still gets an `impl` — `INFERABLE =
+false`, and `Value<'a> = ExplicitKindRequired` (an empty marker whose name doubles as the
+type-mismatch diagnostic when a default is ascribed to it). `PATHSET`/`VECTOR256`/
+`UINT192`/`NUMBER`/`XCHAIN_BRIDGE` back no `txn_template!` kind at all (explicit or
+inferred) — a field with one of those serialized types needs `StoWriter` directly.
+
+An inferred integer field's default is type-checked directly against the field's integer
+type (`let __v: u32 = <expr>;`, no `as` cast) — stricter than the explicit kind's own `(<expr>)
+as u32` cast, which silently truncates an out-of-range default instead of rejecting it. A
+default that only compiled because of that truncating cast does not compile in the bare
+form.
+
+`object`/`array` inference is a pure token rewrite, not a type-level dispatch: a bare
+`name: sfXxx { .. }`/`name: sfXxx [ .. ]` (or a homogeneous/named array element's own
+`Elem: sfY { .. }`) desugars to `name: object(sfXxx) { .. }`/`array(sfXxx) [ .. ]` before
+recursing, so it reuses the existing container arms and their nested-order/depth checks
+unchanged. Desugar arms are generic over `ctx` (they fire in both `obj` and `arr`) and are
+ordered: the container desugars sit right where the analogous explicit-form arm they
+rewrite into does (so a partially-explicit spelling like `array(sfX) [ Elem: sfY { .. } ;
+N ]` — explicit array, inferred element — still resolves), while the two scalar desugar
+arms (with/without default) sit after both `emit_details` arms and before the catch-all,
+so `field: emit_details` keeps matching its own dedicated arm first.
+
+Byte-for-byte identity with the explicit spelling is the whole point: `Infer<STI>`'s
+`KIND`/`LEN`/`PREFIX`/`write` are computed from the exact same `codec` primitives
+(`field_header`, `fixed_field_size`, `write_const_bytes`) the explicit arms call directly,
+so the generated `TEMPLATE`, `FIELDS` row, and setter offset are identical either way — see
+`crates/rshooks/src/txn.rs`'s `mod tests` for the twinned-fixture proofs.
+
+#### Default-shape desugar
+
+`native_amount`/`amount`/`empty_vl`/`fixed_vl` cannot infer from the STI alone — `AMOUNT`
+covers both the native and issued wire shapes, `VL` covers both the empty and
+fixed-length ones — so a bare `field: sfXxx = <default>` instead infers the kind from the
+*shape* of `<default>`, purely as a token rewrite ahead of the plain inferred-scalar arm
+(so `$default:expr` there never gets a chance to parse `NativeAmount(500)` as an ordinary,
+unresolvable call expression):
+
+```text
+field: sfXxx = NativeAmount(d)              -> field: native_amount(sfXxx) = d
+field: sfXxx = IouAmount(xfl, cur, iss)      -> field: amount(sfXxx) = (xfl, cur, iss)
+field: sfXxx = []                           -> field: empty_vl(sfXxx)
+field: sfXxx = [ <elem>+ ]                  -> field: fixed_vl(sfXxx, N) = [ <elem>+ ]
+field: sfXxx = *<byte string literal>       -> field: fixed_vl(sfXxx, N) = *<byte string literal>
+```
+
+`NativeAmount`/`IouAmount` are macro syntax markers matched as literal tokens, not real
+types or functions — nothing named that way needs to exist in scope. `N` in the last two
+rewrites is recovered from the default literal itself via a new `codec::array_len<const N:
+usize>(_: &[u8; N]) -> usize { N }`, spliced in as `{ array_len(&[ <elem>+ ]) }`/`{
+array_len(&*<byte string literal>) }` — a block expression, since `fixed_vl`'s own `$n:expr`
+fragment splices into a `[u8; $n]` array-length position. A `fixed_vl` default spelled as a
+named const (`field: sfX = SOME_CONST`) is not one of the five literal shapes above, so it
+falls through to the plain inferred-scalar-with-default arm and is rejected there —
+`fixed_vl(sfX, N) = SOME_CONST` (the explicit form, `N` spelled out) is still required,
+since there is no literal to recover `N` from. `issue`/`native_issue`, and a zero-default
+`amount(sfX)` (no `=` at all), are untouched by this desugar — none of its five shapes match
+them.
 
 ## 3. Implementation
 

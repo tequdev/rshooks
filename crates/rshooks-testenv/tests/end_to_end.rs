@@ -22,14 +22,14 @@ txn_template! {
     /// filled in by `prepare_for_emit`.
     pub struct PayoutTemplate {
         transaction_type = ttPAYMENT,
-        sequence: u32_field(sfSequence) = 0,
-        first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
-        last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
-        amount: native_amount(sfAmount) = 0,
-        fee: native_amount(sfFee) = 0,
-        signing_pub_key: empty_vl(sfSigningPubKey),
-        account: account_id(sfAccount),
-        destination: account_id(sfDestination),
+        sequence: sfSequence = 0,
+        first_ledger_sequence: sfFirstLedgerSequence = 0,
+        last_ledger_sequence: sfLastLedgerSequence = 0,
+        amount: sfAmount = NativeAmount(0),
+        fee: sfFee = NativeAmount(0),
+        signing_pub_key: sfSigningPubKey = [],
+        account: sfAccount,
+        destination: sfDestination,
         emit_details: emit_details,
     }
 }
@@ -44,20 +44,20 @@ txn_template! {
     /// currency/issuer default.
     pub struct RemitTemplate {
         transaction_type = ttREMIT,
-        flags: u32_field(sfFlags) = tfCANONICAL,
-        sequence: u32_field(sfSequence) = 0,
-        first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
-        last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
-        fee: native_amount(sfFee) = 0,
-        signing_pub_key: empty_vl(sfSigningPubKey),
-        account: account_id(sfAccount),
-        destination: account_id(sfDestination),
-        amounts: array(sfAmounts) [
-            native: object(sfAmountEntry) {
-                amount: native_amount(sfAmount) = 1,
+        flags: sfFlags = tfCANONICAL,
+        sequence: sfSequence = 0,
+        first_ledger_sequence: sfFirstLedgerSequence = 0,
+        last_ledger_sequence: sfLastLedgerSequence = 0,
+        fee: sfFee = NativeAmount(0),
+        signing_pub_key: sfSigningPubKey = [],
+        account: sfAccount,
+        destination: sfDestination,
+        amounts: sfAmounts [
+            native: sfAmountEntry {
+                amount: sfAmount = NativeAmount(1),
             },
-            usd: object(sfAmountEntry) {
-                amount: amount(sfAmount) = (
+            usd: sfAmountEntry {
+                amount: sfAmount = IouAmount(
                     XFL::from_raw_bits(0),
                     REMIT_USD,
                     REMIT_USD_ISSUER
