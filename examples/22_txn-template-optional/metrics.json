@@ -1,0 +1,38 @@
+{
+  "schema": "rshooks-example-metrics-v1",
+  "entries": [
+    {
+      "artifact": "0.pay.wasm",
+      "index": 0,
+      "hook_fn": "pay",
+      "bytes": 2145,
+      "wce": {
+        "hook": 564,
+        "cbak": 7
+      },
+      "max_nesting": 4
+    },
+    {
+      "artifact": "1.remit.wasm",
+      "index": 1,
+      "hook_fn": "remit",
+      "bytes": 2319,
+      "wce": {
+        "hook": 586,
+        "cbak": 7
+      },
+      "max_nesting": 3
+    },
+    {
+      "artifact": "2.vl.wasm",
+      "index": 2,
+      "hook_fn": "vl",
+      "bytes": 2429,
+      "wce": {
+        "hook": 4382,
+        "cbak": 7
+      },
+      "max_nesting": 3
+    }
+  ]
+}

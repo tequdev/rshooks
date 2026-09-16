@@ -28,6 +28,9 @@ Goals:
 Non-goals:
 
 - Runtime-sized shapes (conditional fields, runtime element counts) — `StoWriter`'s job.
+  (Present-or-absent fields and a runtime-chosen-length `VL` within a fixed `MAX` are no
+  longer out of scope for `txn_template!` as of `docs/NOP_PADDING_DESIGN.md`; only runtime
+  element *counts* remain `StoWriter`'s job.)
 - Any change to `prepare_for_emit`/`Prepared`, to `StoWriter`, or to existing templates'
   bytes (`examples/10_emit-txn` must stay byte-identical; `metrics.json` unchanged).
 
@@ -369,6 +372,28 @@ since there is no literal to recover `N` from. `issue`/`native_issue`, and a zer
 `amount(sfX)` (no `=` at all), are untouched by this desugar — none of its five shapes match
 them.
 
+#### Inferred `optional` forms
+
+`field: optional sfXxx` is `optional <scalar_kind>(sfXxx)`'s (`docs/NOP_PADDING_DESIGN.md`
+§3.1) bare-`sfXxx` twin: `InferKind` gains a second kind tag, `OPTIONAL_KIND` (the
+`codec::KIND_OPTIONAL_*` row for this STI's optional form, `u8::MAX` — unused — for a
+non-inferable one), alongside the existing `KIND`. The setter writes `header + PREFIX +
+value` in one call (mirroring `optional account_id`'s own `PREFIX`-aware setter, generalized
+to any `InferKind`), `clear_x` NOP-fills `fixed_field_size(sfXxx, PREFIX.len() + LEN)`, and
+that same size is the field's worst-case NOP charge to its enclosing container. A
+non-inferable STI names the matching explicit `optional` form in its error message
+(`optional native_amount`/`optional amount`/`any_amount`/`optional any_amount`, `optional
+empty_vl`/`optional fixed_vl`, `optional vl`, `optional native_issue`/`optional issue`) —
+there is no default-shape desugar for `optional` (absent has no shape to infer from).
+
+`optional <View>: sfXxx { .. }`/`[ .. ]` and a homogeneous array's `Elem: optional sfY { .. }`
+are pure token rewrites, exactly like their non-`optional` counterparts above: `optional
+<View>: sfXxx { .. }` -> `optional <View>: object(sfXxx) { .. }` (legal wherever the
+explicit form is — a top-level/nested-object field, or a named element inside an array),
+`optional <View>: sfXxx [ .. ]` -> `optional <View>: array(sfXxx) [ .. ]`, and `Elem:
+optional sfY { .. } ; N` -> `Elem: optional object(sfY) { .. } ; N` under either a bare or an
+explicit outer `array(..)`.
+
 ## 3. Implementation
 
 ### 3.1 `codec` additions (`txn.rs`)
@@ -524,9 +549,10 @@ New:
 
 - `Vector256` (`sfURITokenIDs`, `sfHookNamespaces`) and `PathSet` — distinct wire shapes
   from a plain `VL` blob (`Vector256` is a flat run of 32-byte hashes with no per-element
-  header; `PathSet` is its own nested path/step grammar), plus a genuinely variable-length
-  (not fixed-at-declaration) `VL` blob. `fixed_vl(sfX, N)` (§2.6) covers every *fixed*-length
-  `VL` field; these are the remaining VL-family gaps.
+  header; `PathSet` is its own nested path/step grammar). `fixed_vl(sfX, N)` (§2.6) covers
+  every *fixed*-length `VL` field; `vl(sfX, MIN, MAX)`
+  (`docs/NOP_PADDING_DESIGN.md`) covers a runtime-chosen-length one within a compile-time
+  `MAX`; `Vector256`/`PathSet` remain the actual VL-family gaps.
 - `Number` (`sfNumber`), `UInt192` (`sfMPTokenIssuanceID`), `XChainBridge`: no Xahau
   transaction emits them today; add on demand with the `fixed_field_size` pattern.
 - Type-level guard that an `amount` field with the zero default is set before emit (a

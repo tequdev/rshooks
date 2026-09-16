@@ -5,13 +5,16 @@ macro that bakes a transaction's field offsets and total length into a
 `const fn`, computed entirely at compile time — including a fixed-shape
 nested `STObject`/`STArray`, such as a two-entry `sfAmounts` whose element
 count and shapes are known at declaration time (see [Emitting
-Transactions](emitting.md#nested-stobjectstarray)). What `txn_template!`
-cannot describe is a *runtime-sized* shape: a variable element count, or a
-container present only sometimes — Remit's `sfAmounts`, one
-`sfAmountEntry` per destination, present or absent depending on what the
-invoking transaction's hook parameters supply. `rshooks::sto_writer::StoWriter`
-is the runtime counterpart for that case: a bounded, allocation-free cursor
-over caller-owned storage that writes
+Transactions](emitting.md#nested-stobjectstarray)), and, via its
+NOP-padded kinds, a present-or-absent field or a runtime-chosen-length
+blob within a fixed `MAX` (see [Optional and variable-length
+fields](emitting.md#optional-and-variable-length-fields)). What
+`txn_template!` cannot describe is a *runtime element count*: Remit's
+`sfAmounts`, one `sfAmountEntry` per destination, whose count depends on
+what the invoking transaction's hook parameters supply — more entries
+than any one array's 63-`NOP` budget could hold present-or-absent.
+`rshooks::sto_writer::StoWriter` is the runtime counterpart for that
+case: a bounded, allocation-free cursor over caller-owned storage that writes
 field headers, tracks open containers, and checks every write against the
 buffer's real bounds. This page walks through it end to end using
 `examples/17_sto-writer`'s Remit hook as the worked example throughout —

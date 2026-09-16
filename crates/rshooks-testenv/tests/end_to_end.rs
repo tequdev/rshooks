@@ -141,14 +141,111 @@ impl Payments {
         }
         accept!(b"remitted", 0)
     }
+
+    /// Like `remit`, but hand-splices NOP (`0x99`) bytes into the prepared
+    /// bytes at two field-header positions before emitting them directly
+    /// via `emit_buf` — one run between two top-level fields (right before
+    /// `sfDestination`'s own header), one run inside the nested
+    /// `sfAmountEntry` object of the native `sfAmounts` entry (right after
+    /// its own `sfAmount` field, before that entry's own `0xE1`
+    /// terminator). Proves the emission walker's tolerant NOP handling end
+    /// to end: `crate::backend::Backend::emit`'s acceptance check accepts
+    /// the NOP-padded bytes, and the stored `EmittedTxn` holds their
+    /// canonical (NOP-free) form. The pre-splice bytes are stashed in state
+    /// (`nop_test_plain_blob`) so the test can assert the stored emitted
+    /// blob is byte-for-byte identical to them — this hook's own `emit`
+    /// call is the only emission in its invocation, so the pre-splice and
+    /// post-emit bytes share the exact same `EmitDetails` (same nonce,
+    /// generation, burden), making a plain equality check meaningful.
+    #[hook(4, on = [Invoke], can_emit = [Remit])]
+    fn remit_with_nops(&self) -> HookResult {
+        if etxn_reserve(1).is_err() {
+            rollback!(b"reserve failed", 1);
+        }
+        let mut tpl = RemitTemplate::new();
+        tpl.set_destination(&AccountId([0xCDu8; 20]));
+        if tpl.set_amounts_native_amount(2_000_000).is_err() {
+            rollback!(b"native amount out of range", 2);
+        }
+        tpl.set_amounts_usd_amount_value(XFL::one());
+        let prepared = match tpl.prepare_for_emit() {
+            Ok(p) => p,
+            Err(_) => rollback!(b"prepare_for_emit failed", 3),
+        };
+        let base = prepared.as_bytes().to_vec();
+
+        // The native `sfAmountEntry`'s own field bytes: locating this
+        // (header-included, unbroken) pattern gives the offset right
+        // after its `sfAmount` value, i.e. right before that entry's own
+        // `0xE1` — a NOP inserted there stays "inside a nested object,
+        // after a field" without disturbing this pattern's own bytes.
+        let (entry_hdr, entry_hdr_len) = rshooks::txn::codec::field_header(sfAmountEntry);
+        let (amount_hdr, amount_hdr_len) = rshooks::txn::codec::field_header(sfAmount);
+        let mut native_prefix = Vec::new();
+        native_prefix.extend_from_slice(&entry_hdr[..entry_hdr_len]);
+        native_prefix.extend_from_slice(&amount_hdr[..amount_hdr_len]);
+        native_prefix.extend_from_slice(&(2_000_000u64 | 0x4000_0000_0000_0000).to_be_bytes());
+
+        // `sfDestination`'s own header+value: a NOP inserted right before
+        // it stays "between two top-level fields" without disturbing this
+        // pattern's own bytes either.
+        let (dest_hdr, dest_hdr_len) = rshooks::txn::codec::field_header(sfDestination);
+        let mut dest_prefix = Vec::new();
+        dest_prefix.extend_from_slice(&dest_hdr[..dest_hdr_len]);
+        dest_prefix.push(rshooks::types::ACC_ID_LEN as u8);
+        dest_prefix.extend_from_slice(&[0xCDu8; 20]);
+
+        let Some(native_end) = base
+            .windows(native_prefix.len())
+            .position(|w| w == native_prefix.as_slice())
+            .map(|i| i + native_prefix.len())
+        else {
+            rollback!(b"native amount pattern not found", 5);
+        };
+        let Some(dest_start) = base
+            .windows(dest_prefix.len())
+            .position(|w| w == dest_prefix.as_slice())
+        else {
+            rollback!(b"destination pattern not found", 6);
+        };
+
+        let mut spliced = Vec::with_capacity(base.len() + 5);
+        if dest_start >= native_end {
+            spliced.extend_from_slice(&base[..native_end]);
+            spliced.extend_from_slice(&[0x99, 0x99]); // inside the nested object
+            spliced.extend_from_slice(&base[native_end..dest_start]);
+            spliced.extend_from_slice(&[0x99, 0x99, 0x99]); // between top-level fields
+            spliced.extend_from_slice(&base[dest_start..]);
+        } else {
+            spliced.extend_from_slice(&base[..dest_start]);
+            spliced.extend_from_slice(&[0x99, 0x99, 0x99]);
+            spliced.extend_from_slice(&base[dest_start..native_end]);
+            spliced.extend_from_slice(&[0x99, 0x99]);
+            spliced.extend_from_slice(&base[native_end..]);
+        }
+
+        if rshooks::api::state::state_set(&base, b"nop_test_plain_blob").is_err() {
+            rollback!(b"state_set failed", 7);
+        }
+        if rshooks::api::etxn::emit_buf(&spliced).is_err() {
+            rollback!(b"emit failed", 4);
+        }
+        accept!(b"remitted with nops", 0)
+    }
 }
 
 fn env() -> TestEnv {
-    TestEnv::new().hook_account([1u8; 20]).otxn(
-        Otxn::new(TxType::Payment)
-            .account([2u8; 20])
-            .amount_drops(1_000_000),
-    )
+    TestEnv::new()
+        .hook_account([1u8; 20])
+        // `remit_with_nops` stashes its full prepared `RemitTemplate` bytes
+        // (comfortably over the default 256-byte cap) into state for the
+        // matching test to compare against.
+        .max_state_value_len(512)
+        .otxn(
+            Otxn::new(TxType::Payment)
+                .account([2u8; 20])
+                .amount_drops(1_000_000),
+        )
 }
 
 #[test]
@@ -241,5 +338,37 @@ fn remit_emits_one_remit_with_nested_amounts() {
         blob.windows(expected_account.len())
             .any(|w| w == expected_account.as_slice()),
         "sfAccount was not patched to the hook account: {blob:02x?}"
+    );
+}
+
+/// `Payments::remit_with_nops` hand-splices `0x99` NOP bytes into an
+/// otherwise-valid Remit blob (one run between two top-level fields, one
+/// run inside the nested native `sfAmountEntry` object) before emitting
+/// directly via `emit_buf` — see that entry's own doc comment for exactly
+/// where — and stashes the pre-splice bytes into state. Proves NOP
+/// canonicalization end to end: the NOP-padded blob is accepted
+/// (`crate::backend::Backend::emit`'s NOP-tolerant acceptance check), its
+/// `TransactionType` still decodes correctly, and the *stored* `EmittedTxn`
+/// blob is byte-for-byte identical to the pre-splice bytes — i.e. `emit`
+/// stores the canonical (NOP-free) form, exactly as real xahaud's own
+/// `STTx(SerialIter&)` parse-then-store would, not the padded bytes the
+/// hook actually passed in.
+#[test]
+fn remit_with_nops_stores_the_canonical_nop_free_blob() {
+    let env = env();
+    let exit = env.invoke::<Payments>(4);
+    assert_eq!(exit.exit, ExitType::Accept, "{exit:?}");
+    let emitted = env.emitted();
+    assert_eq!(emitted.len(), 1);
+    assert_eq!(emitted[0].tx_type(), Some(TxType::Remit));
+    let blob = emitted[0].blob();
+
+    let plain = env
+        .state(b"nop_test_plain_blob")
+        .expect("remit_with_nops stashes the pre-splice bytes");
+    assert_eq!(
+        blob, plain,
+        "the stored emitted blob must be byte-for-byte identical to the \
+         pre-splice (NOP-free) bytes: {blob:02x?} vs {plain:02x?}"
     );
 }

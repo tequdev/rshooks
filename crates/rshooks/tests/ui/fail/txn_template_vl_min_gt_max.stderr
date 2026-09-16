@@ -1,0 +1,12 @@
+error[E0080]: evaluation panicked: txn_template!: `memo_format`'s vl MIN must not exceed MAX
+  --> tests/ui/fail/txn_template_vl_min_gt_max.rs:6:1
+   |
+6  | / txn_template! {
+7  | |     struct Remit {
+8  | |         transaction_type = ttREMIT,
+9  | |         sequence: u32_field(sfSequence) = 0,
+...  |
+18 | | }
+   | |_^ evaluation of `_` failed here
+   |
+   = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `txn_template` (in Nightly builds, run with -Z macro-backtrace for more info)

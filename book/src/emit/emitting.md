@@ -356,13 +356,88 @@ issued entries, filled through the `amounts(i)` accessor (two entries,
 written one after the other rather than from a loop) and emitted through
 the same lifecycle as `10_emit-txn`'s Payment.
 
+### Optional and variable-length fields
+
+xahaud's `STObject`/`STArray` deserializer skips a single `0x99` byte
+("`NOP`") wherever it expects the next field's header, on the *emit* path
+only (never `sto_*`) — a present-or-absent field, or one of a
+runtime-chosen length, can therefore keep a compile-time-fixed byte
+offset: absence, or the unused tail of a variable-length slot, is just
+more `NOP`s. `txn_template!` builds on this directly, so these fields
+need no `StoWriter`:
+
+- `optional <kind>(sfX)` — any fixed-width kind, present or absent.
+- `any_amount(sfX)` / `optional any_amount(sfX)` — one 49-byte slot
+  holding either the 8-byte native form (the rest `NOP`-filled) or the
+  full 48-byte issued form.
+- `vl(sfX, MIN, MAX)` / `optional vl(sfX, MIN, MAX)` — a `VL` blob whose
+  length is chosen at runtime within `[MIN, MAX]`, in a slot sized for
+  `MAX`.
+- `optional <View>: object(sfX) { .. }` / `optional <View>: array(sfX) [
+  .. ]` — a whole nested container, present or absent.
+- `array(sfX) [ Elem: optional object(sfY) { .. } ; N ]` — a homogeneous,
+  indexed array (see above) whose elements are individually
+  present-or-absent, the array itself always `N` slots long.
+
+Every kind above that can infer from `sfX`'s own serialized type (the same
+inference the required kinds above use for a bare `field: sfX`) has a
+bare-`sfX` `optional` twin too: `optional sfX`, `optional <View>: sfX {
+.. }`/`[ .. ]`, and a homogeneous array's `Elem: optional sfY { .. }` —
+same budget, same generated API, only the spelling differs; a kind that
+cannot infer (`Amount`, `VL`, `Issue`) still needs its explicit `optional`
+form.
+
+Every container — the top level, each named `object`/`array`, each
+homogeneous array, each `optional` view — has its own **63-`NOP` budget**:
+the worst case over its direct optional/variable children (every optional
+field absent, every `vl` at `MIN`, every `any_amount` native) must fit,
+checked at compile time with a message naming the container and the
+budget. This is why a hook author sometimes has to nest a field into its
+own small container, or choose a named array over a homogeneous one,
+rather than declare fields alongside each other freely:
+`examples/22_txn-template-optional`'s `OptionalRemit::amounts` is a
+*named* array with one required and one `optional` element (`first:
+sfAmountEntry { amount: any_amount(sfAmount) }`, `second: optional
+Second: sfAmountEntry { .. }`) — it can hold what two fully `optional`
+50-byte `sfAmountEntry` elements (`2 * 50 = 100 > 63`) could not, since a
+required element charges its container nothing (`Elem::LEN`, not
+`Elem::LEN` reserved-but-optional) while only `second`'s own 50 bytes
+count against the array's budget.
+
+The generated API mirrors `fixed_vl`/homogeneous-element setters: `set_x`
+writes the field (making it present), `clear_x` restores the `NOP`-filled
+default; a whole-container `optional` view gets `enable_x() -> View<'_>`
+(restores the view's own baked default and returns it), `x() ->
+Option<View<'_>>` (`None` when the slot is `NOP`s), and `clear_x()`; a
+homogeneous array whose element is itself `optional`
+gets the same trio (`enable()`/`clear()`) on the element view returned by
+its runtime-indexed accessor. From `22_txn-template-optional`:
+
+```rust,ignore
+if let Ok(Some(tag)) = self.hook_param.dest_tag.get() {
+    txn.set_destination_tag(tag);   // optional sfDestinationTag
+}
+if matches!(self.hook_param.memo.get(), Ok(Some(_))) {
+    let _ = txn.enable_memos();     // optional Memos: sfMemos [ .. ]
+}
+```
+
+`NOP`-padded bytes must never reach the `sto_*` family
+(`sto_validate`/`sto_subfield`/`sto_subarray`/`sto_emplace`/`sto_erase`):
+the Hook API's own lightweight parser rejects `STI_NUMBER` (the NOP's
+type) outright, unlike xahaud's own deserializer on the emit path. No
+`rshooks` code hands `sto_*` a NOP-padded region today; keep it that way
+in hook-side code too. See `docs/NOP_PADDING_DESIGN.md` for the full
+design, including the exact worst-case-NOP formula per kind.
+
 ### Deferred kinds
 
-`Vector256`, `PathSet`, and a genuinely variable-length blob (one whose
-length isn't fixed by the declaration, unlike `fixed_vl`) have no
-`txn_template!` kind yet; see `docs/TXN_TEMPLATE_FIELDS_DESIGN.md` §6 for
-what's deferred and why. A field of one of these types still needs
-`StoWriter` (below) or hand-rolled bytes.
+`Vector256` and `PathSet` — distinct wire shapes from a plain `VL` blob
+(`Vector256` is a flat run of 32-byte hashes with no per-element header;
+`PathSet` is its own nested path/step grammar) — have no `txn_template!`
+kind yet; see `docs/TXN_TEMPLATE_FIELDS_DESIGN.md` §6 for what's deferred
+and why. A field of one of these types still needs `StoWriter` (below) or
+hand-rolled bytes.
 
 ### `prepare_for_emit()`
 
@@ -493,11 +568,14 @@ attributes.
 ## Runtime-shaped transactions: `StoWriter`
 
 `txn_template!` covers fixed-shape nested containers directly (see "Nested
-`STObject`/`STArray`" above) — what it cannot describe is a shape decided
-at runtime: a variable element count, or a container present only
-sometimes (Remit's `sfAmounts`, one entry per destination, depending on
-what the invoking transaction's hook parameters supply). That case needs
-[`rshooks::sto_writer::StoWriter`](sto-writer.md) instead: a bounded,
+`STObject`/`STArray`" above), including present-or-absent fields and
+variable-length blobs within a fixed `MAX` (see "Optional and
+variable-length fields" above) — what it cannot describe is a **runtime
+element count**: an `sfAmounts` whose entry count isn't fixed by the
+declaration (`examples/17_sto-writer`'s Remit, one entry per destination,
+depending on what the invoking transaction's hook parameters supply), or
+any shape needing more than one array's 63-`NOP` budget can hold. That
+case needs [`rshooks::sto_writer::StoWriter`](sto-writer.md) instead: a bounded,
 allocation-free cursor over caller-owned storage with its own
 `prepare_for_emit()`/`Prepared::emit()` lifecycle, built directly on top of
 the same `Prepared` type this page's `prepare_for_emit()` returns. See

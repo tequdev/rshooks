@@ -1,0 +1,12 @@
+error[E0080]: evaluation panicked: txn_template!: `memo_format`'s vl MAX must be at least 1 -- declare it as `empty_vl` for an always-empty blob
+  --> tests/ui/fail/txn_template_vl_max_zero.rs:7:1
+   |
+7  | / txn_template! {
+8  | |     struct Remit {
+9  | |         transaction_type = ttREMIT,
+10 | |         sequence: u32_field(sfSequence) = 0,
+...  |
+19 | | }
+   | |_^ evaluation of `_` failed here
+   |
+   = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `txn_template` (in Nightly builds, run with -Z macro-backtrace for more info)

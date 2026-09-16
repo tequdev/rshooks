@@ -666,6 +666,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "txn-template-optional"
+version = "0.2.1"
+dependencies = [
+ "rshooks",
+ "rshooks-testenv",
+]
+
+[[package]]
 name = "typed-data"
 version = "0.2.1"
 dependencies = [
