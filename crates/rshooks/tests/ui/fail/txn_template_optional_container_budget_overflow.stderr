@@ -1,0 +1,12 @@
+error[E0080]: evaluation panicked: txn_template!: this template's top-level optional/variable-length fields could together need more than 63 NOPs to represent when all are absent/minimal -- xahaud allows at most 63 NOPs per STObject instance
+  --> tests/ui/fail/txn_template_optional_container_budget_overflow.rs:14:1
+   |
+14 | / txn_template! {
+15 | |     struct Remit {
+16 | |         transaction_type = ttREMIT,
+17 | |         sequence: u32_field(sfSequence) = 0,
+...  |
+31 | | }
+   | |_^ evaluation of `_` failed here
+   |
+   = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `txn_template` (in Nightly builds, run with -Z macro-backtrace for more info)

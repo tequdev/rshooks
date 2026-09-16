@@ -51,7 +51,13 @@ pub enum EmitFailureReason {
 /// invocation that ultimately rolled back.
 #[derive(Debug, Clone)]
 pub struct EmitAttempt {
-    /// The raw bytes the hook passed to `emit`.
+    /// For an accepted attempt (`outcome` is `Ok`), the same canonical
+    /// (NOP-stripped) bytes as the resulting [`EmittedTxn::blob`] — see
+    /// `crate::backend::Backend::emit`'s doc comment for why the stored
+    /// form is canonical. For a rejected attempt, the raw bytes the hook
+    /// passed to `emit`, unchanged: a reservation failure never reaches
+    /// `validate_emit_blob`/`canonicalize` at all, and a blob that fails
+    /// `validate_emit_blob` may not even be structurally canonicalizable.
     pub blob: Vec<u8>,
     /// `Ok(())` if the blob was accepted (it also appears in
     /// [`crate::TestEnv::emitted`]); `Err(reason)` if it was rejected.

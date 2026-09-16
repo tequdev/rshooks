@@ -28,6 +28,9 @@ Goals:
 Non-goals:
 
 - Runtime-sized shapes (conditional fields, runtime element counts) — `StoWriter`'s job.
+  (Present-or-absent fields and a runtime-chosen-length `VL` within a fixed `MAX` are no
+  longer out of scope for `txn_template!` as of `docs/NOP_PADDING_DESIGN.md`; only runtime
+  element *counts* remain `StoWriter`'s job.)
 - Any change to `prepare_for_emit`/`Prepared`, to `StoWriter`, or to existing templates'
   bytes (`examples/10_emit-txn` must stay byte-identical; `metrics.json` unchanged).
 
@@ -67,6 +70,7 @@ txn_template! {
   | <name>: sfX [ <Elem>: sfY { <field>* } ; <N> ] // inferred array, homogeneous, indexed
   | <name>: sfX = NativeAmount(<u64 drops>)                 // default-shape: infers native_amount (§2.7)
   | <name>: sfX = IouAmount(<XFL>, <CurrencyCode>, <AccountId>)  // default-shape: infers amount (§2.7)
+  | <name>: sfX = AnyAmount()                     // default-shape: infers any_amount (§2.7), no value
   | <name>: sfX = []                              // default-shape: infers empty_vl (§2.7)
   | <name>: sfX = [ <elem>+ ]                     // default-shape: infers fixed_vl, N from the literal (§2.7)
   | <name>: sfX = *<byte string literal>          // default-shape: infers fixed_vl, N from the literal (§2.7)
@@ -351,23 +355,72 @@ unresolvable call expression):
 ```text
 field: sfXxx = NativeAmount(d)              -> field: native_amount(sfXxx) = d
 field: sfXxx = IouAmount(xfl, cur, iss)      -> field: amount(sfXxx) = (xfl, cur, iss)
+field: sfXxx = AnyAmount()                  -> field: any_amount(sfXxx)
 field: sfXxx = []                           -> field: empty_vl(sfXxx)
 field: sfXxx = [ <elem>+ ]                  -> field: fixed_vl(sfXxx, N) = [ <elem>+ ]
 field: sfXxx = *<byte string literal>       -> field: fixed_vl(sfXxx, N) = *<byte string literal>
 ```
 
-`NativeAmount`/`IouAmount` are macro syntax markers matched as literal tokens, not real
-types or functions — nothing named that way needs to exist in scope. `N` in the last two
+`NativeAmount`/`IouAmount`/`AnyAmount` are macro syntax markers matched as literal tokens,
+not real types or functions — nothing named that way needs to exist in scope. `AnyAmount()`
+takes no value: `any_amount` has no baked default to thread through (issued zero, always),
+so its rewrite leaves no `= ..` behind, unlike the other two. `N` in the two array/byte-string
 rewrites is recovered from the default literal itself via a new `codec::array_len<const N:
 usize>(_: &[u8; N]) -> usize { N }`, spliced in as `{ array_len(&[ <elem>+ ]) }`/`{
 array_len(&*<byte string literal>) }` — a block expression, since `fixed_vl`'s own `$n:expr`
 fragment splices into a `[u8; $n]` array-length position. A `fixed_vl` default spelled as a
-named const (`field: sfX = SOME_CONST`) is not one of the five literal shapes above, so it
+named const (`field: sfX = SOME_CONST`) is not one of the literal shapes above, so it
 falls through to the plain inferred-scalar-with-default arm and is rejected there —
 `fixed_vl(sfX, N) = SOME_CONST` (the explicit form, `N` spelled out) is still required,
 since there is no literal to recover `N` from. `issue`/`native_issue`, and a zero-default
-`amount(sfX)` (no `=` at all), are untouched by this desugar — none of its five shapes match
-them.
+`amount(sfX)` (no `=` at all), are untouched by this desugar — none of the shapes above
+match them.
+
+#### Inferred `optional` forms
+
+`field: optional sfXxx` is `optional <scalar_kind>(sfXxx)`'s (`docs/NOP_PADDING_DESIGN.md`
+§3.1) bare-`sfXxx` twin: `InferKind` gains a second kind tag, `OPTIONAL_KIND` (the
+`codec::KIND_OPTIONAL_*` row for this STI's optional form, `u8::MAX` — unused — for a
+non-inferable one), alongside the existing `KIND`. The setter writes `header + PREFIX +
+value` in one call (mirroring `optional account_id`'s own `PREFIX`-aware setter, generalized
+to any `InferKind`), `clear_x` NOP-fills `fixed_field_size(sfXxx, PREFIX.len() + LEN)`, and
+that same size is the field's worst-case NOP charge to its enclosing container. A
+non-inferable STI names the matching explicit `optional` form in its error message
+(`optional native_amount`/`optional amount`/`any_amount`/`optional any_amount`, `optional
+empty_vl`/`optional fixed_vl`, `optional vl`, `optional native_issue`/`optional issue`) —
+except the three `Amount`-shaped kinds with no baked default, which get their own
+default-shape markers, the `optional` twins of the non-`optional` ones above:
+
+```text
+field: optional sfXxx = AnyAmount()         -> field: optional any_amount(sfXxx)
+field: optional sfXxx = NativeAmount()      -> field: optional native_amount(sfXxx)
+field: optional sfXxx = IouAmount()         -> field: optional amount(sfXxx)
+```
+
+All three take no value, same as the non-`optional` `AnyAmount()` marker: absent is the
+only default an `optional` field has, so there is nothing to thread through even for
+`NativeAmount`/`IouAmount`, unlike their non-`optional` forms above (which do take one).
+
+`optional sfXxx { .. }`/`[ .. ]` and a homogeneous array's `Elem: optional sfY { .. }` are
+pure token rewrites, exactly like their non-`optional` counterparts above: `optional sfXxx {
+.. }` -> `optional object(sfXxx) { .. }` (legal wherever the explicit form is — a
+top-level/nested-object field, or a named element inside an array), `optional sfXxx [ .. ]`
+-> `optional array(sfXxx) [ .. ]`, and `Elem: optional sfY { .. } ; N` -> `Elem: optional
+object(sfY) { .. } ; N` under either a bare or an explicit outer `array(..)`.
+
+#### Named `optional` containers have no view type
+
+`optional object(sfX) { <field>* }`/`optional array(sfX) [ <element>* ]` (whole-container
+present-or-absent) compile *inline*, exactly like the plain `object`/`array` forms above —
+`<field>*`'s own fields flatten onto the parent as ordinary `set_x_<field>` methods, sharing
+the same order/depth/NOP-budget checks — rather than spawning a separate view type. The only
+addition: the container's slot defaults to absent (`NOP`-filled), and every one of its own
+setters (plus a generated `enable_x(&mut self)`) first ensures it — and every enclosing
+`optional` ancestor — is present, copying in its own baked defaults if not. A generated
+`clear_x(&mut self)` NOP-fills the whole slot back to absent, and `is_x_present(&self) ->
+bool` reads presence without changing it. See `docs/NOP_PADDING_DESIGN.md` §3.3 for exactly
+how the container's own writes are captured into a standalone `const` and the ancestor-
+presence prelude (`$crate::__txn_template_ensure!`) is threaded through `mode`.
 
 ## 3. Implementation
 
@@ -524,9 +577,10 @@ New:
 
 - `Vector256` (`sfURITokenIDs`, `sfHookNamespaces`) and `PathSet` — distinct wire shapes
   from a plain `VL` blob (`Vector256` is a flat run of 32-byte hashes with no per-element
-  header; `PathSet` is its own nested path/step grammar), plus a genuinely variable-length
-  (not fixed-at-declaration) `VL` blob. `fixed_vl(sfX, N)` (§2.6) covers every *fixed*-length
-  `VL` field; these are the remaining VL-family gaps.
+  header; `PathSet` is its own nested path/step grammar). `fixed_vl(sfX, N)` (§2.6) covers
+  every *fixed*-length `VL` field; `vl(sfX, MIN, MAX)`
+  (`docs/NOP_PADDING_DESIGN.md`) covers a runtime-chosen-length one within a compile-time
+  `MAX`; `Vector256`/`PathSet` remain the actual VL-family gaps.
 - `Number` (`sfNumber`), `UInt192` (`sfMPTokenIssuanceID`), `XChainBridge`: no Xahau
   transaction emits them today; add on demand with the `fixed_field_size` pattern.
 - Type-level guard that an `amount` field with the zero default is set before emit (a

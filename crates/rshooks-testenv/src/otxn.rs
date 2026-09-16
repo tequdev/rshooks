@@ -168,18 +168,33 @@ fn write_vl_len(out: &mut Vec<u8>, len: usize) {
     }
 }
 
-/// Parses a canonical root field sequence (as [`serialize`] produces, or
-/// any other well-formed root slot's content) back into a field map — the
-/// inverse of [`serialize`]. `None` on any parse failure. `pub(crate)`
-/// rather than an `Otxn` constructor: P2-E's `cbak` harness (design §4
-/// "cbak execution") reconstructs an `Otxn`-shaped field map for the
-/// emitted transaction passed into a callback.
+/// Parses a root field sequence (as [`serialize`] produces, any other
+/// well-formed root slot's content, or a raw NOP-padded blob a test
+/// supplies directly) back into a field map — the inverse of [`serialize`].
+/// `None` on any parse failure. `pub(crate)` rather than an `Otxn`
+/// constructor: P2-E's `cbak` harness (design §4 "cbak execution")
+/// reconstructs an `Otxn`-shaped field map for the emitted transaction
+/// passed into a callback.
+///
+/// [`crate::emit_walk::canonicalize`]s `bytes` first, so every stored
+/// field value — including a nested `STI_OBJECT`(14)/`STI_ARRAY`(15)
+/// field's own bytes, e.g. an incoming `Remit`'s `sfAmounts` array — is
+/// NOP-free at every depth by the time it lands in the returned map. This
+/// matters even when [`bytes`] itself already came from a NOP-free
+/// [`crate::world::EmittedTxn::blob`] (`crate::backend::Backend::emit`
+/// stores canonically too): keeping the canonicalization here as well
+/// means this function's own contract — "the returned field values are
+/// always safe to feed to the strict `sto_*`/`slot_*` family" — does not
+/// silently depend on every caller already having canonicalized upstream.
 pub(crate) fn deserialize(bytes: &[u8]) -> Option<std::collections::HashMap<u32, Vec<u8>>> {
-    let fields = crate::emit_walk::walk_top_level_fields(bytes).ok()?;
+    let canonical = crate::emit_walk::canonicalize(bytes).ok()?;
+    let fields =
+        crate::emit_walk::walk_top_level_fields(&canonical, crate::emit_walk::NopMode::Strict)
+            .ok()?;
     let mut map = std::collections::HashMap::new();
     for f in &fields {
-        let (start, end) = crate::emit_walk::field_value_payload(bytes, f).ok()?;
-        let value = bytes.get(start..end)?.to_vec();
+        let (start, end) = crate::emit_walk::field_value_payload(&canonical, f).ok()?;
+        let value = canonical.get(start..end)?.to_vec();
         map.insert(f.code as u32, value);
     }
     Some(map)
@@ -239,7 +254,16 @@ pub(crate) fn from_emitted(blob: &[u8], hash: [u8; 32]) -> Option<EmittedOtxn> {
     }
 
     let ed_bytes = map.get(&rshooks::sfield::sfEmitDetails.code())?;
-    let ed_fields = crate::emit_walk::walk_top_level_fields_or_object(ed_bytes, true).ok()?;
+    // `ed_bytes` came out of `deserialize`'s canonicalized map, so it is
+    // already NOP-free — `Strict` here is both correct and a defensive
+    // assertion of that invariant (see `crate::emit_walk::NopMode::Strict`'s
+    // doc comment).
+    let ed_fields = crate::emit_walk::walk_top_level_fields_or_object(
+        ed_bytes,
+        true,
+        crate::emit_walk::NopMode::Strict,
+    )
+    .ok()?;
 
     let generation_code = u64::from(rshooks::sfield::sfEmitGeneration.code());
     let burden_code = u64::from(rshooks::sfield::sfEmitBurden.code());
@@ -276,7 +300,7 @@ pub(crate) fn from_emitted(blob: &[u8], hash: [u8; 32]) -> Option<EmittedOtxn> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
+    #![allow(clippy::unwrap_used, clippy::expect_used)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
 
     use super::*;
 
@@ -330,7 +354,9 @@ mod tests {
         let bytes = serialize(&otxn);
         // No wrapping header/terminator: walkable as a top-level field
         // sequence, and the walk must consume every byte.
-        let fields = crate::emit_walk::walk_top_level_fields(&bytes).unwrap();
+        let fields =
+            crate::emit_walk::walk_top_level_fields(&bytes, crate::emit_walk::NopMode::Tolerant)
+                .unwrap();
         // TransactionType (synthesized) + Amount + Account + Destination.
         assert_eq!(fields.len(), 4);
         // Canonical (type, field) order: TransactionType(1,2) < Amount(6,1)
@@ -393,7 +419,9 @@ mod tests {
             .field_raw(rshooks::sfield::sfSigningPubKey.code(), &[9, 9, 9]);
         let bytes = serialize(&otxn);
         // The field's own value bytes on the wire are `<len=3><9,9,9>`.
-        let fields = crate::emit_walk::walk_top_level_fields(&bytes).unwrap();
+        let fields =
+            crate::emit_walk::walk_top_level_fields(&bytes, crate::emit_walk::NopMode::Tolerant)
+                .unwrap();
         let spk = fields
             .iter()
             .find(|f| f.code == u64::from(rshooks::sfield::sfSigningPubKey.code()))
@@ -412,5 +440,31 @@ mod tests {
     #[test]
     fn deserialize_rejects_malformed_bytes() {
         assert_eq!(deserialize(&[0xE2]), None); // truncated
+    }
+
+    #[test]
+    fn deserialize_canonicalizes_a_nested_nop_supplied_directly() {
+        // A top-level field sequence — sfTransactionType(0), then a
+        // nested STObject field (type 14, field 2) whose own body is one
+        // scalar field followed by a NOP, before its own `0xE1` — built
+        // by hand rather than through `serialize`/`Backend::emit`: exactly
+        // the "raw NOP-padded blob a test supplies directly" case
+        // `deserialize`'s own canonicalization (independent of
+        // `Backend::emit`'s) exists for.
+        let mut bytes = vec![0x12, 0x00, 0x00]; // sfTransactionType = 0
+        bytes.push(0xE2); // (type 14, field 2) nested object header
+        bytes.extend_from_slice(&[0x24, 0, 0, 0, 7]); // sfSequence = 7
+        bytes.push(0x99); // NOP inside the nested object, before its own 0xE1
+        bytes.push(0xE1); // nested object terminator
+
+        let map = deserialize(&bytes).expect("tolerant parse of a NOP-padded blob");
+        let nested_code = (14u32 << 16) | 2;
+        let nested_value = map.get(&nested_code).expect("nested field present");
+        // The map's entry is the nested field's *value* (payload,
+        // terminator included — `field_value_payload`'s STI_OBJECT
+        // convention): it must be exactly the NOP-free bytes, proving the
+        // NOP genuinely present in `bytes` did not survive into the map
+        // `deserialize` returns.
+        assert_eq!(nested_value, &vec![0x24, 0, 0, 0, 7, 0xE1]);
     }
 }

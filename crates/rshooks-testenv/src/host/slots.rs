@@ -125,7 +125,7 @@ pub(crate) fn slot_count(ctx: &InvocationContext, slot_no: u32) -> i64 {
     if entry.kind != SlotKind::Array {
         return NOT_AN_ARRAY;
     }
-    match emit_walk::walk_array_elements(&entry.bytes) {
+    match emit_walk::walk_array_elements(&entry.bytes, emit_walk::NopMode::Strict) {
         Ok(elements) => elements.len() as i64,
         // Defensive: every `SlotKind::Array` entry here comes from a
         // successful `walk_array_elements`/`walk_object_body` call, so a
@@ -382,7 +382,11 @@ pub(crate) fn slot_subfield(
         return NOT_AN_OBJECT;
     }
     let in_object = parent.kind == SlotKind::Object;
-    let fields = match emit_walk::walk_top_level_fields_or_object(&parent.bytes, in_object) {
+    let fields = match emit_walk::walk_top_level_fields_or_object(
+        &parent.bytes,
+        in_object,
+        emit_walk::NopMode::Strict,
+    ) {
         Ok(f) => f,
         Err(()) => return NOT_AN_OBJECT, // defensive — see this module's doc comment
     };
@@ -428,7 +432,7 @@ pub(crate) fn slot_subarray(
     if parent.kind != SlotKind::Array {
         return NOT_AN_ARRAY;
     }
-    let elements = match emit_walk::walk_array_elements(&parent.bytes) {
+    let elements = match emit_walk::walk_array_elements(&parent.bytes, emit_walk::NopMode::Strict) {
         Ok(e) => e,
         Err(()) => return NOT_AN_ARRAY, // defensive — see this module's doc comment
     };

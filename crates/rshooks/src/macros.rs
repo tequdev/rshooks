@@ -32,9 +32,11 @@
 /// ```
 #[macro_export]
 macro_rules! guard {
-    ($m:expr) => {
-        unsafe { $crate::raw::_g((1u32 << 31) + line!(), ($m) + 1) }
-    };
+    ($m:expr) => {{
+        let __guard_id: u32 = (1u32 << 31).wrapping_add(line!());
+        let __maxiter: u32 = (($m) as u32).wrapping_add(1);
+        unsafe { $crate::raw::_g(__guard_id, __maxiter) }
+    }};
 }
 
 /// Like [`guard!`], but for multiple loops that share one source line (the
@@ -42,9 +44,13 @@ macro_rules! guard {
 /// exactly.
 #[macro_export]
 macro_rules! guard_m {
-    ($m:expr, $n:expr) => {
-        unsafe { $crate::raw::_g((1u32 << 31) + (line!() << 16) + ($n), ($m) + 1) }
-    };
+    ($m:expr, $n:expr) => {{
+        let __guard_id: u32 = (1u32 << 31)
+            .wrapping_add(line!().wrapping_shl(16))
+            .wrapping_add(($n) as u32);
+        let __maxiter: u32 = (($m) as u32).wrapping_add(1);
+        unsafe { $crate::raw::_g(__guard_id, __maxiter) }
+    }};
 }
 
 /// Defeats full loop unrolling for a small, fixed-trip-count loop whose body

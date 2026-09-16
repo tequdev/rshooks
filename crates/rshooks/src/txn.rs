@@ -462,6 +462,163 @@ pub mod codec {
             .wrapping_add(n)
     }
 
+    // --- NOP-padded optional and variable-length fields ---
+    //
+    // See `docs/NOP_PADDING_DESIGN.md` §1: xahaud's `STObject::set`/
+    // `STArray::STArray` field loops treat a lone `0x99` byte in a
+    // field-header position as a no-op, up to 63 per container instance
+    // (cumulative, not consecutive -- one counter per `STObject`/`STArray`
+    // level). `txn_template!`'s `optional`/`vl`/`any_amount` kinds bake
+    // this byte in place of a real field header/value when a field is
+    // absent or shorter than its reserved slot.
+
+    /// The single-byte NOP xahaud's field-loop parsers skip (see the module
+    /// note above). Never valid in a position the Hook API's own
+    /// `sto_*`/`get_stobject_length` parser reads -- only ever written into
+    /// the pre-emit blob `txn_template!` builds.
+    pub const NOP: u8 = 0x99;
+
+    /// The per-container NOP budget xahaud's field-loop parsers enforce
+    /// (`++nop_counter == 64` throws) -- 63 NOPs, cumulative, per
+    /// `STObject`/`STArray` instance. `txn_template!` checks this at
+    /// compile time for every container (the top level, each nested
+    /// `object`/`array`, each optional view, each homogeneous array of
+    /// optional elements) against the worst case where every optional
+    /// field it directly holds is simultaneously absent.
+    pub const MAX_NOPS_PER_CONTAINER: usize = 63;
+
+    /// Writes `n` [`NOP`] bytes into `bytes` starting at `offset`, at
+    /// compile time. Used by `txn_template!`'s generated `new()` to bake in
+    /// an `optional`/`vl`/`any_amount` field's fully-absent default (`n`
+    /// there is always a compile-time constant -- the field's own reserved
+    /// slot size).
+    ///
+    /// # Panics (compile-time only)
+    ///
+    /// See [`write_field_header`] -- same const-context-only guarantee.
+    #[allow(clippy::indexing_slicing)] // in-bounds per the assert below; const-only, see the Panics note
+    pub const fn write_nops<const N: usize>(bytes: &mut [u8; N], offset: usize, n: usize) {
+        let mut i = 0;
+        while i < n {
+            let dst = offset.wrapping_add(i);
+            assert!(dst < N, "txn_template!: NOP fill out of bounds");
+            bytes[dst] = NOP;
+            i = i.wrapping_add(1);
+        }
+    }
+
+    /// Returns the `M`-byte slice `src[offset..offset + M]`, at compile
+    /// time. Used by `txn_template!`'s named `optional object`/`optional
+    /// array` container arms to trim a whole-container slot's baked
+    /// "present" bytes down to just its own span, out of a temporary
+    /// array built at the container's real (absolute) offset -- so every
+    /// inner field's own `write_field_header`/`write_const_bytes` call
+    /// above needs no relative-offset rewriting, while the const the
+    /// slot ends up in still costs only its own `M` bytes, not the
+    /// leading `offset` bytes of padding a same-sized-as-`src` const
+    /// would carry into the binary's data segment.
+    ///
+    /// # Panics (compile-time only)
+    ///
+    /// See [`write_field_header`] -- same const-context-only guarantee.
+    #[allow(clippy::indexing_slicing)] // in-bounds per the assert below; const-only, see the Panics note
+    pub const fn copy_range<const N: usize, const M: usize>(
+        src: &[u8; N],
+        offset: usize,
+    ) -> [u8; M] {
+        let mut out = [0u8; M];
+        let mut i = 0;
+        while i < M {
+            let at = offset.wrapping_add(i);
+            assert!(at < N, "txn_template!: slot trim out of bounds");
+            out[i] = src[at];
+            i = i.wrapping_add(1);
+        }
+        out
+    }
+
+    /// Whether `needle` equals any element of `haystack`, at compile time.
+    /// Backs `txn_template!`'s "an emit-plumbing field can never be
+    /// `optional`/`vl`/`any_amount`" check -- kept generic over the
+    /// comparison codes (rather than hardcoding `sfield` names here) so
+    /// `codec` stays value-based and independent of any specific `sfXxx`
+    /// constant, matching [`find_field`]'s own convention.
+    #[must_use]
+    #[allow(clippy::indexing_slicing)] // in-bounds per the `i < haystack.len()` guard; const-only, see `find_field`
+    pub const fn is_one_of(needle: u32, haystack: &[u32]) -> bool {
+        let mut i = 0;
+        while i < haystack.len() {
+            if haystack[i] == needle {
+                return true;
+            }
+            i = i.wrapping_add(1);
+        }
+        false
+    }
+
+    /// A tiny compile-time FNV-1a hash (32-bit, truncated to its low 16
+    /// bits). Backs `txn_template!`'s `vl` kind's `guard_m!` disambiguator
+    /// (`$n` in [`crate::guard_m!`]'s `($m, $n)`): `line!()`, used
+    /// directly inside a `macro_rules!` body rather than from a captured
+    /// fragment, resolves to wherever that `line!()` token is written in
+    /// *this file* — the `vl` arm's own definition — not to the
+    /// `txn_template!` call site in the hook author's source, so every
+    /// `vl` field's setter, across every template in the crate, shares
+    /// the same `line!()` value. Hashing the declaring template name and
+    /// the field's full `_`-joined path (unique per field within one
+    /// template — two fields sharing both would already be a duplicate
+    /// method name, a plain Rust compile error) mixed with the field's
+    /// own slot offset gives each `vl` field a disambiguator that is
+    /// distinct except by hash collision, including between two `vl`
+    /// fields at the same offset in two different templates in one
+    /// crate (a "view"'s `prev` restarts at its own container header, so
+    /// offsets alone collide across templates/views).
+    #[must_use]
+    #[allow(clippy::indexing_slicing)] // in-bounds per the `i < bytes.len()` guard; const-only, see `find_field`
+    pub const fn fnv1a_16(bytes: &[u8]) -> u16 {
+        let mut hash: u32 = 0x811c_9dc5; // FNV-1a 32-bit offset basis
+        let mut i = 0;
+        while i < bytes.len() {
+            hash ^= bytes[i] as u32;
+            hash = hash.wrapping_mul(0x0100_0193); // FNV-1a 32-bit prime
+            i = i.wrapping_add(1);
+        }
+        (hash & 0xFFFF) as u16
+    }
+
+    /// The VL-prefix + payload size of a `vl(sfX, MIN, MAX)`/`fixed_vl(sfX,
+    /// N)` slot's *value region* (excluding the field header):
+    /// [`vl_length_prefix`]'s prefix length for `n` plus `n` itself. Used
+    /// by `txn_template!`'s `vl` kind to size a slot for `MAX` and to
+    /// compute the NOP budget charge `vl_slot_size(MAX) - vl_slot_size(MIN)`.
+    #[must_use]
+    pub const fn vl_slot_size(n: usize) -> usize {
+        vl_length_prefix(n).1.wrapping_add(n)
+    }
+
+    /// Header + value-region size of a `vl(sfX, MIN, MAX)` field reserved
+    /// for `MAX`: [`field_header`] plus [`vl_slot_size`]`(max)`.
+    #[must_use]
+    pub const fn vl_field_size<T>(f: SField<T>, max: usize) -> usize {
+        field_header(f).1.wrapping_add(vl_slot_size(max))
+    }
+
+    /// Header + 48-byte value-region size of an `any_amount(sfX)` field --
+    /// numerically identical to [`iou_amount_field_size`] (both reserve a
+    /// header plus [`crate::types::IOU_AMOUNT_LEN`] bytes), named
+    /// separately because `any_amount`'s value region can hold *either* the
+    /// 8-byte native form padded with [`ANY_AMOUNT_NATIVE_NOPS`] NOPs or the
+    /// full 48-byte issued form, unlike `amount`'s always-issued region.
+    #[must_use]
+    pub const fn any_amount_field_size<T>(f: SField<T>) -> usize {
+        iou_amount_field_size(f)
+    }
+
+    /// Number of [`NOP`] bytes following an `any_amount(sfX)` field's
+    /// 8-byte native value, padding it out to the same 48-byte value-region
+    /// width the issued form uses: `48 - 8`.
+    pub const ANY_AMOUNT_NATIVE_NOPS: usize = crate::types::IOU_AMOUNT_LEN - 8;
+
     /// Writes a [`vl_length_prefix`] for `len` into `bytes` at `offset`, at
     /// compile time. Used by `txn_template!`'s generated `new()` to bake in
     /// a `fixed_vl` field's length prefix, the same way
@@ -616,14 +773,62 @@ pub mod codec {
     pub const KIND_ARRAY: u8 = 15;
     /// Kind tag for a `fixed_vl` table row.
     pub const KIND_FIXED_VL: u8 = 16;
+    /// Kind tag for an `optional u8_field` table row.
+    pub const KIND_OPTIONAL_U8_FIELD: u8 = 17;
+    /// Kind tag for an `optional u16_field` table row.
+    pub const KIND_OPTIONAL_U16_FIELD: u8 = 18;
+    /// Kind tag for an `optional u32_field` table row.
+    pub const KIND_OPTIONAL_U32_FIELD: u8 = 19;
+    /// Kind tag for an `optional u64_field` table row.
+    pub const KIND_OPTIONAL_U64_FIELD: u8 = 20;
+    /// Kind tag for an `optional hash128` table row.
+    pub const KIND_OPTIONAL_HASH128: u8 = 21;
+    /// Kind tag for an `optional hash160` table row.
+    pub const KIND_OPTIONAL_HASH160: u8 = 22;
+    /// Kind tag for an `optional hash256` table row.
+    pub const KIND_OPTIONAL_HASH256: u8 = 23;
+    /// Kind tag for an `optional currency` table row.
+    pub const KIND_OPTIONAL_CURRENCY: u8 = 24;
+    /// Kind tag for an `optional native_amount` table row.
+    pub const KIND_OPTIONAL_NATIVE_AMOUNT: u8 = 25;
+    /// Kind tag for an `optional amount` table row.
+    pub const KIND_OPTIONAL_IOU_AMOUNT: u8 = 26;
+    /// Kind tag for an `optional native_issue` table row.
+    pub const KIND_OPTIONAL_NATIVE_ISSUE: u8 = 27;
+    /// Kind tag for an `optional issue` table row.
+    pub const KIND_OPTIONAL_ISSUE: u8 = 28;
+    /// Kind tag for an `optional account_id` table row.
+    pub const KIND_OPTIONAL_ACCOUNT_ID: u8 = 29;
+    /// Kind tag for an `optional empty_vl` table row.
+    pub const KIND_OPTIONAL_EMPTY_VL: u8 = 30;
+    /// Kind tag for an `optional fixed_vl` table row.
+    pub const KIND_OPTIONAL_FIXED_VL: u8 = 31;
+    /// Kind tag for an `any_amount` table row.
+    pub const KIND_ANY_AMOUNT: u8 = 32;
+    /// Kind tag for an `optional any_amount` table row.
+    pub const KIND_OPTIONAL_ANY_AMOUNT: u8 = 33;
+    /// Kind tag for a `vl` table row.
+    pub const KIND_VL: u8 = 34;
+    /// Kind tag for an `optional vl` table row.
+    pub const KIND_OPTIONAL_VL: u8 = 35;
+    /// Kind tag for an `optional object` (whole-container-optional view)
+    /// table row.
+    pub const KIND_OPTIONAL_OBJECT: u8 = 36;
+    /// Kind tag for an `optional array` (whole-container-optional view)
+    /// table row.
+    pub const KIND_OPTIONAL_ARRAY: u8 = 37;
 
     /// One row of a `txn_template!` field table: `(sfcode, kind tag,
-    /// payload offset, depth)`. `payload offset` is the offset of the
-    /// field's *value* (after the header, and after the VL length byte for
-    /// `account_id`) — the same offset each kind's generated setter writes
-    /// to. `depth` is `0` for a field declared directly on the template,
-    /// and one more than its enclosing container's depth for a field
-    /// declared inside a nested `object`/`array` — see [`find_field`].
+    /// payload offset, depth)`. `payload offset`'s meaning is consistent
+    /// between a kind's `optional` and non-`optional` forms (`account_id`
+    /// and `optional account_id` both record `header + 1`, past the VL
+    /// length byte; every other kind records `header` alone) — for
+    /// `optional`/`vl`/`any_amount` kinds it points at the *value* an
+    /// absent field would have, not at anything guaranteed to hold a real
+    /// header. `depth` is `0` for a field declared directly on the
+    /// template, and one more than its enclosing container's depth for a
+    /// field declared inside a nested `object`/`array` — see
+    /// [`find_field`].
     pub type FieldEntry = (u32, u8, usize, usize);
 
     /// Finds `sfcode` in `table`, at compile time, returning its
@@ -724,6 +929,10 @@ pub mod codec {
         const HAS_DEFAULT: bool;
         /// The `codec::KIND_*` tag for the generated `FIELDS` row.
         const KIND: u8;
+        /// The `codec::KIND_OPTIONAL_*` tag for a `field: optional sfXxx`
+        /// declaration's generated `FIELDS` row — `u8::MAX` (unused) for a
+        /// non-inferable STI, matching [`Self::KIND`]'s own placeholder.
+        const OPTIONAL_KIND: u8;
         /// Bytes baked between the field header and the value — the
         /// 1-byte VL length prefix for `STI_ACCOUNT`, empty otherwise.
         const PREFIX: &'static [u8];
@@ -737,12 +946,13 @@ pub mod codec {
     /// Implements [`InferKind`] for an inferable integer STI: `$sti`'s
     /// setter takes `$int` by value and writes it big-endian.
     macro_rules! infer_uint {
-        ($sti:expr, $int:ty, $kind:expr) => {
+        ($sti:expr, $int:ty, $kind:expr, $opt_kind:expr) => {
             impl InferKind for Infer<{ $sti }> {
                 type Value<'a> = $int;
                 const INFERABLE: bool = true;
                 const HAS_DEFAULT: bool = true;
                 const KIND: u8 = $kind;
+                const OPTIONAL_KIND: u8 = $opt_kind;
                 const PREFIX: &'static [u8] = &[];
                 const LEN: usize = ::core::mem::size_of::<$int>();
                 #[inline(always)]
@@ -753,21 +963,37 @@ pub mod codec {
         };
     }
 
-    infer_uint!(sti::STI_UINT8, u8, KIND_U8_FIELD);
-    infer_uint!(sti::STI_UINT16, u16, KIND_U16_FIELD);
-    infer_uint!(sti::STI_UINT32, u32, KIND_U32_FIELD);
-    infer_uint!(sti::STI_UINT64, u64, KIND_U64_FIELD);
+    infer_uint!(sti::STI_UINT8, u8, KIND_U8_FIELD, KIND_OPTIONAL_U8_FIELD);
+    infer_uint!(
+        sti::STI_UINT16,
+        u16,
+        KIND_U16_FIELD,
+        KIND_OPTIONAL_U16_FIELD
+    );
+    infer_uint!(
+        sti::STI_UINT32,
+        u32,
+        KIND_U32_FIELD,
+        KIND_OPTIONAL_U32_FIELD
+    );
+    infer_uint!(
+        sti::STI_UINT64,
+        u64,
+        KIND_U64_FIELD,
+        KIND_OPTIONAL_U64_FIELD
+    );
 
     /// Implements [`InferKind`] for an inferable zeroed (no-default) fixed
     /// `[u8; N]`-shaped STI: `$sti`'s setter takes `&$Value` by reference
     /// and copies its bytes verbatim.
     macro_rules! infer_bytes {
-        ($sti:expr, $Value:ty, $kind:expr, $len:expr) => {
+        ($sti:expr, $Value:ty, $kind:expr, $opt_kind:expr, $len:expr) => {
             impl InferKind for Infer<{ $sti }> {
                 type Value<'a> = &'a $Value;
                 const INFERABLE: bool = true;
                 const HAS_DEFAULT: bool = false;
                 const KIND: u8 = $kind;
+                const OPTIONAL_KIND: u8 = $opt_kind;
                 const PREFIX: &'static [u8] = &[];
                 const LEN: usize = $len;
                 #[inline(always)]
@@ -778,16 +1004,41 @@ pub mod codec {
         };
     }
 
-    infer_bytes!(sti::STI_UINT128, [u8; 16], KIND_HASH128, 16);
-    infer_bytes!(sti::STI_UINT160, [u8; 20], KIND_HASH160, 20);
-    infer_bytes!(sti::STI_UINT256, Hash, KIND_HASH256, 32);
-    infer_bytes!(sti::STI_CURRENCY, CurrencyCode, KIND_CURRENCY, 20);
+    infer_bytes!(
+        sti::STI_UINT128,
+        [u8; 16],
+        KIND_HASH128,
+        KIND_OPTIONAL_HASH128,
+        16
+    );
+    infer_bytes!(
+        sti::STI_UINT160,
+        [u8; 20],
+        KIND_HASH160,
+        KIND_OPTIONAL_HASH160,
+        20
+    );
+    infer_bytes!(
+        sti::STI_UINT256,
+        Hash,
+        KIND_HASH256,
+        KIND_OPTIONAL_HASH256,
+        32
+    );
+    infer_bytes!(
+        sti::STI_CURRENCY,
+        CurrencyCode,
+        KIND_CURRENCY,
+        KIND_OPTIONAL_CURRENCY,
+        20
+    );
 
     impl InferKind for Infer<{ sti::STI_ACCOUNT }> {
         type Value<'a> = &'a AccountId;
         const INFERABLE: bool = true;
         const HAS_DEFAULT: bool = false;
         const KIND: u8 = KIND_ACCOUNT_ID;
+        const OPTIONAL_KIND: u8 = KIND_OPTIONAL_ACCOUNT_ID;
         const PREFIX: &'static [u8] = &[ACC_ID_LEN as u8];
         const LEN: usize = ACC_ID_LEN;
         #[inline(always)]
@@ -808,6 +1059,7 @@ pub mod codec {
                     const INFERABLE: bool = false;
                     const HAS_DEFAULT: bool = false;
                     const KIND: u8 = u8::MAX;
+                    const OPTIONAL_KIND: u8 = u8::MAX;
                     const PREFIX: &'static [u8] = &[];
                     const LEN: usize = 0;
                     fn write(_dst: &mut [u8], _value: Self::Value<'_>) {}
@@ -1272,6 +1524,17 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// | `fixed_vl(sfX, N) = e` | VL | VL-prefix(N) + N | zeroed, or the declared `[u8; N]` | `set_x(&[u8; N])` |
 /// | `object(sfX) { .. }` | OBJECT | inner + 1 (`0xE1`) | inner defaults | inner setters, prefixed |
 /// | `array(sfX) [ .. ]` | ARRAY | elements + 1 (`0xF1`) | inner defaults | inner setters, prefixed |
+/// | `optional <scalar_kind>(sfX $(, N)?)` | (of `<scalar_kind>`) | that kind's slot | all [`NOP`](crate::txn::codec::NOP) (absent) | `set_x(<same args as the kind>)`, `clear_x()` |
+/// | `any_amount(sfX)` | AMOUNT | 1 + 48 | issued zero (as `amount`) | `set_x_native(u64) -> Result<()>`, `set_x_issued(XFL, &CurrencyCode, &AccountId)` |
+/// | `optional any_amount(sfX)` | AMOUNT | 1 + 48 | all NOP (absent) | the two above, plus `clear_x()` |
+/// | `vl(sfX, MAX)` / `vl(sfX, MIN, MAX)` | VL | VL-prefix(MAX) + MAX | prefix(MIN) + MIN zeros + NOP tail | `set_x(&[u8]) -> Result<()>` |
+/// | `optional vl(sfX, MIN, MAX)` | VL | VL-prefix(MAX) + MAX | all NOP (absent) | `set_x(&[u8]) -> Result<()>`, `clear_x()` |
+/// | `optional object(sfX) { .. }` | OBJECT | inner + 1 (`0xE1`) | all NOP (absent) | inner setters, prefixed (any one makes it present); `enable_x()`, `clear_x()`, `is_x_present() -> bool` |
+/// | `optional array(sfX) [ .. ]` | ARRAY | inner + 1 (`0xF1`) | all NOP (absent) | same |
+///
+/// See "Optional and variable-length fields" below for the full grammar,
+/// the host mechanism these kinds rely on, and the compile-time budget
+/// check every container's optional/variable-length fields go through.
 ///
 /// Every kind checks, at compile time, that the declared `sfXxx` constant's
 /// serialized type (`code >> 16`) matches — `u32_field(sfFee)` (an
@@ -1327,9 +1590,15 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// |---|---|---|
 /// | `NativeAmount(drops)` | `native_amount(sfX) = drops` | 8-byte native amount |
 /// | `IouAmount(xfl, cur, iss)` | `amount(sfX) = (xfl, cur, iss)` | 48-byte issued amount |
+/// | `AnyAmount()` | `any_amount(sfX)` | 49-byte native-or-issued slot |
 /// | `[]` | `empty_vl(sfX)` | the one spelling for an empty blob |
 /// | `[ <elem>+ ]` | `fixed_vl(sfX, N) = [ <elem>+ ]` | `N` is the array literal's own length |
 /// | `*b".."` | `fixed_vl(sfX, N) = *b".."` | `N` is the byte-string literal's own length |
+///
+/// `AnyAmount()` takes no value — `any_amount` has no baked default to
+/// thread through (issued zero, always) — so it desugars straight to the
+/// explicit kind with no `= ..` left over, unlike `NativeAmount`/
+/// `IouAmount` above.
 ///
 /// A `fixed_vl` default spelled as a named const (`field_name: sfX =
 /// SOME_CONST`) is not one of these literal shapes, so it falls through to
@@ -1337,8 +1606,8 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// ambiguous STI is — `fixed_vl(sfX, N) = SOME_CONST` (the explicit form,
 /// `N` spelled out) is still required, since there is no default-shape
 /// token to recover `N` from. `issue`/`native_issue`, and a zero-default
-/// `amount(sfX)` (no `=` at all), also stay explicit — none of the five
-/// shapes above apply to them.
+/// `amount(sfX)` (no `=` at all), also stay explicit — none of the shapes
+/// above apply to them.
 ///
 /// `amount`'s 48-byte value region is `[8-byte value][20-byte
 /// currency][20-byte issuer]`. The 8-byte value is a pure bit transform of
@@ -1444,6 +1713,124 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// A homogeneous array may itself contain further named or homogeneous
 /// nested containers, at whatever depth the `STO_WRITER_MAX_DEPTH` bound
 /// above allows.
+///
+/// ## Optional and variable-length fields
+///
+/// xahaud's `STObject`/`STArray` field-loop parsers (`STObject::set`,
+/// `STArray::STArray`) treat a lone `0x99` byte in a field-header position
+/// as a no-op ("NOP"): it is skipped, up to **63 per container instance**
+/// (one counter per `STObject`/`STArray` level, cumulative but not
+/// consecutive — every nested `object` and every `array` has its own
+/// counter, independent of its parent's). `txn_template!` uses this to
+/// give every kind above an `optional` form (plus two purpose-built kinds,
+/// `any_amount` and `vl`) whose *whole reserved slot* — header included —
+/// bakes to NOPs when absent, at the same fixed compile-time offset every
+/// other kind uses:
+///
+/// - **`optional <scalar_kind>(sfX $(, N)?)`**: any scalar kind from the
+///   table above may be declared `optional` (no `= default` — absent is
+///   the only default). `set_x` takes the same arguments as the
+///   non-optional kind's setter and writes the header and value together;
+///   `clear_x()` restores the NOP-filled slot. `optional native_issue`/
+///   `optional empty_vl` get an argument-less `set_x()`, since their value
+///   is fixed. The six emit-plumbing fields (`sfSequence`,
+///   `sfFirstLedgerSequence`, `sfLastLedgerSequence`, `sfFee`,
+///   `sfSigningPubKey`, `sfAccount`) can never be `optional` (or
+///   `vl`/`any_amount`) — `prepare_for_emit` needs each present with a
+///   fixed, immediately readable value — a dedicated compile-time check
+///   rejects it with a named message.
+/// - **`any_amount(sfX)`**: a 49-byte slot (header + 48) holding either
+///   the 8-byte native form (`set_x_native(u64) -> Result<()>`) padded
+///   with 40 NOPs, or the full 48-byte issued form
+///   (`set_x_issued(XFL, &CurrencyCode, &AccountId)`) — chosen at
+///   runtime. Always present; defaults to issued zero, the same bytes
+///   `amount(sfX)`'s default uses. `optional any_amount(sfX)` is the same
+///   slot, absent (all NOP) by default, with an added `clear_x()`.
+/// - **`vl(sfX, MAX)`** (short for `vl(sfX, 0, MAX)`) and `vl(sfX, MIN,
+///   MAX)`: a slot sized for `MAX` bytes of payload (`MAX`/`MIN` are
+///   `usize` const expressions bounded by `MIN <= MAX` and `MAX <=`
+///   [`crate::txn::codec::MAX_VL_LEN`], with `MAX >= 1` since an
+///   always-empty blob is `empty_vl`) whose payload length is chosen at
+///   runtime within that range. `set_x(&[u8]) -> Result<()>` writes the
+///   header, rippled's VL length prefix sized for the actual payload
+///   length (narrower than `MAX`'s own prefix width for a short enough
+///   payload), the payload itself, then NOPs to the slot end, in one
+///   [`crate::guard_m!`]-protected loop bounded by `MAX` (never a
+///   compiler-generated `memcpy`/`memset`, per `docs/DESIGN.md` §2's
+///   "Compiler-generated loops" constraint). Baked default: header, the
+///   VL prefix for `MIN`, `MIN` zero bytes, then NOPs to the slot end.
+///   `optional vl(sfX, MIN, MAX)` reserves the same slot, absent (all
+///   NOP) by default, with an added `clear_x()`.
+/// - **`optional object(sfX) { <field>* }`** / **`optional array(sfX) [
+///   <element>* ]`**: a whole nested container, present-or-absent as one
+///   unit. Unlike every kind above, this one has no view type: it
+///   compiles inline exactly like a plain `object(sfX)`/`array(sfX)`
+///   field — its own inner fields flatten onto the parent as ordinary
+///   `set_x_<field>` methods — except its slot is `NOP`-filled by
+///   default, and every one of its own setters (plus `enable_x(&mut
+///   self)`) first materializes it (and every enclosing `optional`
+///   ancestor) if it's currently absent, copying in its own baked
+///   defaults. `clear_x(&mut self)` NOP-fills the whole slot back to
+///   absent; `is_x_present(&self) -> bool` reads presence without
+///   changing it. Legal at the top level, inside a nested `object`, or —
+///   for `optional object(sfX) { .. }` only — as a named element inside
+///   an `array`.
+/// - A **homogeneous array of optional elements** — `array(sfX) [ Elem:
+///   optional object(sfY) { <field>* } ; N ]` — reserves `N * Elem::LEN`
+///   bytes exactly like the non-optional form (`Elem::LEN`/`TEMPLATE`,
+///   `fn name(&mut self, index) -> Option<Elem<'_>>`), but bakes every
+///   element absent (all NOP) by default, and `Elem` additionally gets
+///   `enable()`/`clear()`. The array field itself is never optional here
+///   (its header always writes); only its elements are, so their
+///   worst-case NOP charge (every element absent at once) is checked
+///   against the *array's own* 63-NOP budget, not its parent's — these
+///   NOPs sit in the array's own `STArray` field loop.
+///
+/// **Compile-time budget check**: for every container — the top level,
+/// each named `object`, each named `array`, each `optional` view, each
+/// homogeneous array of optional elements — the sum of the worst-case NOP
+/// column in the kind table above, over every `optional`/`vl`/
+/// `any_amount` field it *directly* holds, must be at most
+/// [`crate::txn::codec::MAX_NOPS_PER_CONTAINER`] (63) — the same limit
+/// xahaud's field-loop parsers enforce. Worst case means every optional
+/// field absent, every `vl` at `MIN`, every `any_amount` native, all at
+/// once — exactly the state the host may be asked to parse. A container
+/// that could exceed the budget is a named `E0080` compile error. Worked
+/// example: an `sfAmountEntry` element (`amount: sfAmount = AnyAmount()`,
+/// the 49-byte native-or-issued slot) is a 2-byte header + 49 + a 1-byte
+/// `0xE1` terminator = 52-byte region when `optional`, so two fully
+/// `optional` entries in one array (`2 * 52 = 104 > 63`) do not fit, but
+/// one *required* entry (0 NOPs — it always writes) plus one `optional`
+/// entry (`52 <= 63`) does; `examples/22_txn-template-optional`'s `Remit`
+/// declares exactly this shape as a named array (`first: sfAmountEntry {
+/// .. }`, `second: optional sfAmountEntry { .. }`).
+///
+/// ### Inferred `optional` spellings
+///
+/// Every `optional` scalar/container form above has a bare-`sfX` twin, on
+/// the same terms the [Inferred kinds](#inferred-kinds) section above gives
+/// the non-`optional` kinds: `field: optional sfX` infers any scalar kind
+/// [`crate::txn::codec::InferKind`] already infers for the non-`optional`
+/// form; `optional sfX { .. }`/`[ .. ]` and a homogeneous array's `Elem:
+/// optional sfY { .. }` are pure token rewrites into `optional object(sfX)
+/// { .. }`/`array(sfX) [ .. ]` above — same budget, same generated API,
+/// only the spelling differs. A non-inferable STI (`Amount`, `VL`, `Issue`,
+/// an object/array with no body) is a named compile error naming the
+/// matching explicit `optional` form to use instead — except the three
+/// `Amount`-shaped kinds with no baked default, each of which gets its own
+/// default-shape marker: `field: optional sfX = AnyAmount()` -> `optional
+/// any_amount(sfX)`, `= NativeAmount()` -> `optional native_amount(sfX)`,
+/// `= IouAmount()` -> `optional amount(sfX)` (all three take no value, the
+/// same way the non-`optional` `AnyAmount()` marker above does not).
+///
+/// **NOP-padded bytes must never be passed to the Hook API's `sto_*`
+/// family** (`sto_subfield`/`sto_subarray`/`sto_emplace`/`sto_erase`/
+/// `sto_validate`) — its lightweight parser
+/// (`HookAPI::get_stobject_length`) rejects `STI_NUMBER` (the NOP's wire
+/// type) outright, unlike `STObject::set`/`STArray::STArray`, which is
+/// what actually parses an emitted transaction's blob at `emit` time. See
+/// `docs/NOP_PADDING_DESIGN.md` for the full design (the host mechanism,
+/// every kind's byte layout, and the compile-time checks each one adds).
 ///
 /// ## Required fields, and `prepare_for_emit()`
 ///
@@ -1753,11 +2140,12 @@ macro_rules! txn_template {
             prev = [ $crate::txn::codec::transaction_type_field_size($crate::sfield::sfTransactionType) ],
             table = [],
             emit_details = [false, 0usize],
+            nops = [],
             prefix = [],
             ctx = obj,
             depth = [0usize],
             stack = [],
-            mode = tpl,
+            mode = [tpl],
             fields = [ $($($fields)*)? ]
         }
     };
@@ -1806,24 +2194,46 @@ macro_rules! txn_template {
 ///   setter name as literal `ident`/`_` token pairs (`$name _`), which
 ///   [`crate::__paste!`] concatenates alongside `set_`/the field name — see
 ///   [`txn_template!`](crate::txn_template)'s "Setter names" section.
-/// - `mode` distinguishes a template's own recursion (`tpl`) from an
-///   element-view type's (`elem`); every arm but the two base cases just
-///   threads it through unchanged. A homogeneous `array(sfX) [ Elem:
-///   object(sfY) { .. } ; N ]` field's arm spawns a **wholly separate**
-///   `$crate::__txn_template_step!` invocation, seeded fresh (`name =
-///   $Elem`, `order = []`, `prefix = []`, `ctx = obj`, a single `stack`
-///   frame, `mode = elem`, `fields = [ ..inner.., @end_object ]`) so the
-///   same `@end_object` arm above closes it and checks its order — the
-///   `elem`-mode base case then emits only `$Elem`'s standalone view type
-///   (`LEN`, `TEMPLATE`, the inner setters, `bytes()`; see
+/// - `mode` distinguishes a template's own recursion (`tpl`) from a
+///   homogeneous array element's (`elem`, or `elem_opt` for an `optional
+///   object(sfY) { .. }` element) — but it's not just that leading tag: it's
+///   a bracket group, `[<tag> (offset, slot_const)*]`, carrying one
+///   `(offset, slot_const)` pair per enclosing named `optional
+///   object`/`optional array` container this step is nested inside,
+///   outermost first. Every arm but the three base cases and the
+///   `optional object(sfX) { .. }`/`optional array(sfX) [ .. ]` push arms
+///   just threads the whole group through unchanged (`mode = $mode:tt`,
+///   one opaque `tt`); those push arms append their own `(offset,
+///   slot_const)` pair ahead of recursing into their own inner field
+///   list, so a field nested `optional`-inside-`optional` accumulates one
+///   pair per ancestor. [`crate::__txn_template_ensure!`] (prepended to
+///   every generated scalar setter) walks exactly this list to
+///   materialize each absent ancestor before the setter's own write, and
+///   `@end_opt_object`/`@end_opt_array` read it back (as the *parent's*
+///   saved copy, from before their own push appended to it) to build
+///   `enable_x`. A homogeneous `array(sfX) [ Elem: object(sfY) { .. } ; N
+///   ]` field's arm spawns a **wholly separate** `$crate::
+///   __txn_template_step!` invocation, seeded fresh (`name = $Elem`,
+///   `order = []`, `prefix = []`, `ctx = obj`, a single `stack` frame,
+///   `mode = [elem]`, `fields = [ ..inner.., @end_object ]`) so the same
+///   `@end_object` arm above closes it and checks its order — an
+///   `optional object(sfY) { .. }` element instead seeds `mode = [elem_opt
+///   (0usize, $Elem::TEMPLATE)]` (its own presence, as the sole ancestor
+///   its own inner setters need to ensure) — the `elem`/`elem_opt`-mode
+///   base case then emits only `$Elem`'s standalone view type (`LEN`,
+///   `TEMPLATE`, the inner setters, `bytes()`, and for `elem_opt` also
+///   `enable()`/`clear()`/`is_present()`; see
 ///   [`txn_template!`](crate::txn_template)'s "Homogeneous arrays"
 ///   section), never the plumbing/presence/`prepare_for_emit` items the
 ///   `tpl`-mode base case emits. The parent's *own* recursion continues
 ///   alongside, unaffected, referencing `$Elem` by name for its
 ///   `Option<$Elem<'_>>` accessor.
 ///
-/// There is one base case per `mode` (`fields = []`, `mode = tpl` or `mode
-/// = elem`): every field kind's table row is uniform, so a `tpl`-mode
+/// There is one base case per `mode` tag (`fields = []`, `mode = [tpl
+/// ..]`, `[elem ..]`, or `[elem_opt ..]` — a base case never reads any
+/// `(offset, slot_const)` pair trailing its own tag, only the spawn/push
+/// sites and `@end_opt_object`/`@end_opt_array` above do): every field
+/// kind's table row is uniform, so a `tpl`-mode
 /// `prepare_for_emit()`/`$Name::FIELDS` is always generated for a
 /// template, and an `elem`-mode view type is always generated for an
 /// element. A duplicated field within one container is caught by that
@@ -1843,6 +2253,107 @@ macro_rules! txn_template {
 /// initializer panics at its first failing statement, so grouping them
 /// would only ever surface one error; separate items let rustc evaluate
 /// and report every independent problem.
+/// Asserts, at compile time, that a container's accumulated worst-case NOP
+/// charges (see `docs/NOP_PADDING_DESIGN.md` §3.1/§3.2 -- one `usize`
+/// literal per `optional`/`vl`/`any_amount`/optional-view field directly
+/// inside that container) sum to at most
+/// [`crate::txn::codec::MAX_NOPS_PER_CONTAINER`]. Factored out of
+/// [`__txn_template_step!`] since the same check runs at every container's
+/// close (`@end_object`/`@end_array`) and at the top level.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __txn_template_check_nop_budget {
+    ($label:expr, $($nops:tt)*) => {
+        const _: () = {
+            const __NOPS: &[usize] = &[$($nops)*];
+            let mut __sum = 0usize;
+            let mut __i = 0usize;
+            while __i < __NOPS.len() {
+                __sum = __sum.wrapping_add(__NOPS[__i]);
+                __i = __i.wrapping_add(1);
+            }
+            assert!(__sum <= $crate::txn::codec::MAX_NOPS_PER_CONTAINER, $label);
+        };
+    };
+}
+
+/// Asserts, at compile time, that `$sfcode` is not one of the six
+/// emit-plumbing fields (`Sequence`/`FirstLedgerSequence`/
+/// `LastLedgerSequence`/`Fee`/`SigningPubKey`/`Account`) **when declared
+/// at the top level** (`$depth == 0`). `prepare_for_emit`/[`find_field`]
+/// only recognize a plumbing field at depth 0 (see [`FieldEntry`]'s doc
+/// comment), so a same-named field nested inside an `object`/`array` is
+/// not plumbing at all — it does not satisfy the top-level presence check
+/// and is not touched by `prepare_for_emit` — and may freely be
+/// `optional`/`vl`/`any_amount` (see `docs/NOP_PADDING_DESIGN.md` §3.2).
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __txn_template_check_not_plumbing {
+    ($sfcode:expr, $field:ident, $kindword:literal, $depth:expr) => {
+        const _: () = assert!(
+            ($depth) != 0usize
+                || !$crate::txn::codec::is_one_of(
+                    ($sfcode).code(),
+                    &[
+                        $crate::sfield::sfSequence.code(),
+                        $crate::sfield::sfFirstLedgerSequence.code(),
+                        $crate::sfield::sfLastLedgerSequence.code(),
+                        $crate::sfield::sfFee.code(),
+                        $crate::sfield::sfSigningPubKey.code(),
+                        $crate::sfield::sfAccount.code(),
+                    ],
+                ),
+            concat!(
+                "txn_template!: `",
+                stringify!($field),
+                "` is declared as `",
+                $kindword,
+                "`, but it is one of the six emit-plumbing fields (Sequence/FirstLedgerSequence/LastLedgerSequence/Fee/SigningPubKey/Account), which prepare_for_emit requires to be present with a fixed, immediately-readable value -- it can never be optional, `vl`, or `any_amount`"
+            )
+        );
+    };
+}
+
+/// Ensures every enclosing `optional` container named in `$mode` is
+/// present before a setter (or `enable_<name>`) writes through `$bytes`.
+///
+/// `$mode` is `__txn_template_step!`'s own `mode` accumulator: a leading
+/// tag (`tpl`/`elem`/`elem_opt`, unused here, just along for the ride so
+/// the whole thing is one `tt`) followed by zero or more `(offset,
+/// slot_const)` pairs, one per enclosing `optional object`/`optional
+/// array` ancestor, outermost first (see `__txn_template_step!`'s
+/// `optional object(sfX) { .. }` arm). For each pair, if `$bytes[offset]`
+/// is still a NOP (that ancestor is absent), copies `slot_const`'s own
+/// baked "present" bytes -- header, every inner field's default, and the
+/// closing end marker, trimmed to exactly that container's own span (no
+/// leading padding) -- into `$bytes[offset..offset + slot_const.len()]`.
+/// Checking outermost-first means a field nested two `optional`
+/// containers deep first materializes the outer one (with the inner one
+/// still baked absent inside it, exactly matching the inner's own
+/// compile-time default) before the inner entry's own check runs against
+/// it.
+///
+/// A `$mode` with no pairs (a template's own top-level fields, a
+/// homogeneous array's required element) expands to nothing -- the whole
+/// call vanishes, so a template with no `optional` ancestors anywhere
+/// compiles to exactly what it did before this macro existed.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __txn_template_ensure {
+    ([$tag:tt $(($off:expr, $slot:expr))*], $bytes:expr) => {
+        $(
+            {
+                const OFF: usize = $off;
+                const LEN: usize = ($slot).len();
+                const END: usize = OFF.wrapping_add(LEN);
+                if $bytes[OFF] == $crate::txn::codec::NOP {
+                    $bytes[OFF..END].copy_from_slice(&($slot));
+                }
+            }
+        )*
+    };
+}
+
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __txn_template_step {
@@ -1852,6 +2363,7 @@ macro_rules! __txn_template_step {
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -1868,6 +2380,7 @@ macro_rules! __txn_template_step {
             prev = [$($prev)*],
             table = [$($table)*],
             emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
             prefix = [$($prefix)*],
             ctx = $ctx,
             depth = [$($depth)*],
@@ -1883,6 +2396,7 @@ macro_rules! __txn_template_step {
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -1903,6 +2417,7 @@ macro_rules! __txn_template_step {
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction: `Self::LEN` sums these same field sizes
                 $vis fn [<set_ $($prefix)* $field>](&mut self, value: u8) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
                     const OFF: usize = ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1);
                     self.bytes[OFF] = value;
                 }
@@ -1924,6 +2439,7 @@ macro_rules! __txn_template_step {
                 (($sfcode).code(), $crate::txn::codec::KIND_U8_FIELD, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
             ],
             emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -1939,6 +2455,7 @@ macro_rules! __txn_template_step {
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -1959,6 +2476,7 @@ macro_rules! __txn_template_step {
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction: `Self::LEN` sums these same field sizes
                 $vis fn [<set_ $($prefix)* $field>](&mut self, value: u16) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
                     const OFF: usize = ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1);
                     self.bytes[OFF..OFF.wrapping_add(2)].copy_from_slice(&value.to_be_bytes());
                 }
@@ -1980,6 +2498,7 @@ macro_rules! __txn_template_step {
                 (($sfcode).code(), $crate::txn::codec::KIND_U16_FIELD, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
             ],
             emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -1995,6 +2514,7 @@ macro_rules! __txn_template_step {
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2015,6 +2535,7 @@ macro_rules! __txn_template_step {
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction: `Self::LEN` sums these same field sizes
                 $vis fn [<set_ $($prefix)* $field>](&mut self, value: u32) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
                     const OFF: usize = ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1);
                     self.bytes[OFF..OFF.wrapping_add(4)].copy_from_slice(&value.to_be_bytes());
                 }
@@ -2036,6 +2557,7 @@ macro_rules! __txn_template_step {
                 (($sfcode).code(), $crate::txn::codec::KIND_U32_FIELD, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
             ],
             emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2051,6 +2573,7 @@ macro_rules! __txn_template_step {
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2071,6 +2594,7 @@ macro_rules! __txn_template_step {
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction: `Self::LEN` sums these same field sizes
                 $vis fn [<set_ $($prefix)* $field>](&mut self, value: u64) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
                     const OFF: usize = ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1);
                     self.bytes[OFF..OFF.wrapping_add(8)].copy_from_slice(&value.to_be_bytes());
                 }
@@ -2092,6 +2616,7 @@ macro_rules! __txn_template_step {
                 (($sfcode).code(), $crate::txn::codec::KIND_U64_FIELD, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
             ],
             emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2107,6 +2632,7 @@ macro_rules! __txn_template_step {
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2133,6 +2659,7 @@ macro_rules! __txn_template_step {
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds as above; only `drops` itself is runtime-fallible
                 $vis fn [<set_ $($prefix)* $field>](&mut self, drops: u64) -> $crate::error::Result<()> {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
                     const OFF: usize = ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1);
                     $crate::txn::codec::encode_native_amount(&mut self.bytes[OFF..OFF.wrapping_add(8)], drops)
                 }
@@ -2154,6 +2681,7 @@ macro_rules! __txn_template_step {
                 (($sfcode).code(), $crate::txn::codec::KIND_NATIVE_AMOUNT, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
             ],
             emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2169,6 +2697,7 @@ macro_rules! __txn_template_step {
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2189,6 +2718,7 @@ macro_rules! __txn_template_step {
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
                 $vis fn [<set_ $($prefix)* $field>](&mut self, value: &$crate::types::AccountId) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
                     const OFF: usize = (($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1)).wrapping_add(1);
                     self.bytes[OFF..OFF.wrapping_add($crate::types::ACC_ID_LEN)].copy_from_slice(value.as_ref());
                 }
@@ -2210,6 +2740,7 @@ macro_rules! __txn_template_step {
                 (($sfcode).code(), $crate::txn::codec::KIND_ACCOUNT_ID, (($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1)).wrapping_add(1), ($($depth)*)),
             ],
             emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2225,6 +2756,7 @@ macro_rules! __txn_template_step {
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2259,6 +2791,7 @@ macro_rules! __txn_template_step {
                 (($sfcode).code(), $crate::txn::codec::KIND_EMPTY_VL, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
             ],
             emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2274,6 +2807,7 @@ macro_rules! __txn_template_step {
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2294,6 +2828,7 @@ macro_rules! __txn_template_step {
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
                 $vis fn [<set_ $($prefix)* $field>](&mut self, value: &[u8; 16]) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
                     const OFF: usize = ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1);
                     self.bytes[OFF..OFF.wrapping_add(16)].copy_from_slice(value);
                 }
@@ -2310,6 +2845,7 @@ macro_rules! __txn_template_step {
                 (($sfcode).code(), $crate::txn::codec::KIND_HASH128, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
             ],
             emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2325,6 +2861,7 @@ macro_rules! __txn_template_step {
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2345,6 +2882,7 @@ macro_rules! __txn_template_step {
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
                 $vis fn [<set_ $($prefix)* $field>](&mut self, value: &[u8; 20]) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
                     const OFF: usize = ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1);
                     self.bytes[OFF..OFF.wrapping_add(20)].copy_from_slice(value);
                 }
@@ -2361,6 +2899,7 @@ macro_rules! __txn_template_step {
                 (($sfcode).code(), $crate::txn::codec::KIND_HASH160, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
             ],
             emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2376,6 +2915,7 @@ macro_rules! __txn_template_step {
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2396,6 +2936,7 @@ macro_rules! __txn_template_step {
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
                 $vis fn [<set_ $($prefix)* $field>](&mut self, value: &$crate::types::Hash) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
                     const OFF: usize = ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1);
                     self.bytes[OFF..OFF.wrapping_add(32)].copy_from_slice(value.as_ref());
                 }
@@ -2412,6 +2953,7 @@ macro_rules! __txn_template_step {
                 (($sfcode).code(), $crate::txn::codec::KIND_HASH256, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
             ],
             emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2427,6 +2969,7 @@ macro_rules! __txn_template_step {
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2447,6 +2990,7 @@ macro_rules! __txn_template_step {
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
                 $vis fn [<set_ $($prefix)* $field>](&mut self, value: &$crate::types::CurrencyCode) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
                     const OFF: usize = ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1);
                     self.bytes[OFF..OFF.wrapping_add(20)].copy_from_slice(value.as_ref());
                 }
@@ -2463,6 +3007,7 @@ macro_rules! __txn_template_step {
                 (($sfcode).code(), $crate::txn::codec::KIND_CURRENCY, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
             ],
             emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2478,6 +3023,7 @@ macro_rules! __txn_template_step {
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2498,6 +3044,7 @@ macro_rules! __txn_template_step {
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
                 $vis fn [<set_ $($prefix)* $field>](&mut self, xfl: $crate::xfl::XFL, currency: &$crate::types::CurrencyCode, issuer: &$crate::types::AccountId) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
                     const OFF: usize = ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1);
                     self.bytes[OFF..OFF.wrapping_add($crate::types::IOU_AMOUNT_LEN)].copy_from_slice(&$crate::txn::codec::encode_iou_amount_const(xfl, currency, issuer));
                 }
@@ -2506,6 +3053,7 @@ macro_rules! __txn_template_step {
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
                 $vis fn [<set_ $($prefix)* $field _value>](&mut self, xfl: $crate::xfl::XFL) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
                     const OFF: usize = ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1);
                     self.bytes[OFF..OFF.wrapping_add(8)].copy_from_slice(&$crate::txn::codec::encode_iou_amount_value_const(xfl));
                 }
@@ -2527,6 +3075,7 @@ macro_rules! __txn_template_step {
                 (($sfcode).code(), $crate::txn::codec::KIND_IOU_AMOUNT, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
             ],
             emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2542,6 +3091,7 @@ macro_rules! __txn_template_step {
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2562,6 +3112,7 @@ macro_rules! __txn_template_step {
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
                 $vis fn [<set_ $($prefix)* $field>](&mut self, xfl: $crate::xfl::XFL, currency: &$crate::types::CurrencyCode, issuer: &$crate::types::AccountId) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
                     const OFF: usize = ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1);
                     self.bytes[OFF..OFF.wrapping_add($crate::types::IOU_AMOUNT_LEN)].copy_from_slice(&$crate::txn::codec::encode_iou_amount_const(xfl, currency, issuer));
                 }
@@ -2570,6 +3121,7 @@ macro_rules! __txn_template_step {
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
                 $vis fn [<set_ $($prefix)* $field _value>](&mut self, xfl: $crate::xfl::XFL) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
                     const OFF: usize = ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1);
                     self.bytes[OFF..OFF.wrapping_add(8)].copy_from_slice(&$crate::txn::codec::encode_iou_amount_value_const(xfl));
                 }
@@ -2591,6 +3143,7 @@ macro_rules! __txn_template_step {
                 (($sfcode).code(), $crate::txn::codec::KIND_IOU_AMOUNT, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
             ],
             emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2606,6 +3159,7 @@ macro_rules! __txn_template_step {
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2635,6 +3189,7 @@ macro_rules! __txn_template_step {
                 (($sfcode).code(), $crate::txn::codec::KIND_NATIVE_ISSUE, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
             ],
             emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2650,6 +3205,7 @@ macro_rules! __txn_template_step {
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2670,6 +3226,7 @@ macro_rules! __txn_template_step {
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
                 $vis fn [<set_ $($prefix)* $field>](&mut self, currency: &$crate::types::CurrencyCode, issuer: &$crate::types::AccountId) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
                     const OFF: usize = ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1);
                     self.bytes[OFF..OFF.wrapping_add($crate::types::CURRENCY_CODE_LEN)].copy_from_slice(currency.as_ref());
                     self.bytes[OFF.wrapping_add($crate::types::CURRENCY_CODE_LEN)..OFF.wrapping_add($crate::types::CURRENCY_CODE_LEN).wrapping_add($crate::types::ACC_ID_LEN)].copy_from_slice(issuer.as_ref());
@@ -2687,6 +3244,7 @@ macro_rules! __txn_template_step {
                 (($sfcode).code(), $crate::txn::codec::KIND_ISSUE, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
             ],
             emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2702,6 +3260,7 @@ macro_rules! __txn_template_step {
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2726,6 +3285,7 @@ macro_rules! __txn_template_step {
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
                 $vis fn [<set_ $($prefix)* $field>](&mut self, value: &[u8; ($n)]) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
                     const OFF: usize = ($($prev)*)
                         .wrapping_add($crate::txn::codec::field_header($sfcode).1)
                         .wrapping_add($crate::txn::codec::vl_length_prefix($n).1);
@@ -2749,6 +3309,7 @@ macro_rules! __txn_template_step {
                 (($sfcode).code(), $crate::txn::codec::KIND_FIXED_VL, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1).wrapping_add($crate::txn::codec::vl_length_prefix($n).1), ($($depth)*)),
             ],
             emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2764,6 +3325,7 @@ macro_rules! __txn_template_step {
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2788,6 +3350,7 @@ macro_rules! __txn_template_step {
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
                 $vis fn [<set_ $($prefix)* $field>](&mut self, value: &[u8; ($n)]) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
                     const OFF: usize = ($($prev)*)
                         .wrapping_add($crate::txn::codec::field_header($sfcode).1)
                         .wrapping_add($crate::txn::codec::vl_length_prefix($n).1);
@@ -2821,6 +3384,7 @@ macro_rules! __txn_template_step {
                 (($sfcode).code(), $crate::txn::codec::KIND_FIXED_VL, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1).wrapping_add($crate::txn::codec::vl_length_prefix($n).1), ($($depth)*)),
             ],
             emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2836,6 +3400,2795 @@ macro_rules! __txn_template_step {
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : optional u8_field($sfcode:expr) $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_UINT8,
+            concat!("txn_template!: `", stringify!($field), "` is declared as `optional u8_field` but its sfXxx code is not an STI_UINT8 field")
+        );
+        $crate::__txn_template_check_not_plumbing!($sfcode, $field, "optional u8_field", ($($depth)*));
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)* ($sfcode).code(),],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Sets `", stringify!($field), "`, making it present (absent by default).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<set_ $($prefix)* $field>](&mut self, value: u8) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
+                    const OFF: usize = $($prev)*;
+                    const HDR: ([u8; 3], usize) = $crate::txn::codec::field_header($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(HDR.1)].copy_from_slice(&HDR.0[..HDR.1]);
+                    self.bytes[OFF.wrapping_add(HDR.1)] = value;
+                }
+
+                #[doc = concat!("Clears `", stringify!($field), "` back to absent (NOP-fills its whole reserved slot).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<clear_ $($prefix)* $field>](&mut self) {
+                    const OFF: usize = $($prev)*;
+                    const SLOT: usize = $crate::txn::codec::u8_field_size($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(SLOT)].copy_from_slice(&[$crate::txn::codec::NOP; SLOT]);
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [
+                $($init)*
+                $crate::txn::codec::write_nops(&mut $($buf)*, ($($prev)*), $crate::txn::codec::u8_field_size($sfcode));
+            ],
+            prev = [ ($($prev)*).wrapping_add($crate::txn::codec::u8_field_size($sfcode)) ],
+            table = [
+                $($table)*
+                (($sfcode).code(), $crate::txn::codec::KIND_OPTIONAL_U8_FIELD, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
+            ],
+            emit_details = [$($emit_details)*],
+            nops = [$($nops)* $crate::txn::codec::u8_field_size($sfcode),],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $($($rest)*)? ]
+        }
+
+    };
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : optional u16_field($sfcode:expr) $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_UINT16,
+            concat!("txn_template!: `", stringify!($field), "` is declared as `optional u16_field` but its sfXxx code is not an STI_UINT16 field")
+        );
+        $crate::__txn_template_check_not_plumbing!($sfcode, $field, "optional u16_field", ($($depth)*));
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)* ($sfcode).code(),],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Sets `", stringify!($field), "`, making it present (absent by default).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<set_ $($prefix)* $field>](&mut self, value: u16) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
+                    const OFF: usize = $($prev)*;
+                    const HDR: ([u8; 3], usize) = $crate::txn::codec::field_header($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(HDR.1)].copy_from_slice(&HDR.0[..HDR.1]);
+                    let vstart = OFF.wrapping_add(HDR.1);
+                    self.bytes[vstart..vstart.wrapping_add(2)].copy_from_slice(&value.to_be_bytes());
+                }
+
+                #[doc = concat!("Clears `", stringify!($field), "` back to absent (NOP-fills its whole reserved slot).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<clear_ $($prefix)* $field>](&mut self) {
+                    const OFF: usize = $($prev)*;
+                    const SLOT: usize = $crate::txn::codec::u16_field_size($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(SLOT)].copy_from_slice(&[$crate::txn::codec::NOP; SLOT]);
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [
+                $($init)*
+                $crate::txn::codec::write_nops(&mut $($buf)*, ($($prev)*), $crate::txn::codec::u16_field_size($sfcode));
+            ],
+            prev = [ ($($prev)*).wrapping_add($crate::txn::codec::u16_field_size($sfcode)) ],
+            table = [
+                $($table)*
+                (($sfcode).code(), $crate::txn::codec::KIND_OPTIONAL_U16_FIELD, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
+            ],
+            emit_details = [$($emit_details)*],
+            nops = [$($nops)* $crate::txn::codec::u16_field_size($sfcode),],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $($($rest)*)? ]
+        }
+
+    };
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : optional u32_field($sfcode:expr) $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_UINT32,
+            concat!("txn_template!: `", stringify!($field), "` is declared as `optional u32_field` but its sfXxx code is not an STI_UINT32 field")
+        );
+        $crate::__txn_template_check_not_plumbing!($sfcode, $field, "optional u32_field", ($($depth)*));
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)* ($sfcode).code(),],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Sets `", stringify!($field), "`, making it present (absent by default).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<set_ $($prefix)* $field>](&mut self, value: u32) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
+                    const OFF: usize = $($prev)*;
+                    const HDR: ([u8; 3], usize) = $crate::txn::codec::field_header($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(HDR.1)].copy_from_slice(&HDR.0[..HDR.1]);
+                    let vstart = OFF.wrapping_add(HDR.1);
+                    self.bytes[vstart..vstart.wrapping_add(4)].copy_from_slice(&value.to_be_bytes());
+                }
+
+                #[doc = concat!("Clears `", stringify!($field), "` back to absent (NOP-fills its whole reserved slot).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<clear_ $($prefix)* $field>](&mut self) {
+                    const OFF: usize = $($prev)*;
+                    const SLOT: usize = $crate::txn::codec::u32_field_size($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(SLOT)].copy_from_slice(&[$crate::txn::codec::NOP; SLOT]);
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [
+                $($init)*
+                $crate::txn::codec::write_nops(&mut $($buf)*, ($($prev)*), $crate::txn::codec::u32_field_size($sfcode));
+            ],
+            prev = [ ($($prev)*).wrapping_add($crate::txn::codec::u32_field_size($sfcode)) ],
+            table = [
+                $($table)*
+                (($sfcode).code(), $crate::txn::codec::KIND_OPTIONAL_U32_FIELD, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
+            ],
+            emit_details = [$($emit_details)*],
+            nops = [$($nops)* $crate::txn::codec::u32_field_size($sfcode),],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $($($rest)*)? ]
+        }
+
+    };
+    // Desugars a named array whose *outer* `array(..)` is already explicit
+    // but whose element type is a bare `$esf:ident` (inferred `object`).
+    // Placed ahead of the general named-array arm below, which would
+    // otherwise swallow `$($inner:tt)*` first and treat `Elem: sfY { .. }`
+    // as a heterogeneous field list instead of an inferred object element.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $name:ident : array($sfcode:expr) [ $Elem:ident : $esf:ident { $($efields:tt)* } ; $($n:tt)+ ] $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
+            prefix = [$($prefix)*], ctx = $ctx, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $name : array($sfcode) [ $Elem : object($esf) { $($efields)* } ; $($n)+ ] $(, $($rest)*)? ]
+        }
+    };
+    // Same as above, but the element itself is `optional`: desugars to
+    // `Elem: optional object(esf) { .. }`, keeping the outer `array(..)`
+    // explicit.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $name:ident : array($sfcode:expr) [ $Elem:ident : optional $esf:ident { $($efields:tt)* } ; $($n:tt)+ ] $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
+            prefix = [$($prefix)*], ctx = $ctx, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $name : array($sfcode) [ $Elem : optional object($esf) { $($efields)* } ; $($n)+ ] $(, $($rest)*)? ]
+        }
+    };
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : optional u64_field($sfcode:expr) $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_UINT64,
+            concat!("txn_template!: `", stringify!($field), "` is declared as `optional u64_field` but its sfXxx code is not an STI_UINT64 field")
+        );
+        $crate::__txn_template_check_not_plumbing!($sfcode, $field, "optional u64_field", ($($depth)*));
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)* ($sfcode).code(),],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Sets `", stringify!($field), "`, making it present (absent by default).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<set_ $($prefix)* $field>](&mut self, value: u64) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
+                    const OFF: usize = $($prev)*;
+                    const HDR: ([u8; 3], usize) = $crate::txn::codec::field_header($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(HDR.1)].copy_from_slice(&HDR.0[..HDR.1]);
+                    let vstart = OFF.wrapping_add(HDR.1);
+                    self.bytes[vstart..vstart.wrapping_add(8)].copy_from_slice(&value.to_be_bytes());
+                }
+
+                #[doc = concat!("Clears `", stringify!($field), "` back to absent (NOP-fills its whole reserved slot).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<clear_ $($prefix)* $field>](&mut self) {
+                    const OFF: usize = $($prev)*;
+                    const SLOT: usize = $crate::txn::codec::u64_field_size($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(SLOT)].copy_from_slice(&[$crate::txn::codec::NOP; SLOT]);
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [
+                $($init)*
+                $crate::txn::codec::write_nops(&mut $($buf)*, ($($prev)*), $crate::txn::codec::u64_field_size($sfcode));
+            ],
+            prev = [ ($($prev)*).wrapping_add($crate::txn::codec::u64_field_size($sfcode)) ],
+            table = [
+                $($table)*
+                (($sfcode).code(), $crate::txn::codec::KIND_OPTIONAL_U64_FIELD, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
+            ],
+            emit_details = [$($emit_details)*],
+            nops = [$($nops)* $crate::txn::codec::u64_field_size($sfcode),],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $($($rest)*)? ]
+        }
+
+    };
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : optional hash128($sfcode:expr) $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_UINT128,
+            concat!("txn_template!: `", stringify!($field), "` is declared as `optional hash128` but its sfXxx code is not an STI_UINT128 field")
+        );
+        $crate::__txn_template_check_not_plumbing!($sfcode, $field, "optional hash128", ($($depth)*));
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)* ($sfcode).code(),],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Sets `", stringify!($field), "`, making it present (absent by default).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<set_ $($prefix)* $field>](&mut self, value: &[u8; 16]) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
+                    const OFF: usize = $($prev)*;
+                    const HDR: ([u8; 3], usize) = $crate::txn::codec::field_header($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(HDR.1)].copy_from_slice(&HDR.0[..HDR.1]);
+                    let vstart = OFF.wrapping_add(HDR.1);
+                    self.bytes[vstart..vstart.wrapping_add(16)].copy_from_slice(value);
+                }
+
+                #[doc = concat!("Clears `", stringify!($field), "` back to absent (NOP-fills its whole reserved slot).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<clear_ $($prefix)* $field>](&mut self) {
+                    const OFF: usize = $($prev)*;
+                    const SLOT: usize = $crate::txn::codec::fixed_field_size($sfcode, 16usize);
+                    self.bytes[OFF..OFF.wrapping_add(SLOT)].copy_from_slice(&[$crate::txn::codec::NOP; SLOT]);
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [
+                $($init)*
+                $crate::txn::codec::write_nops(&mut $($buf)*, ($($prev)*), $crate::txn::codec::fixed_field_size($sfcode, 16usize));
+            ],
+            prev = [ ($($prev)*).wrapping_add($crate::txn::codec::fixed_field_size($sfcode, 16usize)) ],
+            table = [
+                $($table)*
+                (($sfcode).code(), $crate::txn::codec::KIND_OPTIONAL_HASH128, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
+            ],
+            emit_details = [$($emit_details)*],
+            nops = [$($nops)* $crate::txn::codec::fixed_field_size($sfcode, 16usize),],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $($($rest)*)? ]
+        }
+
+    };
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : optional hash160($sfcode:expr) $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_UINT160,
+            concat!("txn_template!: `", stringify!($field), "` is declared as `optional hash160` but its sfXxx code is not an STI_UINT160 field")
+        );
+        $crate::__txn_template_check_not_plumbing!($sfcode, $field, "optional hash160", ($($depth)*));
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)* ($sfcode).code(),],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Sets `", stringify!($field), "`, making it present (absent by default).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<set_ $($prefix)* $field>](&mut self, value: &[u8; 20]) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
+                    const OFF: usize = $($prev)*;
+                    const HDR: ([u8; 3], usize) = $crate::txn::codec::field_header($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(HDR.1)].copy_from_slice(&HDR.0[..HDR.1]);
+                    let vstart = OFF.wrapping_add(HDR.1);
+                    self.bytes[vstart..vstart.wrapping_add(20)].copy_from_slice(value);
+                }
+
+                #[doc = concat!("Clears `", stringify!($field), "` back to absent (NOP-fills its whole reserved slot).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<clear_ $($prefix)* $field>](&mut self) {
+                    const OFF: usize = $($prev)*;
+                    const SLOT: usize = $crate::txn::codec::fixed_field_size($sfcode, 20usize);
+                    self.bytes[OFF..OFF.wrapping_add(SLOT)].copy_from_slice(&[$crate::txn::codec::NOP; SLOT]);
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [
+                $($init)*
+                $crate::txn::codec::write_nops(&mut $($buf)*, ($($prev)*), $crate::txn::codec::fixed_field_size($sfcode, 20usize));
+            ],
+            prev = [ ($($prev)*).wrapping_add($crate::txn::codec::fixed_field_size($sfcode, 20usize)) ],
+            table = [
+                $($table)*
+                (($sfcode).code(), $crate::txn::codec::KIND_OPTIONAL_HASH160, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
+            ],
+            emit_details = [$($emit_details)*],
+            nops = [$($nops)* $crate::txn::codec::fixed_field_size($sfcode, 20usize),],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $($($rest)*)? ]
+        }
+
+    };
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : optional hash256($sfcode:expr) $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_UINT256,
+            concat!("txn_template!: `", stringify!($field), "` is declared as `optional hash256` but its sfXxx code is not an STI_UINT256 field")
+        );
+        $crate::__txn_template_check_not_plumbing!($sfcode, $field, "optional hash256", ($($depth)*));
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)* ($sfcode).code(),],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Sets `", stringify!($field), "`, making it present (absent by default).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<set_ $($prefix)* $field>](&mut self, value: &$crate::types::Hash) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
+                    const OFF: usize = $($prev)*;
+                    const HDR: ([u8; 3], usize) = $crate::txn::codec::field_header($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(HDR.1)].copy_from_slice(&HDR.0[..HDR.1]);
+                    let vstart = OFF.wrapping_add(HDR.1);
+                    self.bytes[vstart..vstart.wrapping_add(32)].copy_from_slice(value.as_ref());
+                }
+
+                #[doc = concat!("Clears `", stringify!($field), "` back to absent (NOP-fills its whole reserved slot).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<clear_ $($prefix)* $field>](&mut self) {
+                    const OFF: usize = $($prev)*;
+                    const SLOT: usize = $crate::txn::codec::fixed_field_size($sfcode, 32usize);
+                    self.bytes[OFF..OFF.wrapping_add(SLOT)].copy_from_slice(&[$crate::txn::codec::NOP; SLOT]);
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [
+                $($init)*
+                $crate::txn::codec::write_nops(&mut $($buf)*, ($($prev)*), $crate::txn::codec::fixed_field_size($sfcode, 32usize));
+            ],
+            prev = [ ($($prev)*).wrapping_add($crate::txn::codec::fixed_field_size($sfcode, 32usize)) ],
+            table = [
+                $($table)*
+                (($sfcode).code(), $crate::txn::codec::KIND_OPTIONAL_HASH256, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
+            ],
+            emit_details = [$($emit_details)*],
+            nops = [$($nops)* $crate::txn::codec::fixed_field_size($sfcode, 32usize),],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $($($rest)*)? ]
+        }
+
+    };
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : optional currency($sfcode:expr) $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_CURRENCY,
+            concat!("txn_template!: `", stringify!($field), "` is declared as `optional currency` but its sfXxx code is not an STI_CURRENCY field")
+        );
+        $crate::__txn_template_check_not_plumbing!($sfcode, $field, "optional currency", ($($depth)*));
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)* ($sfcode).code(),],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Sets `", stringify!($field), "`, making it present (absent by default).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<set_ $($prefix)* $field>](&mut self, value: &$crate::types::CurrencyCode) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
+                    const OFF: usize = $($prev)*;
+                    const HDR: ([u8; 3], usize) = $crate::txn::codec::field_header($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(HDR.1)].copy_from_slice(&HDR.0[..HDR.1]);
+                    let vstart = OFF.wrapping_add(HDR.1);
+                    self.bytes[vstart..vstart.wrapping_add(20)].copy_from_slice(value.as_ref());
+                }
+
+                #[doc = concat!("Clears `", stringify!($field), "` back to absent (NOP-fills its whole reserved slot).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<clear_ $($prefix)* $field>](&mut self) {
+                    const OFF: usize = $($prev)*;
+                    const SLOT: usize = $crate::txn::codec::fixed_field_size($sfcode, 20usize);
+                    self.bytes[OFF..OFF.wrapping_add(SLOT)].copy_from_slice(&[$crate::txn::codec::NOP; SLOT]);
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [
+                $($init)*
+                $crate::txn::codec::write_nops(&mut $($buf)*, ($($prev)*), $crate::txn::codec::fixed_field_size($sfcode, 20usize));
+            ],
+            prev = [ ($($prev)*).wrapping_add($crate::txn::codec::fixed_field_size($sfcode, 20usize)) ],
+            table = [
+                $($table)*
+                (($sfcode).code(), $crate::txn::codec::KIND_OPTIONAL_CURRENCY, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
+            ],
+            emit_details = [$($emit_details)*],
+            nops = [$($nops)* $crate::txn::codec::fixed_field_size($sfcode, 20usize),],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $($($rest)*)? ]
+        }
+
+    };
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : optional native_amount($sfcode:expr) $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_AMOUNT,
+            concat!("txn_template!: `", stringify!($field), "` is declared as `optional native_amount` but its sfXxx code is not an STI_AMOUNT field")
+        );
+        $crate::__txn_template_check_not_plumbing!($sfcode, $field, "optional native_amount", ($($depth)*));
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)* ($sfcode).code(),],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Sets `", stringify!($field), "` to `drops` native XAH/XRP, making it present (absent by default).")]
+                ///
+                /// # Errors
+                ///
+                /// Returns [`crate::error::HookError::InvalidArgument`] if
+                /// `drops` does not fit in 62 bits.
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds as above; only `drops` itself is runtime-fallible
+                $vis fn [<set_ $($prefix)* $field>](&mut self, drops: u64) -> $crate::error::Result<()> {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
+                    const OFF: usize = $($prev)*;
+                    const HDR: ([u8; 3], usize) = $crate::txn::codec::field_header($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(HDR.1)].copy_from_slice(&HDR.0[..HDR.1]);
+                    let vstart = OFF.wrapping_add(HDR.1);
+                    $crate::txn::codec::encode_native_amount(&mut self.bytes[vstart..vstart.wrapping_add(8)], drops)
+                }
+
+                #[doc = concat!("Clears `", stringify!($field), "` back to absent (NOP-fills its whole reserved slot).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<clear_ $($prefix)* $field>](&mut self) {
+                    const OFF: usize = $($prev)*;
+                    const SLOT: usize = $crate::txn::codec::native_amount_field_size($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(SLOT)].copy_from_slice(&[$crate::txn::codec::NOP; SLOT]);
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [
+                $($init)*
+                $crate::txn::codec::write_nops(&mut $($buf)*, ($($prev)*), $crate::txn::codec::native_amount_field_size($sfcode));
+            ],
+            prev = [ ($($prev)*).wrapping_add($crate::txn::codec::native_amount_field_size($sfcode)) ],
+            table = [
+                $($table)*
+                (($sfcode).code(), $crate::txn::codec::KIND_OPTIONAL_NATIVE_AMOUNT, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
+            ],
+            emit_details = [$($emit_details)*],
+            nops = [$($nops)* $crate::txn::codec::native_amount_field_size($sfcode),],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $($($rest)*)? ]
+        }
+
+    };
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : optional amount($sfcode:expr) $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_AMOUNT,
+            concat!("txn_template!: `", stringify!($field), "` is declared as `optional amount` but its sfXxx code is not an STI_AMOUNT field")
+        );
+        $crate::__txn_template_check_not_plumbing!($sfcode, $field, "optional amount", ($($depth)*));
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)* ($sfcode).code(),],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Sets `", stringify!($field), "` to the 48-byte issued (IOU) form of `xfl`/`currency`/`issuer`, making it present (absent by default).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<set_ $($prefix)* $field>](&mut self, xfl: $crate::xfl::XFL, currency: &$crate::types::CurrencyCode, issuer: &$crate::types::AccountId) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
+                    const OFF: usize = $($prev)*;
+                    const HDR: ([u8; 3], usize) = $crate::txn::codec::field_header($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(HDR.1)].copy_from_slice(&HDR.0[..HDR.1]);
+                    let vstart = OFF.wrapping_add(HDR.1);
+                    self.bytes[vstart..vstart.wrapping_add($crate::types::IOU_AMOUNT_LEN)].copy_from_slice(&$crate::txn::codec::encode_iou_amount_const(xfl, currency, issuer));
+                }
+
+                #[doc = concat!("Clears `", stringify!($field), "` back to absent (NOP-fills its whole reserved slot).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<clear_ $($prefix)* $field>](&mut self) {
+                    const OFF: usize = $($prev)*;
+                    const SLOT: usize = $crate::txn::codec::iou_amount_field_size($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(SLOT)].copy_from_slice(&[$crate::txn::codec::NOP; SLOT]);
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [
+                $($init)*
+                $crate::txn::codec::write_nops(&mut $($buf)*, ($($prev)*), $crate::txn::codec::iou_amount_field_size($sfcode));
+            ],
+            prev = [ ($($prev)*).wrapping_add($crate::txn::codec::iou_amount_field_size($sfcode)) ],
+            table = [
+                $($table)*
+                (($sfcode).code(), $crate::txn::codec::KIND_OPTIONAL_IOU_AMOUNT, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
+            ],
+            emit_details = [$($emit_details)*],
+            nops = [$($nops)* $crate::txn::codec::iou_amount_field_size($sfcode),],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $($($rest)*)? ]
+        }
+
+    };
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : optional native_issue($sfcode:expr) $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_ISSUE,
+            concat!("txn_template!: `", stringify!($field), "` is declared as `optional native_issue` but its sfXxx code is not an STI_ISSUE field")
+        );
+        $crate::__txn_template_check_not_plumbing!($sfcode, $field, "optional native_issue", ($($depth)*));
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)* ($sfcode).code(),],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Makes `", stringify!($field), "` present, at its fixed all-zero value (absent by default).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<set_ $($prefix)* $field>](&mut self) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
+                    const OFF: usize = $($prev)*;
+                    const HDR: ([u8; 3], usize) = $crate::txn::codec::field_header($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(HDR.1)].copy_from_slice(&HDR.0[..HDR.1]);
+                    let vstart = OFF.wrapping_add(HDR.1);
+                    self.bytes[vstart..vstart.wrapping_add(20)].copy_from_slice(&[0u8; 20]);
+                }
+
+                #[doc = concat!("Clears `", stringify!($field), "` back to absent (NOP-fills its whole reserved slot).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<clear_ $($prefix)* $field>](&mut self) {
+                    const OFF: usize = $($prev)*;
+                    const SLOT: usize = $crate::txn::codec::fixed_field_size($sfcode, 20usize);
+                    self.bytes[OFF..OFF.wrapping_add(SLOT)].copy_from_slice(&[$crate::txn::codec::NOP; SLOT]);
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [
+                $($init)*
+                $crate::txn::codec::write_nops(&mut $($buf)*, ($($prev)*), $crate::txn::codec::fixed_field_size($sfcode, 20usize));
+            ],
+            prev = [ ($($prev)*).wrapping_add($crate::txn::codec::fixed_field_size($sfcode, 20usize)) ],
+            table = [
+                $($table)*
+                (($sfcode).code(), $crate::txn::codec::KIND_OPTIONAL_NATIVE_ISSUE, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
+            ],
+            emit_details = [$($emit_details)*],
+            nops = [$($nops)* $crate::txn::codec::fixed_field_size($sfcode, 20usize),],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $($($rest)*)? ]
+        }
+
+    };
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : optional issue($sfcode:expr) $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_ISSUE,
+            concat!("txn_template!: `", stringify!($field), "` is declared as `optional issue` but its sfXxx code is not an STI_ISSUE field")
+        );
+        $crate::__txn_template_check_not_plumbing!($sfcode, $field, "optional issue", ($($depth)*));
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)* ($sfcode).code(),],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Sets `", stringify!($field), "`'s currency and issuer, making it present (absent by default).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<set_ $($prefix)* $field>](&mut self, currency: &$crate::types::CurrencyCode, issuer: &$crate::types::AccountId) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
+                    const OFF: usize = $($prev)*;
+                    const HDR: ([u8; 3], usize) = $crate::txn::codec::field_header($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(HDR.1)].copy_from_slice(&HDR.0[..HDR.1]);
+                    let vstart = OFF.wrapping_add(HDR.1);
+                    self.bytes[vstart..vstart.wrapping_add($crate::types::CURRENCY_CODE_LEN)].copy_from_slice(currency.as_ref());
+                    let istart = vstart.wrapping_add($crate::types::CURRENCY_CODE_LEN);
+                    self.bytes[istart..istart.wrapping_add($crate::types::ACC_ID_LEN)].copy_from_slice(issuer.as_ref());
+                }
+
+                #[doc = concat!("Clears `", stringify!($field), "` back to absent (NOP-fills its whole reserved slot).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<clear_ $($prefix)* $field>](&mut self) {
+                    const OFF: usize = $($prev)*;
+                    const SLOT: usize = $crate::txn::codec::fixed_field_size($sfcode, 40usize);
+                    self.bytes[OFF..OFF.wrapping_add(SLOT)].copy_from_slice(&[$crate::txn::codec::NOP; SLOT]);
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [
+                $($init)*
+                $crate::txn::codec::write_nops(&mut $($buf)*, ($($prev)*), $crate::txn::codec::fixed_field_size($sfcode, 40usize));
+            ],
+            prev = [ ($($prev)*).wrapping_add($crate::txn::codec::fixed_field_size($sfcode, 40usize)) ],
+            table = [
+                $($table)*
+                (($sfcode).code(), $crate::txn::codec::KIND_OPTIONAL_ISSUE, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
+            ],
+            emit_details = [$($emit_details)*],
+            nops = [$($nops)* $crate::txn::codec::fixed_field_size($sfcode, 40usize),],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $($($rest)*)? ]
+        }
+
+    };
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : optional account_id($sfcode:expr) $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_ACCOUNT,
+            concat!("txn_template!: `", stringify!($field), "` is declared as `optional account_id` but its sfXxx code is not an STI_ACCOUNT field")
+        );
+        $crate::__txn_template_check_not_plumbing!($sfcode, $field, "optional account_id", ($($depth)*));
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)* ($sfcode).code(),],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Sets `", stringify!($field), "`, making it present (absent by default).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<set_ $($prefix)* $field>](&mut self, value: &$crate::types::AccountId) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
+                    const OFF: usize = $($prev)*;
+                    const HDR: ([u8; 3], usize) = $crate::txn::codec::field_header($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(HDR.1)].copy_from_slice(&HDR.0[..HDR.1]);
+                    let lstart = OFF.wrapping_add(HDR.1);
+                    self.bytes[lstart] = $crate::types::ACC_ID_LEN as u8;
+                    let vstart = lstart.wrapping_add(1);
+                    self.bytes[vstart..vstart.wrapping_add($crate::types::ACC_ID_LEN)].copy_from_slice(value.as_ref());
+                }
+
+                #[doc = concat!("Clears `", stringify!($field), "` back to absent (NOP-fills its whole reserved slot).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<clear_ $($prefix)* $field>](&mut self) {
+                    const OFF: usize = $($prev)*;
+                    const SLOT: usize = $crate::txn::codec::account_id_field_size($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(SLOT)].copy_from_slice(&[$crate::txn::codec::NOP; SLOT]);
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [
+                $($init)*
+                $crate::txn::codec::write_nops(&mut $($buf)*, ($($prev)*), $crate::txn::codec::account_id_field_size($sfcode));
+            ],
+            prev = [ ($($prev)*).wrapping_add($crate::txn::codec::account_id_field_size($sfcode)) ],
+            table = [
+                $($table)*
+                (($sfcode).code(), $crate::txn::codec::KIND_OPTIONAL_ACCOUNT_ID, (($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1)).wrapping_add(1usize), ($($depth)*)),
+            ],
+            emit_details = [$($emit_details)*],
+            nops = [$($nops)* $crate::txn::codec::account_id_field_size($sfcode),],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $($($rest)*)? ]
+        }
+
+    };
+
+    // `emit_details` terminal handling: the last top-level field
+    // (`ctx = obj`), ahead of the bare-ident desugar/inference arms below —
+    // those would otherwise match the bare `emit_details` ident as an
+    // ordinary `sfXxx` field.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : emit_details $(,)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*],
+            setters = [$($setters)*],
+            emit_region = [
+                #[doc = concat!("Returns the mutable `", stringify!($field), "` region: pass it directly to [`crate::api::etxn::etxn_details`].")]
+                #[inline(always)]
+                #[must_use]
+                #[allow(clippy::indexing_slicing)] // in-bounds: exactly the trailing region `txn_template!` reserved
+                $vis fn emit_details_region(&mut self) -> &mut [u8] {
+                    const OFF: usize = $($prev)*;
+                    &mut self.bytes[OFF..OFF.wrapping_add($crate::types::EMIT_DETAILS_MAX_LEN)]
+                }
+            ],
+            buf = [$($buf)*],
+            init = [$($init)*],
+            prev = [ ($($prev)*).wrapping_add($crate::types::EMIT_DETAILS_MAX_LEN) ],
+            table = [$($table)*],
+            emit_details = [true, (($($prev)*))],
+            nops = [$($nops)*],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = []
+        }
+
+    };
+
+    // `emit_details` inside any container (a non-empty `stack`): a named
+    // error, ahead of the catch-all below.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
+        stack = [ [ $($frame:tt)* ] $($stack:tt)* ],
+        mode = $mode:tt,
+        fields = [ $field:ident : emit_details $($rest:tt)* ]
+    ) => {
+        compile_error!(concat!(
+            "txn_template!: `",
+            stringify!($field),
+            ": emit_details` must be the last top-level field — it cannot be declared inside a nested `object`/`array`"
+        ));
+    };
+
+    // A top-level `emit_details` field not declared last: a named error,
+    // ahead of the inferred-scalar arms below (which would otherwise treat
+    // the bare `emit_details` keyword as an unrecognized `sfXxx` ident and
+    // fail with a confusing `cannot find value \`emit_details\`` instead).
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : emit_details , $($rest:tt)+ ]
+    ) => {
+        compile_error!(concat!(
+            "txn_template!: `",
+            stringify!($field),
+            ": emit_details` must be the last field"
+        ));
+    };
+
+    // --- Inferred-kind desugar arms ---
+    //
+    // A bare `name: sfXxx { .. }` / `name: sfXxx [ .. ]` is a pure token
+    // rewrite into the corresponding explicit `object(sfXxx)`/
+    // `array(sfXxx)` form, which the arms above already handle — these
+    // just recurse with the rewritten tokens, threading every accumulator
+    // through unchanged. Placed after both `emit_details` arms and before
+    // the catch-all below: `x: emit_details` must keep matching the
+    // dedicated arms above, not the inferred-scalar arm below.
+
+    // `name: sfXxx { .. }` -> `name: object(sfXxx) { .. }`.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $name:ident : $sfcode:ident { $($inner:tt)* } $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
+            prefix = [$($prefix)*], ctx = $ctx, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $name : object($sfcode) { $($inner)* } $(, $($rest)*)? ]
+        }
+    };
+    // `name: sfXxx [ Elem: esf { .. } ; N ]` (homogeneous, bare element) ->
+    // `name: array(sfXxx) [ Elem: object(esf) { .. } ; N ]`. Must come
+    // before the general bare-array arm below, or `$($inner:tt)*` there
+    // would swallow this shape first.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $name:ident : $sfcode:ident [ $Elem:ident : $esf:ident { $($efields:tt)* } ; $($n:tt)+ ] $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
+            prefix = [$($prefix)*], ctx = $ctx, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $name : array($sfcode) [ $Elem : object($esf) { $($efields)* } ; $($n)+ ] $(, $($rest)*)? ]
+        }
+    };
+    // `name: sfXxx [ .. ]` (named array, bare) -> `name: array(sfXxx) [ .. ]`.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $name:ident : $sfcode:ident [ $($inner:tt)* ] $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
+            prefix = [$($prefix)*], ctx = $ctx, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $name : array($sfcode) [ $($inner)* ] $(, $($rest)*)? ]
+        }
+    };
+    // `name: optional sfX { .. }` -> `name: optional object(sfX) { .. }` --
+    // bare-`sfX` twin of the explicit `optional object(sfX) { .. }` form
+    // below; legal wherever that one is (`ctx = obj`/`ctx = arr` alike,
+    // since a named array element can itself be a whole optional object).
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $name:ident : optional $sfcode:ident { $($inner:tt)* } $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
+            prefix = [$($prefix)*], ctx = $ctx, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $name : optional object($sfcode) { $($inner)* } $(, $($rest)*)? ]
+        }
+    };
+    // `name: optional sfX [ .. ]` -> `name: optional array(sfX) [ .. ]`
+    // (`ctx = obj` only -- a whole optional array can't be a named array's
+    // own element, matching the explicit `optional array(sfX) [ .. ]` form).
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $name:ident : optional $sfcode:ident [ $($inner:tt)* ] $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
+            prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $name : optional array($sfcode) [ $($inner)* ] $(, $($rest)*)? ]
+        }
+    };
+    // --- Default-shape desugar arms ---
+    //
+    // The kinds `native_amount`/`amount`/`empty_vl`/`fixed_vl` cannot infer
+    // from the STI alone (`STI_AMOUNT`/`STI_VL` cover several distinct wire
+    // shapes), but a bare `field: sfXxx = <default>` can still infer the
+    // kind from the SHAPE of `<default>` itself: `NativeAmount(..)`/
+    // `IouAmount(..)` are macro syntax markers (not real types — never
+    // resolved as paths), and `[]`/`[ .. ]`/`*b".."` are the literal shapes
+    // `empty_vl`/`fixed_vl` already accept. Placed before the plain
+    // inferred-scalar-with-default arm below: `$default:expr` there would
+    // otherwise happily parse `NativeAmount(500)` as an ordinary call
+    // expression and fail later with a real, confusing `cannot find
+    // function` error instead of desugaring it.
+
+    // `field: sfXxx = NativeAmount(d)` -> `field: native_amount(sfXxx) = d`.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : $sfcode:ident = NativeAmount($d:expr $(,)?) $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
+            prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $field : native_amount($sfcode) = $d $(, $($rest)*)? ]
+        }
+    };
+    // `field: sfXxx = IouAmount(xfl, cur, iss)` -> `field: amount(sfXxx) = (xfl, cur, iss)`.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : $sfcode:ident = IouAmount($xfl:expr, $cur:expr, $iss:expr $(,)?) $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
+            prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $field : amount($sfcode) = ($xfl, $cur, $iss) $(, $($rest)*)? ]
+        }
+    };
+    // `field: sfXxx = AnyAmount()` -> `field: any_amount(sfXxx)`. `AnyAmount`
+    // is a macro syntax marker like `NativeAmount`/`IouAmount` above, but
+    // takes no value: `any_amount` has no baked default to thread through
+    // (issued zero, always).
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : $sfcode:ident = AnyAmount() $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
+            prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $field : any_amount($sfcode) $(, $($rest)*)? ]
+        }
+    };
+    // `field: sfXxx = []` -> `field: empty_vl(sfXxx)`.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : $sfcode:ident = [] $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
+            prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $field : empty_vl($sfcode) $(, $($rest)*)? ]
+        }
+    };
+    // `field: sfXxx = [ ..+ ]` -> `field: fixed_vl(sfXxx, N) = [ ..+ ]`, `N`
+    // recovered from the default array literal itself via `array_len`.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : $sfcode:ident = [ $($arr:tt)+ ] $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
+            prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $field : fixed_vl($sfcode, { $crate::txn::codec::array_len(&[ $($arr)+ ]) }) = [ $($arr)+ ] $(, $($rest)*)? ]
+        }
+    };
+    // `field: sfXxx = *lit` (e.g. `*b"note"`) -> `field: fixed_vl(sfXxx, N)
+    // = *lit`, `N` recovered from the byte-string literal itself.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : $sfcode:ident = * $lit:literal $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
+            prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $field : fixed_vl($sfcode, { $crate::txn::codec::array_len(&*$lit) }) = *$lit $(, $($rest)*)? ]
+        }
+    };
+
+    // `field: sfXxx = default` (inferred scalar, required-with-default kind).
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : $sfcode:ident = $default:expr $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::INFERABLE,
+            concat!("txn_template!: `", stringify!($field), "`: the kind of `", stringify!($sfcode), "` cannot be inferred from its serialized type — declare it explicitly (`native_amount`/`amount`, `empty_vl`/`fixed_vl`, `native_issue`/`issue`, or a `{{ .. }}`/`[ .. ]` body for an object/array); serialized types with no `txn_template!` kind need `StoWriter`")
+        );
+        const _: () = assert!(
+            !(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::INFERABLE)
+                || <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::HAS_DEFAULT,
+            concat!("txn_template!: `", stringify!($field), "` is a zeroed kind and takes no `= default`")
+        );
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)* ($sfcode).code(),],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Sets `", stringify!($field), "` (inferred kind, default `", stringify!($default), "`). Overwritten by `prepare_for_emit` if this is one of the required emit-plumbing fields.")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction: `Self::LEN` sums these same field sizes
+                $vis fn [<set_ $($prefix)* $field>](&mut self, value: <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::Value<'_>) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
+                    const OFF: usize = ($($prev)*)
+                        .wrapping_add($crate::txn::codec::field_header($sfcode).1)
+                        .wrapping_add(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX.len());
+                    const LEN: usize = <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::LEN;
+                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::write(
+                        &mut self.bytes[OFF..OFF.wrapping_add(LEN)],
+                        value,
+                    );
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [
+                $($init)*
+                $crate::txn::codec::write_field_header(&mut $($buf)*, ($($prev)*), $sfcode);
+                $crate::txn::codec::write_const_bytes(
+                    &mut $($buf)*,
+                    ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1),
+                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX,
+                );
+                $crate::txn::codec::write_uint_be(
+                    &mut $($buf)*,
+                    ($($prev)*)
+                        .wrapping_add($crate::txn::codec::field_header($sfcode).1)
+                        .wrapping_add(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX.len()),
+                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::LEN,
+                    {
+                        let __v: <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::Value<'static> = $default;
+                        __v as u64
+                    },
+                );
+            ],
+            prev = [
+                ($($prev)*).wrapping_add($crate::txn::codec::fixed_field_size(
+                    $sfcode,
+                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX.len()
+                        .wrapping_add(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::LEN),
+                ))
+            ],
+            table = [
+                $($table)*
+                (
+                    ($sfcode).code(),
+                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::KIND,
+                    ($($prev)*)
+                        .wrapping_add($crate::txn::codec::field_header($sfcode).1)
+                        .wrapping_add(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX.len()),
+                    ($($depth)*),
+                ),
+            ],
+            emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $($($rest)*)? ]
+        }
+
+    };
+    // `field: sfXxx` (inferred scalar, zeroed kind, no default).
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : $sfcode:ident $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::INFERABLE,
+            concat!("txn_template!: `", stringify!($field), "`: the kind of `", stringify!($sfcode), "` cannot be inferred from its serialized type — declare it explicitly (`native_amount`/`amount`, `empty_vl`/`fixed_vl`, `native_issue`/`issue`, or a `{{ .. }}`/`[ .. ]` body for an object/array); serialized types with no `txn_template!` kind need `StoWriter`")
+        );
+        const _: () = assert!(
+            !(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::INFERABLE)
+                || !(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::HAS_DEFAULT),
+            concat!("txn_template!: `", stringify!($field), "` is an integer kind and needs `= default`")
+        );
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)* ($sfcode).code(),],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Sets `", stringify!($field), "` (inferred kind, defaults to all-zero bytes).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction: `Self::LEN` sums these same field sizes
+                $vis fn [<set_ $($prefix)* $field>](&mut self, value: <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::Value<'_>) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
+                    const OFF: usize = ($($prev)*)
+                        .wrapping_add($crate::txn::codec::field_header($sfcode).1)
+                        .wrapping_add(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX.len());
+                    const LEN: usize = <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::LEN;
+                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::write(
+                        &mut self.bytes[OFF..OFF.wrapping_add(LEN)],
+                        value,
+                    );
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [
+                $($init)*
+                $crate::txn::codec::write_field_header(&mut $($buf)*, ($($prev)*), $sfcode);
+                $crate::txn::codec::write_const_bytes(
+                    &mut $($buf)*,
+                    ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1),
+                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX,
+                );
+            ],
+            prev = [
+                ($($prev)*).wrapping_add($crate::txn::codec::fixed_field_size(
+                    $sfcode,
+                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX.len()
+                        .wrapping_add(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::LEN),
+                ))
+            ],
+            table = [
+                $($table)*
+                (
+                    ($sfcode).code(),
+                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::KIND,
+                    ($($prev)*)
+                        .wrapping_add($crate::txn::codec::field_header($sfcode).1)
+                        .wrapping_add(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX.len()),
+                    ($($depth)*),
+                ),
+            ],
+            emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $($($rest)*)? ]
+        }
+
+    };
+
+    // `field: optional sfXxx = AnyAmount()` -> `field: optional
+    // any_amount(sfXxx)` / `= NativeAmount()` -> `optional
+    // native_amount(sfXxx)` / `= IouAmount()` -> `optional amount(sfXxx)`.
+    // Same macro syntax markers as the non-`optional` default-shape
+    // desugar above, still taking no value: none of these three kinds has
+    // a baked default to thread through (absent, or issued zero once
+    // present). Placed before the bare `optional sfXxx` arm below:
+    // `$sfcode:ident $(, ...)?` there never matches a trailing `= ..`, so
+    // ordering is not load-bearing for correctness, only for grouping
+    // with the arms it mirrors.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : optional $sfcode:ident = AnyAmount() $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
+            prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $field : optional any_amount($sfcode) $(, $($rest)*)? ]
+        }
+    };
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : optional $sfcode:ident = NativeAmount() $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
+            prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $field : optional native_amount($sfcode) $(, $($rest)*)? ]
+        }
+    };
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : optional $sfcode:ident = IouAmount() $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
+            prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $field : optional amount($sfcode) $(, $($rest)*)? ]
+        }
+    };
+    // `field: optional sfXxx` (inferred optional scalar, absent by
+    // default) -- a bare-ident twin of the explicit `optional
+    // <scalar>(sfXxx)` kinds: the setter writes `header + PREFIX + value`
+    // in one go, `clear_x` NOP-fills the whole slot, and the worst-case
+    // NOP charge to the enclosing container is that same slot size (see
+    // `docs/NOP_PADDING_DESIGN.md` §3.1). Non-inferable STIs (`Amount`,
+    // `VL`, `Issue`, `Object`/`Array`, ...) are named explicitly in the
+    // error message, pointing at the matching `optional` form.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : optional $sfcode:ident $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::INFERABLE,
+            concat!("txn_template!: `", stringify!($field), "`: the kind of `", stringify!($sfcode), "` cannot be inferred from its serialized type — declare it explicitly (`optional native_amount`/`optional amount`/`any_amount`/`optional any_amount`, `optional empty_vl`/`optional fixed_vl`, `optional vl`, `optional native_issue`/`optional issue`, or a `{{ .. }}`/`[ .. ]` body for an object/array); serialized types with no `txn_template!` kind need `StoWriter`")
+        );
+        $crate::__txn_template_check_not_plumbing!($sfcode, $field, "optional", ($($depth)*));
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)* ($sfcode).code(),],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Sets `", stringify!($field), "` (inferred kind), making it present (absent by default).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<set_ $($prefix)* $field>](&mut self, value: <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::Value<'_>) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
+                    const OFF: usize = $($prev)*;
+                    const HDR: ([u8; 3], usize) = $crate::txn::codec::field_header($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(HDR.1)].copy_from_slice(&HDR.0[..HDR.1]);
+                    const PREFIX: &'static [u8] = <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX;
+                    let pstart = OFF.wrapping_add(HDR.1);
+                    self.bytes[pstart..pstart.wrapping_add(PREFIX.len())].copy_from_slice(PREFIX);
+                    const LEN: usize = <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::LEN;
+                    let vstart = pstart.wrapping_add(PREFIX.len());
+                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::write(
+                        &mut self.bytes[vstart..vstart.wrapping_add(LEN)],
+                        value,
+                    );
+                }
+
+                #[doc = concat!("Clears `", stringify!($field), "` back to absent (NOP-fills its whole reserved slot).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<clear_ $($prefix)* $field>](&mut self) {
+                    const OFF: usize = $($prev)*;
+                    const SLOT: usize = $crate::txn::codec::fixed_field_size(
+                        $sfcode,
+                        <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX.len()
+                            .wrapping_add(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::LEN),
+                    );
+                    self.bytes[OFF..OFF.wrapping_add(SLOT)].copy_from_slice(&[$crate::txn::codec::NOP; SLOT]);
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [
+                $($init)*
+                $crate::txn::codec::write_nops(&mut $($buf)*, ($($prev)*), $crate::txn::codec::fixed_field_size(
+                    $sfcode,
+                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX.len()
+                        .wrapping_add(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::LEN),
+                ));
+            ],
+            prev = [
+                ($($prev)*).wrapping_add($crate::txn::codec::fixed_field_size(
+                    $sfcode,
+                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX.len()
+                        .wrapping_add(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::LEN),
+                ))
+            ],
+            table = [
+                $($table)*
+                (
+                    ($sfcode).code(),
+                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::OPTIONAL_KIND,
+                    ($($prev)*)
+                        .wrapping_add($crate::txn::codec::field_header($sfcode).1)
+                        .wrapping_add(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX.len()),
+                    ($($depth)*),
+                ),
+            ],
+            emit_details = [$($emit_details)*],
+            nops = [
+                $($nops)*
+                $crate::txn::codec::fixed_field_size(
+                    $sfcode,
+                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX.len()
+                        .wrapping_add(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::LEN),
+                ),
+            ],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $($($rest)*)? ]
+        }
+
+    };
+
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : optional empty_vl($sfcode:expr) $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_VL,
+            concat!("txn_template!: `", stringify!($field), "` is declared as `optional empty_vl` but its sfXxx code is not an STI_VL field")
+        );
+        $crate::__txn_template_check_not_plumbing!($sfcode, $field, "optional empty_vl", ($($depth)*));
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)* ($sfcode).code(),],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Makes `", stringify!($field), "` present, as an empty blob (absent by default).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<set_ $($prefix)* $field>](&mut self) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
+                    const OFF: usize = $($prev)*;
+                    const HDR: ([u8; 3], usize) = $crate::txn::codec::field_header($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(HDR.1)].copy_from_slice(&HDR.0[..HDR.1]);
+                    self.bytes[OFF.wrapping_add(HDR.1)] = 0u8;
+                }
+
+                #[doc = concat!("Clears `", stringify!($field), "` back to absent (NOP-fills its whole reserved slot).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<clear_ $($prefix)* $field>](&mut self) {
+                    const OFF: usize = $($prev)*;
+                    const SLOT: usize = $crate::txn::codec::empty_vl_field_size($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(SLOT)].copy_from_slice(&[$crate::txn::codec::NOP; SLOT]);
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [
+                $($init)*
+                $crate::txn::codec::write_nops(&mut $($buf)*, ($($prev)*), $crate::txn::codec::empty_vl_field_size($sfcode));
+            ],
+            prev = [ ($($prev)*).wrapping_add($crate::txn::codec::empty_vl_field_size($sfcode)) ],
+            table = [
+                $($table)*
+                (($sfcode).code(), $crate::txn::codec::KIND_OPTIONAL_EMPTY_VL, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
+            ],
+            emit_details = [$($emit_details)*],
+            nops = [$($nops)* $crate::txn::codec::empty_vl_field_size($sfcode),],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $($($rest)*)? ]
+        }
+
+    };
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : optional fixed_vl($sfcode:expr, $n:expr) $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_VL,
+            concat!("txn_template!: `", stringify!($field), "` is declared as `optional fixed_vl` but its sfXxx code is not an STI_VL field")
+        );
+        $crate::__txn_template_check_not_plumbing!($sfcode, $field, "optional fixed_vl", ($($depth)*));
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)* ($sfcode).code(),],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Sets `", stringify!($field), "`'s ", stringify!($n), "-byte payload, making it present (absent by default).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<set_ $($prefix)* $field>](&mut self, value: &[u8; ($n)]) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
+                    const OFF: usize = $($prev)*;
+                    const HDR: ([u8; 3], usize) = $crate::txn::codec::field_header($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(HDR.1)].copy_from_slice(&HDR.0[..HDR.1]);
+                    const PREFIX: ([u8; 3], usize) = $crate::txn::codec::vl_length_prefix($n);
+                    let pstart = OFF.wrapping_add(HDR.1);
+                    self.bytes[pstart..pstart.wrapping_add(PREFIX.1)].copy_from_slice(&PREFIX.0[..PREFIX.1]);
+                    let vstart = pstart.wrapping_add(PREFIX.1);
+                    self.bytes[vstart..vstart.wrapping_add($n)].copy_from_slice(value);
+                }
+
+                #[doc = concat!("Clears `", stringify!($field), "` back to absent (NOP-fills its whole reserved slot).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<clear_ $($prefix)* $field>](&mut self) {
+                    const OFF: usize = $($prev)*;
+                    const SLOT: usize = $crate::txn::codec::fixed_vl_field_size($sfcode, $n);
+                    self.bytes[OFF..OFF.wrapping_add(SLOT)].copy_from_slice(&[$crate::txn::codec::NOP; SLOT]);
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [
+                $($init)*
+                $crate::txn::codec::write_nops(&mut $($buf)*, ($($prev)*), $crate::txn::codec::fixed_vl_field_size($sfcode, $n));
+            ],
+            prev = [ ($($prev)*).wrapping_add($crate::txn::codec::fixed_vl_field_size($sfcode, $n)) ],
+            table = [
+                $($table)*
+                (($sfcode).code(), $crate::txn::codec::KIND_OPTIONAL_FIXED_VL, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
+            ],
+            emit_details = [$($emit_details)*],
+            nops = [$($nops)* $crate::txn::codec::fixed_vl_field_size($sfcode, $n),],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $($($rest)*)? ]
+        }
+
+    };
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : any_amount($sfcode:expr) $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_AMOUNT,
+            concat!("txn_template!: `", stringify!($field), "` is declared as `any_amount` but its sfXxx code is not an STI_AMOUNT field")
+        );
+        $crate::__txn_template_check_not_plumbing!($sfcode, $field, "any_amount", ($($depth)*));
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)* ($sfcode).code(),],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Sets `", stringify!($field), "` to the 8-byte native form of `drops`, NOP-padding the remaining ", stringify!($crate::txn::codec::ANY_AMOUNT_NATIVE_NOPS), " bytes of its reserved 48-byte value region.")]
+                ///
+                /// # Errors
+                ///
+                /// Returns [`crate::error::HookError::InvalidArgument`] if
+                /// `drops` does not fit in 62 bits.
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds as above; only `drops` itself is runtime-fallible
+                $vis fn [<set_ $($prefix)* $field _native>](&mut self, drops: u64) -> $crate::error::Result<()> {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
+                    const OFF: usize = ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1);
+                    $crate::txn::codec::encode_native_amount(&mut self.bytes[OFF..OFF.wrapping_add(8)], drops)?;
+                    const NOP_OFF: usize = OFF.wrapping_add(8);
+                    const NOP_LEN: usize = $crate::txn::codec::ANY_AMOUNT_NATIVE_NOPS;
+                    self.bytes[NOP_OFF..NOP_OFF.wrapping_add(NOP_LEN)].copy_from_slice(&[$crate::txn::codec::NOP; NOP_LEN]);
+                    Ok(())
+                }
+
+                #[doc = concat!("Sets `", stringify!($field), "` to the 48-byte issued (IOU) form of `xfl`/`currency`/`issuer`.")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<set_ $($prefix)* $field _issued>](&mut self, xfl: $crate::xfl::XFL, currency: &$crate::types::CurrencyCode, issuer: &$crate::types::AccountId) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
+                    const OFF: usize = ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1);
+                    self.bytes[OFF..OFF.wrapping_add($crate::types::IOU_AMOUNT_LEN)].copy_from_slice(&$crate::txn::codec::encode_iou_amount_const(xfl, currency, issuer));
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [
+                $($init)*
+                $crate::txn::codec::write_field_header(&mut $($buf)*, ($($prev)*), $sfcode);
+                $crate::txn::codec::write_const_bytes(
+                    &mut $($buf)*,
+                    ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1),
+                    &$crate::txn::codec::encode_iou_amount_const($crate::xfl::XFL::from_raw_bits(0), &$crate::types::CurrencyCode::zeroed(), &$crate::types::AccountId::zeroed()),
+                );
+            ],
+            prev = [ ($($prev)*).wrapping_add($crate::txn::codec::any_amount_field_size($sfcode)) ],
+            table = [
+                $($table)*
+                (($sfcode).code(), $crate::txn::codec::KIND_ANY_AMOUNT, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
+            ],
+            emit_details = [$($emit_details)*],
+            nops = [$($nops)* $crate::txn::codec::ANY_AMOUNT_NATIVE_NOPS,],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $($($rest)*)? ]
+        }
+
+    };
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : optional any_amount($sfcode:expr) $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_AMOUNT,
+            concat!("txn_template!: `", stringify!($field), "` is declared as `optional any_amount` but its sfXxx code is not an STI_AMOUNT field")
+        );
+        $crate::__txn_template_check_not_plumbing!($sfcode, $field, "optional any_amount", ($($depth)*));
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)* ($sfcode).code(),],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Sets `", stringify!($field), "` to the 8-byte native form of `drops`, making it present and NOP-padding the rest of its reserved 48-byte value region (absent by default).")]
+                ///
+                /// # Errors
+                ///
+                /// Returns [`crate::error::HookError::InvalidArgument`] if
+                /// `drops` does not fit in 62 bits.
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds as above; only `drops` itself is runtime-fallible
+                $vis fn [<set_ $($prefix)* $field _native>](&mut self, drops: u64) -> $crate::error::Result<()> {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
+                    const OFF: usize = $($prev)*;
+                    const HDR: ([u8; 3], usize) = $crate::txn::codec::field_header($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(HDR.1)].copy_from_slice(&HDR.0[..HDR.1]);
+                    let vstart = OFF.wrapping_add(HDR.1);
+                    $crate::txn::codec::encode_native_amount(&mut self.bytes[vstart..vstart.wrapping_add(8)], drops)?;
+                    let nop_start = vstart.wrapping_add(8);
+                    const NOP_LEN: usize = $crate::txn::codec::ANY_AMOUNT_NATIVE_NOPS;
+                    self.bytes[nop_start..nop_start.wrapping_add(NOP_LEN)].copy_from_slice(&[$crate::txn::codec::NOP; NOP_LEN]);
+                    Ok(())
+                }
+
+                #[doc = concat!("Sets `", stringify!($field), "` to the 48-byte issued (IOU) form of `xfl`/`currency`/`issuer`, making it present (absent by default).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<set_ $($prefix)* $field _issued>](&mut self, xfl: $crate::xfl::XFL, currency: &$crate::types::CurrencyCode, issuer: &$crate::types::AccountId) {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
+                    const OFF: usize = $($prev)*;
+                    const HDR: ([u8; 3], usize) = $crate::txn::codec::field_header($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(HDR.1)].copy_from_slice(&HDR.0[..HDR.1]);
+                    let vstart = OFF.wrapping_add(HDR.1);
+                    self.bytes[vstart..vstart.wrapping_add($crate::types::IOU_AMOUNT_LEN)].copy_from_slice(&$crate::txn::codec::encode_iou_amount_const(xfl, currency, issuer));
+                }
+
+                #[doc = concat!("Clears `", stringify!($field), "` back to absent (NOP-fills its whole reserved slot).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<clear_ $($prefix)* $field>](&mut self) {
+                    const OFF: usize = $($prev)*;
+                    const SLOT: usize = $crate::txn::codec::any_amount_field_size($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(SLOT)].copy_from_slice(&[$crate::txn::codec::NOP; SLOT]);
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [
+                $($init)*
+                $crate::txn::codec::write_nops(&mut $($buf)*, ($($prev)*), $crate::txn::codec::any_amount_field_size($sfcode));
+            ],
+            prev = [ ($($prev)*).wrapping_add($crate::txn::codec::any_amount_field_size($sfcode)) ],
+            table = [
+                $($table)*
+                (($sfcode).code(), $crate::txn::codec::KIND_OPTIONAL_ANY_AMOUNT, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
+            ],
+            emit_details = [$($emit_details)*],
+            nops = [$($nops)* $crate::txn::codec::any_amount_field_size($sfcode),],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $($($rest)*)? ]
+        }
+
+    };
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : vl($sfcode:expr, $max:expr) $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*],
+            setters = [$($setters)*],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [$($init)*],
+            prev = [$($prev)*],
+            table = [$($table)*],
+            emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $field: vl($sfcode, 0usize, $max) $(, $($rest)*)? ]
+        }
+    };
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : vl($sfcode:expr, $min:expr, $max:expr) $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_VL,
+            concat!("txn_template!: `", stringify!($field), "` is declared as `vl` but its sfXxx code is not an STI_VL field")
+        );
+        const _: () = assert!(
+            ($min) <= ($max),
+            concat!("txn_template!: `", stringify!($field), "`'s vl MIN must not exceed MAX")
+        );
+        const _: () = assert!(
+            ($max) >= 1usize,
+            concat!("txn_template!: `", stringify!($field), "`'s vl MAX must be at least 1 -- declare it as `empty_vl` for an always-empty blob")
+        );
+        const _: () = assert!(
+            ($max) <= $crate::txn::codec::MAX_VL_LEN,
+            concat!("txn_template!: `", stringify!($field), "`'s vl MAX exceeds the maximum representable VL length")
+        );
+        $crate::__txn_template_check_not_plumbing!($sfcode, $field, "vl", ($($depth)*));
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)* ($sfcode).code(),],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Sets `", stringify!($field), "`'s payload to `value` (`", stringify!($min), "..=", stringify!($max), "` bytes), NOP-padding the unused tail of its reserved slot.")]
+                ///
+                /// # Errors
+                ///
+                /// Returns [`crate::error::HookError::InvalidArgument`] if
+                /// `value.len()` is outside that range.
+                ///
+                /// # Guard budget
+                ///
+                /// This setter's payload/NOP-tail write is one
+                /// [`crate::guard_m!`]-protected loop, bounded by this
+                /// field's reserved slot width — xahaud's guard counter is
+                /// cumulative for the *whole hook execution*, not just one
+                /// call, so calling this setter more than once per
+                /// execution (including once per inlined call site, if the
+                /// compiler duplicates it) can exceed the budget and abort
+                /// the hook with a guard violation. Call it at most once
+                /// per hook execution for this field.
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction; the loop below is bounded by REGION_LEN, a compile-time constant
+                $vis fn [<set_ $($prefix)* $field>](&mut self, value: &[u8]) -> $crate::error::Result<()> {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
+                    if value.len() < ($min) || value.len() > ($max) {
+                        return ::core::result::Result::Err($crate::error::HookError::InvalidArgument);
+                    }
+                    const OFF: usize = ($($prev)*);
+                    const HDR: ([u8; 3], usize) = $crate::txn::codec::field_header($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(HDR.1)].copy_from_slice(&HDR.0[..HDR.1]);
+                    const REGION_OFF: usize = OFF.wrapping_add(HDR.1);
+                    const REGION_LEN: usize = $crate::txn::codec::vl_slot_size($max);
+                    const DISAMB: u16 = $crate::txn::codec::fnv1a_16(
+                        concat!(stringify!($Name), "::", stringify!($($prefix)*), stringify!($field)).as_bytes(),
+                    ) ^ ((REGION_OFF & 0xFFFF) as u16);
+                    let (prefix, prefix_len) = $crate::txn::codec::vl_length_prefix(value.len());
+                    self.bytes[REGION_OFF] = prefix[0];
+                    if prefix_len >= 2 {
+                        self.bytes[REGION_OFF.wrapping_add(1)] = prefix[1];
+                    }
+                    if prefix_len >= 3 {
+                        self.bytes[REGION_OFF.wrapping_add(2)] = prefix[2];
+                    }
+                    let payload_off = REGION_OFF.wrapping_add(prefix_len);
+                    let tail_len = REGION_LEN.wrapping_sub(prefix_len);
+                    let mut i = 0usize;
+                    while i < tail_len {
+                        $crate::guard_m!((REGION_LEN as u32), (DISAMB as u32));
+                        self.bytes[payload_off.wrapping_add(i)] =
+                            value.get(i).copied().unwrap_or($crate::txn::codec::NOP);
+                        i = i.wrapping_add(1);
+                    }
+                    ::core::result::Result::Ok(())
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [
+                $($init)*
+                $crate::txn::codec::write_field_header(&mut $($buf)*, ($($prev)*), $sfcode);
+                $crate::txn::codec::write_vl_length_prefix(
+                    &mut $($buf)*,
+                    ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1),
+                    $min,
+                );
+                $crate::txn::codec::write_nops(
+                    &mut $($buf)*,
+                    ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1).wrapping_add($crate::txn::codec::vl_length_prefix($min).1).wrapping_add($min),
+                    ($crate::txn::codec::vl_slot_size($max)).saturating_sub($crate::txn::codec::vl_slot_size($min)),
+                );
+            ],
+            prev = [ ($($prev)*).wrapping_add($crate::txn::codec::vl_field_size($sfcode, $max)) ],
+            table = [
+                $($table)*
+                (($sfcode).code(), $crate::txn::codec::KIND_VL, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
+            ],
+            emit_details = [$($emit_details)*],
+            nops = [$($nops)* ($crate::txn::codec::vl_slot_size($max)).saturating_sub($crate::txn::codec::vl_slot_size($min)),],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $($($rest)*)? ]
+        }
+
+    };
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : optional vl($sfcode:expr, $min:expr, $max:expr) $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_VL,
+            concat!("txn_template!: `", stringify!($field), "` is declared as `optional vl` but its sfXxx code is not an STI_VL field")
+        );
+        const _: () = assert!(
+            ($min) <= ($max),
+            concat!("txn_template!: `", stringify!($field), "`'s vl MIN must not exceed MAX")
+        );
+        const _: () = assert!(
+            ($max) >= 1usize,
+            concat!("txn_template!: `", stringify!($field), "`'s vl MAX must be at least 1 -- declare it as `optional empty_vl` for an always-empty blob")
+        );
+        const _: () = assert!(
+            ($max) <= $crate::txn::codec::MAX_VL_LEN,
+            concat!("txn_template!: `", stringify!($field), "`'s vl MAX exceeds the maximum representable VL length")
+        );
+        $crate::__txn_template_check_not_plumbing!($sfcode, $field, "optional vl", ($($depth)*));
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)* ($sfcode).code(),],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Sets `", stringify!($field), "`'s payload to `value` (`", stringify!($min), "..=", stringify!($max), "` bytes), making it present and NOP-padding the unused tail of its reserved slot (absent by default).")]
+                ///
+                /// # Errors
+                ///
+                /// Returns [`crate::error::HookError::InvalidArgument`] if
+                /// `value.len()` is outside that range.
+                ///
+                /// # Guard budget
+                ///
+                /// This setter's payload/NOP-tail write is one
+                /// [`crate::guard_m!`]-protected loop, bounded by this
+                /// field's reserved slot width — xahaud's guard counter is
+                /// cumulative for the *whole hook execution*, not just one
+                /// call, so calling this setter more than once per
+                /// execution (including once per inlined call site, if the
+                /// compiler duplicates it) can exceed the budget and abort
+                /// the hook with a guard violation. Call it at most once
+                /// per hook execution for this field.
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction; the loop below is bounded by REGION_LEN, a compile-time constant
+                $vis fn [<set_ $($prefix)* $field>](&mut self, value: &[u8]) -> $crate::error::Result<()> {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
+                    if value.len() < ($min) || value.len() > ($max) {
+                        return ::core::result::Result::Err($crate::error::HookError::InvalidArgument);
+                    }
+                    const OFF: usize = ($($prev)*);
+                    const HDR: ([u8; 3], usize) = $crate::txn::codec::field_header($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(HDR.1)].copy_from_slice(&HDR.0[..HDR.1]);
+                    const REGION_OFF: usize = OFF.wrapping_add(HDR.1);
+                    const REGION_LEN: usize = $crate::txn::codec::vl_slot_size($max);
+                    const DISAMB: u16 = $crate::txn::codec::fnv1a_16(
+                        concat!(stringify!($Name), "::", stringify!($($prefix)*), stringify!($field)).as_bytes(),
+                    ) ^ ((REGION_OFF & 0xFFFF) as u16);
+                    let (prefix, prefix_len) = $crate::txn::codec::vl_length_prefix(value.len());
+                    self.bytes[REGION_OFF] = prefix[0];
+                    if prefix_len >= 2 {
+                        self.bytes[REGION_OFF.wrapping_add(1)] = prefix[1];
+                    }
+                    if prefix_len >= 3 {
+                        self.bytes[REGION_OFF.wrapping_add(2)] = prefix[2];
+                    }
+                    let payload_off = REGION_OFF.wrapping_add(prefix_len);
+                    let tail_len = REGION_LEN.wrapping_sub(prefix_len);
+                    let mut i = 0usize;
+                    while i < tail_len {
+                        $crate::guard_m!((REGION_LEN as u32), (DISAMB as u32));
+                        self.bytes[payload_off.wrapping_add(i)] =
+                            value.get(i).copied().unwrap_or($crate::txn::codec::NOP);
+                        i = i.wrapping_add(1);
+                    }
+                    ::core::result::Result::Ok(())
+                }
+
+                #[doc = concat!("Clears `", stringify!($field), "` back to absent (NOP-fills its whole reserved slot).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                $vis fn [<clear_ $($prefix)* $field>](&mut self) {
+                    const OFF: usize = $($prev)*;
+                    const SLOT: usize = $crate::txn::codec::field_header($sfcode).1.wrapping_add($crate::txn::codec::vl_slot_size($max));
+                    self.bytes[OFF..OFF.wrapping_add(SLOT)].copy_from_slice(&[$crate::txn::codec::NOP; SLOT]);
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [
+                $($init)*
+                $crate::txn::codec::write_nops(&mut $($buf)*, ($($prev)*), $crate::txn::codec::vl_field_size($sfcode, $max));
+            ],
+            prev = [ ($($prev)*).wrapping_add($crate::txn::codec::vl_field_size($sfcode, $max)) ],
+            table = [
+                $($table)*
+                (($sfcode).code(), $crate::txn::codec::KIND_OPTIONAL_VL, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
+            ],
+            emit_details = [$($emit_details)*],
+            nops = [$($nops)* $crate::txn::codec::vl_field_size($sfcode, $max),],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $($($rest)*)? ]
+        }
+
+    };
+    // `optional object(sfX) { .. }` at `ctx = obj`: a whole nested object
+    // that is entirely present or entirely absent (all NOPs), spliced
+    // inline exactly like a plain `object(sfX) { .. }` field -- its own
+    // fields flatten onto the parent (`set_<name>_<inner>`), and its own
+    // order/depth/NOP-budget checks run the same way. The difference: its
+    // own header/inner-default writes accumulate into a *separate*
+    // `__slot` buffer (the parent's `buf`/`init` are saved in the stack
+    // frame and restored by `@end_opt_object` below) instead of the
+    // parent's real buffer, so `@end_opt_object` can materialize them as
+    // a standalone `const` -- the container's baked "present" bytes,
+    // copied into `self.bytes` by any inner setter
+    // (`$crate::__txn_template_ensure!`, prepended to every setter body)
+    // or by `enable_<name>()`, and by default (and after `clear_<name>()`)
+    // left as NOPs. `mode` carries the chain of enclosing optional slots
+    // (outermost first) as `(offset, slot_const)` pairs behind a leading
+    // tag (`tpl`/`elem`/`elem_opt`); entering this container appends its
+    // own `(offset, slot_const)` pair for the recursion into `$($inner)*`,
+    // so a setter nested `optional`-inside-`optional` ensures every
+    // ancestor, outermost first. See `docs/NOP_PADDING_DESIGN.md` §3.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = [$tag:tt $($entry:tt)*],
+        fields = [ $name:ident : optional object($sfcode:expr) { $($inner:tt)* } $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_OBJECT,
+            concat!("txn_template!: `", stringify!($name), "` is declared as `optional object` but its sfXxx code is not an STI_OBJECT field")
+        );
+        const _: () = assert!(
+            (($($depth)*).wrapping_add(1usize)) < $crate::sto_writer::STO_WRITER_MAX_DEPTH,
+            concat!("txn_template!: `", stringify!($name), "` would nest deeper than STO_WRITER_MAX_DEPTH")
+        );
+        $crate::__txn_template_check_not_plumbing!($sfcode, $name, "optional object", ($($depth)*));
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [],
+            setters = [$($setters)*],
+            emit_region = [$($emit_region)*],
+            buf = [__slot],
+            init = [
+                $crate::txn::codec::write_field_header(&mut __slot, ($($prev)*), $sfcode);
+            ],
+            prev = [ ($($prev)*).wrapping_add($crate::txn::codec::container_header_size($sfcode)) ],
+            table = [
+                $($table)*
+                (($sfcode).code(), $crate::txn::codec::KIND_OPTIONAL_OBJECT, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
+            ],
+            emit_details = [$($emit_details)*],
+            nops = [],
+            prefix = [$($prefix)* $name _],
+            ctx = obj,
+            depth = [ (($($depth)*).wrapping_add(1usize)) ],
+            stack = [ [ [$($prefix)*] [$($order)* ($sfcode).code(),] [$($nops)*] $name obj [$($buf)*] [$($init)*] [$($prev)*] [$tag $($entry)*] ] $($stack)* ],
+            mode = [$tag $($entry)* (($($prev)*), [<__ $Name _ $($prefix)* $name _SLOT>])],
+            fields = [ $($inner)* , @ end_opt_object $(, $($rest)*)? ]
+        }
+    };
+    // Same as above, but as a named element directly inside an `array`
+    // (`ctx = arr`): not order-checked, and its NOP charge belongs to the
+    // enclosing *array*'s own budget.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = arr, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = [$tag:tt $($entry:tt)*],
+        fields = [ $name:ident : optional object($sfcode:expr) { $($inner:tt)* } $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_OBJECT,
+            concat!("txn_template!: `", stringify!($name), "` is declared as `optional object` but its sfXxx code is not an STI_OBJECT field")
+        );
+        const _: () = assert!(
+            (($($depth)*).wrapping_add(1usize)) < $crate::sto_writer::STO_WRITER_MAX_DEPTH,
+            concat!("txn_template!: `", stringify!($name), "` would nest deeper than STO_WRITER_MAX_DEPTH")
+        );
+        $crate::__txn_template_check_not_plumbing!($sfcode, $name, "optional object", ($($depth)*));
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [],
+            setters = [$($setters)*],
+            emit_region = [$($emit_region)*],
+            buf = [__slot],
+            init = [
+                $crate::txn::codec::write_field_header(&mut __slot, ($($prev)*), $sfcode);
+            ],
+            prev = [ ($($prev)*).wrapping_add($crate::txn::codec::container_header_size($sfcode)) ],
+            table = [
+                $($table)*
+                (($sfcode).code(), $crate::txn::codec::KIND_OPTIONAL_OBJECT, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
+            ],
+            emit_details = [$($emit_details)*],
+            nops = [],
+            prefix = [$($prefix)* $name _],
+            ctx = obj,
+            depth = [ (($($depth)*).wrapping_add(1usize)) ],
+            stack = [ [ [$($prefix)*] [$($order)*] [$($nops)*] $name arr [$($buf)*] [$($init)*] [$($prev)*] [$tag $($entry)*] ] $($stack)* ],
+            mode = [$tag $($entry)* (($($prev)*), [<__ $Name _ $($prefix)* $name _SLOT>])],
+            fields = [ $($inner)* , @ end_opt_object $(, $($rest)*)? ]
+        }
+    };
+    // `optional array(sfX) [ .. ]` at `ctx = obj`: a whole nested array
+    // that is entirely present or entirely absent. Its elements are the
+    // usual `name: object(sfY) { .. }`/`name: optional sfY { .. }`
+    // array-element forms.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = [$tag:tt $($entry:tt)*],
+        fields = [ $name:ident : optional array($sfcode:expr) [ $($inner:tt)* ] $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_ARRAY,
+            concat!("txn_template!: `", stringify!($name), "` is declared as `optional array` but its sfXxx code is not an STI_ARRAY field")
+        );
+        const _: () = assert!(
+            (($($depth)*).wrapping_add(1usize)) < $crate::sto_writer::STO_WRITER_MAX_DEPTH,
+            concat!("txn_template!: `", stringify!($name), "` would nest deeper than STO_WRITER_MAX_DEPTH")
+        );
+        $crate::__txn_template_check_not_plumbing!($sfcode, $name, "optional array", ($($depth)*));
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [],
+            setters = [$($setters)*],
+            emit_region = [$($emit_region)*],
+            buf = [__slot],
+            init = [
+                $crate::txn::codec::write_field_header(&mut __slot, ($($prev)*), $sfcode);
+            ],
+            prev = [ ($($prev)*).wrapping_add($crate::txn::codec::container_header_size($sfcode)) ],
+            table = [
+                $($table)*
+                (($sfcode).code(), $crate::txn::codec::KIND_OPTIONAL_ARRAY, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
+            ],
+            emit_details = [$($emit_details)*],
+            nops = [],
+            prefix = [$($prefix)* $name _],
+            ctx = arr,
+            depth = [ (($($depth)*).wrapping_add(1usize)) ],
+            stack = [ [ [$($prefix)*] [$($order)* ($sfcode).code(),] [$($nops)*] $name obj [$($buf)*] [$($init)*] [$($prev)*] [$tag $($entry)*] ] $($stack)* ],
+            mode = [$tag $($entry)* (($($prev)*), [<__ $Name _ $($prefix)* $name _SLOT>])],
+            fields = [ $($inner)* , @ end_opt_array $(, $($rest)*)? ]
+        }
+    };
+    // Closes `optional object(sfX) { .. }`: runs the same canonical-order
+    // check `@end_object` runs (this container's own `$($order)*`, reset
+    // to `[]` on entry above), writes the closing `0xE1`, materializes the
+    // accumulated `__slot` writes into a standalone `const` (sized to the
+    // *absolute* end offset, so every inner `write_field_header`/
+    // `write_const_bytes` call above -- which all take absolute offsets,
+    // unchanged from the plain-container arms -- lands at the same index
+    // in `__slot` as it would in the real `self.bytes`; only
+    // `[SLOT_OFF..]` of it is ever read), then restores the parent's
+    // `buf`/`init`/`nops`/`mode` from the stack frame and appends the
+    // slot's all-NOP absent default to the parent's `init` plus its byte
+    // count to the parent's `nops`. Generates `enable_<name>`/
+    // `clear_<name>`/`is_<name>_present` on the parent -- no view type,
+    // no `Option` accessor; the container's own fields are plain
+    // `set_<name>_<inner>` methods already accumulated in `$($setters)*`.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
+        stack = [ [ [$($pfx:tt)*] [$($ord:tt)*] [$($nps:tt)*] $cname:ident $old_ctx:tt [$($pbuf:tt)*] [$($pinit:tt)*] [$($poff:tt)*] [$($omode:tt)*] ] $($stack:tt)* ],
+        mode = $mode:tt,
+        fields = [ @ end_opt_object $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = {
+            const ORDER: &[u32] = &[$($order)*];
+            let mut i = 1;
+            while i < ORDER.len() {
+                assert!(
+                    ORDER[i - 1] < ORDER[i],
+                    "txn_template!: fields must be declared in canonical (type, field) order inside a nested `optional object` (sfXxx codes must be strictly increasing)"
+                );
+                i = i.wrapping_add(1);
+            }
+        };
+        $crate::__txn_template_check_nop_budget! {
+            concat!("txn_template!: `", stringify!($cname), "`'s optional/variable-length fields could together need more than 63 NOPs to represent when all are absent/minimal -- xahaud allows at most 63 NOPs per STObject instance"),
+            $($nops)*
+        }
+        $crate::__paste! {
+            #[doc(hidden)]
+            #[allow(non_upper_case_globals)] // paste-concatenated from the template/field names, not meant to read as a constant
+            const [<__ $Name _ $($pfx)* $cname _SLOT>]: [u8; (($($prev)*).wrapping_add(1usize)).wrapping_sub($($poff)*)] = {
+                let mut $($buf)* = [$crate::txn::codec::NOP; ($($prev)*).wrapping_add(1usize)];
+                $($init)*
+                $crate::txn::codec::write_const_bytes(&mut $($buf)*, ($($prev)*), &[$crate::txn::codec::OBJECT_END_MARKER]);
+                $crate::txn::codec::copy_range(&$($buf)*, ($($poff)*))
+            };
+        }
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($ord)*],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Makes `", stringify!($cname), "` present at its baked default if it (or an enclosing `optional` ancestor) is currently absent -- a no-op if already present. Only needed when none of `", stringify!($cname), "`'s own fields ever need setting; any of its own setters already does this.")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as every setter above
+                $vis fn [<enable_ $($pfx)* $cname>](&mut self) {
+                    $crate::__txn_template_ensure!(
+                        [$($omode)* (($($poff)*), [<__ $Name _ $($pfx)* $cname _SLOT>])],
+                        self.bytes
+                    );
+                }
+
+                #[doc = concat!("Clears `", stringify!($cname), "` back to absent (NOP-fills its whole reserved slot). Does not disturb any enclosing `optional` ancestor's own presence.")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as every setter above
+                $vis fn [<clear_ $($pfx)* $cname>](&mut self) {
+                    const OFF: usize = $($poff)*;
+                    const LEN: usize = [<__ $Name _ $($pfx)* $cname _SLOT>].len();
+                    const END: usize = OFF.wrapping_add(LEN);
+                    self.bytes[OFF..END].copy_from_slice(&[$crate::txn::codec::NOP; LEN]);
+                }
+
+                #[doc = concat!("Whether `", stringify!($cname), "` is currently present (its slot's first byte is not a NOP).")]
+                #[inline(always)]
+                #[must_use]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as every setter above
+                $vis fn [<is_ $($pfx)* $cname _present>](&self) -> bool {
+                    const OFF: usize = $($poff)*;
+                    self.bytes[OFF] != $crate::txn::codec::NOP
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($pbuf)*],
+            init = [
+                $($pinit)*
+                $crate::txn::codec::write_nops(
+                    &mut $($pbuf)*,
+                    ($($poff)*),
+                    (($($prev)*).wrapping_add(1usize)).wrapping_sub($($poff)*),
+                );
+            ],
+            prev = [ ($($prev)*).wrapping_add(1usize) ],
+            table = [$($table)*],
+            emit_details = [$($emit_details)*],
+            nops = [$($nps)* (($($prev)*).wrapping_add(1usize)).wrapping_sub($($poff)*),],
+            prefix = [$($pfx)*],
+            ctx = $old_ctx,
+            depth = [ (($($depth)*).wrapping_sub(1usize)) ],
+            stack = [$($stack)*],
+            mode = [$($omode)*],
+            fields = [ $($($rest)*)? ]
+        }
+    };
+    // Closes `optional array(sfX) [ .. ]`: same as `@end_opt_object`
+    // above, but writes the `0xF1` array-end marker and skips the
+    // order check (array elements are not order-checked).
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
+        stack = [ [ [$($pfx:tt)*] [$($ord:tt)*] [$($nps:tt)*] $cname:ident $old_ctx:tt [$($pbuf:tt)*] [$($pinit:tt)*] [$($poff:tt)*] [$($omode:tt)*] ] $($stack:tt)* ],
+        mode = $mode:tt,
+        fields = [ @ end_opt_array $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_check_nop_budget! {
+            concat!("txn_template!: `", stringify!($cname), "`'s optional/variable-length fields could together need more than 63 NOPs to represent when all are absent/minimal -- xahaud allows at most 63 NOPs per STArray instance"),
+            $($nops)*
+        }
+        $crate::__paste! {
+            #[doc(hidden)]
+            #[allow(non_upper_case_globals)] // paste-concatenated from the template/field names, not meant to read as a constant
+            const [<__ $Name _ $($pfx)* $cname _SLOT>]: [u8; (($($prev)*).wrapping_add(1usize)).wrapping_sub($($poff)*)] = {
+                let mut $($buf)* = [$crate::txn::codec::NOP; ($($prev)*).wrapping_add(1usize)];
+                $($init)*
+                $crate::txn::codec::write_const_bytes(&mut $($buf)*, ($($prev)*), &[$crate::txn::codec::ARRAY_END_MARKER]);
+                $crate::txn::codec::copy_range(&$($buf)*, ($($poff)*))
+            };
+        }
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($ord)*],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Makes `", stringify!($cname), "` present at its baked default if it (or an enclosing `optional` ancestor) is currently absent -- a no-op if already present. Only needed when none of `", stringify!($cname), "`'s own elements ever need setting; any of its own setters already does this.")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as every setter above
+                $vis fn [<enable_ $($pfx)* $cname>](&mut self) {
+                    $crate::__txn_template_ensure!(
+                        [$($omode)* (($($poff)*), [<__ $Name _ $($pfx)* $cname _SLOT>])],
+                        self.bytes
+                    );
+                }
+
+                #[doc = concat!("Clears `", stringify!($cname), "` back to absent (NOP-fills its whole reserved slot). Does not disturb any enclosing `optional` ancestor's own presence.")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as every setter above
+                $vis fn [<clear_ $($pfx)* $cname>](&mut self) {
+                    const OFF: usize = $($poff)*;
+                    const LEN: usize = [<__ $Name _ $($pfx)* $cname _SLOT>].len();
+                    const END: usize = OFF.wrapping_add(LEN);
+                    self.bytes[OFF..END].copy_from_slice(&[$crate::txn::codec::NOP; LEN]);
+                }
+
+                #[doc = concat!("Whether `", stringify!($cname), "` is currently present (its slot's first byte is not a NOP).")]
+                #[inline(always)]
+                #[must_use]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as every setter above
+                $vis fn [<is_ $($pfx)* $cname _present>](&self) -> bool {
+                    const OFF: usize = $($poff)*;
+                    self.bytes[OFF] != $crate::txn::codec::NOP
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($pbuf)*],
+            init = [
+                $($pinit)*
+                $crate::txn::codec::write_nops(
+                    &mut $($pbuf)*,
+                    ($($poff)*),
+                    (($($prev)*).wrapping_add(1usize)).wrapping_sub($($poff)*),
+                );
+            ],
+            prev = [ ($($prev)*).wrapping_add(1usize) ],
+            table = [$($table)*],
+            emit_details = [$($emit_details)*],
+            nops = [$($nps)* (($($prev)*).wrapping_add(1usize)).wrapping_sub($($poff)*),],
+            prefix = [$($pfx)*],
+            ctx = $old_ctx,
+            depth = [ (($($depth)*).wrapping_sub(1usize)) ],
+            stack = [$($stack)*],
+            mode = [$($omode)*],
+            fields = [ $($($rest)*)? ]
+        }
+    };
+    // Homogeneous array whose element is `optional object(sfY) { .. }`:
+    // every element is reserved (`N * Elem::LEN` bytes, as the plain
+    // homogeneous-array kind), but the baked default is all NOPs (every
+    // element absent) instead of `N` copies of `Elem::TEMPLATE`, and the
+    // element view gains `enable()`/`clear()` (`mode = elem_opt`). The
+    // worst-case NOP charge (every element absent at once) is checked
+    // inline against this *array's own* budget -- these NOPs sit in the
+    // array's own `STArray` field loop, not the parent's, so nothing is
+    // added to the parent's `nops` accumulator (mirrors the plain
+    // homogeneous-array arm, which also charges the parent nothing).
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $name:ident : array($sfcode:expr) [ $Elem:ident : optional object($esfcode:expr) { $($efields:tt)* } ; $($n:tt)+ ] $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_ARRAY,
+            concat!("txn_template!: `", stringify!($name), "` is declared as `array` but its sfXxx code is not an STI_ARRAY field")
+        );
+        const _: () = assert!(
+            $crate::txn::codec::sti_of($esfcode) == $crate::txn::codec::sti::STI_OBJECT,
+            concat!("txn_template!: `", stringify!($name), "`'s element `", stringify!($Elem), "` is declared as `optional object` but its sfXxx code is not an STI_OBJECT field")
+        );
+        const _: () = assert!(
+            ($($n)*) >= 1usize,
+            concat!("txn_template!: `", stringify!($name), "`'s element count must be at least 1")
+        );
+        const _: () = assert!(
+            (($($depth)*).wrapping_add(2usize)) < $crate::sto_writer::STO_WRITER_MAX_DEPTH,
+            concat!("txn_template!: `", stringify!($name), "` would nest deeper than STO_WRITER_MAX_DEPTH")
+        );
+        $crate::__txn_template_step! {
+            @step
+            name = $Elem,
+            meta = [
+                #[doc = concat!("One optional element of `", stringify!($name), "`'s homogeneous array -- see [`", stringify!($Name), "::", stringify!($name), "`].")]
+            ],
+            vis = $vis,
+            order = [],
+            setters = [],
+            emit_region = [],
+            buf = [__ebytes],
+            init = [
+                $crate::txn::codec::write_field_header(&mut __ebytes, 0usize, $esfcode);
+            ],
+            prev = [ $crate::txn::codec::container_header_size($esfcode) ],
+            table = [],
+            emit_details = [false, 0usize],
+            nops = [],
+            prefix = [],
+            ctx = obj,
+            depth = [ (($($depth)*).wrapping_add(2usize)) ],
+            stack = [ [ [] [] [] $Elem obj ] ],
+            mode = [elem_opt (0usize, $Elem::<'static>::TEMPLATE)],
+            fields = [ $($efields)* , @ end_object ]
+        }
+        const _: () = assert!(
+            (($($n)*) as usize).wrapping_mul($Elem::<'static>::LEN) <= $crate::txn::codec::MAX_NOPS_PER_CONTAINER,
+            concat!("txn_template!: `", stringify!($name), "`'s optional elements could together need more than 63 NOPs when every element is absent at once -- xahaud allows at most 63 NOPs per STArray instance")
+        );
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)* ($sfcode).code(),],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Returns the `", stringify!($name), "` element at `index` (`None` if out of bounds). Absent (NOP-filled) by default -- any of its setters makes it present automatically.")]
+                #[inline(always)]
+                #[must_use]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as every setter above
+                $vis fn [<$($prefix)* $name>](&mut self, index: usize) -> ::core::option::Option<$Elem<'_>> {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
+                    const OFF: usize = ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1);
+                    const ELEM_LEN: usize = $Elem::<'static>::LEN;
+                    const COUNT: usize = ($($n)*);
+                    if index >= COUNT {
+                        return ::core::option::Option::None;
+                    }
+                    let start = OFF.wrapping_add(index.wrapping_mul(ELEM_LEN));
+                    self.bytes
+                        .get_mut(start..start.wrapping_add(ELEM_LEN))
+                        .map(|bytes| $Elem { bytes })
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [
+                $($init)*
+                $crate::txn::codec::write_field_header(&mut $($buf)*, ($($prev)*), $sfcode);
+                $crate::txn::codec::write_nops(
+                    &mut $($buf)*,
+                    ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1),
+                    (($($n)*) as usize).wrapping_mul($Elem::<'static>::LEN),
+                );
+                $crate::txn::codec::write_const_bytes(
+                    &mut $($buf)*,
+                    ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1).wrapping_add((($($n)*) as usize).wrapping_mul($Elem::<'static>::LEN)),
+                    &[$crate::txn::codec::ARRAY_END_MARKER],
+                );
+            ],
+            prev = [ ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1).wrapping_add((($($n)*) as usize).wrapping_mul($Elem::<'static>::LEN)).wrapping_add(1usize) ],
+            table = [
+                $($table)*
+                (($sfcode).code(), $crate::txn::codec::KIND_ARRAY, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
+            ],
+            emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $($($rest)*)? ]
+        }
+    };
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2866,10 +6219,11 @@ macro_rules! __txn_template_step {
                 (($sfcode).code(), $crate::txn::codec::KIND_OBJECT, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
             ],
             emit_details = [$($emit_details)*],
+            nops = [],
             prefix = [$($prefix)* $name _],
             ctx = obj,
             depth = [ (($($depth)*).wrapping_add(1usize)) ],
-            stack = [ [ [$($prefix)*] [$($order)* ($sfcode).code(),] obj ] $($stack)* ],
+            stack = [ [ [$($prefix)*] [$($order)* ($sfcode).code(),] [$($nops)*] $name obj ] $($stack)* ],
             mode = $mode,
             fields = [ $($inner)* , @ end_object $(, $($rest)*)? ]
         }
@@ -2881,6 +6235,7 @@ macro_rules! __txn_template_step {
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = arr, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2911,10 +6266,11 @@ macro_rules! __txn_template_step {
                 (($sfcode).code(), $crate::txn::codec::KIND_OBJECT, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
             ],
             emit_details = [$($emit_details)*],
+            nops = [],
             prefix = [$($prefix)* $name _],
             ctx = obj,
             depth = [ (($($depth)*).wrapping_add(1usize)) ],
-            stack = [ [ [$($prefix)*] [$($order)*] arr ] $($stack)* ],
+            stack = [ [ [$($prefix)*] [$($order)*] [$($nops)*] $name arr ] $($stack)* ],
             mode = $mode,
             fields = [ $($inner)* , @ end_object $(, $($rest)*)? ]
         }
@@ -2926,6 +6282,7 @@ macro_rules! __txn_template_step {
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2964,11 +6321,12 @@ macro_rules! __txn_template_step {
             prev = [ $crate::txn::codec::container_header_size($esfcode) ],
             table = [],
             emit_details = [false, 0usize],
+            nops = [],
             prefix = [],
             ctx = obj,
             depth = [ (($($depth)*).wrapping_add(2usize)) ],
-            stack = [ [ [] [] obj ] ],
-            mode = elem,
+            stack = [ [ [] [] [] $Elem obj ] ],
+            mode = [elem],
             fields = [ $($efields)* , @ end_object ]
         }
         $crate::__txn_template_step! {
@@ -2981,7 +6339,9 @@ macro_rules! __txn_template_step {
                 #[doc = concat!("Returns the `", stringify!($name), "` element at `index` (`None` if out of bounds).")]
                 #[inline(always)]
                 #[must_use]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as every setter above
                 $vis fn [<$($prefix)* $name>](&mut self, index: usize) -> ::core::option::Option<$Elem<'_>> {
+                    $crate::__txn_template_ensure!($mode, self.bytes);
                     const OFF: usize = ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1);
                     const ELEM_LEN: usize = $Elem::<'static>::LEN;
                     const COUNT: usize = ($($n)*);
@@ -3017,6 +6377,7 @@ macro_rules! __txn_template_step {
                 (($sfcode).code(), $crate::txn::codec::KIND_ARRAY, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
             ],
             emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -3025,40 +6386,13 @@ macro_rules! __txn_template_step {
             fields = [ $($($rest)*)? ]
         }
     };
-    // Desugars a named array whose *outer* `array(..)` is already explicit
-    // but whose element type is a bare `$esf:ident` (inferred `object`).
-    // Placed ahead of the general named-array arm below, which would
-    // otherwise swallow `$($inner:tt)*` first and treat `Elem: sfY { .. }`
-    // as a heterogeneous field list instead of an inferred object element.
     (
         @step
         name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
-        prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
-        stack = [$($stack:tt)*],
-        mode = $mode:tt,
-        fields = [ $name:ident : array($sfcode:expr) [ $Elem:ident : $esf:ident { $($efields:tt)* } ; $($n:tt)+ ] $(, $($rest:tt)*)? ]
-    ) => {
-        $crate::__txn_template_step! {
-            @step
-            name = $Name, meta = [$(#[$meta])*], vis = $vis,
-            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
-            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
-            table = [$($table)*], emit_details = [$($emit_details)*],
-            prefix = [$($prefix)*], ctx = $ctx, depth = [$($depth)*],
-            stack = [$($stack)*],
-            mode = $mode,
-            fields = [ $name : array($sfcode) [ $Elem : object($esf) { $($efields)* } ; $($n)+ ] $(, $($rest)*)? ]
-        }
-    };
-    (
-        @step
-        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
-        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
-        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
-        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -3089,10 +6423,11 @@ macro_rules! __txn_template_step {
                 (($sfcode).code(), $crate::txn::codec::KIND_ARRAY, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
             ],
             emit_details = [$($emit_details)*],
+            nops = [],
             prefix = [$($prefix)* $name _],
             ctx = arr,
             depth = [ (($($depth)*).wrapping_add(1usize)) ],
-            stack = [ [ [$($prefix)*] [$($order)* ($sfcode).code(),] obj ] $($stack)* ],
+            stack = [ [ [$($prefix)*] [$($order)* ($sfcode).code(),] [$($nops)*] $name obj ] $($stack)* ],
             mode = $mode,
             fields = [ $($inner)* , @ end_array $(, $($rest)*)? ]
         }
@@ -3104,8 +6439,9 @@ macro_rules! __txn_template_step {
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
-        stack = [ [ [$($pfx:tt)*] [$($ord:tt)*] $old_ctx:tt ] $($stack:tt)* ],
+        stack = [ [ [$($pfx:tt)*] [$($ord:tt)*] [$($nps:tt)*] $cname:ident $old_ctx:tt ] $($stack:tt)* ],
         mode = $mode:tt,
         fields = [ @ end_object $(, $($rest:tt)*)? ]
     ) => {
@@ -3120,6 +6456,10 @@ macro_rules! __txn_template_step {
                 i = i.wrapping_add(1);
             }
         };
+        $crate::__txn_template_check_nop_budget! {
+            concat!("txn_template!: `", stringify!($cname), "`'s optional/variable-length fields could together need more than 63 NOPs to represent when all are absent/minimal -- xahaud allows at most 63 NOPs per STObject instance"),
+            $($nops)*
+        }
         $crate::__txn_template_step! {
             @step
             name = $Name, meta = [$(#[$meta])*], vis = $vis,
@@ -3134,6 +6474,7 @@ macro_rules! __txn_template_step {
             prev = [ ($($prev)*).wrapping_add(1usize) ],
             table = [$($table)*],
             emit_details = [$($emit_details)*],
+            nops = [$($nps)*],
             prefix = [$($pfx)*],
             ctx = $old_ctx,
             depth = [ (($($depth)*).wrapping_sub(1usize)) ],
@@ -3149,11 +6490,16 @@ macro_rules! __txn_template_step {
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
-        stack = [ [ [$($pfx:tt)*] [$($ord:tt)*] $old_ctx:tt ] $($stack:tt)* ],
+        stack = [ [ [$($pfx:tt)*] [$($ord:tt)*] [$($nps:tt)*] $cname:ident $old_ctx:tt ] $($stack:tt)* ],
         mode = $mode:tt,
         fields = [ @ end_array $(, $($rest:tt)*)? ]
     ) => {
+        $crate::__txn_template_check_nop_budget! {
+            concat!("txn_template!: `", stringify!($cname), "`'s optional/variable-length fields could together need more than 63 NOPs to represent when all are absent/minimal -- xahaud allows at most 63 NOPs per STArray instance"),
+            $($nops)*
+        }
         $crate::__txn_template_step! {
             @step
             name = $Name, meta = [$(#[$meta])*], vis = $vis,
@@ -3168,52 +6514,13 @@ macro_rules! __txn_template_step {
             prev = [ ($($prev)*).wrapping_add(1usize) ],
             table = [$($table)*],
             emit_details = [$($emit_details)*],
+            nops = [$($nps)*],
             prefix = [$($pfx)*],
             ctx = $old_ctx,
             depth = [ (($($depth)*).wrapping_sub(1usize)) ],
             stack = [$($stack)*],
             mode = $mode,
             fields = [ $($($rest)*)? ]
-        }
-
-    };
-    (
-        @step
-        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
-        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
-        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
-        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
-        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
-        stack = [$($stack:tt)*],
-        mode = $mode:tt,
-        fields = [ $field:ident : emit_details $(,)? ]
-    ) => {
-        $crate::__txn_template_step! {
-            @step
-            name = $Name, meta = [$(#[$meta])*], vis = $vis,
-            order = [$($order)*],
-            setters = [$($setters)*],
-            emit_region = [
-                #[doc = concat!("Returns the mutable `", stringify!($field), "` region: pass it directly to [`crate::api::etxn::etxn_details`].")]
-                #[inline(always)]
-                #[must_use]
-                #[allow(clippy::indexing_slicing)] // in-bounds: exactly the trailing region `txn_template!` reserved
-                $vis fn emit_details_region(&mut self) -> &mut [u8] {
-                    const OFF: usize = $($prev)*;
-                    &mut self.bytes[OFF..OFF.wrapping_add($crate::types::EMIT_DETAILS_MAX_LEN)]
-                }
-            ],
-            buf = [$($buf)*],
-            init = [$($init)*],
-            prev = [ ($($prev)*).wrapping_add($crate::types::EMIT_DETAILS_MAX_LEN) ],
-            table = [$($table)*],
-            emit_details = [true, (($($prev)*))],
-            prefix = [$($prefix)*],
-            ctx = obj,
-            depth = [$($depth)*],
-            stack = [$($stack)*],
-            mode = $mode,
-            fields = []
         }
 
     };
@@ -3233,11 +6540,16 @@ macro_rules! __txn_template_step {
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$ed_p:tt, $ed_off:expr],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
-        mode = tpl,
+        mode = [tpl],
         fields = []
     ) => {
+        $crate::__txn_template_check_nop_budget! {
+            "txn_template!: this template's top-level optional/variable-length fields could together need more than 63 NOPs to represent when all are absent/minimal -- xahaud allows at most 63 NOPs per STObject instance",
+            $($nops)*
+        }
         $(#[$meta])*
         #[derive(Clone)]
         $vis struct $Name {
@@ -3476,9 +6788,10 @@ macro_rules! __txn_template_step {
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
-        mode = elem,
+        mode = [elem],
         fields = []
     ) => {
         $(#[$meta])*
@@ -3522,442 +6835,89 @@ macro_rules! __txn_template_step {
         } // $crate::__paste!
     };
 
-    // `emit_details` inside any container (a non-empty `stack`): a named
-    // error, ahead of the catch-all below.
+    // Base case for a homogeneous array's `optional object(sfY) { .. }`
+    // element view type (`mode = [elem_opt (0usize, $Elem::TEMPLATE)]`,
+    // the sole spawn site using this mode) -- identical to the `mode =
+    // [elem]` base case above, plus `enable()`/`clear()`/`is_present()`
+    // (kept as a separate arm, rather than folding a flag into that one,
+    // so the many existing `mode = [elem]` call sites -- and their
+    // dead-code baseline -- are untouched). A named `optional object(sfX)
+    // { .. }`/`optional array(sfX) [ .. ]` field has no view type of its
+    // own and never reaches this arm -- it compiles inline via the
+    // `optional object`/`optional array` push arms and
+    // `@end_opt_object`/`@end_opt_array` instead, generating `enable_x`/
+    // `clear_x`/`is_x_present` directly on the parent.
     (
         @step
-        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        name = $Elem:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
-        prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
-        stack = [ [ $($frame:tt)* ] $($stack:tt)* ],
-        mode = $mode:tt,
-        fields = [ $field:ident : emit_details $($rest:tt)* ]
-    ) => {
-        compile_error!(concat!(
-            "txn_template!: `",
-            stringify!($field),
-            ": emit_details` must be the last top-level field — it cannot be declared inside a nested `object`/`array`"
-        ));
-    };
-
-    // A top-level `emit_details` field not declared last: a named error,
-    // ahead of the inferred-scalar arms below (which would otherwise treat
-    // the bare `emit_details` keyword as an unrecognized `sfXxx` ident and
-    // fail with a confusing `cannot find value \`emit_details\`` instead).
-    (
-        @step
-        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
-        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
-        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
-        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
-        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
-        stack = [$($stack:tt)*],
-        mode = $mode:tt,
-        fields = [ $field:ident : emit_details , $($rest:tt)+ ]
-    ) => {
-        compile_error!(concat!(
-            "txn_template!: `",
-            stringify!($field),
-            ": emit_details` must be the last field"
-        ));
-    };
-
-    // --- Inferred-kind desugar arms ---
-    //
-    // A bare `name: sfXxx { .. }` / `name: sfXxx [ .. ]` is a pure token
-    // rewrite into the corresponding explicit `object(sfXxx)`/
-    // `array(sfXxx)` form, which the arms above already handle — these
-    // just recurse with the rewritten tokens, threading every accumulator
-    // through unchanged. Placed after both `emit_details` arms and before
-    // the catch-all below: `x: emit_details` must keep matching the
-    // dedicated arms above, not the inferred-scalar arm below.
-
-    // `name: sfXxx { .. }` -> `name: object(sfXxx) { .. }`.
-    (
-        @step
-        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
-        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
-        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
-        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
-        mode = $mode:tt,
-        fields = [ $name:ident : $sfcode:ident { $($inner:tt)* } $(, $($rest:tt)*)? ]
+        mode = [elem_opt $($mode_entry:tt)*],
+        fields = []
     ) => {
-        $crate::__txn_template_step! {
-            @step
-            name = $Name, meta = [$(#[$meta])*], vis = $vis,
-            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
-            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
-            table = [$($table)*], emit_details = [$($emit_details)*],
-            prefix = [$($prefix)*], ctx = $ctx, depth = [$($depth)*],
-            stack = [$($stack)*],
-            mode = $mode,
-            fields = [ $name : object($sfcode) { $($inner)* } $(, $($rest)*)? ]
+        $(#[$meta])*
+        $vis struct $Elem<'a> {
+            bytes: &'a mut [u8],
         }
-    };
-    // `name: sfXxx [ Elem: esf { .. } ; N ]` (homogeneous, bare element) ->
-    // `name: array(sfXxx) [ Elem: object(esf) { .. } ; N ]`. Must come
-    // before the general bare-array arm below, or `$($inner:tt)*` there
-    // would swallow this shape first.
-    (
-        @step
-        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
-        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
-        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
-        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
-        prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
-        stack = [$($stack:tt)*],
-        mode = $mode:tt,
-        fields = [ $name:ident : $sfcode:ident [ $Elem:ident : $esf:ident { $($efields:tt)* } ; $($n:tt)+ ] $(, $($rest:tt)*)? ]
-    ) => {
-        $crate::__txn_template_step! {
-            @step
-            name = $Name, meta = [$(#[$meta])*], vis = $vis,
-            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
-            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
-            table = [$($table)*], emit_details = [$($emit_details)*],
-            prefix = [$($prefix)*], ctx = $ctx, depth = [$($depth)*],
-            stack = [$($stack)*],
-            mode = $mode,
-            fields = [ $name : array($sfcode) [ $Elem : object($esf) { $($efields)* } ; $($n)+ ] $(, $($rest)*)? ]
-        }
-    };
-    // `name: sfXxx [ .. ]` (named array, bare) -> `name: array(sfXxx) [ .. ]`.
-    (
-        @step
-        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
-        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
-        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
-        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
-        prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
-        stack = [$($stack:tt)*],
-        mode = $mode:tt,
-        fields = [ $name:ident : $sfcode:ident [ $($inner:tt)* ] $(, $($rest:tt)*)? ]
-    ) => {
-        $crate::__txn_template_step! {
-            @step
-            name = $Name, meta = [$(#[$meta])*], vis = $vis,
-            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
-            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
-            table = [$($table)*], emit_details = [$($emit_details)*],
-            prefix = [$($prefix)*], ctx = $ctx, depth = [$($depth)*],
-            stack = [$($stack)*],
-            mode = $mode,
-            fields = [ $name : array($sfcode) [ $($inner)* ] $(, $($rest)*)? ]
-        }
-    };
-    // --- Default-shape desugar arms ---
-    //
-    // The kinds `native_amount`/`amount`/`empty_vl`/`fixed_vl` cannot infer
-    // from the STI alone (`STI_AMOUNT`/`STI_VL` cover several distinct wire
-    // shapes), but a bare `field: sfXxx = <default>` can still infer the
-    // kind from the SHAPE of `<default>` itself: `NativeAmount(..)`/
-    // `IouAmount(..)` are macro syntax markers (not real types — never
-    // resolved as paths), and `[]`/`[ .. ]`/`*b".."` are the literal shapes
-    // `empty_vl`/`fixed_vl` already accept. Placed before the plain
-    // inferred-scalar-with-default arm below: `$default:expr` there would
-    // otherwise happily parse `NativeAmount(500)` as an ordinary call
-    // expression and fail later with a real, confusing `cannot find
-    // function` error instead of desugaring it.
 
-    // `field: sfXxx = NativeAmount(d)` -> `field: native_amount(sfXxx) = d`.
-    (
-        @step
-        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
-        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
-        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
-        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
-        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
-        stack = [$($stack:tt)*],
-        mode = $mode:tt,
-        fields = [ $field:ident : $sfcode:ident = NativeAmount($d:expr $(,)?) $(, $($rest:tt)*)? ]
-    ) => {
-        $crate::__txn_template_step! {
-            @step
-            name = $Name, meta = [$(#[$meta])*], vis = $vis,
-            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
-            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
-            table = [$($table)*], emit_details = [$($emit_details)*],
-            prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
-            stack = [$($stack)*],
-            mode = $mode,
-            fields = [ $field : native_amount($sfcode) = $d $(, $($rest)*)? ]
-        }
-    };
-    // `field: sfXxx = IouAmount(xfl, cur, iss)` -> `field: amount(sfXxx) = (xfl, cur, iss)`.
-    (
-        @step
-        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
-        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
-        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
-        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
-        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
-        stack = [$($stack:tt)*],
-        mode = $mode:tt,
-        fields = [ $field:ident : $sfcode:ident = IouAmount($xfl:expr, $cur:expr, $iss:expr $(,)?) $(, $($rest:tt)*)? ]
-    ) => {
-        $crate::__txn_template_step! {
-            @step
-            name = $Name, meta = [$(#[$meta])*], vis = $vis,
-            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
-            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
-            table = [$($table)*], emit_details = [$($emit_details)*],
-            prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
-            stack = [$($stack)*],
-            mode = $mode,
-            fields = [ $field : amount($sfcode) = ($xfl, $cur, $iss) $(, $($rest)*)? ]
-        }
-    };
-    // `field: sfXxx = []` -> `field: empty_vl(sfXxx)`.
-    (
-        @step
-        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
-        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
-        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
-        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
-        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
-        stack = [$($stack:tt)*],
-        mode = $mode:tt,
-        fields = [ $field:ident : $sfcode:ident = [] $(, $($rest:tt)*)? ]
-    ) => {
-        $crate::__txn_template_step! {
-            @step
-            name = $Name, meta = [$(#[$meta])*], vis = $vis,
-            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
-            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
-            table = [$($table)*], emit_details = [$($emit_details)*],
-            prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
-            stack = [$($stack)*],
-            mode = $mode,
-            fields = [ $field : empty_vl($sfcode) $(, $($rest)*)? ]
-        }
-    };
-    // `field: sfXxx = [ ..+ ]` -> `field: fixed_vl(sfXxx, N) = [ ..+ ]`, `N`
-    // recovered from the default array literal itself via `array_len`.
-    (
-        @step
-        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
-        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
-        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
-        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
-        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
-        stack = [$($stack:tt)*],
-        mode = $mode:tt,
-        fields = [ $field:ident : $sfcode:ident = [ $($arr:tt)+ ] $(, $($rest:tt)*)? ]
-    ) => {
-        $crate::__txn_template_step! {
-            @step
-            name = $Name, meta = [$(#[$meta])*], vis = $vis,
-            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
-            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
-            table = [$($table)*], emit_details = [$($emit_details)*],
-            prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
-            stack = [$($stack)*],
-            mode = $mode,
-            fields = [ $field : fixed_vl($sfcode, { $crate::txn::codec::array_len(&[ $($arr)+ ]) }) = [ $($arr)+ ] $(, $($rest)*)? ]
-        }
-    };
-    // `field: sfXxx = *lit` (e.g. `*b"note"`) -> `field: fixed_vl(sfXxx, N)
-    // = *lit`, `N` recovered from the byte-string literal itself.
-    (
-        @step
-        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
-        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
-        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
-        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
-        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
-        stack = [$($stack:tt)*],
-        mode = $mode:tt,
-        fields = [ $field:ident : $sfcode:ident = * $lit:literal $(, $($rest:tt)*)? ]
-    ) => {
-        $crate::__txn_template_step! {
-            @step
-            name = $Name, meta = [$(#[$meta])*], vis = $vis,
-            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
-            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
-            table = [$($table)*], emit_details = [$($emit_details)*],
-            prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
-            stack = [$($stack)*],
-            mode = $mode,
-            fields = [ $field : fixed_vl($sfcode, { $crate::txn::codec::array_len(&*$lit) }) = *$lit $(, $($rest)*)? ]
-        }
-    };
+        $crate::__paste! {
+        const [<__ $Elem _LEN>]: usize = $($prev)*;
 
-    // `field: sfXxx = default` (inferred scalar, required-with-default kind).
-    (
-        @step
-        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
-        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
-        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
-        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
-        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
-        stack = [$($stack:tt)*],
-        mode = $mode:tt,
-        fields = [ $field:ident : $sfcode:ident = $default:expr $(, $($rest:tt)*)? ]
-    ) => {
-        const _: () = assert!(
-            <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::INFERABLE,
-            concat!("txn_template!: `", stringify!($field), "`: the kind of `", stringify!($sfcode), "` cannot be inferred from its serialized type — declare it explicitly (`native_amount`/`amount`, `empty_vl`/`fixed_vl`, `native_issue`/`issue`, or a `{{ .. }}`/`[ .. ]` body for an object/array); serialized types with no `txn_template!` kind need `StoWriter`")
-        );
-        const _: () = assert!(
-            !(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::INFERABLE)
-                || <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::HAS_DEFAULT,
-            concat!("txn_template!: `", stringify!($field), "` is a zeroed kind and takes no `= default`")
-        );
-        $crate::__txn_template_step! {
-            @step
-            name = $Name, meta = [$(#[$meta])*], vis = $vis,
-            order = [$($order)* ($sfcode).code(),],
-            setters = [
-                $($setters)*
+        impl<'a> $Elem<'a> {
+            /// Fixed serialized length of one element: this container's
+            /// header, its inner fields, and the closing `0xE1`
+            /// object-end marker.
+            pub const LEN: usize = [<__ $Elem _LEN>];
 
-                #[doc = concat!("Sets `", stringify!($field), "` (inferred kind, default `", stringify!($default), "`). Overwritten by `prepare_for_emit` if this is one of the required emit-plumbing fields.")]
-                #[inline(always)]
-                #[allow(clippy::indexing_slicing)] // in-bounds by construction: `Self::LEN` sums these same field sizes
-                $vis fn [<set_ $($prefix)* $field>](&mut self, value: <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::Value<'_>) {
-                    const OFF: usize = ($($prev)*)
-                        .wrapping_add($crate::txn::codec::field_header($sfcode).1)
-                        .wrapping_add(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX.len());
-                    const LEN: usize = <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::LEN;
-                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::write(
-                        &mut self.bytes[OFF..OFF.wrapping_add(LEN)],
-                        value,
-                    );
-                }
-            ],
-            emit_region = [$($emit_region)*],
-            buf = [$($buf)*],
-            init = [
+            /// The element's default bytes -- header, every inner
+            /// field's default, and the closing `0xE1` marker -- baked
+            /// at compile time.
+            pub const TEMPLATE: [u8; [<__ $Elem _LEN>]] = {
+                let mut $($buf)* = [0u8; [<__ $Elem _LEN>]];
                 $($init)*
-                $crate::txn::codec::write_field_header(&mut $($buf)*, ($($prev)*), $sfcode);
-                $crate::txn::codec::write_const_bytes(
-                    &mut $($buf)*,
-                    ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1),
-                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX,
-                );
-                $crate::txn::codec::write_uint_be(
-                    &mut $($buf)*,
-                    ($($prev)*)
-                        .wrapping_add($crate::txn::codec::field_header($sfcode).1)
-                        .wrapping_add(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX.len()),
-                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::LEN,
-                    {
-                        let __v: <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::Value<'static> = $default;
-                        __v as u64
-                    },
-                );
-            ],
-            prev = [
-                ($($prev)*).wrapping_add($crate::txn::codec::fixed_field_size(
-                    $sfcode,
-                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX.len()
-                        .wrapping_add(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::LEN),
-                ))
-            ],
-            table = [
-                $($table)*
-                (
-                    ($sfcode).code(),
-                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::KIND,
-                    ($($prev)*)
-                        .wrapping_add($crate::txn::codec::field_header($sfcode).1)
-                        .wrapping_add(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX.len()),
-                    ($($depth)*),
-                ),
-            ],
-            emit_details = [$($emit_details)*],
-            prefix = [$($prefix)*],
-            ctx = obj,
-            depth = [$($depth)*],
-            stack = [$($stack)*],
-            mode = $mode,
-            fields = [ $($($rest)*)? ]
+                $($buf)*
+            };
+
+            $($setters)*
+
+            /// Restores [`Self::TEMPLATE`] into this element's bytes --
+            /// makes an absent optional element present at its default.
+            #[inline(always)]
+            #[allow(clippy::indexing_slicing)] // `self.bytes` is always exactly `Self::LEN` bytes, by construction
+            $vis fn enable(&mut self) {
+                self.bytes.copy_from_slice(&Self::TEMPLATE);
+            }
+
+            /// NOP-fills this element's bytes -- makes it absent.
+            #[inline(always)]
+            #[allow(clippy::indexing_slicing)] // `self.bytes` is always exactly `Self::LEN` bytes, by construction
+            $vis fn clear(&mut self) {
+                self.bytes.copy_from_slice(&[$crate::txn::codec::NOP; [<__ $Elem _LEN>]]);
+            }
+
+            /// Whether this element is currently present: its first byte
+            /// is not a [`NOP`](crate::txn::codec::NOP). `false` for an
+            /// absent slot (the baked default, or after [`Self::clear`]);
+            /// `true` after [`Self::enable`].
+            #[inline(always)]
+            #[must_use]
+            #[allow(clippy::indexing_slicing)] // `self.bytes` is always `Self::LEN >= 1` bytes, by construction
+            $vis fn is_present(&self) -> bool {
+                self.bytes[0] != $crate::txn::codec::NOP
+            }
+
+            /// Returns this element's full [`Self::LEN`]-byte region.
+            #[inline(always)]
+            #[must_use]
+            $vis fn bytes(&self) -> &[u8] {
+                &*self.bytes
+            }
         }
-
-    };
-    // `field: sfXxx` (inferred scalar, zeroed kind, no default).
-    (
-        @step
-        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
-        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
-        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
-        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
-        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
-        stack = [$($stack:tt)*],
-        mode = $mode:tt,
-        fields = [ $field:ident : $sfcode:ident $(, $($rest:tt)*)? ]
-    ) => {
-        const _: () = assert!(
-            <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::INFERABLE,
-            concat!("txn_template!: `", stringify!($field), "`: the kind of `", stringify!($sfcode), "` cannot be inferred from its serialized type — declare it explicitly (`native_amount`/`amount`, `empty_vl`/`fixed_vl`, `native_issue`/`issue`, or a `{{ .. }}`/`[ .. ]` body for an object/array); serialized types with no `txn_template!` kind need `StoWriter`")
-        );
-        const _: () = assert!(
-            !(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::INFERABLE)
-                || !(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::HAS_DEFAULT),
-            concat!("txn_template!: `", stringify!($field), "` is an integer kind and needs `= default`")
-        );
-        $crate::__txn_template_step! {
-            @step
-            name = $Name, meta = [$(#[$meta])*], vis = $vis,
-            order = [$($order)* ($sfcode).code(),],
-            setters = [
-                $($setters)*
-
-                #[doc = concat!("Sets `", stringify!($field), "` (inferred kind, defaults to all-zero bytes).")]
-                #[inline(always)]
-                #[allow(clippy::indexing_slicing)] // in-bounds by construction: `Self::LEN` sums these same field sizes
-                $vis fn [<set_ $($prefix)* $field>](&mut self, value: <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::Value<'_>) {
-                    const OFF: usize = ($($prev)*)
-                        .wrapping_add($crate::txn::codec::field_header($sfcode).1)
-                        .wrapping_add(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX.len());
-                    const LEN: usize = <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::LEN;
-                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::write(
-                        &mut self.bytes[OFF..OFF.wrapping_add(LEN)],
-                        value,
-                    );
-                }
-            ],
-            emit_region = [$($emit_region)*],
-            buf = [$($buf)*],
-            init = [
-                $($init)*
-                $crate::txn::codec::write_field_header(&mut $($buf)*, ($($prev)*), $sfcode);
-                $crate::txn::codec::write_const_bytes(
-                    &mut $($buf)*,
-                    ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1),
-                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX,
-                );
-            ],
-            prev = [
-                ($($prev)*).wrapping_add($crate::txn::codec::fixed_field_size(
-                    $sfcode,
-                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX.len()
-                        .wrapping_add(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::LEN),
-                ))
-            ],
-            table = [
-                $($table)*
-                (
-                    ($sfcode).code(),
-                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::KIND,
-                    ($($prev)*)
-                        .wrapping_add($crate::txn::codec::field_header($sfcode).1)
-                        .wrapping_add(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX.len()),
-                    ($($depth)*),
-                ),
-            ],
-            emit_details = [$($emit_details)*],
-            prefix = [$($prefix)*],
-            ctx = obj,
-            depth = [$($depth)*],
-            stack = [$($stack)*],
-            mode = $mode,
-            fields = [ $($($rest)*)? ]
-        }
-
+        } // $crate::__paste!
     };
 
     (
@@ -3966,6 +6926,7 @@ macro_rules! __txn_template_step {
         order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -3984,19 +6945,22 @@ mod tests {
     // §8); expect/indexing on known-good values is idiomatic here.
     #![allow(clippy::expect_used, clippy::indexing_slicing)]
 
+    use crate::error::HookError;
     use crate::txn::codec;
     use crate::types::{ACC_ID_LEN, AccountId, CurrencyCode, EMIT_DETAILS_MAX_LEN};
     use crate::xfl::XFL;
     use rshooks_core::consts::tfCANONICAL;
     // The typed constants: `txn_template!` calls `.code()` on whatever it is
     // given, so its field list takes `SField`s, not raw `u32`s.
+    #[cfg(feature = "all-amendments")]
+    use crate::sfield::sfAsset;
     use crate::sfield::{
-        sfAccount, sfAmount, sfAmountEntry, sfAmounts, sfAuthorize, sfBaseAsset, sfBlob,
-        sfClaimCurrency, sfDestination, sfDestinationTag, sfEmailHash, sfFee,
+        sfAccount, sfAmount, sfAmountEntry, sfAmounts, sfAuthorize, sfBalance, sfBaseAsset, sfBlob,
+        sfClaimCurrency, sfDestination, sfDestinationTag, sfDomain, sfEmailHash, sfFee,
         sfFirstLedgerSequence, sfFlags, sfHook, sfHookGrant, sfHookGrants, sfHookHash, sfHooks,
-        sfIndexNext, sfInvoiceID, sfLastLedgerSequence, sfMemo, sfMemoData, sfMemoType, sfMemos,
-        sfSequence, sfSignerWeight, sfSigningPubKey, sfSourceTag, sfTakerPaysCurrency,
-        sfTransactionResult,
+        sfIndexNext, sfInvoiceID, sfLastLedgerSequence, sfLimitAmount, sfMemo, sfMemoData,
+        sfMemoFormat, sfMemoType, sfMemos, sfSendMax, sfSequence, sfSignerEntry, sfSignerWeight,
+        sfSigningPubKey, sfSourceTag, sfTakerPaysCurrency, sfTransactionResult, sfURI,
     };
 
     crate::txn_template! {
@@ -5039,6 +8003,1631 @@ mod tests {
     }
 
     // -----------------------------------------------------------------
+    // `encode_iou_amount_value_const`: hand-derived reference vectors
+    // (rshooks-testenv is not a dev-dependency of this crate, so these are
+    // verified by hand against the XFL/`STAmount` bit-layout writeup in
+    // `docs/TXN_TEMPLATE_FIELDS_DESIGN.md` §2.2, not against a second
+    // encoder).
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn encode_iou_amount_value_const_zero() {
+        assert_eq!(
+            codec::encode_iou_amount_value_const(XFL::from_raw_bits(0)),
+            [0x80, 0, 0, 0, 0, 0, 0, 0]
+        );
+    }
+
+    #[test]
+    fn encode_iou_amount_value_const_one() {
+        // XFL!(1): mantissa 1_000_000_000_000_000, exponent -15 -> biased
+        // 82; sign bit (bit 62) set for positive. Raw bits
+        // 0x5483_8D7E_A4C6_8000; OR bit 63 -> 0xD483_8D7E_A4C6_8000.
+        assert_eq!(
+            codec::encode_iou_amount_value_const(XFL::from_raw_bits(6_089_866_696_204_910_592)),
+            [0xD4, 0x83, 0x8D, 0x7E, 0xA4, 0xC6, 0x80, 0x00]
+        );
+    }
+
+    #[test]
+    fn encode_iou_amount_value_const_negative_one() {
+        // XFL!(-1): identical mantissa/exponent bits as XFL!(1), sign bit
+        // (bit 62) clear. Raw bits 0x1483_8D7E_A4C6_8000; OR bit 63 ->
+        // 0x9483_8D7E_A4C6_8000.
+        assert_eq!(
+            codec::encode_iou_amount_value_const(XFL::from_raw_bits(1_478_180_677_777_522_688)),
+            [0x94, 0x83, 0x8D, 0x7E, 0xA4, 0xC6, 0x80, 0x00]
+        );
+    }
+
+    #[test]
+    fn encode_iou_amount_value_const_minimum_exponent() {
+        // The canonical minimum unbiased exponent, -96 (stored field 1: -96
+        // + 97), minimum mantissa 1_000_000_000_000_000, positive (sign bit
+        // 62 set). Raw bits: (1 << 62) | (1 << 54) | 1_000_000_000_000_000
+        // = 0x4043_8D7E_A4C6_8000; OR bit 63 -> 0xC043_8D7E_A4C6_8000.
+        assert_eq!(
+            codec::encode_iou_amount_value_const(XFL::from_raw_bits(4_630_700_416_936_869_888)),
+            [0xC0, 0x43, 0x8D, 0x7E, 0xA4, 0xC6, 0x80, 0x00]
+        );
+    }
+
+    #[test]
+    fn encode_iou_amount_value_const_maximum_exponent() {
+        // The canonical maximum unbiased exponent, 80 (stored field 177: 80
+        // + 97), minimum mantissa 1_000_000_000_000_000, positive. Raw
+        // bits: (1 << 62) | (177 << 54) | 1_000_000_000_000_000 =
+        // 0x6C43_8D7E_A4C6_8000; OR bit 63 -> 0xEC43_8D7E_A4C6_8000.
+        assert_eq!(
+            codec::encode_iou_amount_value_const(XFL::from_raw_bits(7_801_234_554_605_699_072)),
+            [0xEC, 0x43, 0x8D, 0x7E, 0xA4, 0xC6, 0x80, 0x00]
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // NOP-padded `optional` scalar kinds (docs/NOP_PADDING_DESIGN.md §3):
+    // one minimal fixture per kind (its own template, since the 63-NOP
+    // per-container budget cannot hold every kind at once), following the
+    // existing `IssueFixture`/`AmountNoDefaultFixture` single-concept
+    // style. Each pins the absent (all-`NOP`) default, the setter's
+    // header+value write, and (where applicable) `clear_` restoring NOPs.
+    // -----------------------------------------------------------------
+
+    crate::txn_template! {
+        /// `optional u16_field` placed before `sfSequence` (`SignerWeight`
+        /// is type 1, sorting ahead of every required field).
+        struct OptionalU16Fixture {
+            transaction_type = ttPAYMENT,
+            signer_weight: optional u16_field(sfSignerWeight),
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn optional_u16_defaults_absent_and_round_trips() {
+        let mut tpl = OptionalU16Fixture::new();
+        // SignerWeight (1,3): 1-byte header + 2-byte value = 3-byte slot,
+        // right after TransactionType's fixed 3 bytes.
+        assert_eq!(&tpl.bytes()[3..6], &[codec::NOP; 3]);
+        tpl.set_signer_weight(0xBEEF);
+        assert_eq!(&tpl.bytes()[3..6], &[0x13, 0xBE, 0xEF]);
+        tpl.clear_signer_weight();
+        assert_eq!(&tpl.bytes()[3..6], &[codec::NOP; 3]);
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// `optional u32_field` on `sfSourceTag` (sorts before `sfSequence`).
+        struct OptionalU32Fixture {
+            transaction_type = ttPAYMENT,
+            source_tag: optional u32_field(sfSourceTag),
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn optional_u32_defaults_absent_and_round_trips() {
+        let mut tpl = OptionalU32Fixture::new();
+        // SourceTag (2,3): 1-byte header + 4-byte value = 5-byte slot.
+        assert_eq!(&tpl.bytes()[3..8], &[codec::NOP; 5]);
+        tpl.set_source_tag(0xDEAD_BEEF);
+        assert_eq!(&tpl.bytes()[3..8], &[0x23, 0xDE, 0xAD, 0xBE, 0xEF]);
+        tpl.clear_source_tag();
+        assert_eq!(&tpl.bytes()[3..8], &[codec::NOP; 5]);
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// `optional u64_field` on `sfIndexNext` (sorts between
+        /// `sfLastLedgerSequence` and `sfFee`).
+        struct OptionalU64Fixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            index_next: optional u64_field(sfIndexNext),
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn optional_u64_defaults_absent_and_round_trips() {
+        let mut tpl = OptionalU64Fixture::new();
+        // TransactionType(3) + Sequence(5) + First(6) + Last(6) = 20.
+        let off = 20usize;
+        // IndexNext (3,1): 1-byte header + 8-byte value = 9-byte slot.
+        assert_eq!(&tpl.bytes()[off..off + 9], &[codec::NOP; 9]);
+        tpl.set_index_next(0x0102_0304_0506_0708);
+        assert_eq!(tpl.bytes()[off], 0x31);
+        assert_eq!(
+            &tpl.bytes()[off + 1..off + 9],
+            &0x0102_0304_0506_0708u64.to_be_bytes()
+        );
+        tpl.clear_index_next();
+        assert_eq!(&tpl.bytes()[off..off + 9], &[codec::NOP; 9]);
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// `optional hash256` on `sfInvoiceID` (sorts between
+        /// `sfLastLedgerSequence` and `sfFee`).
+        struct OptionalHash256Fixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            invoice_id: optional hash256(sfInvoiceID),
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn optional_hash256_defaults_absent_and_round_trips() {
+        let mut tpl = OptionalHash256Fixture::new();
+        let off = 20usize;
+        // InvoiceID (5,17): 2-byte header + 32-byte value = 34-byte slot.
+        assert_eq!(&tpl.bytes()[off..off + 34], &[codec::NOP; 34]);
+        let hash = crate::types::Hash([0xAB; 32]);
+        tpl.set_invoice_id(&hash);
+        assert_eq!(&tpl.bytes()[off..off + 2], &[0x50, 0x11]);
+        assert_eq!(&tpl.bytes()[off + 2..off + 34], hash.as_ref());
+        tpl.clear_invoice_id();
+        assert_eq!(&tpl.bytes()[off..off + 34], &[codec::NOP; 34]);
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// `optional hash128` on `sfEmailHash` (sorts between
+        /// `sfLastLedgerSequence` and `sfFee`).
+        struct OptionalHash128Fixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            email_hash: optional hash128(sfEmailHash),
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn optional_hash128_defaults_absent_and_round_trips() {
+        let mut tpl = OptionalHash128Fixture::new();
+        let off = 20usize;
+        // EmailHash (4,1): 1-byte header + 16-byte value = 17-byte slot.
+        assert_eq!(&tpl.bytes()[off..off + 17], &[codec::NOP; 17]);
+        tpl.set_email_hash(&[0xCD; 16]);
+        assert_eq!(tpl.bytes()[off], 0x41);
+        assert_eq!(&tpl.bytes()[off + 1..off + 17], &[0xCD; 16]);
+        tpl.clear_email_hash();
+        assert_eq!(&tpl.bytes()[off..off + 17], &[codec::NOP; 17]);
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// `optional native_amount` on `sfAmount` (sorts before `sfFee`,
+        /// both `STI_AMOUNT`).
+        struct OptionalNativeAmountFixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            amount: optional native_amount(sfAmount),
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn optional_native_amount_defaults_absent_and_round_trips() {
+        let mut tpl = OptionalNativeAmountFixture::new();
+        let off = 20usize;
+        // Amount (6,1): 1-byte header + 8-byte value = 9-byte slot.
+        assert_eq!(&tpl.bytes()[off..off + 9], &[codec::NOP; 9]);
+        tpl.set_amount(5).expect("5 drops is in range");
+        assert_eq!(tpl.bytes()[off], 0x61);
+        assert_eq!(
+            &tpl.bytes()[off + 1..off + 9],
+            &codec::encode_native_amount_const(5)
+        );
+        assert_eq!(tpl.set_amount(1u64 << 62), Err(HookError::InvalidArgument));
+        tpl.clear_amount();
+        assert_eq!(&tpl.bytes()[off..off + 9], &[codec::NOP; 9]);
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// Inferred-kind twin of `OptionalNativeAmountFixture`: `amount`
+        /// uses `optional sfX = NativeAmount()` instead of the explicit
+        /// `optional native_amount(sfX)`.
+        struct OptionalNativeAmountFixtureInferred {
+            transaction_type = ttPAYMENT,
+            sequence: sfSequence = 0,
+            first_ledger_sequence: sfFirstLedgerSequence = 0,
+            last_ledger_sequence: sfLastLedgerSequence = 0,
+            amount: optional sfAmount = NativeAmount(),
+            fee: sfFee = NativeAmount(0),
+            signing_pub_key: sfSigningPubKey = [],
+            account: sfAccount,
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn inferred_optional_native_amount_matches_explicit_twin() {
+        assert_eq!(
+            OptionalNativeAmountFixtureInferred::FIELDS,
+            OptionalNativeAmountFixture::FIELDS
+        );
+        assert_eq!(
+            OptionalNativeAmountFixtureInferred::LEN,
+            OptionalNativeAmountFixture::LEN
+        );
+        assert_eq!(
+            OptionalNativeAmountFixtureInferred::new().bytes(),
+            OptionalNativeAmountFixture::new().bytes()
+        );
+
+        let mut inferred = OptionalNativeAmountFixtureInferred::new();
+        inferred.set_amount(5).expect("5 drops is in range");
+        let mut explicit = OptionalNativeAmountFixture::new();
+        explicit.set_amount(5).expect("5 drops is in range");
+        assert_eq!(inferred.bytes(), explicit.bytes());
+
+        inferred.clear_amount();
+        explicit.clear_amount();
+        assert_eq!(inferred.bytes(), explicit.bytes());
+
+        // Exercise every remaining setter too (dead-code hygiene).
+        inferred.set_sequence(0);
+        inferred.set_first_ledger_sequence(0);
+        inferred.set_last_ledger_sequence(0);
+        inferred.set_fee(0).expect("0 drops is in range");
+        inferred.set_account(&AccountId::default());
+        let _ = inferred.emit_details_region();
+        assert_eq!(
+            inferred
+                .prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// `optional amount` (48-byte issued form) on `sfSendMax` (sorts
+        /// after `sfFee`, both `STI_AMOUNT`).
+        struct OptionalAmountFixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            send_max: optional amount(sfSendMax),
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn optional_amount_defaults_absent_and_round_trips() {
+        let mut tpl = OptionalAmountFixture::new();
+        // TransactionType(3) + Sequence(5) + First(6) + Last(6) + Fee(9) = 29.
+        let off = 29usize;
+        // SendMax (6,9): 1-byte header + 48-byte value = 49-byte slot.
+        assert_eq!(&tpl.bytes()[off..off + 49], &[codec::NOP; 49]);
+        let currency = CurrencyCode::from_iso(b"USD");
+        let issuer = AccountId([0x55; ACC_ID_LEN]);
+        tpl.set_send_max(XFL::from_raw_bits(0), &currency, &issuer);
+        assert_eq!(tpl.bytes()[off], 0x69);
+        assert_eq!(
+            &tpl.bytes()[off + 1..off + 49],
+            &codec::encode_iou_amount_const(XFL::from_raw_bits(0), &currency, &issuer)
+        );
+        tpl.clear_send_max();
+        assert_eq!(&tpl.bytes()[off..off + 49], &[codec::NOP; 49]);
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// Inferred-kind twin of `OptionalAmountFixture`: `send_max` uses
+        /// `optional sfX = IouAmount()` instead of the explicit `optional
+        /// amount(sfX)`.
+        struct OptionalAmountFixtureInferred {
+            transaction_type = ttPAYMENT,
+            sequence: sfSequence = 0,
+            first_ledger_sequence: sfFirstLedgerSequence = 0,
+            last_ledger_sequence: sfLastLedgerSequence = 0,
+            fee: sfFee = NativeAmount(0),
+            send_max: optional sfSendMax = IouAmount(),
+            signing_pub_key: sfSigningPubKey = [],
+            account: sfAccount,
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn inferred_optional_amount_matches_explicit_twin() {
+        assert_eq!(
+            OptionalAmountFixtureInferred::FIELDS,
+            OptionalAmountFixture::FIELDS
+        );
+        assert_eq!(
+            OptionalAmountFixtureInferred::LEN,
+            OptionalAmountFixture::LEN
+        );
+        assert_eq!(
+            OptionalAmountFixtureInferred::new().bytes(),
+            OptionalAmountFixture::new().bytes()
+        );
+
+        let currency = CurrencyCode::from_iso(b"USD");
+        let issuer = AccountId([0x55; ACC_ID_LEN]);
+        let mut inferred = OptionalAmountFixtureInferred::new();
+        inferred.set_send_max(XFL::from_raw_bits(0), &currency, &issuer);
+        let mut explicit = OptionalAmountFixture::new();
+        explicit.set_send_max(XFL::from_raw_bits(0), &currency, &issuer);
+        assert_eq!(inferred.bytes(), explicit.bytes());
+
+        inferred.clear_send_max();
+        explicit.clear_send_max();
+        assert_eq!(inferred.bytes(), explicit.bytes());
+
+        // Exercise every remaining setter too (dead-code hygiene).
+        inferred.set_sequence(0);
+        inferred.set_first_ledger_sequence(0);
+        inferred.set_last_ledger_sequence(0);
+        inferred.set_fee(0).expect("0 drops is in range");
+        inferred.set_account(&AccountId::default());
+        let _ = inferred.emit_details_region();
+        assert_eq!(
+            inferred
+                .prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// `optional fixed_vl` on `sfMemoType` (sorts after
+        /// `sfSigningPubKey`, both `STI_VL`).
+        struct OptionalFixedVlFixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            memo_type: optional fixed_vl(sfMemoType, 4),
+            account: account_id(sfAccount),
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn optional_fixed_vl_defaults_absent_and_round_trips() {
+        let mut tpl = OptionalFixedVlFixture::new();
+        // TransactionType(3) + Sequence(5) + First(6) + Last(6) + Fee(9)
+        // + SigningPubKey(2) = 31.
+        let off = 31usize;
+        // MemoType (7,12): 1-byte header + 1-byte VL prefix (4 <= 192) +
+        // 4-byte value = 6-byte slot.
+        assert_eq!(&tpl.bytes()[off..off + 6], &[codec::NOP; 6]);
+        tpl.set_memo_type(b"note");
+        assert_eq!(&tpl.bytes()[off..off + 2], &[0x7C, 0x04]);
+        assert_eq!(&tpl.bytes()[off + 2..off + 6], b"note");
+        tpl.clear_memo_type();
+        assert_eq!(&tpl.bytes()[off..off + 6], &[codec::NOP; 6]);
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// `optional empty_vl` on `sfMemoData` (sorts after
+        /// `sfSigningPubKey`, both `STI_VL`).
+        struct OptionalEmptyVlFixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            memo_data: optional empty_vl(sfMemoData),
+            account: account_id(sfAccount),
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn optional_empty_vl_defaults_absent_and_round_trips() {
+        let mut tpl = OptionalEmptyVlFixture::new();
+        let off = 31usize;
+        // MemoData (7,13): 1-byte header + 1-byte zero-length VL = 2-byte slot.
+        assert_eq!(&tpl.bytes()[off..off + 2], &[codec::NOP; 2]);
+        tpl.set_memo_data();
+        assert_eq!(&tpl.bytes()[off..off + 2], &[0x7D, 0x00]);
+        tpl.clear_memo_data();
+        assert_eq!(&tpl.bytes()[off..off + 2], &[codec::NOP; 2]);
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// `optional account_id` on `sfAuthorize` (sorts after `sfAccount`).
+        struct OptionalAccountIdFixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            authorize: optional account_id(sfAuthorize),
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn optional_account_id_defaults_absent_and_round_trips() {
+        let mut tpl = OptionalAccountIdFixture::new();
+        let off = 53usize; // established fixed prefix through sfAccount
+        // Authorize (8,5): 1-byte header + 1-byte VL length + 20-byte
+        // value = 22-byte slot.
+        assert_eq!(&tpl.bytes()[off..off + 22], &[codec::NOP; 22]);
+        let id = AccountId([0x9A; ACC_ID_LEN]);
+        tpl.set_authorize(&id);
+        assert_eq!(&tpl.bytes()[off..off + 2], &[0x85, 20]);
+        assert_eq!(&tpl.bytes()[off + 2..off + 22], id.as_ref());
+        tpl.clear_authorize();
+        assert_eq!(&tpl.bytes()[off..off + 22], &[codec::NOP; 22]);
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// `optional u8_field` on `sfTransactionResult` (sorts after
+        /// `sfAccount`).
+        struct OptionalU8Fixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            transaction_result: optional u8_field(sfTransactionResult),
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn optional_u8_defaults_absent_and_round_trips() {
+        let mut tpl = OptionalU8Fixture::new();
+        let off = 53usize;
+        // TransactionResult (16,3): 2-byte header + 1-byte value = 3-byte slot.
+        assert_eq!(&tpl.bytes()[off..off + 3], &[codec::NOP; 3]);
+        tpl.set_transaction_result(0xAB);
+        assert_eq!(&tpl.bytes()[off..off + 2], &[0x30, 0x10]);
+        assert_eq!(tpl.bytes()[off + 2], 0xAB);
+        tpl.clear_transaction_result();
+        assert_eq!(&tpl.bytes()[off..off + 3], &[codec::NOP; 3]);
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// `optional hash160` on `sfTakerPaysCurrency` (sorts after
+        /// `sfAccount`).
+        struct OptionalHash160Fixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            taker_pays_currency: optional hash160(sfTakerPaysCurrency),
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn optional_hash160_defaults_absent_and_round_trips() {
+        let mut tpl = OptionalHash160Fixture::new();
+        let off = 53usize;
+        // TakerPaysCurrency (17,1): 2-byte header + 20-byte value = 22-byte slot.
+        assert_eq!(&tpl.bytes()[off..off + 22], &[codec::NOP; 22]);
+        tpl.set_taker_pays_currency(&[0x77; 20]);
+        assert_eq!(&tpl.bytes()[off..off + 2], &[0x10, 0x11]);
+        assert_eq!(&tpl.bytes()[off + 2..off + 22], &[0x77; 20]);
+        tpl.clear_taker_pays_currency();
+        assert_eq!(&tpl.bytes()[off..off + 22], &[codec::NOP; 22]);
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    #[cfg(feature = "all-amendments")]
+    crate::txn_template! {
+        /// `optional native_issue` on `sfAsset` (sorts after `sfAccount`).
+        /// `sfAsset` is dormant on Xahau mainnet and gated behind
+        /// `all-amendments` -- no unconditional `STI_ISSUE` field besides
+        /// `sfClaimCurrency` (already used by [`OptionalIssueFixture`])
+        /// exists to exercise this kind against.
+        struct OptionalNativeIssueFixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            asset: optional native_issue(sfAsset),
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "all-amendments")]
+    fn optional_native_issue_defaults_absent_and_round_trips() {
+        let mut tpl = OptionalNativeIssueFixture::new();
+        let off = 53usize;
+        // Asset (24,3): 2-byte header + 20-byte value = 22-byte slot.
+        assert_eq!(&tpl.bytes()[off..off + 22], &[codec::NOP; 22]);
+        tpl.set_asset();
+        assert_eq!(&tpl.bytes()[off..off + 2], &[0x30, 0x18]);
+        assert_eq!(&tpl.bytes()[off + 2..off + 22], &[0u8; 20]);
+        tpl.clear_asset();
+        assert_eq!(&tpl.bytes()[off..off + 22], &[codec::NOP; 22]);
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// `optional issue` on `sfClaimCurrency` (sorts after `sfAccount`).
+        struct OptionalIssueFixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            claim_currency: optional issue(sfClaimCurrency),
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn optional_issue_defaults_absent_and_round_trips() {
+        let mut tpl = OptionalIssueFixture::new();
+        let off = 53usize;
+        // ClaimCurrency (24,5): 2-byte header + 40-byte value = 42-byte slot.
+        assert_eq!(&tpl.bytes()[off..off + 42], &[codec::NOP; 42]);
+        let currency = CurrencyCode::from_iso(b"GBP");
+        let issuer = AccountId([0x66; ACC_ID_LEN]);
+        tpl.set_claim_currency(&currency, &issuer);
+        assert_eq!(&tpl.bytes()[off..off + 2], &[0x50, 0x18]);
+        assert_eq!(&tpl.bytes()[off + 2..off + 22], currency.as_ref());
+        assert_eq!(&tpl.bytes()[off + 22..off + 42], issuer.as_ref());
+        tpl.clear_claim_currency();
+        assert_eq!(&tpl.bytes()[off..off + 42], &[codec::NOP; 42]);
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// `optional currency` on `sfBaseAsset` (sorts after `sfAccount`).
+        struct OptionalCurrencyFixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            base_asset: optional currency(sfBaseAsset),
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn optional_currency_defaults_absent_and_round_trips() {
+        let mut tpl = OptionalCurrencyFixture::new();
+        let off = 53usize;
+        // BaseAsset (26,1): 2-byte header + 20-byte value = 22-byte slot.
+        assert_eq!(&tpl.bytes()[off..off + 22], &[codec::NOP; 22]);
+        let currency = CurrencyCode::from_iso(b"EUR");
+        tpl.set_base_asset(&currency);
+        assert_eq!(&tpl.bytes()[off..off + 2], &[0x10, 0x1A]);
+        assert_eq!(&tpl.bytes()[off + 2..off + 22], currency.as_ref());
+        tpl.clear_base_asset();
+        assert_eq!(&tpl.bytes()[off..off + 22], &[codec::NOP; 22]);
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// A same-named-but-nested `sfAccount` is not plumbing: the
+        /// top-level `sfAccount` (required, `depth == 0`) coexists with a
+        /// nested `optional account_id(sfAccount)` (`depth == 1`, inside
+        /// `sfMemo`) -- `find_field`/`prepare_for_emit` only recognize a
+        /// plumbing field at depth 0 (see `FieldEntry`'s doc comment), so
+        /// the nested one is free to be `optional`.
+        struct NestedAccountOptionalFixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            entry: object(sfMemo) {
+                nested_account: optional account_id(sfAccount),
+            },
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn optional_account_id_is_allowed_when_nested_even_though_the_same_code_is_required_at_top_level()
+     {
+        let mut tpl = NestedAccountOptionalFixture::new();
+        let off = 53usize; // fixed prefix through the top-level sfAccount
+        // Memo (14,10): 1-byte header.
+        assert_eq!(tpl.bytes()[off], 0xEA);
+        let nested_off = off + 1;
+        // The nested `optional account_id(sfAccount)`: 1-byte header +
+        // 1-byte VL length + 20-byte value = 22-byte slot, absent by
+        // default.
+        assert_eq!(&tpl.bytes()[nested_off..nested_off + 22], &[codec::NOP; 22]);
+        let id = AccountId([0x33; ACC_ID_LEN]);
+        tpl.set_entry_nested_account(&id);
+        assert_eq!(&tpl.bytes()[nested_off..nested_off + 2], &[0x81, 20]);
+        assert_eq!(&tpl.bytes()[nested_off + 2..nested_off + 22], id.as_ref());
+        assert_eq!(tpl.bytes()[nested_off + 22], codec::OBJECT_END_MARKER);
+        tpl.clear_entry_nested_account();
+        assert_eq!(&tpl.bytes()[nested_off..nested_off + 22], &[codec::NOP; 22]);
+
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // `optional` and `= default` together must not parse.
+    // -----------------------------------------------------------------
+    // (compile-time rejection covered by tests/ui/fail/txn_template_optional_default.rs)
+
+    // -----------------------------------------------------------------
+    // `any_amount` / `optional any_amount`: a 49-byte slot holding either
+    // the native form (8 bytes + `ANY_AMOUNT_NATIVE_NOPS` NOPs) or the
+    // full 48-byte issued form.
+    // -----------------------------------------------------------------
+
+    crate::txn_template! {
+        /// `any_amount(sfX)` on `sfBalance` (sorts before `sfFee`, both
+        /// `STI_AMOUNT`). Always present; defaults to issued zero (the
+        /// same bytes as `amount(sfX)`'s default).
+        struct AnyAmountFixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            balance: any_amount(sfBalance),
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn any_amount_defaults_to_issued_zero_and_switches_forms() {
+        let mut tpl = AnyAmountFixture::new();
+        let off = 20usize;
+        // Balance (6,2): 1-byte header + 48-byte value = 49-byte slot.
+        assert_eq!(tpl.bytes()[off], 0x62);
+        assert_eq!(
+            &tpl.bytes()[off + 1..off + 49],
+            &codec::encode_iou_amount_const(
+                XFL::from_raw_bits(0),
+                &CurrencyCode::zeroed(),
+                &AccountId::zeroed()
+            )
+        );
+
+        tpl.set_balance_native(5).expect("5 drops is in range");
+        assert_eq!(tpl.bytes()[off], 0x62);
+        assert_eq!(
+            &tpl.bytes()[off + 1..off + 9],
+            &codec::encode_native_amount_const(5)
+        );
+        assert_eq!(
+            &tpl.bytes()[off + 9..off + 49],
+            &[codec::NOP; codec::ANY_AMOUNT_NATIVE_NOPS]
+        );
+        assert_eq!(
+            tpl.set_balance_native(1u64 << 62),
+            Err(HookError::InvalidArgument)
+        );
+
+        let currency = CurrencyCode::from_iso(b"USD");
+        let issuer = AccountId([0x44; ACC_ID_LEN]);
+        tpl.set_balance_issued(XFL::from_raw_bits(0), &currency, &issuer);
+        assert_eq!(
+            &tpl.bytes()[off + 1..off + 49],
+            &codec::encode_iou_amount_const(XFL::from_raw_bits(0), &currency, &issuer)
+        );
+
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// Inferred-kind twin of `AnyAmountFixture`: `balance` uses the
+        /// `field: sfX = AnyAmount()` default-shape marker instead of the
+        /// explicit `any_amount(sfX)`.
+        struct AnyAmountFixtureInferred {
+            transaction_type = ttPAYMENT,
+            sequence: sfSequence = 0,
+            first_ledger_sequence: sfFirstLedgerSequence = 0,
+            last_ledger_sequence: sfLastLedgerSequence = 0,
+            balance: sfBalance = AnyAmount(),
+            fee: sfFee = NativeAmount(0),
+            signing_pub_key: sfSigningPubKey = [],
+            account: sfAccount,
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn inferred_any_amount_matches_explicit_twin() {
+        assert_eq!(AnyAmountFixtureInferred::FIELDS, AnyAmountFixture::FIELDS);
+        assert_eq!(AnyAmountFixtureInferred::LEN, AnyAmountFixture::LEN);
+        assert_eq!(
+            AnyAmountFixtureInferred::new().bytes(),
+            AnyAmountFixture::new().bytes()
+        );
+
+        let mut inferred = AnyAmountFixtureInferred::new();
+        inferred.set_balance_native(5).expect("5 drops is in range");
+        let mut explicit = AnyAmountFixture::new();
+        explicit.set_balance_native(5).expect("5 drops is in range");
+        assert_eq!(inferred.bytes(), explicit.bytes());
+
+        let currency = CurrencyCode::from_iso(b"USD");
+        let issuer = AccountId([0x44; ACC_ID_LEN]);
+        inferred.set_balance_issued(XFL::from_raw_bits(0), &currency, &issuer);
+        explicit.set_balance_issued(XFL::from_raw_bits(0), &currency, &issuer);
+        assert_eq!(inferred.bytes(), explicit.bytes());
+
+        // Exercise every remaining setter too (dead-code hygiene).
+        inferred.set_sequence(0);
+        inferred.set_first_ledger_sequence(0);
+        inferred.set_last_ledger_sequence(0);
+        inferred.set_fee(0).expect("0 drops is in range");
+        inferred.set_account(&AccountId::default());
+        let _ = inferred.emit_details_region();
+        assert_eq!(
+            inferred
+                .prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// `optional any_amount(sfX)` on `sfLimitAmount` (sorts before
+        /// `sfFee`, both `STI_AMOUNT`). Absent by default (all NOPs).
+        struct OptionalAnyAmountFixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            limit_amount: optional any_amount(sfLimitAmount),
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn optional_any_amount_defaults_absent_and_round_trips() {
+        let mut tpl = OptionalAnyAmountFixture::new();
+        let off = 20usize;
+        // LimitAmount (6,3): 1-byte header + 48-byte value = 49-byte slot.
+        assert_eq!(&tpl.bytes()[off..off + 49], &[codec::NOP; 49]);
+
+        tpl.set_limit_amount_native(7).expect("7 drops is in range");
+        assert_eq!(tpl.bytes()[off], 0x63);
+        assert_eq!(
+            &tpl.bytes()[off + 1..off + 9],
+            &codec::encode_native_amount_const(7)
+        );
+        assert_eq!(
+            &tpl.bytes()[off + 9..off + 49],
+            &[codec::NOP; codec::ANY_AMOUNT_NATIVE_NOPS]
+        );
+        tpl.clear_limit_amount();
+        assert_eq!(&tpl.bytes()[off..off + 49], &[codec::NOP; 49]);
+
+        let currency = CurrencyCode::from_iso(b"EUR");
+        let issuer = AccountId([0x22; ACC_ID_LEN]);
+        tpl.set_limit_amount_issued(XFL::from_raw_bits(0), &currency, &issuer);
+        assert_eq!(tpl.bytes()[off], 0x63);
+        assert_eq!(
+            &tpl.bytes()[off + 1..off + 49],
+            &codec::encode_iou_amount_const(XFL::from_raw_bits(0), &currency, &issuer)
+        );
+        tpl.clear_limit_amount();
+        assert_eq!(&tpl.bytes()[off..off + 49], &[codec::NOP; 49]);
+
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// Inferred-kind twin of `OptionalAnyAmountFixture`: `limit_amount`
+        /// uses `optional sfX = AnyAmount()` instead of the explicit
+        /// `optional any_amount(sfX)`.
+        struct OptionalAnyAmountFixtureInferred {
+            transaction_type = ttPAYMENT,
+            sequence: sfSequence = 0,
+            first_ledger_sequence: sfFirstLedgerSequence = 0,
+            last_ledger_sequence: sfLastLedgerSequence = 0,
+            limit_amount: optional sfLimitAmount = AnyAmount(),
+            fee: sfFee = NativeAmount(0),
+            signing_pub_key: sfSigningPubKey = [],
+            account: sfAccount,
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn inferred_optional_any_amount_matches_explicit_twin() {
+        assert_eq!(
+            OptionalAnyAmountFixtureInferred::FIELDS,
+            OptionalAnyAmountFixture::FIELDS
+        );
+        assert_eq!(
+            OptionalAnyAmountFixtureInferred::LEN,
+            OptionalAnyAmountFixture::LEN
+        );
+        assert_eq!(
+            OptionalAnyAmountFixtureInferred::new().bytes(),
+            OptionalAnyAmountFixture::new().bytes()
+        );
+
+        let mut inferred = OptionalAnyAmountFixtureInferred::new();
+        inferred
+            .set_limit_amount_native(7)
+            .expect("7 drops is in range");
+        let mut explicit = OptionalAnyAmountFixture::new();
+        explicit
+            .set_limit_amount_native(7)
+            .expect("7 drops is in range");
+        assert_eq!(inferred.bytes(), explicit.bytes());
+
+        inferred.clear_limit_amount();
+        explicit.clear_limit_amount();
+        assert_eq!(inferred.bytes(), explicit.bytes());
+
+        let currency = CurrencyCode::from_iso(b"EUR");
+        let issuer = AccountId([0x22; ACC_ID_LEN]);
+        inferred.set_limit_amount_issued(XFL::from_raw_bits(0), &currency, &issuer);
+        explicit.set_limit_amount_issued(XFL::from_raw_bits(0), &currency, &issuer);
+        assert_eq!(inferred.bytes(), explicit.bytes());
+
+        // Exercise every remaining setter too (dead-code hygiene).
+        inferred.set_sequence(0);
+        inferred.set_first_ledger_sequence(0);
+        inferred.set_last_ledger_sequence(0);
+        inferred.set_fee(0).expect("0 drops is in range");
+        inferred.set_account(&AccountId::default());
+        let _ = inferred.emit_details_region();
+        assert_eq!(
+            inferred
+                .prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // `vl(sfX, MIN, MAX)` / `vl(sfX, MAX)` / `optional vl`: a
+    // runtime-chosen-length payload within a compile-time-fixed slot,
+    // NOP-padded past the written length.
+    // -----------------------------------------------------------------
+
+    crate::txn_template! {
+        /// `vl(sfX, MIN, MAX)` on `sfMemoFormat` (sorts after
+        /// `sfSigningPubKey`, both `STI_VL`); `2..=6` stays within the
+        /// one-byte VL-prefix range throughout.
+        struct VlFixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            memo_format: vl(sfMemoFormat, 2, 6),
+            account: account_id(sfAccount),
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn vl_bakes_min_default_and_round_trips_within_range() {
+        let mut tpl = VlFixture::new();
+        // TransactionType(3) + Sequence(5) + First(6) + Last(6) + Fee(9)
+        // + SigningPubKey(2) = 31.
+        let off = 31usize;
+        // MemoFormat (7,14): 1-byte header + (1-byte prefix + 6-byte
+        // payload reserved for MAX=6) = 8-byte slot (off..off+8). Baked
+        // default is MIN=2 zero bytes, NOP-padded to the MAX=6 slot end.
+        assert_eq!(tpl.bytes()[off], 0x7E);
+        assert_eq!(tpl.bytes()[off + 1], 2); // one-byte VL prefix for MIN=2
+        assert_eq!(&tpl.bytes()[off + 2..off + 4], &[0u8; 2]);
+        assert_eq!(&tpl.bytes()[off + 4..off + 8], &[codec::NOP; 4]);
+
+        tpl.set_memo_format(&[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF])
+            .expect("6 bytes is within [2, 6]");
+        assert_eq!(tpl.bytes()[off + 1], 6);
+        assert_eq!(
+            &tpl.bytes()[off + 2..off + 8],
+            &[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]
+        );
+
+        tpl.set_memo_format(&[0x11, 0x22, 0x33])
+            .expect("3 bytes is within [2, 6]");
+        assert_eq!(tpl.bytes()[off + 1], 3);
+        assert_eq!(&tpl.bytes()[off + 2..off + 5], &[0x11, 0x22, 0x33]);
+        assert_eq!(&tpl.bytes()[off + 5..off + 8], &[codec::NOP; 3]);
+
+        assert_eq!(
+            tpl.set_memo_format(&[0x01]),
+            Err(HookError::InvalidArgument)
+        );
+        assert_eq!(
+            tpl.set_memo_format(&[0u8; 7]),
+            Err(HookError::InvalidArgument)
+        );
+
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// `vl(sfX, MIN, MAX)` on `sfDomain` spanning the one-byte/
+        /// two-byte VL-prefix boundary (`150..=200`: 150 needs a
+        /// one-byte prefix, 200 a two-byte prefix).
+        struct VlPrefixWidthFixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            domain: vl(sfDomain, 150, 200),
+            account: account_id(sfAccount),
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn vl_handles_a_prefix_width_change_between_min_and_max() {
+        let mut tpl = VlPrefixWidthFixture::new();
+        let off = 31usize;
+        // Domain (7,7): 1-byte header + (2-byte prefix + 200-byte payload
+        // reserved for MAX=200) = 203-byte slot (off..off+203). Baked
+        // default is a one-byte prefix (MIN=150 <= 192) + 150 zero bytes,
+        // NOP-padded to the MAX=200 slot end (151 + 51 = 202 value bytes).
+        assert_eq!(tpl.bytes()[off], 0x77);
+        assert_eq!(tpl.bytes()[off + 1], 150); // one-byte VL prefix for MIN=150
+        assert_eq!(&tpl.bytes()[off + 2..off + 152], &[0u8; 150]);
+        assert_eq!(&tpl.bytes()[off + 152..off + 203], &[codec::NOP; 51]);
+
+        let payload_max = [0x5Au8; 200];
+        tpl.set_domain(&payload_max)
+            .expect("200 bytes is within [150, 200]");
+        // 200 needs a two-byte prefix: adj = 200 - 193 = 7 -> [193, 7].
+        assert_eq!(&tpl.bytes()[off + 1..off + 3], &[193, 7]);
+        assert_eq!(&tpl.bytes()[off + 3..off + 203], &payload_max[..]);
+
+        let payload_min = [0x5Au8; 150];
+        tpl.set_domain(&payload_min)
+            .expect("150 bytes is within [150, 200]");
+        assert_eq!(tpl.bytes()[off + 1], 150);
+        assert_eq!(&tpl.bytes()[off + 2..off + 152], &payload_min[..]);
+        assert_eq!(&tpl.bytes()[off + 152..off + 203], &[codec::NOP; 51]);
+
+        assert_eq!(tpl.set_domain(&[0u8; 149]), Err(HookError::InvalidArgument));
+        assert_eq!(tpl.set_domain(&[0u8; 201]), Err(HookError::InvalidArgument));
+
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// `optional vl(sfX, MIN, MAX)` on `sfURI` (sorts after
+        /// `sfSigningPubKey`, both `STI_VL`). Absent by default.
+        struct OptionalVlFixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            uri: optional vl(sfURI, 1, 4),
+            account: account_id(sfAccount),
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn optional_vl_defaults_absent_and_round_trips() {
+        let mut tpl = OptionalVlFixture::new();
+        let off = 31usize;
+        // URI (7,5): 1-byte header + (1-byte prefix + 4-byte payload) =
+        // 6-byte slot, all NOPs by default (absent).
+        assert_eq!(&tpl.bytes()[off..off + 6], &[codec::NOP; 6]);
+
+        tpl.set_uri(&[0x01, 0x02, 0x03, 0x04])
+            .expect("4 bytes is within [1, 4]");
+        assert_eq!(&tpl.bytes()[off..off + 2], &[0x75, 4]);
+        assert_eq!(&tpl.bytes()[off + 2..off + 6], &[0x01, 0x02, 0x03, 0x04]);
+
+        assert_eq!(tpl.set_uri(&[]), Err(HookError::InvalidArgument));
+        assert_eq!(tpl.set_uri(&[0u8; 5]), Err(HookError::InvalidArgument));
+
+        tpl.clear_uri();
+        assert_eq!(&tpl.bytes()[off..off + 6], &[codec::NOP; 6]);
+
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // Whole-container `optional sfX { .. }` / `optional sfX [ .. ]` (and
+    // their explicit `optional object(sfX) { .. }` / `optional
+    // array(sfX) [ .. ]` spellings), plus a named array's own `optional`
+    // element and a homogeneous array whose element is
+    // `optional object(sfY) { .. }`. A named optional container compiles
+    // inline (no view type): its own fields are plain `set_<name>_<..>`
+    // methods on the parent, and any of them (or `enable_<name>`) makes
+    // the container present, ensuring every enclosing `optional` ancestor
+    // first.
+    // -----------------------------------------------------------------
+
+    crate::txn_template! {
+        /// A whole `optional` object on `sfHookGrant` (sorts after
+        /// `sfAccount`): entirely present or entirely absent. Two inner
+        /// fields (`amount`, `authorize`) let a test show that setting
+        /// one doesn't disturb the other's own baked default.
+        struct OptionalObjectFixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            hook_grant: optional sfHookGrant {
+                amount: native_amount(sfAmount) = 0,
+                authorize: account_id(sfAuthorize),
+            },
+            emit_details: emit_details,
+        }
+    }
+
+    crate::txn_template! {
+        /// Plain (always-present) twin of `OptionalObjectFixture`'s
+        /// `hook_grant`, for a `bytes()`-equality check once it's made
+        /// present.
+        struct PlainObjectTwin {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            hook_grant: object(sfHookGrant) {
+                amount: native_amount(sfAmount) = 0,
+                authorize: account_id(sfAuthorize),
+            },
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn optional_object_defaults_absent_setter_makes_present_without_resetting_sibling() {
+        let mut tpl = OptionalObjectFixture::new();
+        assert!(!tpl.is_hook_grant_present());
+
+        tpl.set_hook_grant_amount(5).expect("5 drops is in range");
+        assert!(tpl.is_hook_grant_present());
+        // A second setter on the same (now-present) container doesn't
+        // reset the field the first setter just wrote.
+        let authorize = AccountId([7u8; ACC_ID_LEN]);
+        tpl.set_hook_grant_authorize(&authorize);
+        assert!(tpl.is_hook_grant_present());
+
+        let mut plain = PlainObjectTwin::new();
+        plain.set_hook_grant_amount(5).expect("5 drops is in range");
+        plain.set_hook_grant_authorize(&authorize);
+        assert_eq!(tpl.bytes(), plain.bytes());
+
+        tpl.clear_hook_grant();
+        assert!(!tpl.is_hook_grant_present());
+
+        // `enable_hook_grant()` alone (no inner setter) makes it present
+        // at its baked default.
+        tpl.enable_hook_grant();
+        assert!(tpl.is_hook_grant_present());
+        // A no-op the second time (already present).
+        tpl.enable_hook_grant();
+        assert!(tpl.is_hook_grant_present());
+
+        // Exercise every remaining setter too (dead-code hygiene).
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+        plain.set_sequence(0);
+        plain.set_first_ledger_sequence(0);
+        plain.set_last_ledger_sequence(0);
+        plain.set_fee(0).expect("0 drops is in range");
+        plain.set_account(&AccountId::default());
+        let _ = plain.emit_details_region();
+        assert_eq!(
+            plain
+                .prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// A plain (always-present) named array (`sfHookGrants`) whose
+        /// one named element (`grant`) is itself a whole `optional`
+        /// object -- the array-element form of the same mechanism.
+        struct OptionalArrayFixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            grants: sfHookGrants [
+                grant: optional sfHookGrant {
+                    amount: native_amount(sfAmount) = 0,
+                },
+            ],
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn optional_array_element_defaults_absent_setter_makes_present() {
+        let mut tpl = OptionalArrayFixture::new();
+        assert!(!tpl.is_grants_grant_present());
+
+        tpl.set_grants_grant_amount(9).expect("9 drops is in range");
+        assert!(tpl.is_grants_grant_present());
+
+        tpl.clear_grants_grant();
+        assert!(!tpl.is_grants_grant_present());
+
+        tpl.enable_grants_grant();
+        assert!(tpl.is_grants_grant_present());
+
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// A whole `optional` object (`sfSignerEntry`) nested *inside*
+        /// another whole `optional` object (`sfHookGrant`): setting the
+        /// innermost field must also materialize the outer container --
+        /// `mode`'s ensure-list runs outermost first.
+        struct NestedOptionalFixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            outer: optional sfHookGrant {
+                inner: optional sfSignerEntry {
+                    amount: native_amount(sfAmount) = 0,
+                },
+            },
+            emit_details: emit_details,
+        }
+    }
+
+    crate::txn_template! {
+        /// Plain (always-present) twin of `NestedOptionalFixture`'s
+        /// nested `outer.inner` -- same fields, same order -- for a
+        /// `bytes()`-equality check once both are present: catches a
+        /// wrong slot length, trim offset, or missing end marker that
+        /// presence-only assertions can't.
+        struct PlainNestedTwin {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            outer: object(sfHookGrant) {
+                inner: object(sfSignerEntry) {
+                    amount: native_amount(sfAmount) = 0,
+                },
+            },
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn nested_optional_setter_materializes_every_ancestor_outermost_first() {
+        let mut tpl = NestedOptionalFixture::new();
+        assert!(!tpl.is_outer_present());
+        assert!(!tpl.is_outer_inner_present());
+
+        tpl.set_outer_inner_amount(3).expect("3 drops is in range");
+        assert!(tpl.is_outer_present());
+        assert!(tpl.is_outer_inner_present());
+
+        let mut plain = PlainNestedTwin::new();
+        plain
+            .set_outer_inner_amount(3)
+            .expect("3 drops is in range");
+        assert_eq!(tpl.bytes(), plain.bytes());
+
+        tpl.clear_outer_inner();
+        assert!(tpl.is_outer_present());
+        assert!(!tpl.is_outer_inner_present());
+
+        tpl.clear_outer();
+        assert!(!tpl.is_outer_present());
+        assert!(!tpl.is_outer_inner_present());
+
+        // `enable_outer()` alone materializes just the outer container;
+        // `enable_outer_inner()` then also ensures it, on top of its own.
+        tpl.enable_outer();
+        assert!(tpl.is_outer_present());
+        assert!(!tpl.is_outer_inner_present());
+        tpl.clear_outer();
+
+        tpl.enable_outer_inner();
+        assert!(tpl.is_outer_present());
+        assert!(tpl.is_outer_inner_present());
+
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+
+        // Exercise every remaining setter too (dead-code hygiene).
+        plain.set_sequence(0);
+        plain.set_first_ledger_sequence(0);
+        plain.set_last_ledger_sequence(0);
+        plain.set_fee(0).expect("0 drops is in range");
+        plain.set_account(&AccountId::default());
+        let _ = plain.emit_details_region();
+        assert_eq!(
+            plain
+                .prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// `optional array(sfX) [ .. ]` (explicit form): a whole nested
+        /// array that is entirely present or entirely absent, holding one
+        /// named `optional` element -- exercises the explicit-container
+        /// spelling alongside `OptionalArrayFixture`'s bare-`sfX` one.
+        struct OptionalArrayContainerFixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            grants: optional array(sfHookGrants) [
+                grant: optional object(sfHookGrant) {
+                    amount: native_amount(sfAmount) = 0,
+                },
+            ],
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn optional_array_container_defaults_absent_and_round_trips() {
+        let mut tpl = OptionalArrayContainerFixture::new();
+        assert!(!tpl.is_grants_present());
+        assert!(!tpl.is_grants_grant_present());
+
+        tpl.set_grants_grant_amount(4).expect("4 drops is in range");
+        assert!(tpl.is_grants_present());
+        assert!(tpl.is_grants_grant_present());
+
+        tpl.clear_grants();
+        assert!(!tpl.is_grants_present());
+        assert!(!tpl.is_grants_grant_present());
+
+        tpl.enable_grants();
+        assert!(tpl.is_grants_present());
+        assert!(!tpl.is_grants_grant_present());
+
+        tpl.enable_grants_grant();
+        assert!(tpl.is_grants_grant_present());
+        tpl.clear_grants_grant();
+        assert!(!tpl.is_grants_grant_present());
+        assert!(tpl.is_grants_present());
+
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    // -----------------------------------------------------------------
     // Inferred kinds (`field: sfXxx` / `field: sfXxx = default` /
     // `name: sfXxx { .. }` / `name: sfXxx [ .. ]`): each fixture below is
     // an inferred-form twin of an explicit-form fixture above, asserting
@@ -5418,65 +10007,74 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------
-    // `encode_iou_amount_value_const`: hand-derived reference vectors
-    // (rshooks-testenv is not a dev-dependency of this crate, so these are
-    // verified by hand against the XFL/`STAmount` bit-layout writeup in
-    // `docs/TXN_TEMPLATE_FIELDS_DESIGN.md` §2.2, not against a second
-    // encoder).
-    // -----------------------------------------------------------------
-
-    #[test]
-    fn encode_iou_amount_value_const_zero() {
-        assert_eq!(
-            codec::encode_iou_amount_value_const(XFL::from_raw_bits(0)),
-            [0x80, 0, 0, 0, 0, 0, 0, 0]
-        );
+    crate::txn_template! {
+        /// Homogeneous array of `optional object(sfY) { .. }` elements:
+        /// the array itself is always present, but each element is
+        /// individually present-or-absent.
+        struct OptionalHomogeneousElementFixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            grants: array(sfHookGrants) [
+                OptGrant: optional object(sfHookGrant) {
+                    amount: native_amount(sfAmount) = 0,
+                }; 2
+            ],
+            emit_details: emit_details,
+        }
     }
 
     #[test]
-    fn encode_iou_amount_value_const_one() {
-        // XFL!(1): mantissa 1_000_000_000_000_000, exponent -15 -> biased
-        // 82; sign bit (bit 62) set for positive. Raw bits
-        // 0x5483_8D7E_A4C6_8000; OR bit 63 -> 0xD483_8D7E_A4C6_8000.
-        assert_eq!(
-            codec::encode_iou_amount_value_const(XFL::from_raw_bits(6_089_866_696_204_910_592)),
-            [0xD4, 0x83, 0x8D, 0x7E, 0xA4, 0xC6, 0x80, 0x00]
-        );
-    }
+    fn optional_homogeneous_element_defaults_absent_and_round_trips() {
+        let mut tpl = OptionalHomogeneousElementFixture::new();
+        let off = 53usize;
+        // HookGrants (15,20): 2-byte header + 2 * Grant::LEN (12) + 0xF1
+        // = 2 + 24 + 1 = 27. The array itself is always present; both
+        // elements start absent (NOP-filled).
+        assert_eq!(OptGrant::LEN, 12);
+        assert_eq!(&tpl.bytes()[off..off + 2], &[0xF0, 0x14]);
+        assert_eq!(&tpl.bytes()[off + 2..off + 26], &[codec::NOP; 24]);
+        assert_eq!(tpl.bytes()[off + 26], codec::ARRAY_END_MARKER);
 
-    #[test]
-    fn encode_iou_amount_value_const_negative_one() {
-        // XFL!(-1): identical mantissa/exponent bits as XFL!(1), sign bit
-        // (bit 62) clear. Raw bits 0x1483_8D7E_A4C6_8000; OR bit 63 ->
-        // 0x9483_8D7E_A4C6_8000.
+        {
+            let mut g0 = tpl.grants(0).expect("index 0 is in range");
+            assert!(!g0.is_present());
+            assert_eq!(g0.bytes(), &[codec::NOP; 12][..]);
+            g0.enable();
+            assert!(g0.is_present());
+            g0.set_amount(3).expect("3 drops is in range");
+        }
+        assert_eq!(&tpl.bytes()[off + 2..off + 5], &[0xE0, 0x18, 0x61]);
         assert_eq!(
-            codec::encode_iou_amount_value_const(XFL::from_raw_bits(1_478_180_677_777_522_688)),
-            [0x94, 0x83, 0x8D, 0x7E, 0xA4, 0xC6, 0x80, 0x00]
+            &tpl.bytes()[off + 5..off + 13],
+            &codec::encode_native_amount_const(3)
         );
-    }
+        assert_eq!(tpl.bytes()[off + 13], codec::OBJECT_END_MARKER);
+        // The second element is untouched.
+        assert_eq!(&tpl.bytes()[off + 14..off + 26], &[codec::NOP; 12]);
 
-    #[test]
-    fn encode_iou_amount_value_const_minimum_exponent() {
-        // The canonical minimum unbiased exponent, -96 (stored field 1: -96
-        // + 97), minimum mantissa 1_000_000_000_000_000, positive (sign bit
-        // 62 set). Raw bits: (1 << 62) | (1 << 54) | 1_000_000_000_000_000
-        // = 0x4043_8D7E_A4C6_8000; OR bit 63 -> 0xC043_8D7E_A4C6_8000.
-        assert_eq!(
-            codec::encode_iou_amount_value_const(XFL::from_raw_bits(4_630_700_416_936_869_888)),
-            [0xC0, 0x43, 0x8D, 0x7E, 0xA4, 0xC6, 0x80, 0x00]
-        );
-    }
+        assert!(tpl.grants(2).is_none());
 
-    #[test]
-    fn encode_iou_amount_value_const_maximum_exponent() {
-        // The canonical maximum unbiased exponent, 80 (stored field 177: 80
-        // + 97), minimum mantissa 1_000_000_000_000_000, positive. Raw
-        // bits: (1 << 62) | (177 << 54) | 1_000_000_000_000_000 =
-        // 0x6C43_8D7E_A4C6_8000; OR bit 63 -> 0xEC43_8D7E_A4C6_8000.
+        {
+            let mut g0 = tpl.grants(0).expect("index 0 is in range");
+            g0.clear();
+        }
+        assert_eq!(&tpl.bytes()[off + 2..off + 26], &[codec::NOP; 24]);
+
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
         assert_eq!(
-            codec::encode_iou_amount_value_const(XFL::from_raw_bits(7_801_234_554_605_699_072)),
-            [0xEC, 0x43, 0x8D, 0x7E, 0xA4, 0xC6, 0x80, 0x00]
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
         );
     }
 }

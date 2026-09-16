@@ -881,8 +881,19 @@ things:
    named, independently shaped elements, or `array(sfXxx) [ Elem:
    object(sfY) { .. } ; N ]` for a nested `STArray` of `N` identically
    shaped elements reached by runtime index, `emit_details`, plus the
-   leading `transaction_type = ttXXX`); the macro computes cumulative
-   offsets and
+   leading `transaction_type = ttXXX`); a present-or-absent field of any
+   fixed-width kind (`optional <kind>(sfXxx)`), a runtime-chosen
+   native-or-issued `Amount` slot (`any_amount(sfXxx)`, or `optional
+   any_amount(sfXxx)`), a runtime-length `VL` blob within a compile-time
+   `MAX` (`vl(sfXxx, MIN, MAX)`, or `optional vl(..)`), a whole-container
+   present-or-absent `object`/`array` with no view type of its own
+   (`optional object(sfXxx) { .. }`/`optional array(sfXxx) [ .. ]`), and a
+   homogeneous array whose per-element
+   *fields* are `optional` while every element itself stays present
+   (`array(sfXxx) [ Elem: object(sfY) { field: optional .. } ; N ]`) —
+   all NOP-padded (`docs/NOP_PADDING_DESIGN.md`) so absence still costs a
+   compile-time-fixed byte offset, never a runtime-shaped one; the macro
+   computes cumulative offsets and
    total length at compile time, bakes the field headers into a
    `const fn new()` template (⇒ data segment via `HookStatic`), and
    generates typed `set_<field>` setters plus an `emit_details_region()`
@@ -999,6 +1010,16 @@ The base arm then emits const-evaluated checks over the accumulated table
   must have the serialized type (`code >> 16`) its kind expects — this is
   the per-field check `2.` above already flagged, applied uniformly across
   the entire table, nested rows included.
+- **NOP budget**: for every container (the top level, each named
+  `object`/`array`, each homogeneous array, each `optional` view), the
+  worst-case `NOP` count over its direct `optional`/`any_amount`/`vl`
+  children — "everything optional absent at once, every `vl` at `MIN`,
+  every `any_amount` native", the state the host may actually be asked to
+  parse — must be `<= codec::MAX_NOPS_PER_CONTAINER` (63), the same limit
+  xahaud's own `STObject`/`STArray` NOP counter enforces
+  (`docs/NOP_PADDING_DESIGN.md` §1/§3.1/§3.2). An `optional`/`vl`/
+  `any_amount` field whose `sfXxx` code is one of the six required-field
+  codes above is a separate compile error, independent of this budget.
 
 Because detection is by *value*, it is robust to how the constant is
 spelled (qualified paths, aliases). `prepare_for_emit(&mut self) ->

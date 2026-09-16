@@ -11,6 +11,15 @@ transaction supplies hook parameters for it — and emits it via
 `StoWriter::prepare_for_emit()`/`Prepared::emit()`, the dynamic
 counterpart to `txn_template!`'s own `prepare_for_emit()` lifecycle.
 
+`examples/22_txn-template-optional` covers the *fixed-shape* alternative
+to a conditional entry like this: `txn_template!`'s NOP-padded `optional`
+kinds (`docs/NOP_PADDING_DESIGN.md`) let a field, or a whole nested
+container, be present-or-absent while keeping every other field's byte
+offset compile-time-fixed, with no `StoWriter` needed — the tradeoff is
+the 63-NOP-per-container budget that mechanism is bounded by, which a
+genuinely open-ended runtime element count (this page's own subject)
+still exceeds.
+
 ## Code walkthrough
 
 ```rust

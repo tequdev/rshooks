@@ -101,7 +101,7 @@ pub(crate) fn sto_validate(sto: &[u8]) -> i64 {
     if sto.len() < 2 {
         return TOO_SMALL;
     }
-    match emit_walk::walk_top_level_fields(sto) {
+    match emit_walk::walk_top_level_fields(sto, emit_walk::NopMode::Strict) {
         Ok(_) => 1,
         Err(()) => 0,
     }
@@ -112,7 +112,7 @@ pub(crate) fn sto_subfield(sto: &[u8], field_id: u32) -> i64 {
     if sto.len() < 2 {
         return TOO_SMALL;
     }
-    let fields = match emit_walk::walk_top_level_fields(sto) {
+    let fields = match emit_walk::walk_top_level_fields(sto, emit_walk::NopMode::Strict) {
         Ok(f) => f,
         Err(()) => return PARSE_ERROR,
     };
@@ -153,7 +153,7 @@ pub(crate) fn sto_subarray(array: &[u8], index: u32) -> i64 {
     let Some(body) = array.get(base..) else {
         return PARSE_ERROR;
     };
-    let elements = match emit_walk::walk_array_elements(body) {
+    let elements = match emit_walk::walk_array_elements(body, emit_walk::NopMode::Strict) {
         Ok(e) => e,
         Err(()) => return PARSE_ERROR,
     };
@@ -182,7 +182,8 @@ pub(crate) fn sto_emplace(source: &[u8], field: &[u8], field_id: u32) -> Result<
         // `fixHookAPI20251128`'s field_id/injected-header cross-check:
         // `field` must parse as exactly one fully-formed top-level field
         // whose header code matches `field_id`.
-        let injected = emit_walk::walk_top_level_fields(field).map_err(|()| PARSE_ERROR)?;
+        let injected = emit_walk::walk_top_level_fields(field, emit_walk::NopMode::Strict)
+            .map_err(|()| PARSE_ERROR)?;
         let [only] = injected.as_slice() else {
             return Err(PARSE_ERROR);
         };
@@ -191,7 +192,8 @@ pub(crate) fn sto_emplace(source: &[u8], field: &[u8], field_id: u32) -> Result<
         }
     }
 
-    let fields = emit_walk::walk_top_level_fields(source).map_err(|()| PARSE_ERROR)?;
+    let fields = emit_walk::walk_top_level_fields(source, emit_walk::NopMode::Strict)
+        .map_err(|()| PARSE_ERROR)?;
     let target = u64::from(field_id);
     let mut inject_start = source.len();
     let mut inject_end = source.len();
@@ -303,6 +305,20 @@ mod tests {
         assert_eq!(sto_validate(&nested_object_chain(3)), 1);
         assert_eq!(sto_validate(&nested_object_chain(10)), 1);
         assert_eq!(sto_validate(&[0xE2; 11]), 0);
+    }
+
+    #[test]
+    fn sto_validate_rejects_a_nop_padded_sto() {
+        // `HookAPI::get_stobject_length` (the real parser behind every
+        // `sto_*` function) has no NOP handling — see
+        // `crate::emit_walk::NopMode::Strict`'s doc comment. A `0x99` byte
+        // between two otherwise well-formed fields must still fail here,
+        // exactly as `sto_validate` on the real host would report the sto
+        // invalid.
+        let mut padded = sf_flags(1);
+        padded.push(0x99); // NOP
+        padded.extend_from_slice(&sf_sequence(5));
+        assert_eq!(sto_validate(&padded), 0);
     }
 
     // -- sto_subfield --
