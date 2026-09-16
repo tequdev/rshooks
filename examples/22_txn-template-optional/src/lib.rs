@@ -30,7 +30,7 @@ txn_template! {
         destination: sfDestination,
         amounts: sfAmounts [
             first: sfAmountEntry { amount: sfAmount = AnyAmount() },
-            second: optional Second: sfAmountEntry { amount: sfAmount = AnyAmount() },
+            second: optional sfAmountEntry { amount: sfAmount = AnyAmount() },
         ],
         emit_details: emit_details,
     }
@@ -159,7 +159,6 @@ impl TxnTemplateOptional {
                     RemitError::ZeroAmount
                 );
             }
-            let mut second = txn.enable_amounts_second();
             match &issuer {
                 Some(iss) => {
                     let Ok(xfl) = XFL::new(0, amt2 as i64) else {
@@ -168,10 +167,10 @@ impl TxnTemplateOptional {
                             RemitError::AmountFailed
                         );
                     };
-                    second.set_amount_issued(xfl, &USD, iss);
+                    txn.set_amounts_second_amount_issued(xfl, &USD, iss);
                 }
                 None => {
-                    if second.set_amount_native(amt2).is_err() {
+                    if txn.set_amounts_second_amount_native(amt2).is_err() {
                         rollback!(
                             b"txn-template-optional: AMT2 native amount out of range",
                             RemitError::AmountFailed
@@ -251,9 +250,11 @@ mod tests {
 
     /// `amounts.first` (`amount: sfAmount = AnyAmount()`, always present)
     /// leaves 40 trailing `NOP` bytes after the 8-byte value in its native
-    /// form; `amounts.second` (`optional Second: sfAmountEntry { .. }`)
-    /// defaults absent (the whole element, header included, is `NOP`s)
-    /// and, once enabled, carries the same native-form shape at the same
+    /// form; `amounts.second` (`optional sfAmountEntry { .. }`, no view
+    /// type -- its own `amount` field is a plain `set_amounts_second_
+    /// amount_native`/`_issued` pair on `Remit` itself) defaults absent
+    /// (the whole element, header included, is `NOP`s) and, once its
+    /// setter is called, carries the same native-form shape at the same
     /// offset; `clear_amounts_second()` restores the `NOP`s.
     #[test]
     fn first_leaves_nop_tail_second_defaults_absent_and_enables() {
@@ -295,8 +296,8 @@ mod tests {
             &[codec::NOP; codec::ANY_AMOUNT_NATIVE_NOPS]
         );
 
-        let mut second = txn.enable_amounts_second();
-        second.set_amount_native(9).expect("9 drops is in range");
+        txn.set_amounts_second_amount_native(9)
+            .expect("9 drops is in range");
         let bytes = txn.bytes();
         assert_eq!(
             &bytes[second_start..second_start + entry_hdr_len],

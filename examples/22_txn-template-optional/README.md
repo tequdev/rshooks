@@ -40,7 +40,7 @@ txn_template! {
         destination: sfDestination,
         amounts: sfAmounts [
             first: sfAmountEntry { amount: sfAmount = AnyAmount() },
-            second: optional Second: sfAmountEntry { amount: sfAmount = AnyAmount() },
+            second: optional sfAmountEntry { amount: sfAmount = AnyAmount() },
         ],
         emit_details: emit_details,
     }
@@ -53,31 +53,31 @@ txn_template! {
   (the slot's own byte count, well under the top level's 63-`NOP`
   budget).
 - `amounts: sfAmounts [ first: sfAmountEntry { .. }, second: optional
-  Second: sfAmountEntry { .. } ]` — a *named* array (not a homogeneous,
+  sfAmountEntry { .. } ]` — a *named* array (not a homogeneous,
   indexed one): `first`'s `amount: sfAmount = AnyAmount()` is always
   present, flattened as `set_amounts_first_amount_native(u64) ->
   Result<()>`/`set_amounts_first_amount_issued(xfl, &currency, &issuer)`;
   `remit` always writes a real, constructible amount into it (`AMT1`, or
   `1` drop by default) rather than leaving it at `any_amount`'s raw
   issued-zero encoding default — a required named element, unlike an
-  `optional` one, has no "absent" state to fall back to. `second` is the
-  inferred spelling of `optional Second: object(sfAmountEntry) { .. }`
-  as a named array element: `enable_amounts_second() -> Second<'_>`,
-  `amounts_second() -> Option<Second<'_>>` (`None` only if absent),
-  `clear_amounts_second()`; `remit` enables it (and writes `AMT2` into
-  it, via the same `set_amount_native`/`set_amount_issued` pair `first`
-  uses, on the returned view) only when `AMT2` is supplied. A
-  homogeneous array can't express "one required, one that may or may
-  not be there" (its elements share one presence rule), and two fully
-  `optional` `sfAmountEntry` elements (each `header(2) +
-  any_amount(sfAmount)`'s 49-byte slot + terminator(1) = 52 bytes;
-  `2 * 52 = 104 > 63`) wouldn't fit the array's own budget anyway — one
-  required (`0` charge, always writes) plus one `optional` (`52 <= 63`)
-  does.
+  `optional` one, has no "absent" state to fall back to. `second` is a
+  whole `optional` container with no view type: its own `amount` field is
+  a plain `set_amounts_second_amount_native(u64) ->
+  Result<()>`/`set_amounts_second_amount_issued(xfl, &currency, &issuer)`
+  pair directly on `Remit`, exactly like `first`'s — calling either one
+  makes `second` present as a side effect (`remit` calls one only when
+  `AMT2` is supplied); `clear_amounts_second()`/`is_amounts_second_present()`
+  round out the trio. A homogeneous array can't express "one required,
+  one that may or may not be there" (its elements share one presence
+  rule), and two fully `optional` `sfAmountEntry` elements (each
+  `header(2) + any_amount(sfAmount)`'s 49-byte slot + terminator(1) = 52
+  bytes; `2 * 52 = 104 > 63`) wouldn't fit the array's own budget anyway —
+  one required (`0` charge, always writes) plus one `optional`
+  (`52 <= 63`) does.
 
 Container budget: `amounts` itself charges the top level nothing (arrays
-are always-present containers); `second`'s own charge (its whole
-`Elem::LEN`, `52`) lands against `amounts`'s own 63-NOP budget instead,
+are always-present containers); `second`'s own charge (its whole reserved
+slot, `52` bytes) lands against `amounts`'s own 63-NOP budget instead,
 where it fits comfortably alone.
 
 ## Build

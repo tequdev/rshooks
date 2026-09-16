@@ -373,46 +373,50 @@ need no `StoWriter`:
 - `vl(sfX, MIN, MAX)` / `optional vl(sfX, MIN, MAX)` — a `VL` blob whose
   length is chosen at runtime within `[MIN, MAX]`, in a slot sized for
   `MAX`.
-- `optional <View>: object(sfX) { .. }` / `optional <View>: array(sfX) [
-  .. ]` — a whole nested container, present or absent.
+- `optional object(sfX) { .. }` / `optional array(sfX) [ .. ]` — a whole
+  nested container, present or absent, with no view type: its own fields
+  are plain `set_x_<field>` methods on the parent, and any of them makes
+  the container present.
 - `array(sfX) [ Elem: optional object(sfY) { .. } ; N ]` — a homogeneous,
   indexed array (see above) whose elements are individually
   present-or-absent, the array itself always `N` slots long.
 
 Every kind above that can infer from `sfX`'s own serialized type (the same
 inference the required kinds above use for a bare `field: sfX`) has a
-bare-`sfX` `optional` twin too: `optional sfX`, `optional <View>: sfX {
-.. }`/`[ .. ]`, and a homogeneous array's `Elem: optional sfY { .. }` —
-same budget, same generated API, only the spelling differs; a kind that
-cannot infer (`Amount`, `VL`, `Issue`) still needs its explicit `optional`
-form.
+bare-`sfX` `optional` twin too: `optional sfX`, `optional sfX { .. }`/
+`[ .. ]`, and a homogeneous array's `Elem: optional sfY { .. }` — same
+budget, same generated API, only the spelling differs; a kind that cannot
+infer (`Amount`, `VL`, `Issue`) still needs its explicit `optional` form.
 
 Every container — the top level, each named `object`/`array`, each
-homogeneous array, each `optional` view — has its own **63-`NOP` budget**:
-the worst case over its direct optional/variable children (every optional
-field absent, every `vl` at `MIN`, every `any_amount` native) must fit,
-checked at compile time with a message naming the container and the
-budget. This is why a hook author sometimes has to nest a field into its
-own small container, or choose a named array over a homogeneous one,
-rather than declare fields alongside each other freely:
-`examples/22_txn-template-optional`'s `Remit::amounts` is a *named*
-array with one required and one `optional` element (`first:
+homogeneous array, each named `optional object`/`optional array` — has its
+own **63-`NOP` budget**: the worst case over its direct optional/variable
+children (every optional field absent, every `vl` at `MIN`, every
+`any_amount` native) must fit, checked at compile time with a message
+naming the container and the budget. This is why a hook author sometimes
+has to nest a field into its own small container, or choose a named array
+over a homogeneous one, rather than declare fields alongside each other
+freely: `examples/22_txn-template-optional`'s `Remit::amounts` is a
+*named* array with one required and one `optional` element (`first:
 sfAmountEntry { amount: sfAmount = AnyAmount() }`, `second: optional
-Second: sfAmountEntry { .. }`) — it can hold what two fully `optional`
-52-byte `sfAmountEntry` elements (`2 * 52 = 104 > 63`) could not, since a
-required element charges its container nothing (`Elem::LEN`, not
-`Elem::LEN` reserved-but-optional) while only `second`'s own 52 bytes
-count against the array's budget.
+sfAmountEntry { .. }`) — it can hold what two fully `optional` 52-byte
+`sfAmountEntry` elements (`2 * 52 = 104 > 63`) could not, since a required
+element charges its container nothing (`Elem::LEN`, not `Elem::LEN`
+reserved-but-optional) while only `second`'s own 52 bytes count against
+the array's budget.
 
 The generated API mirrors `fixed_vl`/homogeneous-element setters: `set_x`
 writes the field (making it present), `clear_x` restores the `NOP`-filled
-default; a whole-container `optional` view gets `enable_x() -> View<'_>`
-(restores the view's own baked default and returns it), `x() ->
-Option<View<'_>>` (`None` when the slot is `NOP`s), and `clear_x()`; a
-homogeneous array whose element is itself `optional` gets the same trio
-(`enable()`/`clear()`) on the element view returned by its
-runtime-indexed accessor (`Elem::enable()`/`Elem::clear()` — see
-`crates/rshooks/src/txn.rs`'s `mod tests` and
+default; a named `optional object`/`optional array` gets no view type at
+all — its own fields flatten onto the parent like a plain nested
+container's, and any one of them (or a generated `enable_x(&mut self)`)
+first materializes it and every enclosing `optional` ancestor, if absent,
+before writing; `clear_x(&mut self)`/`is_x_present(&self) -> bool` round
+it out. A homogeneous array whose element is itself `optional` keeps its
+element view type (the array is indexed at runtime), and that view's own
+setters gained the same auto-presenting behavior, alongside its existing
+`enable()`/`clear()`/`is_present()` (`Elem::enable()`/`Elem::clear()` —
+see `crates/rshooks/src/txn.rs`'s `mod tests` and
 `crates/rshooks/tests/ui/pass/txn_template_optional.rs` for a worked
 example; `examples/22_txn-template-optional` uses the *named*-array form
 instead). From `22_txn-template-optional`:
@@ -422,8 +426,8 @@ if let Ok(Some(tag)) = self.hook_param.dest_tag.get() {
     txn.set_destination_tag(u32::from_be_bytes(tag));   // optional sfDestinationTag
 }
 if let Ok(Some(bytes)) = self.hook_param.amt2.get() {
-    let mut second = txn.enable_amounts_second();       // optional Second: sfAmountEntry { .. }
-    second.set_amount_native(u64::from_be_bytes(bytes))?;
+    // optional sfAmountEntry { .. } -- this setter makes `second` present.
+    txn.set_amounts_second_amount_native(u64::from_be_bytes(bytes))?;
 }
 ```
 

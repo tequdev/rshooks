@@ -886,8 +886,9 @@ things:
    native-or-issued `Amount` slot (`any_amount(sfXxx)`, or `optional
    any_amount(sfXxx)`), a runtime-length `VL` blob within a compile-time
    `MAX` (`vl(sfXxx, MIN, MAX)`, or `optional vl(..)`), a whole-container
-   present-or-absent `object`/`array` (`optional <View>: object(sfXxx) {
-   .. }`/`array [ .. ]`), and a homogeneous array whose per-element
+   present-or-absent `object`/`array` with no view type of its own
+   (`optional object(sfXxx) { .. }`/`optional array(sfXxx) [ .. ]`), and a
+   homogeneous array whose per-element
    *fields* are `optional` while every element itself stays present
    (`array(sfXxx) [ Elem: object(sfY) { field: optional .. } ; N ]`) —
    all NOP-padded (`docs/NOP_PADDING_DESIGN.md`) so absence still costs a

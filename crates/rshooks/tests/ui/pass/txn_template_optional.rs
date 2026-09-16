@@ -1,11 +1,16 @@
 //! Every `optional` scalar kind, `any_amount`/`optional any_amount`,
 //! `vl`/`optional vl`, whole-container `optional object`/`optional
-//! array` views, and a homogeneous array of `optional object` elements
-//! compile, and each generated setter/accessor is reachable and
-//! callable. Split across several nested `object`s -- each field's
-//! worst-case NOP charge (`docs/NOP_PADDING_DESIGN.md` §3.1) is checked
-//! against the 63-per-container budget independently per container, and
-//! no single container can hold every kind from this fixture at once.
+//! array` (both the explicit `optional object(sfX) { .. }`/`optional
+//! array(sfX) [ .. ]` spelling, on `opt_obj`/`opt_arr`, and the bare
+//! `optional sfX { .. }` spelling, on `second`), and a homogeneous array
+//! of `optional object` elements compile, and each generated setter/
+//! accessor is reachable and callable. A named `optional` container has
+//! no view type: its own fields are plain `set_<name>_<..>` methods on
+//! the parent, and any of them makes the container present. Split across
+//! several nested `object`s -- each field's worst-case NOP charge
+//! (`docs/NOP_PADDING_DESIGN.md` §3.1) is checked against the
+//! 63-per-container budget independently per container, and no single
+//! container can hold every kind from this fixture at once.
 
 use rshooks::prelude::*;
 use rshooks::txn_template;
@@ -76,8 +81,8 @@ txn_template! {
             a: vl(sfDomain, 2, 6),
         },
 
-        // Whole-container-optional `object` view (12), top level.
-        opt_obj: optional OptObjView: object(sfHookGrant) {
+        // Whole-container-optional `object` (12), top level.
+        opt_obj: optional object(sfHookGrant) {
             amount: native_amount(sfAmount) = 0,
         },
 
@@ -89,8 +94,8 @@ txn_template! {
             }; 2
         ],
 
-        // Whole-container-optional `array` view (15), top level.
-        opt_arr: optional OptArrView: array(sfAmounts) [
+        // Whole-container-optional `array` (15), top level.
+        opt_arr: optional array(sfAmounts) [
             entry: object(sfAmountEntry) {
                 amount: native_amount(sfAmount) = 0,
             },
@@ -118,7 +123,7 @@ txn_template! {
             first: sfAmountEntry {
                 amount: amount(sfAmount),
             },
-            second: optional Second: sfAmountEntry {
+            second: optional sfAmountEntry {
                 amount: amount(sfAmount),
             },
         ],
@@ -179,8 +184,9 @@ fn main() {
     txn.set_blobs_b(&[9]).expect("1 byte is within [1, 4]");
     txn.clear_blobs_b();
 
-    txn.enable_opt_obj().set_amount(1).expect("1 drop is in range");
-    let _ = txn.opt_obj();
+    txn.set_opt_obj_amount(1).expect("1 drop is in range");
+    let _ = txn.is_opt_obj_present();
+    txn.enable_opt_obj();
     txn.clear_opt_obj();
 
     let mut g0 = txn.opt_elems(0).expect("index 0 is in range");
@@ -189,9 +195,9 @@ fn main() {
     g0.clear();
     assert!(txn.opt_elems(2).is_none());
 
-    let mut arr = txn.enable_opt_arr();
-    arr.set_entry_amount(1).expect("1 drop is in range");
-    let _ = txn.opt_arr();
+    txn.set_opt_arr_entry_amount(1).expect("1 drop is in range");
+    let _ = txn.is_opt_arr_present();
+    txn.enable_opt_arr();
     txn.clear_opt_arr();
 
     let _ = &txn;
@@ -202,9 +208,9 @@ fn main() {
     let currency = CurrencyCode::from_iso(b"USD");
     let issuer = AccountId::default();
     amounts.set_amounts_first_amount(XFL!(0), &currency, &issuer);
-    let mut second = amounts.enable_amounts_second();
-    second.set_amount(XFL!(0), &currency, &issuer);
-    let _ = amounts.amounts_second();
+    amounts.set_amounts_second_amount(XFL!(0), &currency, &issuer);
+    let _ = amounts.is_amounts_second_present();
+    amounts.enable_amounts_second();
     amounts.clear_amounts_second();
     let _ = &amounts;
 }

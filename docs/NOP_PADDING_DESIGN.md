@@ -86,8 +86,8 @@ Non-goals:
   | <name>: vl(sfX, MAX)                                 // == vl(sfX, 0, MAX)
   | <name>: vl(sfX, MIN, MAX)
   | <name>: optional vl(sfX, MIN, MAX)
-  | <name>: optional <View>: object(sfX) { <field>* }    // whole object present-or-absent
-  | <name>: optional <View>: array(sfX) [ <element>* ]   // whole array present-or-absent
+  | <name>: optional object(sfX) { <field>* }            // whole object present-or-absent
+  | <name>: optional array(sfX) [ <element>* ]           // whole array present-or-absent
   | <name>: array(sfX) [ <Elem>: optional object(sfY) { <field>* } ; <N> ]  // per-element
 
   // inferred spellings (§3.3): kind taken from sfX's own serialized type
@@ -95,14 +95,14 @@ Non-goals:
   | <name>: optional sfX = AnyAmount()                   // == optional any_amount(sfX), no value
   | <name>: optional sfX = NativeAmount()                // == optional native_amount(sfX), no value
   | <name>: optional sfX = IouAmount()                   // == optional amount(sfX), no value
-  | <name>: optional <View>: sfX { <field>* }             // == optional <View>: object(sfX) { .. }
-  | <name>: optional <View>: sfX [ <element>* ]           // == optional <View>: array(sfX) [ .. ]
+  | <name>: optional sfX { <field>* }                     // == optional object(sfX) { .. }
+  | <name>: optional sfX [ <element>* ]                   // == optional array(sfX) [ .. ]
   | <name>: sfX [ <Elem>: optional sfY { <field>* } ; <N> ]  // == array(sfX) [ Elem: optional object(sfY) { .. } ; N ]
 
 <element> := <name>: object(sfX) { <field>* }
            | <name>: sfX { <field>* }                    // inferred: == object(sfX) { .. }
-           | <name>: optional <View>: object(sfX) { <field>* }
-           | <name>: optional <View>: sfX { <field>* }    // inferred: == optional <View>: object(sfX) { .. }
+           | <name>: optional object(sfX) { <field>* }
+           | <name>: optional sfX { <field>* }            // inferred: == optional object(sfX) { .. }
 
 <scalar_kind> := u8_field | u16_field | u32_field | u64_field | hash128 | hash160 | hash256
                | currency | native_amount | amount | native_issue | issue | account_id
@@ -125,10 +125,10 @@ sfX` covers every scalar kind `InferKind` already infers for the non-`optional` 
 at the matching explicit `optional` form (`optional native_amount`/`optional amount`/
 `any_amount`/`optional any_amount`, `optional empty_vl`/`optional fixed_vl`, `optional vl`,
 `optional native_issue`/`optional issue`) — except the three `Amount`-shaped kinds above,
-which infer from their own default-shape marker instead of erroring. `optional <View>: sfX
-{ .. }`/`[ .. ]` and a homogeneous array's `Elem: optional sfY { .. }` are pure token
-rewrites into the explicit `object`/`array` forms above — same budget, same generated API,
-only the spelling differs.
+which infer from their own default-shape marker instead of erroring. `optional sfX { .. }`/
+`[ .. ]` and a homogeneous array's `Elem: optional sfY { .. }` are pure token rewrites into
+the explicit `object`/`array` forms above — same budget, same generated API, only the
+spelling differs.
 
 ### 3.1 Kind table (additions)
 
@@ -139,8 +139,8 @@ only the spelling differs.
 | `optional any_amount(sfX)` | header + 48 | all NOPs | header + 48 | the two above, plus `clear_x()` |
 | `vl(sfX, MIN, MAX)` | header + `vl_length_prefix(MAX)` + MAX | header + prefix(MIN) + MIN zero bytes + NOPs | `slot(MAX).saturating_sub(slot(MIN))` where `slot(n) = prefix_len(n) + n` | `set_x(&[u8]) -> Result<()>` (length must be in `[MIN, MAX]`, else `HookError::InvalidArgument`) — call at most once per hook execution, see §3.1.1 |
 | `optional vl(sfX, MIN, MAX)` | as above | all NOPs | slot bytes | `set_x(&[u8]) -> Result<()>`, `clear_x()` — same once-per-execution rule |
-| `optional View: object(sfX) { .. }` | header + inner + `0xE1` | all NOPs | slot bytes | `enable_x() -> View<'_>` (restores `View::TEMPLATE`, returns the view), `x() -> Option<View<'_>>` (`None` when the slot's first byte is a NOP), `clear_x()` |
-| `optional View: array(sfX) [ .. ]` | header + elements + `0xF1` | all NOPs | slot bytes | same trio |
+| `optional object(sfX) { .. }` | header + inner + `0xE1` | all NOPs | slot bytes | inner setters, prefixed (any one makes it present, ensuring every enclosing `optional` ancestor first); `enable_x()`, `clear_x()`, `is_x_present() -> bool` |
+| `optional array(sfX) [ .. ]` | header + elements + `0xF1` | all NOPs | slot bytes | same |
 | `[Elem: optional object(sfY) { .. }; N]` | N × `Elem::LEN` | every element absent (all NOPs) | self-contained: `N * Elem::LEN <= 63` is asserted against **this array's own** budget (these NOPs sit in the array's own `STArray` field loop), charging the parent nothing | the runtime-indexed accessor is unchanged (`Option<Elem<'_>>`, `None` only for an out-of-range index — an in-range but absent element is `Some` of a view whose `is_present()` reads `false`); on the view: `Elem::enable(&mut self)`, `Elem::clear(&mut self)`, `Elem::is_present(&self) -> bool`, plus the inner setters |
 
 A scalar `optional` setter writes `header + value` in one go; its offset constant is the slot
@@ -193,14 +193,17 @@ declaring template name and the field's full `_`-joined path, unique per field w
 template since two fields sharing both would already be a duplicate method name, a plain Rust
 compile error — XORed with the field's own slot offset (`REGION_OFF & 0xFFFF`), giving each
 `vl` field a disambiguator that is distinct except by hash collision, including between two
-`vl` fields at the same offset in two different templates in one crate (a view's `prev`
-restarts at its own container header, so offsets alone collide across templates/views). The
+`vl` fields at the same offset in two different templates in one crate (a homogeneous
+array's element type has its own `prev`, restarting at its own container header, so offsets
+alone collide across templates/elements; a named `optional` container's own `prev` stays
+absolute, continuous with its parent, so this collision case doesn't arise for it). The
 hash is computed in a `const` binding, so it costs nothing at runtime.
 
 ### 3.2 Compile-time checks (all `E0080` `const _: () = assert!(..)` items, one per check)
 
 - **NOP budget**: for every container — the top level, each named `object`, each named
-  `array`, each homogeneous array, each `optional` view, each homogeneous element view — the
+  `array`, each homogeneous array, each named `optional object`/`optional array`, each
+  homogeneous element view — the
   sum of the worst-case NOP column above over its direct children is `<=
   codec::MAX_NOPS_PER_CONTAINER` (63). The message names the container and the budget.
   Worst case means "everything optional absent at once, every `vl` at `MIN`, every
@@ -237,29 +240,71 @@ array's own `STArray` field loop, not the parent's.
 
 Each `stack` frame gained a fifth element, the container's own field name (an `ident`):
 `[ [prefix] [order] [nops] name ctx ]`, populated by every arm that pushes a frame (including
-the `optional`/homogeneous-`optional`-element spawns' single dummy frame, which uses the
-spawned view/element type's own name, `$View`/`$Elem`) and read back by `@end_object`/
-`@end_array` to name the container in the budget-overflow message (`` `entry`'s
-optional/variable-length fields could together need more than 63 NOPs `` rather than a bare
-"this object's").
+the homogeneous-`optional`-element spawn's single dummy frame, which uses the spawned
+element type's own name, `$Elem`) and read back by `@end_object`/`@end_array` to name the
+container in the budget-overflow message (`` `entry`'s optional/variable-length fields could
+together need more than 63 NOPs `` rather than a bare "this object's"). A named `optional
+object(sfX) { .. }`/`array(sfX) [ .. ]` container's own push/pop frame carries four more
+elements — the parent's `buf`/`init` accumulators, the slot's own start offset, and the
+parent's `mode` — described below.
 
-An `optional` container is compiled the way a homogeneous element already is, but with its
-own macro `mode`, `elem_opt` (distinct from the existing `elem`): a sub-invocation emits the
-view type (`View::LEN`, `View::TEMPLATE`, inner setters, `enable()`, `clear()`,
-`is_present()`), and the parent bakes `[NOP; View::LEN]` and generates the
-`enable_`/accessor/`clear_` trio — the accessor (no `enable_` prefix) returns
-`Option<View<'_>>`, `None` when the slot's first byte is a NOP, so calling an inner setter
-through it can never write into an absent (NOP-filled) slot and corrupt it; `enable_x`
-remains unconditional (`View`'s underlying byte range is always in bounds — only whether it
-currently holds a real header or NOPs is in question). `elem_opt` is a genuinely separate
-`mode` value (not a flag folded into the existing `elem` base case) so the many
-already-existing `mode = elem` homogeneous-array element types (which have no need for
-`enable`/`clear`/`is_present`) keep their existing shape and dead-code baseline untouched.
-`mode = elem_opt` learns to start in `ctx = arr` (closing with `@end_array`) so an optional
-*array* view works the same way; a homogeneous array's own (always-`Option<Elem<'_>>`,
-bounds-checked) indexed accessor is unchanged — only its element view type moves to
-`elem_opt` when the element is `optional object(sfY) { .. }`, gaining `enable`/`clear`/
-`is_present` without changing the accessor's signature.
+**Named optional containers have no view type.** `optional object(sfX) { .. }`/`optional
+array(sfX) [ .. ]` compile inline exactly like the plain `object`/`array` arms (their own
+`$($setters)*`/`order`/`prefix`/`depth`/`stack` handling is byte-for-byte the same push/pop
+shape) — the difference is that the container's own header/inner-default writes accumulate
+into a *separate* `__slot` buffer instead of the parent's real one, so they can be
+materialized as a standalone `const` once the container closes:
+
+- **On entry** (the `optional object(sfX) { .. }`/`optional array(sfX) [ .. ]` arms), the
+  parent's `buf`/`init` and the entry `prev` (the slot's own start offset, `SLOT_OFF`) are
+  saved in the `stack` frame; the recursion into `$($inner)*` continues with `buf = [__slot]`,
+  `init = []`, `prev` unchanged (still absolute, not relative to `SLOT_OFF`) — every inner
+  `write_field_header`/`write_const_bytes` call is completely unchanged from the plain-
+  container arms, since they already take an absolute offset.
+- **On close** (`@end_opt_object`/`@end_opt_array`, the `optional` twins of `@end_object`/
+  `@end_array`), the container's own order/NOP-budget checks run exactly as they do for a
+  plain container, then a module-level `const [<__ $Name _ $($prefix)* $name _SLOT>]: [u8;
+  SLOT_LEN]` is emitted (`SLOT_LEN = SLOT_END - SLOT_OFF`, `SLOT_END` the `prev` after the
+  closing marker): its initializer builds a `[NOP; SLOT_END]` *temporary* at the container's
+  real, absolute offset — `let mut __slot = [NOP; SLOT_END]; <the container's own init>;` —
+  so every inner write above needed no relative-offset rewriting, then trims it down to just
+  `[SLOT_OFF..SLOT_END]` via `codec::copy_range::<SLOT_END, SLOT_LEN>(&__slot, SLOT_OFF)`
+  before returning — the *stored* const costs exactly `SLOT_LEN` bytes in the binary's data
+  segment, not `SLOT_END`. The parent's `buf`/`init` are then restored from the frame, with
+  one more statement appended to the restored `init`: `write_nops(&mut <parent buf>,
+  SLOT_OFF, SLOT_LEN)` — the slot's whole span defaults to absent — and `SLOT_LEN` is charged
+  to the parent's `nops`, same as `optional`'s old whole-view charge. `enable_x`/`clear_x`/
+  `is_x_present` are generated onto the parent's `setters` here (see below); no `Option`
+  accessor exists — there is nothing to return.
+
+**Any setter can make its container present.** `mode` (`tpl`/`elem`/`elem_opt` before this
+feature) becomes a bracket group carrying that same leading tag plus zero or more `(offset,
+slot_const)` pairs, one per enclosing named `optional` container, outermost first — appended
+by the `optional object`/`optional array` push arms above for the recursion into their own
+`$($inner)*`, and otherwise threaded completely unchanged through every other arm (already
+`mode = $mode:tt`, a single opaque `tt`, everywhere but the handful of spawn/base-case sites
+that need to read or extend it). Every generated *value*-writing setter (`set_x`/`set_x_
+native`/`set_x_issued`/etc., not `clear_x`, which is already correct regardless of an
+ancestor's presence) begins with `$crate::__txn_template_ensure!($mode, self.bytes);` — a new
+`#[doc(hidden)]` macro that, per `(offset, slot_const)` pair, copies `slot_const`'s bytes into
+`self.bytes` at that offset *only if* the slot is still absent (its first byte is a NOP) —
+checked outermost first, so a field two `optional` containers deep first materializes the
+outer one (still baking the inner one absent inside it, matching the inner's own compile-time
+default) before the inner pair's own check runs. A `mode` with no pairs (a template's own
+top-level fields, a homogeneous array's required element) makes the whole macro call expand
+to nothing, so a template with no `optional` ancestors anywhere is unaffected byte-for-byte.
+`enable_x` reuses the very same macro with *its own* `(offset, slot_const)` pair appended to
+the ancestor list — needed only when none of `x`'s own fields ever get set (e.g. every inner
+field is a fixed default); any of `x`'s own setters already does this as a side effect.
+
+**Homogeneous optional elements keep their view type** (the array is indexed at runtime, so
+each element still needs its own addressable, borrow-checked handle) — the spawned element
+type's own recursion gets `mode = [elem_opt (0usize, $Elem::TEMPLATE)]` instead of a bare
+`mode = [elem_opt]`, so the element's *own* setters gained the same auto-presenting `ensure!`
+prelude (using the element's own `TEMPLATE` as its own "ancestor" slot, `enable`/`clear`/
+`is_present` are otherwise unchanged on the view). `elem_opt` stays a separate `mode` tag
+(not a flag folded into `elem`) so the many `mode = [elem]` element types keep their existing
+shape and dead-code baseline untouched.
 
 New `FieldEntry` kind codes (`KIND_OPTIONAL_*`, `KIND_ANY_AMOUNT`, `KIND_VL`) keep
 `field_kind_ok` exact; `field_present`/`find_field` are unchanged (presence in the table is
@@ -285,12 +330,13 @@ about the declaration, not the runtime state, and both already only match a dept
 - `pub const fn fnv1a_16(bytes: &[u8]) -> u16` — the `vl` guard-id disambiguator's hash
   (§3.1.1).
 
-Two small internal helper macros (not part of `codec`, `#[doc(hidden)]` `#[macro_export]`
+Three small internal helper macros (not part of `codec`, `#[doc(hidden)]` `#[macro_export]`
 like `__txn_template_step!` itself) factor out logic shared by several arms:
 `__txn_template_check_nop_budget!(label_expr, $($nops:tt)*)` (the sum-and-assert against
-`MAX_NOPS_PER_CONTAINER`, used at `@end_object`/`@end_array`/the top-level base case) and
+`MAX_NOPS_PER_CONTAINER`, used at `@end_object`/`@end_array`/the top-level base case),
 `__txn_template_check_not_plumbing!($sfcode, $field, $kindword_literal, $depth_expr)` (§3.2's
-depth-0-only plumbing check).
+depth-0-only plumbing check), and `__txn_template_ensure!($mode, $bytes_expr)` (the
+ancestor-presence prelude described above).
 
 ## 4. `rshooks-testenv`
 
@@ -309,8 +355,10 @@ decoding, `otxn::from_emitted`, `emitted()` inspection), **strict** (today's beh
   inferred style (§3.3) — explicit only where a kind cannot infer (`any_amount`, via the `=
   AnyAmount()` default-shape marker).
   `amounts` is a named array with one required and one `optional` element (`first:
-  sfAmountEntry { amount: sfAmount = AnyAmount() }`, `second: optional Second: sfAmountEntry
-  { .. }`) — the motivating case for a named array over a homogeneous one: one required entry
+  sfAmountEntry { amount: sfAmount = AnyAmount() }`, `second: optional sfAmountEntry
+  { .. }`, its own `amount` field a plain `set_amounts_second_amount_native`/`_issued` pair
+  directly on `Remit`) — the motivating case for a named array over a homogeneous one: one
+  required entry
   (`remit` always writes a real, constructible amount into it — never left at `any_amount`'s
   raw issued-zero encoding default) and one that may or may not be there; two fully
   `optional` 52-byte `sfAmountEntry` elements would not fit one array's 63-NOP budget, but one
@@ -324,8 +372,8 @@ decoding, `otxn::from_emitted`, `emitted()` inspection), **strict** (today's beh
   *absence*, since a short header can coincidentally match part of a longer, unrelated one
   elsewhere in the blob), `amounts`'s element count by counting the array's own `0xE1`
   element terminators, and both entries' native/issued forms. Includes a `metrics.json`. The
-  other NOP-padded kinds this design introduces — `vl`/`optional vl`, whole-container
-  `optional` views, and a homogeneous array of `optional` elements — are not exercised by this
+  other NOP-padded kinds this design introduces — `vl`/`optional vl`, a whole-container
+  `optional object`/`optional array`, and a homogeneous array of `optional` elements — are not exercised by this
   example (none of them fit a single-Remit, protocol-legal scenario alongside `amounts`
   without either duplicating a field code or reaching for an unrelated `sfcode`); they are
   covered by `crates/rshooks/src/txn.rs`'s `mod tests` twinned fixtures and

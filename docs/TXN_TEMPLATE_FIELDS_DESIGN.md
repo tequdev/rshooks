@@ -401,13 +401,26 @@ All three take no value, same as the non-`optional` `AnyAmount()` marker: absent
 only default an `optional` field has, so there is nothing to thread through even for
 `NativeAmount`/`IouAmount`, unlike their non-`optional` forms above (which do take one).
 
-`optional <View>: sfXxx { .. }`/`[ .. ]` and a homogeneous array's `Elem: optional sfY { .. }`
-are pure token rewrites, exactly like their non-`optional` counterparts above: `optional
-<View>: sfXxx { .. }` -> `optional <View>: object(sfXxx) { .. }` (legal wherever the
-explicit form is — a top-level/nested-object field, or a named element inside an array),
-`optional <View>: sfXxx [ .. ]` -> `optional <View>: array(sfXxx) [ .. ]`, and `Elem:
-optional sfY { .. } ; N` -> `Elem: optional object(sfY) { .. } ; N` under either a bare or an
-explicit outer `array(..)`.
+`optional sfXxx { .. }`/`[ .. ]` and a homogeneous array's `Elem: optional sfY { .. }` are
+pure token rewrites, exactly like their non-`optional` counterparts above: `optional sfXxx {
+.. }` -> `optional object(sfXxx) { .. }` (legal wherever the explicit form is — a
+top-level/nested-object field, or a named element inside an array), `optional sfXxx [ .. ]`
+-> `optional array(sfXxx) [ .. ]`, and `Elem: optional sfY { .. } ; N` -> `Elem: optional
+object(sfY) { .. } ; N` under either a bare or an explicit outer `array(..)`.
+
+#### Named `optional` containers have no view type
+
+`optional object(sfX) { <field>* }`/`optional array(sfX) [ <element>* ]` (whole-container
+present-or-absent) compile *inline*, exactly like the plain `object`/`array` forms above —
+`<field>*`'s own fields flatten onto the parent as ordinary `set_x_<field>` methods, sharing
+the same order/depth/NOP-budget checks — rather than spawning a separate view type. The only
+addition: the container's slot defaults to absent (`NOP`-filled), and every one of its own
+setters (plus a generated `enable_x(&mut self)`) first ensures it — and every enclosing
+`optional` ancestor — is present, copying in its own baked defaults if not. A generated
+`clear_x(&mut self)` NOP-fills the whole slot back to absent, and `is_x_present(&self) ->
+bool` reads presence without changing it. See `docs/NOP_PADDING_DESIGN.md` §3.3 for exactly
+how the container's own writes are captured into a standalone `const` and the ancestor-
+presence prelude (`$crate::__txn_template_ensure!`) is threaded through `mode`.
 
 ## 3. Implementation
 
