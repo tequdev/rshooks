@@ -2,15 +2,16 @@
 //! `vl`/`optional vl`, whole-container `optional object`/`optional
 //! array` (both the explicit `optional object(sfX) { .. }`/`optional
 //! array(sfX) [ .. ]` spelling, on `opt_obj`/`opt_arr`, and the bare
-//! `optional sfX { .. }` spelling, on `second`), and a homogeneous array
-//! of `optional object` elements compile, and each generated setter/
-//! accessor is reachable and callable. A named `optional` container has
-//! no view type: its own fields are plain `set_<name>_<..>` methods on
-//! the parent, and any of them makes the container present. Split across
-//! several nested `object`s -- each field's worst-case NOP charge
-//! (`docs/NOP_PADDING_DESIGN.md` §3.1) is checked against the
-//! 63-per-container budget independently per container, and no single
-//! container can hold every kind from this fixture at once.
+//! `optional sfX { .. }` spelling, on `amounts`'s second element), and a
+//! homogeneous array of `optional object` elements compile, and each
+//! generated setter/accessor is reachable and callable. An `optional`
+//! container has no view type: its own fields are plain
+//! `set_<name>_<..>` methods on the parent, and any of them makes the
+//! container present. Split across several nested `object`s -- each
+//! field's worst-case NOP charge (`docs/NOP_PADDING_DESIGN.md` §3.1) is
+//! checked against the 63-per-container budget independently per
+//! container, and no single container can hold every kind from this
+//! fixture at once.
 
 use rshooks::prelude::*;
 use rshooks::txn_template;
@@ -96,7 +97,7 @@ txn_template! {
 
         // Whole-container-optional `array` (15), top level.
         opt_arr: optional array(sfAmounts) [
-            entry: object(sfAmountEntry) {
+            object(sfAmountEntry) {
                 amount: native_amount(sfAmount) = 0,
             },
         ],
@@ -106,10 +107,10 @@ txn_template! {
 }
 
 txn_template! {
-    /// Motivating case: a named array with one required element and one
+    /// Motivating case: an array with one required element and one
     /// `optional` element -- a homogeneous array's elements share one
-    /// shape, so a named array with per-element presence is the right
-    /// tool for "one required entry, one that may or may not be there".
+    /// shape, so an array with per-element presence is the right tool
+    /// for "one required entry, one that may or may not be there".
     struct RemitAmounts {
         transaction_type = ttREMIT,
         sequence: u32_field(sfSequence) = 0,
@@ -120,10 +121,10 @@ txn_template! {
         signing_pub_key: empty_vl(sfSigningPubKey),
         account: account_id(sfAccount),
         amounts: sfAmounts [
-            first: sfAmountEntry {
+            sfAmountEntry {
                 amount: amount(sfAmount),
             },
-            second: optional sfAmountEntry {
+            optional sfAmountEntry {
                 amount: amount(sfAmount),
             },
         ],
@@ -195,7 +196,7 @@ fn main() {
     g0.clear();
     assert!(txn.opt_elems(2).is_none());
 
-    txn.set_opt_arr_entry_amount(1).expect("1 drop is in range");
+    txn.set_opt_arr_0_amount(1).expect("1 drop is in range");
     let _ = txn.is_opt_arr_present();
     txn.enable_opt_arr();
     txn.clear_opt_arr();
@@ -207,10 +208,10 @@ fn main() {
     amounts.clear_destination_tag();
     let currency = CurrencyCode::from_iso(b"USD");
     let issuer = AccountId::default();
-    amounts.set_amounts_first_amount(XFL!(0), &currency, &issuer);
-    amounts.set_amounts_second_amount(XFL!(0), &currency, &issuer);
-    let _ = amounts.is_amounts_second_present();
-    amounts.enable_amounts_second();
-    amounts.clear_amounts_second();
+    amounts.set_amounts_0_amount(XFL!(0), &currency, &issuer);
+    amounts.set_amounts_1_amount(XFL!(0), &currency, &issuer);
+    let _ = amounts.is_amounts_1_present();
+    amounts.enable_amounts_1();
+    amounts.clear_amounts_1();
     let _ = &amounts;
 }

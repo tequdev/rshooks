@@ -1492,8 +1492,8 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 ///     }
 /// }
 ///
-/// <element> := field_name: object(sfXxx) { <field>* }  // objects only, directly in an array
-///            | field_name: sfXxx { <field>* }           // inferred object element
+/// <element> := object(sfXxx) { <field>* }  // objects only, directly in an array, by position
+///            | sfXxx { <field>* }           // inferred object element
 /// ```
 ///
 /// Every scalar field uses one of the uniform kinds in the table below —
@@ -1546,9 +1546,10 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// A field whose serialized type fixes its wire shape can skip the
 /// explicit kind wrapper: `field_name: sfXxx` (or `= default`) infers the
 /// kind straight from `sfXxx`'s STI, `field_name: sfXxx { .. }`/
-/// `field_name: sfXxx [ .. ]` likewise infer `object`/`array`, and a
-/// homogeneous or named array element's own `Elem: sfY { .. }` infers
-/// `object(sfY)` the same way — every explicit spelling above keeps
+/// `field_name: sfXxx [ .. ]` likewise infer `object`/`array`, a
+/// positional array element's own `sfY { .. }` infers `object(sfY)`, and
+/// a homogeneous array element's own `Elem: sfY { .. }` infers
+/// `object(sfY)` too — every explicit spelling above keeps
 /// working unchanged, and the two forms produce byte-identical templates
 /// for the same field.
 ///
@@ -1648,25 +1649,20 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// `object(sfX) { <field>* }` nests a fixed inner field list — its field
 /// count and shape are known at declaration time, so the whole template
 /// stays `const fn`-computable exactly like the scalar kinds. An
-/// `array(sfX) [ .. ]` field takes a named-element form or a homogeneous
-/// indexed form:
+/// `array(sfX) [ .. ]` field takes a positional-element form or a
+/// homogeneous indexed form:
 ///
-/// - **Named elements**: `array(sfX) [ name: object(sfY) { <field>* },
-///   name2: object(sfY) { <field>* }, .. ]` — each element declared
-///   individually (so heterogeneous element shapes, one native and one
-///   issued entry say, fall out naturally), reached through its own
-///   `_`-joined setter path (below). An element may omit its name (`[
-///   object(sfY) { <field>* }, .. ]` or, inferred, `[ sfY { <field>* },
-///   .. ]`/`[ optional sfY { <field>* }, .. ]`): it's numbered by its
-///   zero-based position among *every* element in the list, named or
-///   not, so `[ sfY { .. }, kept: sfY { .. }, optional sfY { .. } ]`
-///   reaches its elements as `_0`, `_kept`, `_2`. An explicit index
-///   (`1: sfY { .. }`) is a name like any other and does not shift the
-///   numbering, so it must not repeat a position another element gets.
+/// - **Array elements**: `array(sfX) [ object(sfY) { <field>* },
+///   object(sfY) { <field>* }, .. ]` — each element declared individually
+///   (so heterogeneous element shapes, one native and one issued entry
+///   say, fall out naturally), reached through its zero-based position
+///   among every element in the list: `[ sfY { .. }, optional sfY { .. }
+///   ]` reaches its elements as `_0`, `_1`.
 /// - **Homogeneous, indexed elements**: `array(sfX) [ Elem: object(sfY) {
 ///   <field>* } ; N ]` — exactly one element shape, declared once and
 ///   repeated `N` times (`N` a `usize` const expression, at least 1); see
-///   "Homogeneous arrays" below.
+///   "Homogeneous arrays" below. `Elem` names the generated element-view
+///   type, not a position.
 ///
 /// Either way, an array's elements must each be an `object(sfY) { .. }` —
 /// a scalar or a nested `array` directly inside an `array` is a compile
@@ -1676,25 +1672,23 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// Canonical `(type, field)` order is checked **per container**, not just
 /// at the top level: each object's own direct fields (and the template's
 /// own top-level fields) must have strictly increasing `sfXxx` codes. An
-/// array's elements are not order-checked against each other (named
-/// elements typically share one repeated `sfcode` anyway, e.g. every
-/// `sfAmounts` element is an `sfAmountEntry`). Nesting depth is bounded at
-/// compile time by [`crate::sto_writer::STO_WRITER_MAX_DEPTH`], the same
-/// limit xahaud's deserializer enforces — a homogeneous array's element
-/// counts as **two** levels (the array itself, then the element), the same
-/// as a named array's object element.
+/// array's elements are not order-checked against each other (they
+/// typically share one repeated `sfcode` anyway, e.g. every `sfAmounts`
+/// element is an `sfAmountEntry`). Nesting depth is bounded at compile
+/// time by [`crate::sto_writer::STO_WRITER_MAX_DEPTH`], the same limit
+/// xahaud's deserializer enforces — a homogeneous array's element counts
+/// as **two** levels (the array itself, then the element), the same as a
+/// positional array's object element.
 ///
-/// Setter names for a *named* nested field are the full `_`-joined
-/// declaration path: `amounts: array(sfAmounts) [ usd: object(sfAmountEntry)
-/// { amount: amount(sfAmount) = .. } ]` generates `set_amounts_usd_amount`/
-/// `set_amounts_usd_amount_value` — an array element's own name is only a
-/// path segment, not a repetition index. An element that omits its name is
-/// numbered instead, by its position among every element in the list
-/// (`$crate::__txn_template_index_elements!`, a proc macro that splits the
-/// element list on top-level commas and prepends `<N>:` to whichever ones
-/// don't already start `<tt>:`, ahead of the arms below ever seeing them):
-/// `amounts: array(sfAmounts) [ object(sfAmountEntry) { amount:
-/// amount(sfAmount) = .. } ]` generates `set_amounts_0_amount`.
+/// Setter names for an array element are the full `_`-joined declaration
+/// path, its position standing in for a field name: `amounts:
+/// array(sfAmounts) [ object(sfAmountEntry) { amount: amount(sfAmount) =
+/// .. } ]` generates `set_amounts_0_amount`/`set_amounts_0_amount_value`.
+/// The position is assigned by `$crate::__txn_template_index_elements!`
+/// (a proc macro that splits the element list on top-level commas and
+/// prepends `<N>:` to each one, ahead of the arms below ever seeing them)
+/// — an element spelled `name: object(sfY) { .. }` is a compile error, not
+/// a name override.
 ///
 /// ## Homogeneous arrays
 ///
@@ -1815,8 +1809,8 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// `optional` entries in one array (`2 * 52 = 104 > 63`) do not fit, but
 /// one *required* entry (0 NOPs — it always writes) plus one `optional`
 /// entry (`52 <= 63`) does; `examples/22_txn-template-optional`'s `Remit`
-/// declares exactly this shape as a named array (`first: sfAmountEntry {
-/// .. }`, `second: optional sfAmountEntry { .. }`).
+/// declares exactly this shape as an array (`sfAmountEntry { .. }`,
+/// `optional sfAmountEntry { .. }`).
 ///
 /// ### Inferred `optional` spellings
 ///
@@ -2255,7 +2249,7 @@ macro_rules! txn_template {
 /// down to independent `const _: () = assert!(...)` items: one STI check
 /// per declared field, one order check per container, one depth check per
 /// nested container (two for a homogeneous array's element, matching a
-/// named array's object element), one element-count check per homogeneous
+/// positional array's object element), one element-count check per homogeneous
 /// array, plus the fixed set of required-field checks generated in a
 /// `tpl`-mode base case — a presence check and a kind-agreement check per
 /// required field (via [`crate::txn::codec::field_present`] /
@@ -3607,9 +3601,9 @@ macro_rules! __txn_template_step {
         }
 
     };
-    // Desugars a named array whose *outer* `array(..)` is already explicit
+    // Desugars an array whose *outer* `array(..)` is already explicit
     // but whose element type is a bare `$esf:ident` (inferred `object`).
-    // Placed ahead of the general named-array arm below, which would
+    // Placed ahead of the general array arm below, which would
     // otherwise swallow `$($inner:tt)*` first and treat `Elem: sfY { .. }`
     // as a heterogeneous field list instead of an inferred object element.
     (
@@ -4501,7 +4495,7 @@ macro_rules! __txn_template_step {
             fields = [ $name : array($sfcode) [ $Elem : object($esf) { $($efields)* } ; $($n)+ ] $(, $($rest)*)? ]
         }
     };
-    // `name: sfXxx [ .. ]` (named array, bare) -> `name: array(sfXxx) [ .. ]`.
+    // `name: sfXxx [ .. ]` (array, bare) -> `name: array(sfXxx) [ .. ]`.
     (
         @step
         name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
@@ -4530,7 +4524,7 @@ macro_rules! __txn_template_step {
     // `name: optional sfX { .. }` -> `name: optional object(sfX) { .. }` --
     // bare-`sfX` twin of the explicit `optional object(sfX) { .. }` form
     // below; legal wherever that one is (`ctx = obj`/`ctx = arr` alike,
-    // since a named array element can itself be a whole optional object).
+    // since an array element can itself be a whole optional object).
     (
         @step
         name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
@@ -4557,8 +4551,8 @@ macro_rules! __txn_template_step {
         }
     };
     // `name: optional sfX [ .. ]` -> `name: optional array(sfX) [ .. ]`
-    // (`ctx = obj` only -- a whole optional array can't be a named array's
-    // own element, matching the explicit `optional array(sfX) [ .. ]` form).
+    // (`ctx = obj` only -- a whole optional array can't be an array's own
+    // element, matching the explicit `optional array(sfX) [ .. ]` form).
     (
         @step
         name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
@@ -5776,7 +5770,7 @@ macro_rules! __txn_template_step {
             fields = [ $($inner)* , @ end_opt_object $(, $($rest)*)? ]
         }
     };
-    // Same as above, but as a named element directly inside an `array`
+    // Same as above, but as an element directly inside an `array`
     // (`ctx = arr`): not order-checked, and its NOP charge belongs to the
     // enclosing *array*'s own budget.
     (
@@ -7192,10 +7186,10 @@ mod tests {
             account: account_id(sfAccount),
             destination: account_id(sfDestination),
             amounts: array(sfAmounts) [
-                native: object(sfAmountEntry) {
+                object(sfAmountEntry) {
                     amount: native_amount(sfAmount) = 1,
                 },
-                usd: object(sfAmountEntry) {
+                object(sfAmountEntry) {
                     amount: amount(sfAmount) = (
                         XFL::from_raw_bits(0),
                         CurrencyCode::from_iso(b"USD"),
@@ -7215,7 +7209,7 @@ mod tests {
     /// with `type < 16`, so their headers are the two-byte
     /// `[type << 4, field]` form (`0xF0 0x5C` and `0xE0 0x5B`); every other
     /// field here is the same one-byte or two-byte form already proven by
-    /// `TestPayment`'s fixture above. The `usd` entry's `amount` value is
+    /// `TestPayment`'s fixture above. Element `1`'s `amount` value is
     /// the 48-byte issued form of XFL zero (`0x80` + 7 zero bytes),
     /// `CurrencyCode::from_iso(b"USD")`, and `AccountId([0x44; 20])`.
     #[rustfmt::skip]
@@ -7257,11 +7251,10 @@ mod tests {
     #[test]
     fn remit_nested_setters_write_at_the_expected_offsets() {
         let mut tpl = TestRemit::new();
-        tpl.set_amounts_native_amount(5)
-            .expect("5 drops is in range");
+        tpl.set_amounts_0_amount(5).expect("5 drops is in range");
         assert_eq!(&tpl.bytes()[85..93], &[0x40, 0, 0, 0, 0, 0, 0, 5]);
 
-        tpl.set_amounts_usd_amount_value(XFL::from_raw_bits(6_107_031_094_714_392_576));
+        tpl.set_amounts_1_amount_value(XFL::from_raw_bits(6_107_031_094_714_392_576));
         // Overwrites only the 8-byte value region; currency/issuer (the
         // baked default) are untouched.
         assert_eq!(
@@ -7269,7 +7262,7 @@ mod tests {
             &REMIT_EXPECTED_FIXED_PREFIX[105..145]
         );
 
-        tpl.set_amounts_usd_amount(
+        tpl.set_amounts_1_amount(
             XFL::from_raw_bits(6_107_081_094_714_392_576),
             &CurrencyCode::from_iso(b"EUR"),
             &AccountId([0x55; ACC_ID_LEN]),
@@ -9327,7 +9320,7 @@ mod tests {
     // -----------------------------------------------------------------
     // Whole-container `optional sfX { .. }` / `optional sfX [ .. ]` (and
     // their explicit `optional object(sfX) { .. }` / `optional
-    // array(sfX) [ .. ]` spellings), plus a named array's own `optional`
+    // array(sfX) [ .. ]` spellings), plus an array's own `optional`
     // element and a homogeneous array whose element is
     // `optional object(sfY) { .. }`. A named optional container compiles
     // inline (no view type): its own fields are plain `set_<name>_<..>`
@@ -9433,9 +9426,9 @@ mod tests {
     }
 
     crate::txn_template! {
-        /// A plain (always-present) named array (`sfHookGrants`) whose
-        /// one named element (`grant`) is itself a whole `optional`
-        /// object -- the array-element form of the same mechanism.
+        /// A plain (always-present) array (`sfHookGrants`) whose one
+        /// element (position `0`) is itself a whole `optional` object --
+        /// the array-element form of the same mechanism.
         struct OptionalArrayFixture {
             transaction_type = ttPAYMENT,
             sequence: u32_field(sfSequence) = 0,
@@ -9445,7 +9438,7 @@ mod tests {
             signing_pub_key: empty_vl(sfSigningPubKey),
             account: account_id(sfAccount),
             grants: sfHookGrants [
-                grant: optional sfHookGrant {
+                optional sfHookGrant {
                     amount: native_amount(sfAmount) = 0,
                 },
             ],
@@ -9456,16 +9449,16 @@ mod tests {
     #[test]
     fn optional_array_element_defaults_absent_setter_makes_present() {
         let mut tpl = OptionalArrayFixture::new();
-        assert!(!tpl.is_grants_grant_present());
+        assert!(!tpl.is_grants_0_present());
 
-        tpl.set_grants_grant_amount(9).expect("9 drops is in range");
-        assert!(tpl.is_grants_grant_present());
+        tpl.set_grants_0_amount(9).expect("9 drops is in range");
+        assert!(tpl.is_grants_0_present());
 
-        tpl.clear_grants_grant();
-        assert!(!tpl.is_grants_grant_present());
+        tpl.clear_grants_0();
+        assert!(!tpl.is_grants_0_present());
 
-        tpl.enable_grants_grant();
-        assert!(tpl.is_grants_grant_present());
+        tpl.enable_grants_0();
+        assert!(tpl.is_grants_0_present());
 
         tpl.set_sequence(0);
         tpl.set_first_ledger_sequence(0);
@@ -9590,8 +9583,9 @@ mod tests {
     crate::txn_template! {
         /// `optional array(sfX) [ .. ]` (explicit form): a whole nested
         /// array that is entirely present or entirely absent, holding one
-        /// named `optional` element -- exercises the explicit-container
-        /// spelling alongside `OptionalArrayFixture`'s bare-`sfX` one.
+        /// (position `0`) `optional` element -- exercises the
+        /// explicit-container spelling alongside `OptionalArrayFixture`'s
+        /// bare-`sfX` one.
         struct OptionalArrayContainerFixture {
             transaction_type = ttPAYMENT,
             sequence: u32_field(sfSequence) = 0,
@@ -9601,7 +9595,7 @@ mod tests {
             signing_pub_key: empty_vl(sfSigningPubKey),
             account: account_id(sfAccount),
             grants: optional array(sfHookGrants) [
-                grant: optional object(sfHookGrant) {
+                optional object(sfHookGrant) {
                     amount: native_amount(sfAmount) = 0,
                 },
             ],
@@ -9613,24 +9607,24 @@ mod tests {
     fn optional_array_container_defaults_absent_and_round_trips() {
         let mut tpl = OptionalArrayContainerFixture::new();
         assert!(!tpl.is_grants_present());
-        assert!(!tpl.is_grants_grant_present());
+        assert!(!tpl.is_grants_0_present());
 
-        tpl.set_grants_grant_amount(4).expect("4 drops is in range");
+        tpl.set_grants_0_amount(4).expect("4 drops is in range");
         assert!(tpl.is_grants_present());
-        assert!(tpl.is_grants_grant_present());
+        assert!(tpl.is_grants_0_present());
 
         tpl.clear_grants();
         assert!(!tpl.is_grants_present());
-        assert!(!tpl.is_grants_grant_present());
+        assert!(!tpl.is_grants_0_present());
 
         tpl.enable_grants();
         assert!(tpl.is_grants_present());
-        assert!(!tpl.is_grants_grant_present());
+        assert!(!tpl.is_grants_0_present());
 
-        tpl.enable_grants_grant();
-        assert!(tpl.is_grants_grant_present());
-        tpl.clear_grants_grant();
-        assert!(!tpl.is_grants_grant_present());
+        tpl.enable_grants_0();
+        assert!(tpl.is_grants_0_present());
+        tpl.clear_grants_0();
+        assert!(!tpl.is_grants_0_present());
         assert!(tpl.is_grants_present());
 
         tpl.set_sequence(0);
@@ -9928,12 +9922,12 @@ mod tests {
     }
 
     crate::txn_template! {
-        /// Named array (no repetition count), explicit form: a single
-        /// `grant: object(sfHookGrant) { .. }` element flattened directly
-        /// into the parent's own setters (`set_grants_grant_hook_hash`/
-        /// `set_grants_grant_authorize`) -- see `txn_template!`'s "Named
-        /// elements" grammar.
-        struct NamedArrayExplicit {
+        /// A positional array (no repetition count), explicit form: a
+        /// single `object(sfHookGrant) { .. }` element, unnamed, flattened
+        /// directly into the parent's own setters
+        /// (`set_grants_0_hook_hash`/`set_grants_0_authorize`) -- see
+        /// `txn_template!`'s "Array elements" grammar.
+        struct ArrayElementExplicit {
             transaction_type = ttPAYMENT,
             sequence: u32_field(sfSequence) = 0,
             first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
@@ -9942,7 +9936,7 @@ mod tests {
             signing_pub_key: empty_vl(sfSigningPubKey),
             account: account_id(sfAccount),
             grants: array(sfHookGrants) [
-                grant: object(sfHookGrant) {
+                object(sfHookGrant) {
                     hook_hash: hash256(sfHookHash),
                     authorize: account_id(sfAuthorize),
                 },
@@ -9952,11 +9946,11 @@ mod tests {
     }
 
     crate::txn_template! {
-        /// Inferred-kind twin of `NamedArrayExplicit`: both the array's
+        /// Inferred-kind twin of `ArrayElementExplicit`: both the array's
         /// name (`sfHookGrants`), its element's type (`sfHookGrant`), and
         /// the element's own fields are declared with bare `sfXxx`
         /// idents.
-        struct NamedArrayInferred {
+        struct ArrayElementInferred {
             transaction_type = ttPAYMENT,
             sequence: sfSequence = 0,
             first_ledger_sequence: sfFirstLedgerSequence = 0,
@@ -9965,7 +9959,7 @@ mod tests {
             signing_pub_key: empty_vl(sfSigningPubKey),
             account: sfAccount,
             grants: sfHookGrants [
-                grant: sfHookGrant {
+                sfHookGrant {
                     hook_hash: sfHookHash,
                     authorize: sfAuthorize,
                 },
@@ -9975,27 +9969,27 @@ mod tests {
     }
 
     #[test]
-    fn inferred_named_array_matches_explicit_twin() {
-        assert_eq!(NamedArrayInferred::FIELDS, NamedArrayExplicit::FIELDS);
-        assert_eq!(NamedArrayInferred::LEN, NamedArrayExplicit::LEN);
+    fn inferred_array_element_matches_explicit_twin() {
+        assert_eq!(ArrayElementInferred::FIELDS, ArrayElementExplicit::FIELDS);
+        assert_eq!(ArrayElementInferred::LEN, ArrayElementExplicit::LEN);
         assert_eq!(
-            NamedArrayInferred::new().bytes(),
-            NamedArrayExplicit::new().bytes()
+            ArrayElementInferred::new().bytes(),
+            ArrayElementExplicit::new().bytes()
         );
     }
 
     #[test]
-    fn inferred_named_array_setters_match_explicit_setters() {
+    fn inferred_array_element_setters_match_explicit_setters() {
         let hash = crate::types::Hash([0xAB; 32]);
         let authorize = AccountId([0xCD; ACC_ID_LEN]);
 
-        let mut inferred = NamedArrayInferred::new();
-        inferred.set_grants_grant_hook_hash(&hash);
-        inferred.set_grants_grant_authorize(&authorize);
+        let mut inferred = ArrayElementInferred::new();
+        inferred.set_grants_0_hook_hash(&hash);
+        inferred.set_grants_0_authorize(&authorize);
 
-        let mut explicit = NamedArrayExplicit::new();
-        explicit.set_grants_grant_hook_hash(&hash);
-        explicit.set_grants_grant_authorize(&authorize);
+        let mut explicit = ArrayElementExplicit::new();
+        explicit.set_grants_0_hook_hash(&hash);
+        explicit.set_grants_0_authorize(&authorize);
 
         assert_eq!(inferred.bytes(), explicit.bytes());
 
@@ -10021,114 +10015,6 @@ mod tests {
         assert_eq!(
             explicit
                 .prepare_for_emit()
-                .expect_err("prepare_for_emit must fail on the host stub"),
-            crate::error::HookError::NotImplemented
-        );
-    }
-
-    crate::txn_template! {
-        /// Unnamed-element twin of `NamedArrayExplicit`: the single
-        /// element omits its name, so it's numbered by position (`0`)
-        /// instead -- `set_grants_0_hook_hash`/`set_grants_0_authorize`.
-        struct NamedArrayUnnamed {
-            transaction_type = ttPAYMENT,
-            sequence: u32_field(sfSequence) = 0,
-            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
-            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
-            fee: native_amount(sfFee) = 0,
-            signing_pub_key: empty_vl(sfSigningPubKey),
-            account: account_id(sfAccount),
-            grants: array(sfHookGrants) [
-                object(sfHookGrant) {
-                    hook_hash: hash256(sfHookHash),
-                    authorize: account_id(sfAuthorize),
-                },
-            ],
-            emit_details: emit_details,
-        }
-    }
-
-    #[test]
-    fn unnamed_array_element_matches_named_twin() {
-        assert_eq!(NamedArrayUnnamed::FIELDS, NamedArrayExplicit::FIELDS);
-        assert_eq!(NamedArrayUnnamed::LEN, NamedArrayExplicit::LEN);
-        assert_eq!(
-            NamedArrayUnnamed::new().bytes(),
-            NamedArrayExplicit::new().bytes()
-        );
-
-        let hash = crate::types::Hash([0xAB; 32]);
-        let authorize = AccountId([0xCD; ACC_ID_LEN]);
-
-        let mut unnamed = NamedArrayUnnamed::new();
-        unnamed.set_grants_0_hook_hash(&hash);
-        unnamed.set_grants_0_authorize(&authorize);
-
-        let mut named = NamedArrayExplicit::new();
-        named.set_grants_grant_hook_hash(&hash);
-        named.set_grants_grant_authorize(&authorize);
-
-        assert_eq!(unnamed.bytes(), named.bytes());
-
-        // Exercise every remaining setter too (dead-code hygiene).
-        unnamed.set_sequence(0);
-        unnamed.set_first_ledger_sequence(0);
-        unnamed.set_last_ledger_sequence(0);
-        unnamed.set_fee(0).expect("0 drops is in range");
-        unnamed.set_account(&AccountId::default());
-        let _ = unnamed.emit_details_region();
-        assert_eq!(
-            unnamed
-                .prepare_for_emit()
-                .expect_err("prepare_for_emit must fail on the host stub"),
-            crate::error::HookError::NotImplemented
-        );
-    }
-
-    crate::txn_template! {
-        /// A mix of unnamed, named, and unnamed-`optional` elements in one
-        /// named array: `sfHookGrant { .. }` (position `0`), `usd:
-        /// sfHookGrant { .. }` (kept name), `optional sfHookGrant { .. }`
-        /// (position `2`, counting every element, named or not).
-        struct MixedArrayFixture {
-            transaction_type = ttPAYMENT,
-            sequence: u32_field(sfSequence) = 0,
-            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
-            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
-            fee: native_amount(sfFee) = 0,
-            signing_pub_key: empty_vl(sfSigningPubKey),
-            account: account_id(sfAccount),
-            grants: sfHookGrants [
-                sfHookGrant { amount: native_amount(sfAmount) = 0 },
-                usd: sfHookGrant { amount: native_amount(sfAmount) = 0 },
-                optional sfHookGrant { amount: native_amount(sfAmount) = 0 },
-            ],
-            emit_details: emit_details,
-        }
-    }
-
-    #[test]
-    fn mixed_named_and_positional_array_elements() {
-        let mut tpl = MixedArrayFixture::new();
-        tpl.set_grants_0_amount(1).expect("1 drop is in range");
-        tpl.set_grants_usd_amount(2).expect("2 drops is in range");
-
-        assert!(!tpl.is_grants_2_present());
-        tpl.set_grants_2_amount(3).expect("3 drops is in range");
-        assert!(tpl.is_grants_2_present());
-        tpl.clear_grants_2();
-        assert!(!tpl.is_grants_2_present());
-        tpl.enable_grants_2();
-        assert!(tpl.is_grants_2_present());
-
-        tpl.set_sequence(0);
-        tpl.set_first_ledger_sequence(0);
-        tpl.set_last_ledger_sequence(0);
-        tpl.set_fee(0).expect("0 drops is in range");
-        tpl.set_account(&AccountId::default());
-        let _ = tpl.emit_details_region();
-        assert_eq!(
-            tpl.prepare_for_emit()
                 .expect_err("prepare_for_emit must fail on the host stub"),
             crate::error::HookError::NotImplemented
         );

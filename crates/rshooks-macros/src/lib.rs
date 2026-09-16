@@ -250,8 +250,8 @@ pub fn paste(input: TokenStream) -> TokenStream {
     rewrite_stream(input)
 }
 
-/// Numbers a `txn_template!` named array's unnamed elements by position —
-/// see [`index_elements::expand`] for the full mechanism.
+/// Numbers a `txn_template!` array's elements by position — see
+/// [`index_elements::expand`] for the full mechanism.
 ///
 /// Only ever invoked internally, from `txn_template!`'s own expansion
 /// (`$crate::__txn_template_index_elements! { .. }`) — not part of the

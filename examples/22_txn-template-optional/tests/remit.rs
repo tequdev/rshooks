@@ -82,8 +82,8 @@ fn destination_tag_absent_by_default_present_when_supplied() {
 }
 
 /// `amounts` (`sfAmounts [ sfAmountEntry { .. }, optional sfAmountEntry
-/// { .. } ]`, unnamed elements numbered `0`/`1` by position) always
-/// carries `amounts.0`: exactly one element with `AMT2` absent, exactly
+/// { .. } ]`, elements numbered `0`/`1` by position) always carries
+/// `amounts.0`: exactly one element with `AMT2` absent, exactly
 /// two once it enables `amounts.1`. Counted by the array's own `0xE1`
 /// element terminators between `sfAmounts`'s header and its closing
 /// `0xF1` (`AmountEntry` has no nested `object`/`array` of its own, so

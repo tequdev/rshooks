@@ -1,8 +1,8 @@
 //! Inferred-kind `txn_template!` fields (`name: sfXxx`/`name: sfXxx =
 //! default`/`name: sfXxx { .. }`/`name: sfXxx [ .. ]`) compile, and every
 //! generated setter -- top-level, through a homogeneous element view, and
-//! through a named array's inferred object element -- is reachable and
-//! callable.
+//! through an array's inferred, positional object element -- is
+//! reachable and callable.
 
 use rshooks::prelude::*;
 use rshooks::txn_template;
@@ -28,10 +28,10 @@ txn_template! {
                 memo_data: sfMemoData = [0; 8],
             }; 1
         ],
-        // Named array (no repetition count) with an inferred object
-        // element.
+        // Array (no repetition count) with an inferred, positional
+        // object element.
         grants: sfHookGrants [
-            grant: sfHookGrant {
+            sfHookGrant {
                 hook_hash: sfHookHash,
                 authorize: sfAuthorize,
             },
@@ -71,6 +71,6 @@ fn main() {
     }
     assert!(txn.amounts(2).is_none());
 
-    txn.set_grants_grant_hook_hash(&Hash::default());
-    txn.set_grants_grant_authorize(&AccountId::default());
+    txn.set_grants_0_hook_hash(&Hash::default());
+    txn.set_grants_0_authorize(&AccountId::default());
 }

@@ -1,6 +1,8 @@
 //! Only `object(sfX) { .. }` elements may appear directly inside an
-//! `array(sfX) [ .. ]` -- a scalar field there has no defined element shape
-//! and is rejected as an unrecognized declaration.
+//! `array(sfX) [ .. ]` -- a scalar element there is numbered by position
+//! like any other element (`0: native_amount(sfAmount) = 1`), but still
+//! has no defined element shape and is rejected as an unrecognized
+//! declaration.
 
 use rshooks::prelude::*;
 use rshooks::txn_template;
@@ -15,7 +17,7 @@ txn_template! {
         signing_pub_key: empty_vl(sfSigningPubKey),
         account: account_id(sfAccount),
         amounts: array(sfAmounts) [
-            amount: native_amount(sfAmount) = 1,
+            native_amount(sfAmount) = 1,
         ],
         emit_details: emit_details,
     }

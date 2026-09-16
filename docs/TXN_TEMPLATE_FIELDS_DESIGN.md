@@ -62,7 +62,7 @@ txn_template! {
   | <name>: empty_vl(sfX)                         // existing
   | <name>: fixed_vl(sfX, N) $(= <[u8; N] expr>)?  // fixed-length VL blob
   | <name>: object(sfX) { <field>* }              // STObject, closed by 0xE1
-  | <name>: array(sfX) [ <element>* ]             // STArray, named elements, closed by 0xF1
+  | <name>: array(sfX) [ <element>* ]             // STArray, positional elements, closed by 0xF1
   | <name>: array(sfX) [ <Elem>: object(sfY) { <field>* } ; <N> ]  // STArray, homogeneous, indexed
   | <name>: sfX $(= <expr>)?                      // inferred scalar kind (§2.7)
   | <name>: sfX { <field>* }                      // inferred object
@@ -75,8 +75,8 @@ txn_template! {
   | <name>: sfX = [ <elem>+ ]                     // default-shape: infers fixed_vl, N from the literal (§2.7)
   | <name>: sfX = *<byte string literal>          // default-shape: infers fixed_vl, N from the literal (§2.7)
 
-<element> := [<name>:] object(sfX) { <field>* }   // only objects directly inside an array
-           | [<name>:] sfX { <field>* }          // inferred object element
+<element> := object(sfX) { <field>* }   // only objects directly inside an array, by position
+           | sfX { <field>* }          // inferred object element
 ```
 
 Trailing commas are accepted everywhere a field list is accepted (as today), except after
@@ -86,9 +86,10 @@ error (§4.5).
 `<Elem>` names the generated element-view type; `<N>` is a `usize` const expression
 (literal or a named const), at least 1. See §2.5.
 
-`<name>:` is optional on a named array's own element (only — the homogeneous `<Elem>: ..; N`
-form is unaffected, its `<Elem>` is never optional): an element without one is numbered by
-its zero-based position among every element in the list, named or not — see §2.7.
+An array's own element (only — the homogeneous `<Elem>: ..; N` form is unaffected, its
+`<Elem>` names a view type, never a position) takes no name: it's numbered by its
+zero-based position among every element in the list. `name: object(sfX) { .. }` is a
+compile error — see §2.7.
 
 ### 2.1 Kind table
 
@@ -176,8 +177,8 @@ txn_template! {
         account: account_id(sfAccount),
         destination: account_id(sfDestination),
         amounts: array(sfAmounts) [
-            native: object(sfAmountEntry) { amount: native_amount(sfAmount) = 1 },
-            usd: object(sfAmountEntry) {
+            object(sfAmountEntry) { amount: native_amount(sfAmount) = 1 },
+            object(sfAmountEntry) {
                 amount: amount(sfAmount) = (XFL!(0), USD, USD_ISSUER),
             },
         ],
@@ -185,12 +186,13 @@ txn_template! {
     }
 }
 
-txn.set_amounts_native_amount(5)?;          // native entry, 8-byte store (Result: 62-bit range)
-txn.set_amounts_usd_amount_value(XFL!(1.5)); // issued entry, 8-byte store
+txn.set_amounts_0_amount(5)?;              // first entry, 8-byte store (Result: 62-bit range)
+txn.set_amounts_1_amount_value(XFL!(1.5)); // second entry, 8-byte store
 ```
 
 - Setter names are the `_`-joined declaration path: `set_<outer>_<inner>_<leaf>`. Array
-  elements are named like any other field; the element name is only a path segment.
+  elements take no name; their zero-based position is only a path segment, the same shape
+  as any other field.
 - Array elements are declared one by one. That is what "element count known ahead" means
   here: the shape of every element is fixed, and heterogeneous element shapes (one native
   entry, one issued entry) fall out naturally. A homogeneous, indexed form for the case
@@ -252,10 +254,10 @@ back to back, then `0xF1` — a new `codec::write_repeated` helper (`write_const
 applied `N` times at `Elem::LEN`-sized strides) bakes the `N` copies at compile time.
 
 Nesting depth: a homogeneous array's element counts as **two** levels against
-`STO_WRITER_MAX_DEPTH` (the array itself, then the element), the same as a named array's
-object element — checked once, directly, rather than through two separate nested-entry
-steps. A homogeneous array may itself be declared inside another homogeneous array's
-element (or a named object), to whatever depth that bound allows.
+`STO_WRITER_MAX_DEPTH` (the array itself, then the element), the same as an array's own
+positional object element — checked once, directly, rather than through two separate
+nested-entry steps. A homogeneous array may itself be declared inside another homogeneous
+array's element (or a nested object), to whatever depth that bound allows.
 
 Implementation: the homogeneous-array arm spawns a **second, independent**
 `$crate::__txn_template_step!` invocation for `Elem`, seeded fresh (its own `order`,
@@ -331,8 +333,8 @@ default that only compiled because of that truncating cast does not compile in t
 form.
 
 `object`/`array` inference is a pure token rewrite, not a type-level dispatch: a bare
-`name: sfXxx { .. }`/`name: sfXxx [ .. ]` (or a homogeneous/named array element's own
-`Elem: sfY { .. }`) desugars to `name: object(sfXxx) { .. }`/`array(sfXxx) [ .. ]` before
+`name: sfXxx { .. }`/`name: sfXxx [ .. ]` (or a homogeneous array element's own `Elem: sfY
+{ .. }`) desugars to `name: object(sfXxx) { .. }`/`array(sfXxx) [ .. ]` before
 recursing, so it reuses the existing container arms and their nested-order/depth checks
 unchanged. Desugar arms are generic over `ctx` (they fire in both `obj` and `arr`) and are
 ordered: the container desugars sit right where the analogous explicit-form arm they
@@ -347,14 +349,15 @@ Byte-for-byte identity with the explicit spelling is the whole point: `Infer<STI
 so the generated `TEMPLATE`, `FIELDS` row, and setter offset are identical either way — see
 `crates/rshooks/src/txn.rs`'s `mod tests` for the twinned-fixture proofs.
 
-A named array's own elements (not the homogeneous `<Elem>: ..; N` form) go through one more
+An array's own elements (not the homogeneous `<Elem>: ..; N` form) go through one more
 rewrite ahead of all of the above: `$crate::__txn_template_index_elements!`, a `rshooks-macros`
 proc macro (alongside `$crate::__paste!`), splits the element list on top-level commas and
-prepends `<N>:` — `<N>` the element's zero-based position — to whichever ones don't already
-start `<tt>:` (an explicit name), before splicing the (now fully named) list back into
-`fields = [ .. ]`. Every element arm that captures the name — the explicit `object(sfY) {
-.. }`/`optional object(sfY) { .. }` forms and their inferred-kind desugars — takes it as
-`$name:tt` rather than `$name:ident` so an integer literal is accepted there too; the
+prepends `<N>:` — `<N>` the element's zero-based position — to every one of them, before
+splicing the (now numbered) list back into `fields = [ .. ]`. An element already spelled
+`<tt> : ..` is a compile error at that point — array elements are positional only, and an
+explicit name is never an override. Every element arm that captures the position — the
+explicit `object(sfY) { .. }`/`optional object(sfY) { .. }` forms and their inferred-kind
+desugars — takes it as `$name:tt` (an integer literal, not `$name:ident`); the
 `@end_object`/`@end_opt_object`/`@end_array`/`@end_opt_array` arms that later name the
 container in a doc string or a generated method (`stringify!($name)`,
 `[<set_ $prefix $name>]`) do the same, since a bare digit literal stringifies and
@@ -423,9 +426,9 @@ only default an `optional` field has, so there is nothing to thread through even
 `optional sfXxx { .. }`/`[ .. ]` and a homogeneous array's `Elem: optional sfY { .. }` are
 pure token rewrites, exactly like their non-`optional` counterparts above: `optional sfXxx {
 .. }` -> `optional object(sfXxx) { .. }` (legal wherever the explicit form is — a
-top-level/nested-object field, or a named element inside an array), `optional sfXxx [ .. ]`
--> `optional array(sfXxx) [ .. ]`, and `Elem: optional sfY { .. } ; N` -> `Elem: optional
-object(sfY) { .. } ; N` under either a bare or an explicit outer `array(..)`.
+top-level/nested-object field, or a positional element inside an array), `optional sfXxx
+[ .. ]` -> `optional array(sfXxx) [ .. ]`, and `Elem: optional sfY { .. } ; N` -> `Elem:
+optional object(sfY) { .. } ; N` under either a bare or an explicit outer `array(..)`.
 
 #### Named `optional` containers have no view type
 

@@ -53,9 +53,9 @@ txn_template! {
   (the slot's own byte count, well under the top level's 63-`NOP`
   budget).
 - `amounts: sfAmounts [ sfAmountEntry { .. }, optional sfAmountEntry
-  { .. } ]` — a *named* array (not a homogeneous, indexed one) whose two
-  elements omit their names entirely, so each is numbered by its
-  zero-based position instead: `amounts.0`'s `amount: sfAmount =
+  { .. } ]` — an array (not a homogeneous, indexed one) whose two
+  elements are each numbered by their zero-based position: `amounts.0`'s
+  `amount: sfAmount =
   AnyAmount()` is always present, flattened as
   `set_amounts_0_amount_native(u64) ->
   Result<()>`/`set_amounts_0_amount_iou(xfl, &currency, &issuer)`;

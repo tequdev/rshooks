@@ -238,10 +238,11 @@ must each be an `object(sfX) { .. }`; a bare scalar, or another `array`,
 directly inside an `array` is a compile error. `array` itself comes in two
 forms.
 
-#### Named elements
+#### Array elements
 
 Each element is declared individually, so heterogeneous shapes — one
-native entry, one issued entry — fall out naturally:
+native entry, one issued entry — fall out naturally, reached by its
+zero-based position in the list:
 
 ```rust,ignore
 txn_template! {
@@ -249,10 +250,10 @@ txn_template! {
         transaction_type = ttREMIT,
         // .. the required fields, plus `destination: sfDestination` ..
         amounts: sfAmounts [
-            native: sfAmountEntry {
+            sfAmountEntry {
                 amount: native_amount(sfAmount) = 1,
             },
-            usd: sfAmountEntry {
+            sfAmountEntry {
                 amount: sfAmount = IouAmount(XFL!(0), USD, USD_ISSUER),
             },
         ],
@@ -260,21 +261,15 @@ txn_template! {
     }
 }
 
-txn.set_amounts_native_amount(5)?;           // native entry, 8-byte store
-txn.set_amounts_usd_amount_value(XFL!(1.5)); // issued entry, 8-byte store
+txn.set_amounts_0_amount(5)?;                // first entry, 8-byte store
+txn.set_amounts_1_amount_value(XFL!(1.5));   // second entry, 8-byte store
 ```
 
 Setter names are the `_`-joined declaration path
-(`set_amounts_native_amount`,
-`set_amounts_usd_amount`/`set_amounts_usd_amount_value`); an array
-element's own name (`native`, `usd`) is only a path segment, not a
-repetition index.
-
-An element can also omit its name entirely — `amounts: sfAmounts [
-sfAmountEntry { .. }, sfAmountEntry { .. } ]` — in which case it's
-numbered by its zero-based position among every element in the list
-(named or not): `set_amounts_0_amount`/`set_amounts_1_amount`. Naming and
-numbering mix freely in one list.
+(`set_amounts_0_amount`, `set_amounts_1_amount`/`set_amounts_1_amount_value`);
+an element takes no name of its own — its position is just another path
+segment, not a repetition index. An explicit name (`native: sfAmountEntry
+{ .. }`) is a compile error.
 
 #### Homogeneous, indexed elements
 
@@ -328,11 +323,12 @@ a hook anyway, so `Option` plus a guarded loop is the idiom.
 
 #### Choosing between them, and shared rules
 
-Named elements read best when each entry's shape genuinely differs (a
-native amount next to an issued one, say); the homogeneous indexed form
-is for a repeated element shape whose count is fixed at declaration time,
-built or inspected through a loop rather than named individually. A few
-rules apply either way, once containers nest:
+Individually declared elements read best when each entry's shape
+genuinely differs (a native amount next to an issued one, say); the
+homogeneous indexed form is for a repeated element shape whose count is
+fixed at declaration time, built or inspected through a loop rather than
+addressed one at a time. A few rules apply either way, once containers
+nest:
 
 - Canonical `(type, field)` order is checked **per container**: each
   object's own direct fields must be strictly increasing, same as the
@@ -346,7 +342,7 @@ rules apply either way, once containers nest:
   [`STO_WRITER_MAX_DEPTH`](sto-writer.md), the same limit xahaud's
   deserializer enforces — a homogeneous array's element counts as two
   levels against that bound (the array itself, then the element), the
-  same as a named array's object element.
+  same as an array's own positional object element.
 - The six emit-plumbing fields (see "Required fields" above) are recognized
   only at the top level — an `sfAccount` nested inside some other object
   neither satisfies the presence check nor gets patched by
@@ -393,23 +389,21 @@ bare-`sfX` `optional` twin too: `optional sfX`, `optional sfX { .. }`/
 `[ .. ]`, and a homogeneous array's `Elem: optional sfY { .. }` — same
 budget, same generated API, only the spelling differs; a kind that cannot
 infer (`Amount`, `VL`, `Issue`) still needs its explicit `optional` form.
-A named array's own element (the homogeneous `Elem: ..; N` form aside) can
-also omit its name entirely: it's numbered by its zero-based position
-among every element in the list, named or not, instead — `[ sfY { .. },
-kept: sfY { .. }, optional sfY { .. } ]` reaches its elements as `_0`,
-`_kept`, `_2`.
+An array's own element (the homogeneous `Elem: ..; N` form aside) is
+numbered by its zero-based position among every element in the list —
+`[ sfY { .. }, optional sfY { .. } ]` reaches its elements as `_0`, `_1`.
 
-Every container — the top level, each named `object`/`array`, each
-homogeneous array, each named `optional object`/`optional array` — has its
-own **63-`NOP` budget**: the worst case over its direct optional/variable
+Every container — the top level, each object/array, each homogeneous
+array, each named `optional object`/`optional array` — has its own
+**63-`NOP` budget**: the worst case over its direct optional/variable
 children (every optional field absent, every `vl` at `MIN`, every
 `any_amount` native) must fit, checked at compile time with a message
 naming the container and the budget. This is why a hook author sometimes
-has to nest a field into its own small container, or choose a named array
-over a homogeneous one, rather than declare fields alongside each other
-freely: `examples/22_txn-template-optional`'s `Remit::amounts` is a
-*named* array with one required and one `optional` element, both unnamed
-and numbered by position (`sfAmountEntry { amount: sfAmount =
+has to nest a field into its own small container, or choose a
+per-element array over a homogeneous one, rather than declare fields
+alongside each other freely: `examples/22_txn-template-optional`'s
+`Remit::amounts` is an array with one required and one `optional`
+element, both numbered by position (`sfAmountEntry { amount: sfAmount =
 AnyAmount() }`, `optional sfAmountEntry { .. }`) — it can hold what two
 fully `optional` 52-byte `sfAmountEntry` elements (`2 * 52 = 104 > 63`)
 could not, since a required element charges its container nothing

@@ -1,12 +1,12 @@
-error: txn_template!: an array element name must be an identifier or a plain index (`0`, `1`, ..)
-  --> tests/ui/fail/txn_template_array_element_bad_name.rs:9:1
+error: txn_template!: array elements are positional and take no name -- remove `usd:`
+  --> tests/ui/fail/txn_template_array_element_bad_name.rs:7:1
    |
-9  | / txn_template! {
-10 | |     struct Remit {
-11 | |         transaction_type = ttREMIT,
-12 | |         sequence: u32_field(sfSequence) = 0,
+7  | / txn_template! {
+8  | |     struct Remit {
+9  | |         transaction_type = ttREMIT,
+10 | |         sequence: u32_field(sfSequence) = 0,
 ...  |
-23 | | }
+21 | | }
    | |_^
    |
    = note: this error originates in the macro `$crate::__txn_template_index_elements` which comes from the expansion of the macro `txn_template` (in Nightly builds, run with -Z macro-backtrace for more info)

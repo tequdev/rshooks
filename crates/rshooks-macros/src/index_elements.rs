@@ -1,5 +1,5 @@
-//! Backs `rshooks::txn_template!`'s automatic positional numbering of
-//! named-array elements — see [`expand`].
+//! Backs `rshooks::txn_template!`'s positional numbering of array
+//! elements — see [`expand`].
 
 use proc_macro::{Group, Literal, Punct, Spacing, TokenStream, TokenTree};
 
@@ -12,13 +12,10 @@ use crate::hooks_shared::is_punct;
 /// nested inside some element's own `{ .. }`/`( .. )`/`[ .. ]` body is
 /// already hidden inside that element's own `Group` token, so a plain
 /// top-level split is enough; a trailing comma yields no empty element
-/// after it). Each element whose own first two tokens are not already
-/// `<tt> :` (an explicit name) gets its zero-based position spliced in
-/// front as `<N> :` — `optional sfX { .. }` starts `optional sfX ..`
-/// (`optional` then an `Ident`, not a `Punct`), so it's numbered like any
-/// other unnamed element; `name: sfX { .. }` and `name: optional sfX
-/// { .. }` already start `name :`, so they keep their own name and don't
-/// count as unnumbered.
+/// after it) and prepends each element's zero-based position, `<N>:`, in
+/// front of it. An element already spelled `<tt> : ..` is a compile
+/// error — array elements are positional only, an explicit name is never
+/// accepted.
 ///
 /// Then walks `<rest tokens>` (recursing into every group, since the
 /// numbered list is usually destined for a `fields = [ .. ]` several
@@ -43,10 +40,10 @@ pub fn expand(input: TokenStream) -> TokenStream {
 }
 
 /// Splits `input` on top-level commas and prepends `<N>:` to every
-/// element not already spelled `<tt> : ..`, per [`expand`]'s doc comment.
-/// Reassembles the result as `elem0 , elem1 , .. ,` (every element,
-/// including the last, followed by a comma — harmless alongside the
-/// `$(, $($rest:tt)*)?` shape every consumer already expects).
+/// element, per [`expand`]'s doc comment. Reassembles the result as
+/// `0: elem0 , 1: elem1 , .. ,` (every element, including the last,
+/// followed by a comma — harmless alongside the `$(, $($rest:tt)*)?`
+/// shape every consumer already expects).
 fn number_elements(input: TokenStream) -> Result<TokenStream, TokenStream> {
     let tokens: Vec<TokenTree> = input.into_iter().collect();
 
@@ -72,41 +69,26 @@ fn number_elements(input: TokenStream) -> Result<TokenStream, TokenStream> {
         if element.is_empty() {
             continue;
         }
-        let already_named = element.get(1).is_some_and(|tt| is_punct(tt, ':'));
-        if already_named {
-            // An explicit name must be spelled the way the generated
-            // method names can carry it: an identifier or a plain index.
-            let name_ok = match element.first() {
-                Some(TokenTree::Ident(_)) => true,
-                Some(TokenTree::Literal(lit)) => is_plain_index(&lit.to_string()),
-                _ => false,
-            };
-            if !name_ok {
-                let span = element
-                    .first()
-                    .map_or_else(proc_macro::Span::call_site, TokenTree::span);
-                return Err(crate::err(
-                    span,
-                    "txn_template!: an array element name must be an identifier or a plain index (`0`, `1`, ..)",
-                ));
-            }
-        } else {
-            out.extend([
-                TokenTree::Literal(Literal::usize_unsuffixed(index)),
-                TokenTree::Punct(Punct::new(':', Spacing::Alone)),
-            ]);
+        if element.get(1).is_some_and(|tt| is_punct(tt, ':')) {
+            // Checked non-empty above.
+            #[allow(clippy::indexing_slicing)]
+            let name = &element[0];
+            return Err(crate::err(
+                name.span(),
+                &format!(
+                    "txn_template!: array elements are positional and take no name -- remove `{name}:`"
+                ),
+            ));
         }
+        out.extend([
+            TokenTree::Literal(Literal::usize_unsuffixed(index)),
+            TokenTree::Punct(Punct::new(':', Spacing::Alone)),
+        ]);
         out.extend(element);
         out.extend([TokenTree::Punct(Punct::new(',', Spacing::Alone))]);
         index = index.wrapping_add(1);
     }
     Ok(out)
-}
-
-/// `true` for a literal spelled as bare ASCII digits (no sign, no suffix),
-/// the only literal shape a generated method name can carry.
-fn is_plain_index(text: &str) -> bool {
-    !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// Recursively scans `input` for every `@ ELEMS` two-token marker (an
