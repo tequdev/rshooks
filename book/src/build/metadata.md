@@ -143,7 +143,7 @@ For `Governance`'s `govern` entry (index `0`, `on = [Invoke]`,
   "WCE": { "hook": 27751, "cbak": 0 },
   "builder": {
     "name": "rshooks-build",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "rustc": "rustc 1.89.0 (29483883e 2025-08-04)"
   },
   "human": {
@@ -238,7 +238,7 @@ and `sethook.template.meta.json`:
 ```json
 {
   "crate": "governance",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "generated_at": "2026-08-18T09:00:00Z",
   "hook_hashes": { "0": "…", "1": "…" },
   "positions": { "declared": [0, 1], "gaps": [], "untouched_beyond": 2 },

@@ -38,6 +38,7 @@ WIRED_EXAMPLES = {
     "17_sto-writer",
     "18_typed-views",
     "21_txn-template-nested",
+    "22_txn-template-optional",
 }
 
 

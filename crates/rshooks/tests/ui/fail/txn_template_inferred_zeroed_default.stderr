@@ -1,0 +1,40 @@
+error[E0080]: evaluation panicked: txn_template!: `invoice` is a zeroed kind and takes no `= default`
+  --> tests/ui/fail/txn_template_inferred_zeroed_default.rs:8:1
+   |
+8  | / txn_template! {
+9  | |     struct ZeroedDefault {
+10 | |         transaction_type = ttPAYMENT,
+11 | |         sequence: u32_field(sfSequence) = 0,
+...  |
+20 | | }
+   | |_^ evaluation of `_` failed here
+   |
+   = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `txn_template` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+  --> tests/ui/fail/txn_template_inferred_zeroed_default.rs:14:32
+   |
+8  | / txn_template! {
+9  | |     struct ZeroedDefault {
+10 | |         transaction_type = ttPAYMENT,
+11 | |         sequence: u32_field(sfSequence) = 0,
+...  |
+14 | |         invoice: sfInvoiceID = 0,
+   | |                                ^ expected `&Hash`, found integer
+...  |
+20 | | }
+   | |_- expected due to this
+
+error[E0606]: casting `&'static rshooks::types::Hash` as `u64` is invalid
+  --> tests/ui/fail/txn_template_inferred_zeroed_default.rs:8:1
+   |
+8  | / txn_template! {
+9  | |     struct ZeroedDefault {
+10 | |         transaction_type = ttPAYMENT,
+11 | |         sequence: u32_field(sfSequence) = 0,
+...  |
+20 | | }
+   | |_^
+   |
+   = help: cast through a raw pointer first
+   = note: this error originates in the macro `$crate::__txn_template_step` which comes from the expansion of the macro `txn_template` (in Nightly builds, run with -Z macro-backtrace for more info)

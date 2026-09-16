@@ -34,23 +34,23 @@ txn_template! {
     /// `fixed_vl(sfSigningPubKey, 0)` — the macro rejects `N = 0`.
     struct Remit {
         transaction_type = ttREMIT,
-        flags: u32_field(sfFlags) = tfCANONICAL,
-        sequence: u32_field(sfSequence) = 0,
-        first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
-        last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
-        fee: native_amount(sfFee) = 0,
-        signing_pub_key: empty_vl(sfSigningPubKey),
-        account: account_id(sfAccount),
-        destination: account_id(sfDestination),
-        memos: array(sfMemos) [
-            Memo: object(sfMemo) {
-                memo_type: fixed_vl(sfMemoType, 4) = *b"note",
-                memo_data: fixed_vl(sfMemoData, 8),
+        flags: sfFlags = tfCANONICAL,
+        sequence: sfSequence = 0,
+        first_ledger_sequence: sfFirstLedgerSequence = 0,
+        last_ledger_sequence: sfLastLedgerSequence = 0,
+        fee: sfFee = NativeAmount(0),
+        signing_pub_key: sfSigningPubKey = [],
+        account: sfAccount,
+        destination: sfDestination,
+        memos: sfMemos [
+            Memo: sfMemo {
+                memo_type: sfMemoType = *b"note",
+                memo_data: sfMemoData = [0; 8],
             }; 1
         ],
-        amounts: array(sfAmounts) [
-            AmountEntry: object(sfAmountEntry) {
-                amount: amount(sfAmount) = (XFL::from_raw_bits(0), USD, USD_ISSUER),
+        amounts: sfAmounts [
+            AmountEntry: sfAmountEntry {
+                amount: sfAmount = IouAmount(XFL::from_raw_bits(0), USD, USD_ISSUER),
             }; 2
         ],
         emit_details: emit_details,

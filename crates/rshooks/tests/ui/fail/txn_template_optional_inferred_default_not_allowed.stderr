@@ -1,0 +1,12 @@
+error: txn_template!: unrecognized field declaration: source_tag: optional sfSourceTag = 1, emit_details: emit_details,
+  --> tests/ui/fail/txn_template_optional_inferred_default_not_allowed.rs:9:1
+   |
+9  | / txn_template! {
+10 | |     struct Remit {
+11 | |         transaction_type = ttREMIT,
+12 | |         sequence: u32_field(sfSequence) = 0,
+...  |
+21 | | }
+   | |_^
+   |
+   = note: this error originates in the macro `$crate::__txn_template_step` which comes from the expansion of the macro `txn_template` (in Nightly builds, run with -Z macro-backtrace for more info)

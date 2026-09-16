@@ -234,9 +234,9 @@ pub(crate) fn err(span: Span, msg: &str) -> TokenStream {
 ///
 /// Scans its input for bracket groups shaped like `[< tok tok .. >]` (first
 /// inner token `<`, last inner token `>`, both plain `Punct`s) and replaces
-/// each with a single new identifier formed by concatenating the string
-/// form of every `Ident` token strictly between them. Recurses into every
-/// other group unchanged, so this can wrap an arbitrarily large token
+/// each with a single new identifier formed by concatenating, in order, the
+/// string form of every `Ident` token strictly between them. Recurses into
+/// every other group unchanged, so this can wrap an arbitrarily large token
 /// stream and only the marked splice points are touched.
 ///
 /// Only ever invoked internally, from `txn_template!`'s own expansion
@@ -273,15 +273,16 @@ fn rewrite_tree(tt: TokenTree) -> TokenTree {
 
 /// If `stream` is shaped exactly like a `< ident ident .. >` splice marker
 /// (at least one `Ident` strictly between a leading and trailing `Punct`
-/// token spelled `<`/`>`), returns the concatenated identifier. Returns
-/// `None` for anything else (including a marker whose interior contains a
-/// non-`Ident` token) — such a group is left as ordinary bracketed tokens,
-/// which is not this macro's problem to diagnose.
+/// token spelled `<`/`>`), returns the concatenated identifier: each middle
+/// token's text, verbatim, joined with nothing between. Returns `None` for
+/// anything else (including a marker whose interior contains a non-`Ident`
+/// token) — such a group is left as ordinary bracketed tokens, which is not
+/// this macro's problem to diagnose.
 ///
-/// Concatenating only `Ident` tokens guarantees the result is itself always
-/// a valid identifier (an identifier's continuation characters are a
-/// superset of its allowed starting characters), so `Ident::new` below can
-/// never panic on the text this function builds.
+/// Concatenating only `Ident` text guarantees the result is itself always a
+/// valid identifier (an identifier's continuation characters are a superset
+/// of its allowed starting characters), so `Ident::new` below can never
+/// panic on the text this function builds.
 fn try_concat_marker(stream: TokenStream) -> Option<Ident> {
     let tokens: Vec<TokenTree> = stream.into_iter().collect();
     if tokens.len() < 3 {
@@ -295,11 +296,11 @@ fn try_concat_marker(stream: TokenStream) -> Option<Ident> {
     let middle = tokens.get(1..tokens.len().saturating_sub(1))?;
 
     let mut text = String::new();
-    for t in middle {
-        match t {
-            TokenTree::Ident(id) => text.push_str(&id.to_string()),
-            _ => return None,
-        }
+    for tt in middle {
+        let TokenTree::Ident(id) = tt else {
+            return None;
+        };
+        text.push_str(&id.to_string());
     }
     if text.is_empty() {
         return None;

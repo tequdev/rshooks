@@ -1,0 +1,12 @@
+error[E0080]: evaluation panicked: txn_template!: `email_hash` is declared as `fixed_vl` (or given an array / `*b".."` default) but its sfXxx code is not an STI_VL field
+  --> tests/ui/fail/txn_template_inferred_array_default_on_hash.rs:10:1
+   |
+10 | / txn_template! {
+11 | |     struct BadEmailHash {
+12 | |         transaction_type = ttPAYMENT,
+13 | |         sequence: u32_field(sfSequence) = 0,
+...  |
+22 | | }
+   | |_^ evaluation of `_` failed here
+   |
+   = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `txn_template` (in Nightly builds, run with -Z macro-backtrace for more info)

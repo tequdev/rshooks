@@ -1,0 +1,12 @@
+error[E0080]: evaluation panicked: txn_template!: `send_max`: the kind of `sfSendMax` cannot be inferred from its serialized type — declare it explicitly (`optional native_amount`/`optional amount`/`any_amount`/`optional any_amount`, `optional empty_vl`/`optional fixed_vl`, `optional vl`, `optional native_issue`/`optional issue`, or a `{ .. }`/`[ .. ]` body for an object/array); serialized types with no `txn_template!` kind need `StoWriter`
+  --> tests/ui/fail/txn_template_optional_inferred_ambiguous.rs:10:1
+   |
+10 | / txn_template! {
+11 | |     struct BadSendMax {
+12 | |         transaction_type = ttPAYMENT,
+13 | |         sequence: u32_field(sfSequence) = 0,
+...  |
+22 | | }
+   | |_^ evaluation of `_` failed here
+   |
+   = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `txn_template` (in Nightly builds, run with -Z macro-backtrace for more info)
