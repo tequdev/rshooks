@@ -1,16 +1,15 @@
-//! Off-chain unit tests for `TxnTemplateOptional`'s `tplremit` entry
-//! (`#[hook(1, ..)]`, `OptionalRemit`) — driven through
-//! `TestEnv::invoke` against the real chain, no wasm build, no node.
-//! `env.emitted()` blobs are canonical (re-serialized the way a real
-//! ledger stores them): every `0x99` NOP — an absent optional field's
-//! whole slot, or the unused tail of a partially-filled one — is
-//! stripped. Absence is asserted by byte-count delta against the
-//! present-state blob, not by searching for the header's *absence*: a
-//! short header can coincidentally match part of a longer, unrelated
-//! one elsewhere in the blob (`EmitDetails`, say). See `src/lib.rs`'s
-//! in-crate `#[cfg(test)]` module for the raw, NOP-padded pre-emit
-//! layout (`OptionalRemit` is private, so that's the only place it's
-//! reachable).
+//! Off-chain unit tests for `TxnTemplateOptional`'s `remit` entry
+//! (`#[hook(0, ..)]`, `Remit`) — driven through `TestEnv::invoke`
+//! against the real chain, no wasm build, no node. `env.emitted()`
+//! blobs are canonical (re-serialized the way a real ledger stores
+//! them): every `0x99` NOP — an absent optional field's whole slot, or
+//! the unused tail of a partially-filled one — is stripped. Absence is
+//! asserted by byte-count delta against the present-state blob, not by
+//! searching for the header's *absence*: a short header can
+//! coincidentally match part of a longer, unrelated one elsewhere in
+//! the blob (`EmitDetails`, say). See `src/lib.rs`'s in-crate
+//! `#[cfg(test)]` module for the raw, NOP-padded pre-emit layout
+//! (`Remit` is private, so that's the only place it's reachable).
 
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, missing_docs)]
 
@@ -31,101 +30,72 @@ fn env() -> TestEnv {
 #[test]
 fn accepts_and_emits_one_remit() {
     let env = env();
-    let exit = env.invoke::<TxnTemplateOptional>(1);
+    let exit = env.invoke::<TxnTemplateOptional>(0);
     assert_eq!(exit.exit, ExitType::Accept, "{exit:?}");
     let emitted = env.emitted();
     assert_eq!(emitted.len(), 1);
     assert_eq!(emitted[0].tx_type(), Some(TxType::Remit));
 }
 
-/// `blob` (`optional vl(sfBlob, 2, 8)`) is absent from the canonical
-/// blob by default and carries the 5-byte `"blob!"` payload once
-/// `BLOB` is present.
 #[test]
-fn blob_absent_by_default_present_when_supplied() {
-    let (hdr, hdr_len) = codec::field_header(sfBlob);
+fn missing_destination_rolls_back_without_emitting() {
+    let env = TestEnv::new()
+        .hook_account([1u8; 20])
+        .otxn(Otxn::new(TxType::Invoke).account([2u8; 20]));
+    let exit = env.invoke::<TxnTemplateOptional>(0);
+    assert_eq!(exit.exit, ExitType::Rollback, "{exit:?}");
+    assert_eq!(env.emitted().len(), 0);
+}
+
+/// `destination_tag` (`optional sfDestinationTag`) is absent from the
+/// canonical emitted blob by default — the blob is exactly `header + 4`
+/// bytes shorter than one with it present — and present with the exact
+/// big-endian value once `DTAG` is supplied.
+#[test]
+fn destination_tag_absent_by_default_present_when_supplied() {
+    let (hdr, hdr_len) = codec::field_header(sfDestinationTag);
 
     let absent = env();
-    let exit = absent.invoke::<TxnTemplateOptional>(1);
+    let exit = absent.invoke::<TxnTemplateOptional>(0);
     assert_eq!(exit.exit, ExitType::Accept, "{exit:?}");
     let emitted_absent = absent.emitted();
     let absent_len = emitted_absent[0].blob().len();
 
-    let present = env().hook_param(b"BLOB", &[1u8]);
-    let exit = present.invoke::<TxnTemplateOptional>(1);
+    let present = env().hook_param(b"DTAG", &7u32.to_be_bytes());
+    let exit = present.invoke::<TxnTemplateOptional>(0);
     assert_eq!(exit.exit, ExitType::Accept, "{exit:?}");
     let emitted_present = present.emitted();
     let blob = emitted_present[0].blob();
     let mut expected = Vec::new();
     expected.extend_from_slice(&hdr[..hdr_len]);
-    expected.push(5); // one-byte VL prefix, 5 <= 192
-    expected.extend_from_slice(b"blob!");
+    expected.extend_from_slice(&7u32.to_be_bytes());
     assert!(
         blob.windows(expected.len())
             .any(|w| w == expected.as_slice()),
-        "present blob field not found: {blob:02x?}"
-    );
-    assert_eq!(blob.len(), absent_len + expected.len());
-}
-
-/// `memos` (`optional Memos: array(sfMemos) [ .. ]`) is absent from the
-/// canonical blob by default — a shorter blob than with it present, by
-/// exactly the declared region's own byte count — and, once `MEMO` is
-/// supplied, carries the one declared `sfMemo` element with its baked
-/// `*b"note"` `memo_type`.
-#[test]
-fn memos_absent_by_default_present_when_supplied() {
-    let (memos_hdr, memos_hdr_len) = codec::field_header(sfMemos);
-    let (memo_hdr, memo_hdr_len) = codec::field_header(sfMemo);
-    let (type_hdr, type_hdr_len) = codec::field_header(sfMemoType);
-
-    let absent = env();
-    let exit = absent.invoke::<TxnTemplateOptional>(1);
-    assert_eq!(exit.exit, ExitType::Accept, "{exit:?}");
-    let emitted_absent = absent.emitted();
-    let absent_len = emitted_absent[0].blob().len();
-
-    let present = env().hook_param(b"MEMO", &[1u8]);
-    let exit = present.invoke::<TxnTemplateOptional>(1);
-    assert_eq!(exit.exit, ExitType::Accept, "{exit:?}");
-    let emitted_present = present.emitted();
-    let blob = emitted_present[0].blob();
-    let mut expected = Vec::new();
-    expected.extend_from_slice(&memos_hdr[..memos_hdr_len]);
-    expected.extend_from_slice(&memo_hdr[..memo_hdr_len]);
-    expected.extend_from_slice(&type_hdr[..type_hdr_len]);
-    expected.push(4); // fixed_vl(sfMemoType, 4)'s length prefix
-    expected.extend_from_slice(b"note");
-    expected.push(0xE1); // object end marker
-    expected.push(0xF1); // array end marker
-    assert!(
-        blob.windows(expected.len())
-            .any(|w| w == expected.as_slice()),
-        "present memos region not found: {blob:02x?}"
+        "present DestinationTag field not found: {blob:02x?}"
     );
     assert_eq!(
         blob.len(),
-        absent_len + expected.len(),
-        "the canonical blob must be exactly the region's own bytes longer with it present"
+        absent_len + hdr_len + 4,
+        "the canonical blob must be exactly the field's own bytes longer with it present"
     );
 }
 
 /// `amounts` (`sfAmounts [ first: sfAmountEntry { .. }, second: optional
-/// Second: sfAmountEntry { .. } ]`) always carries `first` (`remit`
-/// always writes a real, constructible 1-drop native amount into it):
-/// exactly one element with `AMT_ENTRY` absent, exactly two once it
-/// enables `second`. Counted by the array's own `0xE1` element
-/// terminators between `sfAmounts`'s header and its closing `0xF1`
-/// (`AmountEntry` has no nested `object`/`array` of its own, so every
-/// `0xE1` in that span is one element's terminator, not a false match
-/// from an unrelated field elsewhere in the blob).
+/// Second: sfAmountEntry { .. } ]`) always carries `first`: exactly one
+/// element with `AMT2` absent, exactly two once it enables `second`.
+/// Counted by the array's own `0xE1` element terminators between
+/// `sfAmounts`'s header and its closing `0xF1` (`AmountEntry` has no
+/// nested `object`/`array` of its own, so every `0xE1` in that span is
+/// one element's terminator, not a false match from an unrelated field
+/// elsewhere in the blob).
 #[test]
 fn amounts_has_one_element_absent_two_present() {
     let (amounts_hdr, amounts_hdr_len) = codec::field_header(sfAmounts);
     let (amount_hdr, amount_hdr_len) = codec::field_header(sfAmount);
 
     let absent = env();
-    let exit = absent.invoke::<TxnTemplateOptional>(1);
+    let exit = absent.invoke::<TxnTemplateOptional>(0);
     assert_eq!(exit.exit, ExitType::Accept, "{exit:?}");
     let emitted_absent = absent.emitted();
     let blob = emitted_absent[0].blob();
@@ -134,7 +104,7 @@ fn amounts_has_one_element_absent_two_present() {
         1,
         "{blob:02x?}"
     );
-    // `first` carries the real 1-drop native amount `remit` always writes.
+    // `first` defaults to the native 1-drop amount (`AMT1` absent).
     let mut expected_first = Vec::new();
     expected_first.extend_from_slice(&amount_hdr[..amount_hdr_len]);
     let mut native_value = 1u64.to_be_bytes();
@@ -146,8 +116,8 @@ fn amounts_has_one_element_absent_two_present() {
         "first's native 1-drop amount not found: {blob:02x?}"
     );
 
-    let present = env().hook_param(b"AMT_ENTRY", &[1u8]);
-    let exit = present.invoke::<TxnTemplateOptional>(1);
+    let present = env().hook_param(b"AMT2", &5u64.to_be_bytes());
+    let exit = present.invoke::<TxnTemplateOptional>(0);
     assert_eq!(exit.exit, ExitType::Accept, "{exit:?}");
     let emitted_present = present.emitted();
     let blob = emitted_present[0].blob();
@@ -156,6 +126,59 @@ fn amounts_has_one_element_absent_two_present() {
         2,
         "{blob:02x?}"
     );
+}
+
+/// With `ISSUER` present, both `first` and (once `AMT2` enables it)
+/// `second` switch to the 48-byte issued form (`USD`, the supplied
+/// issuer) instead of the native form: the whole 48-byte value region
+/// fills exactly (no leftover `NOP`s, unlike the native form's 40
+/// trailing ones), and the currency/issuer bytes match exactly.
+#[test]
+fn issuer_present_writes_both_amounts_issued() {
+    let (amount_hdr, amount_hdr_len) = codec::field_header(sfAmount);
+    let issuer = [9u8; 20];
+    let mut currency = [0u8; 20];
+    currency[12..15].copy_from_slice(b"USD");
+
+    let env = env()
+        .hook_param(b"AMT2", &5u64.to_be_bytes())
+        .hook_param(b"ISSUER", &issuer);
+    let exit = env.invoke::<TxnTemplateOptional>(0);
+    assert_eq!(exit.exit, ExitType::Accept, "{exit:?}");
+    let emitted = env.emitted();
+    let blob = emitted[0].blob();
+
+    let mut expected_tail = Vec::new();
+    expected_tail.extend_from_slice(&currency);
+    expected_tail.extend_from_slice(&issuer);
+    // Both `first` and `second` are the issued form: currency/issuer
+    // (the value's own encoding is exercised byte-exactly by
+    // `crates/rshooks/src/txn.rs`'s `encode_iou_amount_value_const`
+    // tests) appear twice, immediately after an `sfAmount` header, with
+    // no `0x99` anywhere in either 48-byte region.
+    let occurrences = blob
+        .windows(amount_hdr_len + 48)
+        .filter(|w| w.starts_with(&amount_hdr[..amount_hdr_len]) && w.ends_with(&expected_tail))
+        .count();
+    assert_eq!(
+        occurrences, 2,
+        "expected both first and second issued (USD, the supplied issuer): {blob:02x?}"
+    );
+}
+
+/// `AMT1 = 0` and `AMT2 = 0` both roll back (Remit rejects a zero
+/// amount) rather than emit.
+#[test]
+fn zero_amount_rolls_back_without_emitting() {
+    let amt1_zero = env().hook_param(b"AMT1", &0u64.to_be_bytes());
+    let exit = amt1_zero.invoke::<TxnTemplateOptional>(0);
+    assert_eq!(exit.exit, ExitType::Rollback, "{exit:?}");
+    assert_eq!(amt1_zero.emitted().len(), 0);
+
+    let amt2_zero = env().hook_param(b"AMT2", &0u64.to_be_bytes());
+    let exit = amt2_zero.invoke::<TxnTemplateOptional>(0);
+    assert_eq!(exit.exit, ExitType::Rollback, "{exit:?}");
+    assert_eq!(amt2_zero.emitted().len(), 0);
 }
 
 /// Counts `0xE1` (`STObject` terminator) bytes between `sfAmounts`'s own

@@ -15,6 +15,7 @@ txn_template! {
         first_ledger_sequence: sfFirstLedgerSequence = 0,
         last_ledger_sequence: sfLastLedgerSequence = 0,
         invoice_id: sfInvoiceID,
+        amount: sfAmount = AnyAmount(),
         fee: sfFee = NativeAmount(0,),
         signing_pub_key: sfSigningPubKey = [],
         account: sfAccount,
@@ -58,6 +59,7 @@ fn main() {
     txn.set_account(&AccountId::default());
     txn.set_destination(&AccountId::default());
     txn.set_invoice_id(&Hash::default());
+    txn.set_amount_native(1).expect("1 drop is in range");
 
     let mut memo = txn.memos(0).expect("index in range");
     memo.set_memo_data(&[0xAB; 8]);

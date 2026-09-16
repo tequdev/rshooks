@@ -70,6 +70,7 @@ txn_template! {
   | <name>: sfX [ <Elem>: sfY { <field>* } ; <N> ] // inferred array, homogeneous, indexed
   | <name>: sfX = NativeAmount(<u64 drops>)                 // default-shape: infers native_amount (§2.7)
   | <name>: sfX = IouAmount(<XFL>, <CurrencyCode>, <AccountId>)  // default-shape: infers amount (§2.7)
+  | <name>: sfX = AnyAmount()                     // default-shape: infers any_amount (§2.7), no value
   | <name>: sfX = []                              // default-shape: infers empty_vl (§2.7)
   | <name>: sfX = [ <elem>+ ]                     // default-shape: infers fixed_vl, N from the literal (§2.7)
   | <name>: sfX = *<byte string literal>          // default-shape: infers fixed_vl, N from the literal (§2.7)
@@ -354,23 +355,26 @@ unresolvable call expression):
 ```text
 field: sfXxx = NativeAmount(d)              -> field: native_amount(sfXxx) = d
 field: sfXxx = IouAmount(xfl, cur, iss)      -> field: amount(sfXxx) = (xfl, cur, iss)
+field: sfXxx = AnyAmount()                  -> field: any_amount(sfXxx)
 field: sfXxx = []                           -> field: empty_vl(sfXxx)
 field: sfXxx = [ <elem>+ ]                  -> field: fixed_vl(sfXxx, N) = [ <elem>+ ]
 field: sfXxx = *<byte string literal>       -> field: fixed_vl(sfXxx, N) = *<byte string literal>
 ```
 
-`NativeAmount`/`IouAmount` are macro syntax markers matched as literal tokens, not real
-types or functions — nothing named that way needs to exist in scope. `N` in the last two
+`NativeAmount`/`IouAmount`/`AnyAmount` are macro syntax markers matched as literal tokens,
+not real types or functions — nothing named that way needs to exist in scope. `AnyAmount()`
+takes no value: `any_amount` has no baked default to thread through (issued zero, always),
+so its rewrite leaves no `= ..` behind, unlike the other two. `N` in the two array/byte-string
 rewrites is recovered from the default literal itself via a new `codec::array_len<const N:
 usize>(_: &[u8; N]) -> usize { N }`, spliced in as `{ array_len(&[ <elem>+ ]) }`/`{
 array_len(&*<byte string literal>) }` — a block expression, since `fixed_vl`'s own `$n:expr`
 fragment splices into a `[u8; $n]` array-length position. A `fixed_vl` default spelled as a
-named const (`field: sfX = SOME_CONST`) is not one of the five literal shapes above, so it
+named const (`field: sfX = SOME_CONST`) is not one of the literal shapes above, so it
 falls through to the plain inferred-scalar-with-default arm and is rejected there —
 `fixed_vl(sfX, N) = SOME_CONST` (the explicit form, `N` spelled out) is still required,
 since there is no literal to recover `N` from. `issue`/`native_issue`, and a zero-default
-`amount(sfX)` (no `=` at all), are untouched by this desugar — none of its five shapes match
-them.
+`amount(sfX)` (no `=` at all), are untouched by this desugar — none of the shapes above
+match them.
 
 #### Inferred `optional` forms
 
@@ -384,7 +388,18 @@ that same size is the field's worst-case NOP charge to its enclosing container. 
 non-inferable STI names the matching explicit `optional` form in its error message
 (`optional native_amount`/`optional amount`/`any_amount`/`optional any_amount`, `optional
 empty_vl`/`optional fixed_vl`, `optional vl`, `optional native_issue`/`optional issue`) —
-there is no default-shape desugar for `optional` (absent has no shape to infer from).
+except the three `Amount`-shaped kinds with no baked default, which get their own
+default-shape markers, the `optional` twins of the non-`optional` ones above:
+
+```text
+field: optional sfXxx = AnyAmount()         -> field: optional any_amount(sfXxx)
+field: optional sfXxx = NativeAmount()      -> field: optional native_amount(sfXxx)
+field: optional sfXxx = IouAmount()         -> field: optional amount(sfXxx)
+```
+
+All three take no value, same as the non-`optional` `AnyAmount()` marker: absent is the
+only default an `optional` field has, so there is nothing to thread through even for
+`NativeAmount`/`IouAmount`, unlike their non-`optional` forms above (which do take one).
 
 `optional <View>: sfXxx { .. }`/`[ .. ]` and a homogeneous array's `Elem: optional sfY { .. }`
 are pure token rewrites, exactly like their non-`optional` counterparts above: `optional

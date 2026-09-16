@@ -395,13 +395,13 @@ checked at compile time with a message naming the container and the
 budget. This is why a hook author sometimes has to nest a field into its
 own small container, or choose a named array over a homogeneous one,
 rather than declare fields alongside each other freely:
-`examples/22_txn-template-optional`'s `OptionalRemit::amounts` is a
-*named* array with one required and one `optional` element (`first:
-sfAmountEntry { amount: any_amount(sfAmount) }`, `second: optional
+`examples/22_txn-template-optional`'s `Remit::amounts` is a *named*
+array with one required and one `optional` element (`first:
+sfAmountEntry { amount: sfAmount = AnyAmount() }`, `second: optional
 Second: sfAmountEntry { .. }`) — it can hold what two fully `optional`
-50-byte `sfAmountEntry` elements (`2 * 50 = 100 > 63`) could not, since a
+52-byte `sfAmountEntry` elements (`2 * 52 = 104 > 63`) could not, since a
 required element charges its container nothing (`Elem::LEN`, not
-`Elem::LEN` reserved-but-optional) while only `second`'s own 50 bytes
+`Elem::LEN` reserved-but-optional) while only `second`'s own 52 bytes
 count against the array's budget.
 
 The generated API mirrors `fixed_vl`/homogeneous-element setters: `set_x`
@@ -409,16 +409,21 @@ writes the field (making it present), `clear_x` restores the `NOP`-filled
 default; a whole-container `optional` view gets `enable_x() -> View<'_>`
 (restores the view's own baked default and returns it), `x() ->
 Option<View<'_>>` (`None` when the slot is `NOP`s), and `clear_x()`; a
-homogeneous array whose element is itself `optional`
-gets the same trio (`enable()`/`clear()`) on the element view returned by
-its runtime-indexed accessor. From `22_txn-template-optional`:
+homogeneous array whose element is itself `optional` gets the same trio
+(`enable()`/`clear()`) on the element view returned by its
+runtime-indexed accessor (`Elem::enable()`/`Elem::clear()` — see
+`crates/rshooks/src/txn.rs`'s `mod tests` and
+`crates/rshooks/tests/ui/pass/txn_template_optional.rs` for a worked
+example; `examples/22_txn-template-optional` uses the *named*-array form
+instead). From `22_txn-template-optional`:
 
 ```rust,ignore
 if let Ok(Some(tag)) = self.hook_param.dest_tag.get() {
-    txn.set_destination_tag(tag);   // optional sfDestinationTag
+    txn.set_destination_tag(u32::from_be_bytes(tag));   // optional sfDestinationTag
 }
-if matches!(self.hook_param.memo.get(), Ok(Some(_))) {
-    let _ = txn.enable_memos();     // optional Memos: sfMemos [ .. ]
+if let Ok(Some(bytes)) = self.hook_param.amt2.get() {
+    let mut second = txn.enable_amounts_second();       // optional Second: sfAmountEntry { .. }
+    second.set_amount_native(u64::from_be_bytes(bytes))?;
 }
 ```
 

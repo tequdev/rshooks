@@ -1560,9 +1560,15 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// |---|---|---|
 /// | `NativeAmount(drops)` | `native_amount(sfX) = drops` | 8-byte native amount |
 /// | `IouAmount(xfl, cur, iss)` | `amount(sfX) = (xfl, cur, iss)` | 48-byte issued amount |
+/// | `AnyAmount()` | `any_amount(sfX)` | 49-byte native-or-issued slot |
 /// | `[]` | `empty_vl(sfX)` | the one spelling for an empty blob |
 /// | `[ <elem>+ ]` | `fixed_vl(sfX, N) = [ <elem>+ ]` | `N` is the array literal's own length |
 /// | `*b".."` | `fixed_vl(sfX, N) = *b".."` | `N` is the byte-string literal's own length |
+///
+/// `AnyAmount()` takes no value — `any_amount` has no baked default to
+/// thread through (issued zero, always) — so it desugars straight to the
+/// explicit kind with no `= ..` left over, unlike `NativeAmount`/
+/// `IouAmount` above.
 ///
 /// A `fixed_vl` default spelled as a named const (`field_name: sfX =
 /// SOME_CONST`) is not one of these literal shapes, so it falls through to
@@ -1570,8 +1576,8 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// ambiguous STI is — `fixed_vl(sfX, N) = SOME_CONST` (the explicit form,
 /// `N` spelled out) is still required, since there is no default-shape
 /// token to recover `N` from. `issue`/`native_issue`, and a zero-default
-/// `amount(sfX)` (no `=` at all), also stay explicit — none of the five
-/// shapes above apply to them.
+/// `amount(sfX)` (no `=` at all), also stay explicit — none of the shapes
+/// above apply to them.
 ///
 /// `amount`'s 48-byte value region is `[8-byte value][20-byte
 /// currency][20-byte issuer]`. The 8-byte value is a pure bit transform of
@@ -1759,14 +1765,14 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// field absent, every `vl` at `MIN`, every `any_amount` native, all at
 /// once — exactly the state the host may be asked to parse. A container
 /// that could exceed the budget is a named `E0080` compile error. Worked
-/// example: an `sfAmountEntry` element (`amount(sfAmount)`, the 48-byte
-/// issued form) is a 2-byte header + 48 = 50-byte slot when `optional`, so
-/// two fully `optional` entries in one array (`2 * 50 = 100 > 63`) do not
-/// fit, but one *required* entry (0 NOPs — it always writes) plus one
-/// `optional` entry (`50 <= 63`) does; `examples/22_txn-template-optional`'s
-/// `OptionalRemit` declares exactly this shape as a named array
-/// (`first: sfAmountEntry { .. }`, `second: optional Second: sfAmountEntry
-/// { .. }`).
+/// example: an `sfAmountEntry` element (`amount: sfAmount = AnyAmount()`,
+/// the 49-byte native-or-issued slot) is a 2-byte header + 49 + a 1-byte
+/// `0xE1` terminator = 52-byte region when `optional`, so two fully
+/// `optional` entries in one array (`2 * 52 = 104 > 63`) do not fit, but
+/// one *required* entry (0 NOPs — it always writes) plus one `optional`
+/// entry (`52 <= 63`) does; `examples/22_txn-template-optional`'s `Remit`
+/// declares exactly this shape as a named array (`first: sfAmountEntry {
+/// .. }`, `second: optional Second: sfAmountEntry { .. }`).
 ///
 /// ### Inferred `optional` spellings
 ///
@@ -1779,7 +1785,13 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// View: object(sfX) { .. }`/`array(sfX) [ .. ]` above — same budget, same
 /// generated API, only the spelling differs. A non-inferable STI (`Amount`,
 /// `VL`, `Issue`, an object/array with no body) is a named compile error
-/// naming the matching explicit `optional` form to use instead.
+/// naming the matching explicit `optional` form to use instead — except
+/// the three `Amount`-shaped kinds with no baked default, each of which
+/// gets its own default-shape marker: `field: optional sfX = AnyAmount()`
+/// -> `optional any_amount(sfX)`, `= NativeAmount()` -> `optional
+/// native_amount(sfX)`, `= IouAmount()` -> `optional amount(sfX)` (all
+/// three take no value, the same way the non-`optional` `AnyAmount()`
+/// marker above does not).
 ///
 /// **NOP-padded bytes must never be passed to the Hook API's `sto_*`
 /// family** (`sto_subfield`/`sto_subarray`/`sto_emplace`/`sto_erase`/
@@ -4501,6 +4513,35 @@ macro_rules! __txn_template_step {
             fields = [ $field : amount($sfcode) = ($xfl, $cur, $iss) $(, $($rest)*)? ]
         }
     };
+    // `field: sfXxx = AnyAmount()` -> `field: any_amount(sfXxx)`. `AnyAmount`
+    // is a macro syntax marker like `NativeAmount`/`IouAmount` above, but
+    // takes no value: `any_amount` has no baked default to thread through
+    // (issued zero, always).
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : $sfcode:ident = AnyAmount() $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
+            prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $field : any_amount($sfcode) $(, $($rest)*)? ]
+        }
+    };
     // `field: sfXxx = []` -> `field: empty_vl(sfXxx)`.
     (
         @step
@@ -4760,6 +4801,91 @@ macro_rules! __txn_template_step {
 
     };
 
+    // `field: optional sfXxx = AnyAmount()` -> `field: optional
+    // any_amount(sfXxx)` / `= NativeAmount()` -> `optional
+    // native_amount(sfXxx)` / `= IouAmount()` -> `optional amount(sfXxx)`.
+    // Same macro syntax markers as the non-`optional` default-shape
+    // desugar above, still taking no value: none of these three kinds has
+    // a baked default to thread through (absent, or issued zero once
+    // present). Placed before the bare `optional sfXxx` arm below:
+    // `$sfcode:ident $(, ...)?` there never matches a trailing `= ..`, so
+    // ordering is not load-bearing for correctness, only for grouping
+    // with the arms it mirrors.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : optional $sfcode:ident = AnyAmount() $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
+            prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $field : optional any_amount($sfcode) $(, $($rest)*)? ]
+        }
+    };
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : optional $sfcode:ident = NativeAmount() $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
+            prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $field : optional native_amount($sfcode) $(, $($rest)*)? ]
+        }
+    };
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        nops = [$($nops:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : optional $sfcode:ident = IouAmount() $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            nops = [$($nops)*],
+            prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $field : optional amount($sfcode) $(, $($rest)*)? ]
+        }
+    };
     // `field: optional sfXxx` (inferred optional scalar, absent by
     // default) -- a bare-ident twin of the explicit `optional
     // <scalar>(sfXxx)` kinds: the setter writes `header + PREFIX + value`
@@ -8026,6 +8152,63 @@ mod tests {
     }
 
     crate::txn_template! {
+        /// Inferred-kind twin of `OptionalNativeAmountFixture`: `amount`
+        /// uses `optional sfX = NativeAmount()` instead of the explicit
+        /// `optional native_amount(sfX)`.
+        struct OptionalNativeAmountFixtureInferred {
+            transaction_type = ttPAYMENT,
+            sequence: sfSequence = 0,
+            first_ledger_sequence: sfFirstLedgerSequence = 0,
+            last_ledger_sequence: sfLastLedgerSequence = 0,
+            amount: optional sfAmount = NativeAmount(),
+            fee: sfFee = NativeAmount(0),
+            signing_pub_key: sfSigningPubKey = [],
+            account: sfAccount,
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn inferred_optional_native_amount_matches_explicit_twin() {
+        assert_eq!(
+            OptionalNativeAmountFixtureInferred::FIELDS,
+            OptionalNativeAmountFixture::FIELDS
+        );
+        assert_eq!(
+            OptionalNativeAmountFixtureInferred::LEN,
+            OptionalNativeAmountFixture::LEN
+        );
+        assert_eq!(
+            OptionalNativeAmountFixtureInferred::new().bytes(),
+            OptionalNativeAmountFixture::new().bytes()
+        );
+
+        let mut inferred = OptionalNativeAmountFixtureInferred::new();
+        inferred.set_amount(5).expect("5 drops is in range");
+        let mut explicit = OptionalNativeAmountFixture::new();
+        explicit.set_amount(5).expect("5 drops is in range");
+        assert_eq!(inferred.bytes(), explicit.bytes());
+
+        inferred.clear_amount();
+        explicit.clear_amount();
+        assert_eq!(inferred.bytes(), explicit.bytes());
+
+        // Exercise every remaining setter too (dead-code hygiene).
+        inferred.set_sequence(0);
+        inferred.set_first_ledger_sequence(0);
+        inferred.set_last_ledger_sequence(0);
+        inferred.set_fee(0).expect("0 drops is in range");
+        inferred.set_account(&AccountId::default());
+        let _ = inferred.emit_details_region();
+        assert_eq!(
+            inferred
+                .prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
         /// `optional amount` (48-byte issued form) on `sfSendMax` (sorts
         /// after `sfFee`, both `STI_AMOUNT`).
         struct OptionalAmountFixture {
@@ -8066,6 +8249,65 @@ mod tests {
         let _ = tpl.emit_details_region();
         assert_eq!(
             tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// Inferred-kind twin of `OptionalAmountFixture`: `send_max` uses
+        /// `optional sfX = IouAmount()` instead of the explicit `optional
+        /// amount(sfX)`.
+        struct OptionalAmountFixtureInferred {
+            transaction_type = ttPAYMENT,
+            sequence: sfSequence = 0,
+            first_ledger_sequence: sfFirstLedgerSequence = 0,
+            last_ledger_sequence: sfLastLedgerSequence = 0,
+            fee: sfFee = NativeAmount(0),
+            send_max: optional sfSendMax = IouAmount(),
+            signing_pub_key: sfSigningPubKey = [],
+            account: sfAccount,
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn inferred_optional_amount_matches_explicit_twin() {
+        assert_eq!(
+            OptionalAmountFixtureInferred::FIELDS,
+            OptionalAmountFixture::FIELDS
+        );
+        assert_eq!(
+            OptionalAmountFixtureInferred::LEN,
+            OptionalAmountFixture::LEN
+        );
+        assert_eq!(
+            OptionalAmountFixtureInferred::new().bytes(),
+            OptionalAmountFixture::new().bytes()
+        );
+
+        let currency = CurrencyCode::from_iso(b"USD");
+        let issuer = AccountId([0x55; ACC_ID_LEN]);
+        let mut inferred = OptionalAmountFixtureInferred::new();
+        inferred.set_send_max(XFL::from_raw_bits(0), &currency, &issuer);
+        let mut explicit = OptionalAmountFixture::new();
+        explicit.set_send_max(XFL::from_raw_bits(0), &currency, &issuer);
+        assert_eq!(inferred.bytes(), explicit.bytes());
+
+        inferred.clear_send_max();
+        explicit.clear_send_max();
+        assert_eq!(inferred.bytes(), explicit.bytes());
+
+        // Exercise every remaining setter too (dead-code hygiene).
+        inferred.set_sequence(0);
+        inferred.set_first_ledger_sequence(0);
+        inferred.set_last_ledger_sequence(0);
+        inferred.set_fee(0).expect("0 drops is in range");
+        inferred.set_account(&AccountId::default());
+        let _ = inferred.emit_details_region();
+        assert_eq!(
+            inferred
+                .prepare_for_emit()
                 .expect_err("prepare_for_emit must fail on the host stub"),
             HookError::NotImplemented
         );
@@ -8536,6 +8778,59 @@ mod tests {
     }
 
     crate::txn_template! {
+        /// Inferred-kind twin of `AnyAmountFixture`: `balance` uses the
+        /// `field: sfX = AnyAmount()` default-shape marker instead of the
+        /// explicit `any_amount(sfX)`.
+        struct AnyAmountFixtureInferred {
+            transaction_type = ttPAYMENT,
+            sequence: sfSequence = 0,
+            first_ledger_sequence: sfFirstLedgerSequence = 0,
+            last_ledger_sequence: sfLastLedgerSequence = 0,
+            balance: sfBalance = AnyAmount(),
+            fee: sfFee = NativeAmount(0),
+            signing_pub_key: sfSigningPubKey = [],
+            account: sfAccount,
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn inferred_any_amount_matches_explicit_twin() {
+        assert_eq!(AnyAmountFixtureInferred::FIELDS, AnyAmountFixture::FIELDS);
+        assert_eq!(AnyAmountFixtureInferred::LEN, AnyAmountFixture::LEN);
+        assert_eq!(
+            AnyAmountFixtureInferred::new().bytes(),
+            AnyAmountFixture::new().bytes()
+        );
+
+        let mut inferred = AnyAmountFixtureInferred::new();
+        inferred.set_balance_native(5).expect("5 drops is in range");
+        let mut explicit = AnyAmountFixture::new();
+        explicit.set_balance_native(5).expect("5 drops is in range");
+        assert_eq!(inferred.bytes(), explicit.bytes());
+
+        let currency = CurrencyCode::from_iso(b"USD");
+        let issuer = AccountId([0x44; ACC_ID_LEN]);
+        inferred.set_balance_issued(XFL::from_raw_bits(0), &currency, &issuer);
+        explicit.set_balance_issued(XFL::from_raw_bits(0), &currency, &issuer);
+        assert_eq!(inferred.bytes(), explicit.bytes());
+
+        // Exercise every remaining setter too (dead-code hygiene).
+        inferred.set_sequence(0);
+        inferred.set_first_ledger_sequence(0);
+        inferred.set_last_ledger_sequence(0);
+        inferred.set_fee(0).expect("0 drops is in range");
+        inferred.set_account(&AccountId::default());
+        let _ = inferred.emit_details_region();
+        assert_eq!(
+            inferred
+                .prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
         /// `optional any_amount(sfX)` on `sfLimitAmount` (sorts before
         /// `sfFee`, both `STI_AMOUNT`). Absent by default (all NOPs).
         struct OptionalAnyAmountFixture {
@@ -8590,6 +8885,73 @@ mod tests {
         let _ = tpl.emit_details_region();
         assert_eq!(
             tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// Inferred-kind twin of `OptionalAnyAmountFixture`: `limit_amount`
+        /// uses `optional sfX = AnyAmount()` instead of the explicit
+        /// `optional any_amount(sfX)`.
+        struct OptionalAnyAmountFixtureInferred {
+            transaction_type = ttPAYMENT,
+            sequence: sfSequence = 0,
+            first_ledger_sequence: sfFirstLedgerSequence = 0,
+            last_ledger_sequence: sfLastLedgerSequence = 0,
+            limit_amount: optional sfLimitAmount = AnyAmount(),
+            fee: sfFee = NativeAmount(0),
+            signing_pub_key: sfSigningPubKey = [],
+            account: sfAccount,
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn inferred_optional_any_amount_matches_explicit_twin() {
+        assert_eq!(
+            OptionalAnyAmountFixtureInferred::FIELDS,
+            OptionalAnyAmountFixture::FIELDS
+        );
+        assert_eq!(
+            OptionalAnyAmountFixtureInferred::LEN,
+            OptionalAnyAmountFixture::LEN
+        );
+        assert_eq!(
+            OptionalAnyAmountFixtureInferred::new().bytes(),
+            OptionalAnyAmountFixture::new().bytes()
+        );
+
+        let mut inferred = OptionalAnyAmountFixtureInferred::new();
+        inferred
+            .set_limit_amount_native(7)
+            .expect("7 drops is in range");
+        let mut explicit = OptionalAnyAmountFixture::new();
+        explicit
+            .set_limit_amount_native(7)
+            .expect("7 drops is in range");
+        assert_eq!(inferred.bytes(), explicit.bytes());
+
+        inferred.clear_limit_amount();
+        explicit.clear_limit_amount();
+        assert_eq!(inferred.bytes(), explicit.bytes());
+
+        let currency = CurrencyCode::from_iso(b"EUR");
+        let issuer = AccountId([0x22; ACC_ID_LEN]);
+        inferred.set_limit_amount_issued(XFL::from_raw_bits(0), &currency, &issuer);
+        explicit.set_limit_amount_issued(XFL::from_raw_bits(0), &currency, &issuer);
+        assert_eq!(inferred.bytes(), explicit.bytes());
+
+        // Exercise every remaining setter too (dead-code hygiene).
+        inferred.set_sequence(0);
+        inferred.set_first_ledger_sequence(0);
+        inferred.set_last_ledger_sequence(0);
+        inferred.set_fee(0).expect("0 drops is in range");
+        inferred.set_account(&AccountId::default());
+        let _ = inferred.emit_details_region();
+        assert_eq!(
+            inferred
+                .prepare_for_emit()
                 .expect_err("prepare_for_emit must fail on the host stub"),
             HookError::NotImplemented
         );

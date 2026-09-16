@@ -92,6 +92,9 @@ Non-goals:
 
   // inferred spellings (§3.3): kind taken from sfX's own serialized type
   | <name>: optional sfX                                 // any inferable scalar kind
+  | <name>: optional sfX = AnyAmount()                   // == optional any_amount(sfX), no value
+  | <name>: optional sfX = NativeAmount()                // == optional native_amount(sfX), no value
+  | <name>: optional sfX = IouAmount()                   // == optional amount(sfX), no value
   | <name>: optional <View>: sfX { <field>* }             // == optional <View>: object(sfX) { .. }
   | <name>: optional <View>: sfX [ <element>* ]           // == optional <View>: array(sfX) [ .. ]
   | <name>: sfX [ <Elem>: optional sfY { <field>* } ; <N> ]  // == array(sfX) [ Elem: optional object(sfY) { .. } ; N ]
@@ -106,9 +109,12 @@ Non-goals:
                | empty_vl | fixed_vl
 ```
 
-`optional` scalars take no `= default` (the default is "absent"). `optional
-native_issue`/`optional empty_vl` are allowed: the value is fixed, so the setter takes no
-argument and just makes the field present.
+`optional` scalars take no `= default` (the default is "absent"), except the three
+default-shape markers above (`AnyAmount()`/`NativeAmount()`/`IouAmount()`, each with empty
+parentheses — none of these three kinds has a baked default to carry, so there is no value
+to thread through even under `optional`). `optional native_issue`/`optional empty_vl` are
+allowed: the value is fixed, so the setter takes no argument and just makes the field
+present.
 
 **Inferred spellings.** Every `optional` form above has a bare-`sfX` twin, on the same terms
 `docs/TXN_TEMPLATE_FIELDS_DESIGN.md` §2.7 already gives the non-`optional` kinds: the kind is
@@ -118,9 +124,11 @@ sfX` covers every scalar kind `InferKind` already infers for the non-`optional` 
 `VL`, `Issue`, an object/array with no `{ .. }`/`[ .. ]` body) is a named compile error pointing
 at the matching explicit `optional` form (`optional native_amount`/`optional amount`/
 `any_amount`/`optional any_amount`, `optional empty_vl`/`optional fixed_vl`, `optional vl`,
-`optional native_issue`/`optional issue`). `optional <View>: sfX { .. }`/`[ .. ]` and a
-homogeneous array's `Elem: optional sfY { .. }` are pure token rewrites into the explicit
-`object`/`array` forms above — same budget, same generated API, only the spelling differs.
+`optional native_issue`/`optional issue`) — except the three `Amount`-shaped kinds above,
+which infer from their own default-shape marker instead of erroring. `optional <View>: sfX
+{ .. }`/`[ .. ]` and a homogeneous array's `Elem: optional sfY { .. }` are pure token
+rewrites into the explicit `object`/`array` forms above — same budget, same generated API,
+only the spelling differs.
 
 ### 3.1 Kind table (additions)
 
@@ -164,9 +172,8 @@ no loop), then one `guard_m!`-protected loop over the *rest* of the reserved reg
 `vl_slot_size(MAX)`) writing `value.get(i).copied().unwrap_or(NOP)` per position — a single
 branch-light expression standing in for what would otherwise be a three-way
 prefix/payload/NOP-tail branch inside the loop. This roughly halved the setter's contribution
-to worst-case instruction count end to end (`examples/22_txn-template-optional`'s `pay`
-entry: WCE 7796 → 4434 after this change, measured with `mise run build-examples` /
-`rshooks check`).
+to worst-case instruction count end to end, measured against a `vl(sfX, 2, 194)`-shaped
+template with `mise run build-examples`/`rshooks check`.
 
 **The guard budget is per hook execution, not per call**: xahaud's `_g` counter is cumulative
 for the whole hook run (`docs/DESIGN.md` §2 C2), so calling a `vl` field's `set_x` more than
@@ -297,36 +304,32 @@ decoding, `otxn::from_emitted`, `emitted()` inspection), **strict** (today's beh
 
 ## 5. Examples, metrics, docs
 
-- New `examples/22_txn-template-optional`: three `#[hooks]` entries, `tplpay`
-  (`OptionalPayment`, a Payment), `tplremit` (`OptionalRemit`, a Remit), and `tplvl`
-  (`OptionalVl`, a second Remit), together exercising every new kind at least once, mostly
-  through the inferred spellings (§3.3) — explicit only where a kind cannot be inferred
-  (`any_amount`, `native_amount`, `empty_vl`, `fixed_vl`, `vl`, `amount`). Every field in all
-  three templates is legal for its transaction type per
-  `crates/rshooks-core/protocol_formats.json` (a sfield only that format's `tx_common`/
-  type-specific list actually allows) — `OptionalPayment`'s `send_max: optional
-  any_amount(sfSendMax)` and `OptionalRemit`/`OptionalVl`'s `blob`/`note: vl(sfBlob, ..)` use
-  `sfSendMax`/`sfBlob` rather than an arbitrarily-chosen `sfcode`, and `OptionalRemit`/
-  `OptionalVl`'s whole-container-optional views use `sfMintURIToken`'s own `flags`/`uri`
-  sub-fields rather than a stand-in `object`. `OptionalRemit::amounts` is a named array
-  (`first: sfAmountEntry { amount: any_amount(sfAmount) }`, `second: optional Second:
-  sfAmountEntry { .. }`) — the motivating case for a named array over a homogeneous one: one
-  required entry (always written to a real, constructible amount — `remit` never leaves it at
-  its raw encoding default) and one that may or may not be there — while `OptionalVl::amounts`
-  is the homogeneous "`0` or `1` entries" case (`sfAmounts [ Entry: optional sfAmountEntry {
-  .. } ; 1 ]`). `env.emitted()` is canonical (NOP-free, matching the ledger's re-serialized
-  form), so the byte-level NOP-padding assertions (a field's raw pre-emit slot: `NOP`-filled
-  when absent/`MIN`-length, filled exactly when present/`MAX`-length, and — for `note` — that
-  shrinking back to `MIN` after writing `MAX` re-`NOP`-fills the vacated tail rather than
-  leaving stale bytes) live in `src/lib.rs`'s in-crate `#[cfg(test)]` module (the template
-  types are private) against the template's own `bytes()`, never `prepare_for_emit`/`emit`;
-  `tests/pay.rs`/`tests/remit.rs`/`tests/vl.rs` instead assert the decoded functional behavior
-  against `emitted()` — present with exactly the written bytes, absent by byte-count delta
-  against the present-state blob (not by searching for the header's *absence*, since a short
-  header can coincidentally match part of a longer, unrelated one elsewhere in the blob), and
-  each `amounts` field's element count by counting the array's own `0xE1` element terminators
-  — covering both states for every kind, `any_amount`'s native/issued forms, and `note`'s
-  `MIN`/`MAX` lengths. Includes a `metrics.json`.
+- New `examples/22_txn-template-optional`: one `#[hooks]` entry, `remit` (`Remit`, a Remit
+  sending one or two amounts with an `optional` `DestinationTag`), written entirely in the
+  inferred style (§3.3) — explicit only where a kind cannot infer (`any_amount`, via the `=
+  AnyAmount()` default-shape marker).
+  `amounts` is a named array with one required and one `optional` element (`first:
+  sfAmountEntry { amount: sfAmount = AnyAmount() }`, `second: optional Second: sfAmountEntry
+  { .. }`) — the motivating case for a named array over a homogeneous one: one required entry
+  (`remit` always writes a real, constructible amount into it — never left at `any_amount`'s
+  raw issued-zero encoding default) and one that may or may not be there; two fully
+  `optional` 52-byte `sfAmountEntry` elements would not fit one array's 63-NOP budget, but one
+  required (0 charge) plus one `optional` (52) does. `env.emitted()` is canonical (NOP-free,
+  matching the ledger's re-serialized form), so the byte-level NOP-padding assertions (a
+  field's raw pre-emit slot: `NOP`-filled when absent, filled exactly once present) live in
+  `src/lib.rs`'s in-crate `#[cfg(test)]` module (`Remit` is private) against the template's
+  own `bytes()`, never `prepare_for_emit`/`emit`; `tests/remit.rs` instead asserts the decoded
+  functional behavior against `emitted()` — present with exactly the written bytes, absent by
+  byte-count delta against the present-state blob (not by searching for the header's
+  *absence*, since a short header can coincidentally match part of a longer, unrelated one
+  elsewhere in the blob), `amounts`'s element count by counting the array's own `0xE1`
+  element terminators, and both entries' native/issued forms. Includes a `metrics.json`. The
+  other NOP-padded kinds this design introduces — `vl`/`optional vl`, whole-container
+  `optional` views, and a homogeneous array of `optional` elements — are not exercised by this
+  example (none of them fit a single-Remit, protocol-legal scenario alongside `amounts`
+  without either duplicating a field code or reaching for an unrelated `sfcode`); they are
+  covered by `crates/rshooks/src/txn.rs`'s `mod tests` twinned fixtures and
+  `crates/rshooks/tests/ui/{pass,fail}` instead.
 - `examples/17_sto-writer` stays as the `StoWriter` demonstration; its README points at 22
   for the fixed-shape alternative.
 - `tests/ui/fail`: budget overflow at the top level, inside a nested object, inside an

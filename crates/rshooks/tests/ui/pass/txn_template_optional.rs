@@ -27,7 +27,7 @@ txn_template! {
             c: optional u32_field(sfSourceTag),
             d: optional u64_field(sfIndexNext),
             e: optional hash128(sfEmailHash),
-            f: optional native_amount(sfAmount),
+            f: optional sfAmount = NativeAmount(),
             h: optional fixed_vl(sfMemoType, 4),
             g: optional empty_vl(sfMemoData),
             a: optional u8_field(sfTransactionResult),
@@ -62,12 +62,12 @@ txn_template! {
 
         // optional any_amount, alone (49).
         amt2: object(sfEmittedTxn) {
-            a: optional any_amount(sfLimitAmount),
+            a: optional sfLimitAmount = AnyAmount(),
         },
 
         // optional amount (48-byte issued form), alone (49).
         amt3: object(sfHookExecution) {
-            a: optional amount(sfSendMax),
+            a: optional sfSendMax = IouAmount(),
         },
 
         // vl(2..=6) (4) + optional vl(1..=4) (6) = 10.
