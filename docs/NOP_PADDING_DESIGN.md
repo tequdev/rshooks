@@ -119,7 +119,7 @@ present.
 `<name>:` on a named array's own element (`optional` or not) is itself optional: an
 unnamed element is numbered by its zero-based position among every element in the list, so
 `amounts: sfAmounts [ sfAmountEntry { .. }, optional sfAmountEntry { .. } ]` reaches its
-second (`optional`) entry as `set_amounts_1_amount_native`/`_issued`,
+second (`optional`) entry as `set_amounts_1_amount_native`/`_iou`,
 `enable_amounts_1`/`clear_amounts_1`/`is_amounts_1_present` —
 `docs/TXN_TEMPLATE_FIELDS_DESIGN.md` §2.7 has the full mechanism
 (`$crate::__txn_template_index_elements!`).
@@ -143,7 +143,7 @@ spelling differs.
 | kind | slot bytes | baked default | worst-case NOPs charged to the enclosing container | setters |
 |---|---|---|---|---|
 | `optional <scalar>(sfX)` | that kind's header + value | all NOPs | slot bytes | `set_x(<same args as the kind>)`, `clear_x()` |
-| `any_amount(sfX)` | header + 48 | header + issued zero (48 bytes) | 40 | `set_x_native(u64) -> Result<()>`, `set_x_issued(XFL, &CurrencyCode, &AccountId)` |
+| `any_amount(sfX)` | header + 48 | header + issued zero (48 bytes) | 40 | `set_x_native(u64) -> Result<()>`, `set_x_iou(XFL, &CurrencyCode, &AccountId)` |
 | `optional any_amount(sfX)` | header + 48 | all NOPs | header + 48 | the two above, plus `clear_x()` |
 | `vl(sfX, MIN, MAX)` | header + `vl_length_prefix(MAX)` + MAX | header + prefix(MIN) + MIN zero bytes + NOPs | `slot(MAX).saturating_sub(slot(MIN))` where `slot(n) = prefix_len(n) + n` | `set_x(&[u8]) -> Result<()>` (length must be in `[MIN, MAX]`, else `HookError::InvalidArgument`) — call at most once per hook execution, see §3.1.1 |
 | `optional vl(sfX, MIN, MAX)` | as above | all NOPs | slot bytes | `set_x(&[u8]) -> Result<()>`, `clear_x()` — same once-per-execution rule |
@@ -292,7 +292,7 @@ by the `optional object`/`optional array` push arms above for the recursion into
 `$($inner)*`, and otherwise threaded completely unchanged through every other arm (already
 `mode = $mode:tt`, a single opaque `tt`, everywhere but the handful of spawn/base-case sites
 that need to read or extend it). Every generated *value*-writing setter (`set_x`/`set_x_
-native`/`set_x_issued`/etc., not `clear_x`, which is already correct regardless of an
+native`/`set_x_iou`/etc., not `clear_x`, which is already correct regardless of an
 ancestor's presence) begins with `$crate::__txn_template_ensure!($mode, self.bytes);` — a new
 `#[doc(hidden)]` macro that, per `(offset, slot_const)` pair, copies `slot_const`'s bytes into
 `self.bytes` at that offset *only if* the slot is still absent (its first byte is a NOP) —
@@ -365,7 +365,7 @@ decoding, `otxn::from_emitted`, `emitted()` inspection), **strict** (today's beh
   `amounts` is a named array with one required and one `optional` element, both unnamed and
   numbered by position (`sfAmountEntry { amount: sfAmount = AnyAmount() }`, `optional
   sfAmountEntry { .. }`, its own `amount` field a plain `set_amounts_1_amount_native`/
-  `_issued` pair directly on `Remit`) — the motivating case for a named array over a
+  `_iou` pair directly on `Remit`) — the motivating case for a named array over a
   homogeneous one: one required entry
   (`remit` always writes a real, constructible amount into it — never left at `any_amount`'s
   raw issued-zero encoding default) and one that may or may not be there; two fully

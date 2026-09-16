@@ -139,7 +139,7 @@ impl TxnTemplateOptional {
                         RemitError::AmountFailed
                     );
                 };
-                txn.set_amounts_0_amount_issued(xfl, &USD, iss);
+                txn.set_amounts_0_amount_iou(xfl, &USD, iss);
             }
             None => {
                 if txn.set_amounts_0_amount_native(amt1).is_err() {
@@ -167,7 +167,7 @@ impl TxnTemplateOptional {
                             RemitError::AmountFailed
                         );
                     };
-                    txn.set_amounts_1_amount_issued(xfl, &USD, iss);
+                    txn.set_amounts_1_amount_iou(xfl, &USD, iss);
                 }
                 None => {
                     if txn.set_amounts_1_amount_native(amt2).is_err() {
@@ -252,7 +252,7 @@ mod tests {
     /// leaves 40 trailing `NOP` bytes after the 8-byte value in its native
     /// form; `amounts.1` (`optional sfAmountEntry { .. }`, no view type --
     /// its own `amount` field is a plain `set_amounts_1_amount_native`/
-    /// `_issued` pair on `Remit` itself, unnamed and numbered by
+    /// `_iou` pair on `Remit` itself, unnamed and numbered by
     /// position) defaults absent (the whole element, header included, is
     /// `NOP`s) and, once its setter is called, carries the same
     /// native-form shape at the same offset; `clear_amounts_1()` restores

@@ -31,7 +31,7 @@ fn main() {
 
     txn.set_amounts_0_amount_native(1)
         .expect("1 drop is in range");
-    txn.set_amounts_0_amount_issued(XFL!(0), &currency, &issuer);
+    txn.set_amounts_0_amount_iou(XFL!(0), &currency, &issuer);
 
     assert!(!txn.is_amounts_1_present());
     txn.set_amounts_1_amount_native(1)
@@ -40,7 +40,7 @@ fn main() {
     txn.clear_amounts_1();
     assert!(!txn.is_amounts_1_present());
     txn.enable_amounts_1();
-    txn.set_amounts_1_amount_issued(XFL!(0), &currency, &issuer);
+    txn.set_amounts_1_amount_iou(XFL!(0), &currency, &issuer);
 
     let _ = &txn;
 }

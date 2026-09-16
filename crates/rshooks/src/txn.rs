@@ -1525,7 +1525,7 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// | `object(sfX) { .. }` | OBJECT | inner + 1 (`0xE1`) | inner defaults | inner setters, prefixed |
 /// | `array(sfX) [ .. ]` | ARRAY | elements + 1 (`0xF1`) | inner defaults | inner setters, prefixed |
 /// | `optional <scalar_kind>(sfX $(, N)?)` | (of `<scalar_kind>`) | that kind's slot | all [`NOP`](crate::txn::codec::NOP) (absent) | `set_x(<same args as the kind>)`, `clear_x()` |
-/// | `any_amount(sfX)` | AMOUNT | 1 + 48 | issued zero (as `amount`) | `set_x_native(u64) -> Result<()>`, `set_x_issued(XFL, &CurrencyCode, &AccountId)` |
+/// | `any_amount(sfX)` | AMOUNT | 1 + 48 | issued zero (as `amount`) | `set_x_native(u64) -> Result<()>`, `set_x_iou(XFL, &CurrencyCode, &AccountId)` |
 /// | `optional any_amount(sfX)` | AMOUNT | 1 + 48 | all NOP (absent) | the two above, plus `clear_x()` |
 /// | `vl(sfX, MAX)` / `vl(sfX, MIN, MAX)` | VL | VL-prefix(MAX) + MAX | prefix(MIN) + MIN zeros + NOP tail | `set_x(&[u8]) -> Result<()>` |
 /// | `optional vl(sfX, MIN, MAX)` | VL | VL-prefix(MAX) + MAX | all NOP (absent) | `set_x(&[u8]) -> Result<()>`, `clear_x()` |
@@ -1755,7 +1755,7 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// - **`any_amount(sfX)`**: a 49-byte slot (header + 48) holding either
 ///   the 8-byte native form (`set_x_native(u64) -> Result<()>`) padded
 ///   with 40 NOPs, or the full 48-byte issued form
-///   (`set_x_issued(XFL, &CurrencyCode, &AccountId)`) — chosen at
+///   (`set_x_iou(XFL, &CurrencyCode, &AccountId)`) — chosen at
 ///   runtime. Always present; defaults to issued zero, the same bytes
 ///   `amount(sfX)`'s default uses. `optional any_amount(sfX)` is the same
 ///   slot, absent (all NOP) by default, with an added `clear_x()`.
@@ -5317,7 +5317,7 @@ macro_rules! __txn_template_step {
                 #[doc = concat!("Sets `", stringify!($field), "` to the 48-byte issued (IOU) form of `xfl`/`currency`/`issuer`.")]
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
-                $vis fn [<set_ $($prefix)* $field _issued>](&mut self, xfl: $crate::xfl::XFL, currency: &$crate::types::CurrencyCode, issuer: &$crate::types::AccountId) {
+                $vis fn [<set_ $($prefix)* $field _iou>](&mut self, xfl: $crate::xfl::XFL, currency: &$crate::types::CurrencyCode, issuer: &$crate::types::AccountId) {
                     $crate::__txn_template_ensure!($mode, self.bytes);
                     const OFF: usize = ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1);
                     self.bytes[OFF..OFF.wrapping_add($crate::types::IOU_AMOUNT_LEN)].copy_from_slice(&$crate::txn::codec::encode_iou_amount_const(xfl, currency, issuer));
@@ -5398,7 +5398,7 @@ macro_rules! __txn_template_step {
                 #[doc = concat!("Sets `", stringify!($field), "` to the 48-byte issued (IOU) form of `xfl`/`currency`/`issuer`, making it present (absent by default).")]
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
-                $vis fn [<set_ $($prefix)* $field _issued>](&mut self, xfl: $crate::xfl::XFL, currency: &$crate::types::CurrencyCode, issuer: &$crate::types::AccountId) {
+                $vis fn [<set_ $($prefix)* $field _iou>](&mut self, xfl: $crate::xfl::XFL, currency: &$crate::types::CurrencyCode, issuer: &$crate::types::AccountId) {
                     $crate::__txn_template_ensure!($mode, self.bytes);
                     const OFF: usize = $($prev)*;
                     const HDR: ([u8; 3], usize) = $crate::txn::codec::field_header($sfcode);
@@ -8944,7 +8944,7 @@ mod tests {
 
         let currency = CurrencyCode::from_iso(b"USD");
         let issuer = AccountId([0x44; ACC_ID_LEN]);
-        tpl.set_balance_issued(XFL::from_raw_bits(0), &currency, &issuer);
+        tpl.set_balance_iou(XFL::from_raw_bits(0), &currency, &issuer);
         assert_eq!(
             &tpl.bytes()[off + 1..off + 49],
             &codec::encode_iou_amount_const(XFL::from_raw_bits(0), &currency, &issuer)
@@ -8997,8 +8997,8 @@ mod tests {
 
         let currency = CurrencyCode::from_iso(b"USD");
         let issuer = AccountId([0x44; ACC_ID_LEN]);
-        inferred.set_balance_issued(XFL::from_raw_bits(0), &currency, &issuer);
-        explicit.set_balance_issued(XFL::from_raw_bits(0), &currency, &issuer);
+        inferred.set_balance_iou(XFL::from_raw_bits(0), &currency, &issuer);
+        explicit.set_balance_iou(XFL::from_raw_bits(0), &currency, &issuer);
         assert_eq!(inferred.bytes(), explicit.bytes());
 
         // Exercise every remaining setter too (dead-code hygiene).
@@ -9054,7 +9054,7 @@ mod tests {
 
         let currency = CurrencyCode::from_iso(b"EUR");
         let issuer = AccountId([0x22; ACC_ID_LEN]);
-        tpl.set_limit_amount_issued(XFL::from_raw_bits(0), &currency, &issuer);
+        tpl.set_limit_amount_iou(XFL::from_raw_bits(0), &currency, &issuer);
         assert_eq!(tpl.bytes()[off], 0x63);
         assert_eq!(
             &tpl.bytes()[off + 1..off + 49],
@@ -9124,8 +9124,8 @@ mod tests {
 
         let currency = CurrencyCode::from_iso(b"EUR");
         let issuer = AccountId([0x22; ACC_ID_LEN]);
-        inferred.set_limit_amount_issued(XFL::from_raw_bits(0), &currency, &issuer);
-        explicit.set_limit_amount_issued(XFL::from_raw_bits(0), &currency, &issuer);
+        inferred.set_limit_amount_iou(XFL::from_raw_bits(0), &currency, &issuer);
+        explicit.set_limit_amount_iou(XFL::from_raw_bits(0), &currency, &issuer);
         assert_eq!(inferred.bytes(), explicit.bytes());
 
         // Exercise every remaining setter too (dead-code hygiene).

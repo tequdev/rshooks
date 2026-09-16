@@ -58,14 +58,14 @@ txn_template! {
   zero-based position instead: `amounts.0`'s `amount: sfAmount =
   AnyAmount()` is always present, flattened as
   `set_amounts_0_amount_native(u64) ->
-  Result<()>`/`set_amounts_0_amount_issued(xfl, &currency, &issuer)`;
+  Result<()>`/`set_amounts_0_amount_iou(xfl, &currency, &issuer)`;
   `remit` always writes a real, constructible amount into it (`AMT1`, or
   `1` drop by default) rather than leaving it at `any_amount`'s raw
   issued-zero encoding default — a required element, unlike an `optional`
   one, has no "absent" state to fall back to. `amounts.1` is a whole
   `optional` container with no view type: its own `amount` field is a
   plain `set_amounts_1_amount_native(u64) ->
-  Result<()>`/`set_amounts_1_amount_issued(xfl, &currency, &issuer)` pair
+  Result<()>`/`set_amounts_1_amount_iou(xfl, &currency, &issuer)` pair
   directly on `Remit`, exactly like `amounts.0`'s — calling either one
   makes `amounts.1` present as a side effect (`remit` calls one only when
   `AMT2` is supplied); `clear_amounts_1()`/`is_amounts_1_present()` round

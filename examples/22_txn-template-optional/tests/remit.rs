@@ -134,7 +134,7 @@ fn amounts_has_one_element_absent_two_present() {
 /// fills exactly (no leftover `NOP`s, unlike the native form's 40
 /// trailing ones), and the currency/issuer bytes match exactly.
 #[test]
-fn issuer_present_writes_both_amounts_issued() {
+fn issuer_present_writes_both_amounts_iou() {
     let (amount_hdr, amount_hdr_len) = codec::field_header(sfAmount);
     let issuer = [9u8; 20];
     let mut currency = [0u8; 20];

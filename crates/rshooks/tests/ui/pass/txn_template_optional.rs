@@ -169,12 +169,12 @@ fn main() {
     txn.clear_misc2_a();
 
     txn.set_amt1_a_native(1).expect("1 drop is in range");
-    txn.set_amt1_a_issued(XFL!(0), &currency, &issuer);
+    txn.set_amt1_a_iou(XFL!(0), &currency, &issuer);
     txn.set_amt1_b(&[0u8; 20]);
     txn.clear_amt1_b();
 
     txn.set_amt2_a_native(1).expect("1 drop is in range");
-    txn.set_amt2_a_issued(XFL!(0), &currency, &issuer);
+    txn.set_amt2_a_iou(XFL!(0), &currency, &issuer);
     txn.clear_amt2_a();
 
     txn.set_amt3_a(XFL!(0), &currency, &issuer);
