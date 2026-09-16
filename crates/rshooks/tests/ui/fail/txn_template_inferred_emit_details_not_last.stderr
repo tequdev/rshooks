@@ -1,0 +1,12 @@
+error: txn_template!: `emit_details: emit_details` must be the last field
+  --> tests/ui/fail/txn_template_inferred_emit_details_not_last.rs:9:1
+   |
+9  | / txn_template! {
+10 | |     struct NotLast {
+11 | |         transaction_type = ttPAYMENT,
+12 | |         sequence: u32_field(sfSequence) = 0,
+...  |
+21 | | }
+   | |_^
+   |
+   = note: this error originates in the macro `$crate::__txn_template_step` which comes from the expansion of the macro `txn_template` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -49,7 +49,7 @@
 /// entirely out of these.
 pub mod codec {
     use crate::error::{HookError, Result};
-    use crate::types::{ACC_ID_LEN, AccountId, CurrencyCode, SField};
+    use crate::types::{ACC_ID_LEN, AccountId, CurrencyCode, Hash, SField};
     use crate::xfl::XFL;
 
     /// Native (XRP/XAH) amounts reserve their top 2 bits for control flags;
@@ -170,6 +170,9 @@ pub mod codec {
         pub const STI_VL: u32 = 7;
         /// `AccountID`.
         pub const STI_ACCOUNT: u32 = 8;
+        /// `Number` (e.g. `sfNumber`) — an arbitrary-precision decimal
+        /// value, distinct from `Amount`.
+        pub const STI_NUMBER: u32 = 9;
         /// `STObject` (nested field list, closed by `0xE1`).
         pub const STI_OBJECT: u32 = 14;
         /// `STArray` (nested element list, closed by `0xF1`).
@@ -186,6 +189,8 @@ pub mod codec {
         pub const STI_UINT192: u32 = 21;
         /// `Issue` (currency, or currency + issuer).
         pub const STI_ISSUE: u32 = 24;
+        /// `XChainBridge` (e.g. `sfXChainBridge`).
+        pub const STI_XCHAIN_BRIDGE: u32 = 25;
         /// `Currency` (a bare 20-byte currency code, no issuer).
         pub const STI_CURRENCY: u32 = 26;
     }
@@ -338,6 +343,34 @@ pub mod codec {
         }
     }
 
+    /// Writes the low `len` bytes of `value.to_be_bytes()` into
+    /// `bytes[offset..offset + len]`, at compile time. Used by
+    /// `txn_template!`'s inferred-kind scalar arms to bake in an integer
+    /// default whose width (1/2/4/8 bytes) is only known through
+    /// [`InferKind::LEN`] — a single writer covering every inferable
+    /// integer STI, in place of one `write_const_bytes(&value.to_be_bytes())`
+    /// call per width.
+    ///
+    /// # Panics (compile-time only)
+    ///
+    /// See [`write_field_header`] — same const-context-only guarantee.
+    #[allow(clippy::indexing_slicing)] // in-bounds per the assert below; const-only, see the Panics note
+    pub const fn write_uint_be<const N: usize>(
+        bytes: &mut [u8; N],
+        offset: usize,
+        len: usize,
+        value: u64,
+    ) {
+        let full = value.to_be_bytes();
+        let mut i = 0;
+        while i < len {
+            let dst = offset.wrapping_add(i);
+            assert!(dst < N, "txn_template!: field value write out of bounds");
+            bytes[dst] = full[8usize.wrapping_sub(len).wrapping_add(i)];
+            i = i.wrapping_add(1);
+        }
+    }
+
     /// Writes `count` back-to-back copies of `src` into `bytes` starting at
     /// `offset`, at compile time — [`write_const_bytes`] applied `count`
     /// times at successive `src.len()`-sized strides. Used by
@@ -406,6 +439,16 @@ pub mod codec {
                 "txn_template!: fixed_vl length exceeds the maximum representable VL length (918744)"
             );
         }
+    }
+
+    /// Returns `N`, the length baked into a `[u8; N]` array type — used by
+    /// `txn_template!`'s default-shape desugar (`field: sfX = [ .. ]` /
+    /// `field: sfX = *b".."`) to recover `fixed_vl`'s length argument from
+    /// the default array/byte-string literal itself, so the caller never
+    /// repeats the length as a separate token.
+    #[must_use]
+    pub const fn array_len<const N: usize>(_: &[u8; N]) -> usize {
+        N
     }
 
     /// Header + VL-prefix + value size of a `fixed_vl(sfX, n)` field:
@@ -641,6 +684,151 @@ pub mod codec {
         }
     }
 
+    // --- Kind inference: `txn_template!`'s bare `name: sfXxx` field forms ---
+    //
+    // `macro_rules!` cannot inspect an identifier's serialized type, so
+    // inference is dispatched at the type level: `Infer<{ sti_of(sfcode) }>`
+    // is a concrete const-generic type nameable from the macro (a `{ .. }`
+    // const-generic argument accepts any const expression on stable), and
+    // [`InferKind`] gives the macro everything it needs from that type —
+    // the setter's value type, the wire size, the `FIELDS` kind tag, and
+    // the write itself — without repeating one macro arm's worth of code
+    // per inferable kind.
+
+    /// Marker selecting the inferred `txn_template!` kind for a serialized
+    /// type ID (one of the [`sti`] constants).
+    pub struct Infer<const STI: u32>;
+
+    /// Marker [`InferKind::Value`] for a serialized type that
+    /// `txn_template!` cannot infer a kind for (`STI_AMOUNT`, `STI_VL`,
+    /// `STI_ISSUE`, `STI_OBJECT`/`STI_ARRAY` without a `{ .. }`/`[ .. ]`
+    /// body, `STI_PATHSET`, `STI_VECTOR256`, `STI_UINT192`, `STI_NUMBER`,
+    /// `STI_XCHAIN_BRIDGE`) — its name is itself the diagnostic when a bare
+    /// `name: sfXxx = default` field ascribes a default to it, since
+    /// `default` then fails to type-check against a unit struct.
+    pub struct ExplicitKindRequired;
+
+    /// The kind `txn_template!` infers for a bare `name: sfXxx` (optionally
+    /// `= default`) field declaration, keyed by [`Infer`]'s const-generic
+    /// serialized type ID. One `impl` per [`sti`] constant.
+    pub trait InferKind {
+        /// The setter's value type (`u32`, `&'a Hash`, ...); for a
+        /// non-inferable STI, [`ExplicitKindRequired`].
+        type Value<'a>;
+        /// `false` for a serialized type whose wire size is not fixed by
+        /// the type alone (`Amount`, `VL`, `Issue`, ...) — these must stay
+        /// explicit.
+        const INFERABLE: bool;
+        /// `true` for an integer kind, which requires `= default`; `false`
+        /// for a zeroed (all-bytes-default) kind, which rejects one.
+        const HAS_DEFAULT: bool;
+        /// The `codec::KIND_*` tag for the generated `FIELDS` row.
+        const KIND: u8;
+        /// Bytes baked between the field header and the value — the
+        /// 1-byte VL length prefix for `STI_ACCOUNT`, empty otherwise.
+        const PREFIX: &'static [u8];
+        /// Value byte count, after [`Self::PREFIX`].
+        const LEN: usize;
+        /// Writes `value` into `dst` (exactly [`Self::LEN`] bytes long),
+        /// big-endian for an integer kind.
+        fn write(dst: &mut [u8], value: Self::Value<'_>);
+    }
+
+    /// Implements [`InferKind`] for an inferable integer STI: `$sti`'s
+    /// setter takes `$int` by value and writes it big-endian.
+    macro_rules! infer_uint {
+        ($sti:expr, $int:ty, $kind:expr) => {
+            impl InferKind for Infer<{ $sti }> {
+                type Value<'a> = $int;
+                const INFERABLE: bool = true;
+                const HAS_DEFAULT: bool = true;
+                const KIND: u8 = $kind;
+                const PREFIX: &'static [u8] = &[];
+                const LEN: usize = ::core::mem::size_of::<$int>();
+                #[inline(always)]
+                fn write(dst: &mut [u8], value: Self::Value<'_>) {
+                    dst.copy_from_slice(&value.to_be_bytes());
+                }
+            }
+        };
+    }
+
+    infer_uint!(sti::STI_UINT8, u8, KIND_U8_FIELD);
+    infer_uint!(sti::STI_UINT16, u16, KIND_U16_FIELD);
+    infer_uint!(sti::STI_UINT32, u32, KIND_U32_FIELD);
+    infer_uint!(sti::STI_UINT64, u64, KIND_U64_FIELD);
+
+    /// Implements [`InferKind`] for an inferable zeroed (no-default) fixed
+    /// `[u8; N]`-shaped STI: `$sti`'s setter takes `&$Value` by reference
+    /// and copies its bytes verbatim.
+    macro_rules! infer_bytes {
+        ($sti:expr, $Value:ty, $kind:expr, $len:expr) => {
+            impl InferKind for Infer<{ $sti }> {
+                type Value<'a> = &'a $Value;
+                const INFERABLE: bool = true;
+                const HAS_DEFAULT: bool = false;
+                const KIND: u8 = $kind;
+                const PREFIX: &'static [u8] = &[];
+                const LEN: usize = $len;
+                #[inline(always)]
+                fn write(dst: &mut [u8], value: Self::Value<'_>) {
+                    dst.copy_from_slice(value.as_ref());
+                }
+            }
+        };
+    }
+
+    infer_bytes!(sti::STI_UINT128, [u8; 16], KIND_HASH128, 16);
+    infer_bytes!(sti::STI_UINT160, [u8; 20], KIND_HASH160, 20);
+    infer_bytes!(sti::STI_UINT256, Hash, KIND_HASH256, 32);
+    infer_bytes!(sti::STI_CURRENCY, CurrencyCode, KIND_CURRENCY, 20);
+
+    impl InferKind for Infer<{ sti::STI_ACCOUNT }> {
+        type Value<'a> = &'a AccountId;
+        const INFERABLE: bool = true;
+        const HAS_DEFAULT: bool = false;
+        const KIND: u8 = KIND_ACCOUNT_ID;
+        const PREFIX: &'static [u8] = &[ACC_ID_LEN as u8];
+        const LEN: usize = ACC_ID_LEN;
+        #[inline(always)]
+        fn write(dst: &mut [u8], value: Self::Value<'_>) {
+            dst.copy_from_slice(value.as_ref());
+        }
+    }
+
+    /// Implements [`InferKind`] for a serialized type `txn_template!`
+    /// cannot infer a kind for — a bare `name: sfXxx` field whose `sfXxx`
+    /// has this STI must stay explicit (see each STI's own kind
+    /// docs for which explicit form to use).
+    macro_rules! not_inferable {
+        ($($sti:expr),* $(,)?) => {
+            $(
+                impl InferKind for Infer<{ $sti }> {
+                    type Value<'a> = ExplicitKindRequired;
+                    const INFERABLE: bool = false;
+                    const HAS_DEFAULT: bool = false;
+                    const KIND: u8 = u8::MAX;
+                    const PREFIX: &'static [u8] = &[];
+                    const LEN: usize = 0;
+                    fn write(_dst: &mut [u8], _value: Self::Value<'_>) {}
+                }
+            )*
+        };
+    }
+
+    not_inferable!(
+        sti::STI_AMOUNT,
+        sti::STI_VL,
+        sti::STI_OBJECT,
+        sti::STI_ARRAY,
+        sti::STI_PATHSET,
+        sti::STI_VECTOR256,
+        sti::STI_UINT192,
+        sti::STI_ISSUE,
+        sti::STI_NUMBER,
+        sti::STI_XCHAIN_BRIDGE,
+    );
+
     #[cfg(test)]
     mod tests {
         #![allow(clippy::expect_used, clippy::indexing_slicing)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
@@ -698,7 +886,7 @@ pub mod codec {
         fn sti_constants_match_real_sfield_codes() {
             use crate::sfield::{
                 sfAccount, sfAmount, sfAmountEntry, sfAmounts, sfBaseAsset, sfClaimCurrency,
-                sfEmailHash, sfIndexNext, sfIndexes, sfInvoiceID, sfPaths, sfSequence,
+                sfEmailHash, sfIndexNext, sfIndexes, sfInvoiceID, sfNumber, sfPaths, sfSequence,
                 sfSigningPubKey, sfTakerPaysCurrency, sfTransactionResult, sfTransactionType,
             };
 
@@ -710,6 +898,7 @@ pub mod codec {
             assert_eq!(sti_of(sfAmount), sti::STI_AMOUNT);
             assert_eq!(sti_of(sfSigningPubKey), sti::STI_VL);
             assert_eq!(sti_of(sfAccount), sti::STI_ACCOUNT);
+            assert_eq!(sti_of(sfNumber), sti::STI_NUMBER);
             assert_eq!(sti_of(sfAmountEntry), sti::STI_OBJECT);
             assert_eq!(sti_of(sfAmounts), sti::STI_ARRAY);
             assert_eq!(sti_of(sfTransactionResult), sti::STI_UINT8);
@@ -721,6 +910,11 @@ pub mod codec {
 
             #[cfg(feature = "all-amendments")]
             assert_eq!(sti_of(crate::sfield::sfMPTokenIssuanceID), sti::STI_UINT192);
+            #[cfg(feature = "all-amendments")]
+            assert_eq!(
+                sti_of(crate::sfield::sfXChainBridge),
+                sti::STI_XCHAIN_BRIDGE
+            );
         }
 
         #[test]
@@ -1038,11 +1232,16 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 ///         field_name: <kind>,                        // any count/order after this
 ///         field_name: object(sfXxx) { <field>* },     // nested STObject
 ///         field_name: array(sfXxx) [ <element>* ],    // nested STArray
+///         field_name: sfXxx,                          // inferred kind, or...
+///         field_name: sfXxx = <expr>,                 // ...inferred kind with a default
+///         field_name: sfXxx { <field>* },              // inferred object
+///         field_name: sfXxx [ <element>* ],            // inferred array
 ///         field_name: emit_details,                   // must be LAST, top level only
 ///     }
 /// }
 ///
 /// <element> := field_name: object(sfXxx) { <field>* }  // objects only, directly in an array
+///            | field_name: sfXxx { <field>* }           // inferred object element
 /// ```
 ///
 /// Every scalar field uses one of the uniform kinds in the table below —
@@ -1078,6 +1277,68 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// serialized type (`code >> 16`) matches — `u32_field(sfFee)` (an
 /// STI_AMOUNT field) is rejected rather than silently encoding the wrong
 /// wire representation. Integer kinds are big-endian.
+///
+/// ## Inferred kinds
+///
+/// A field whose serialized type fixes its wire shape can skip the
+/// explicit kind wrapper: `field_name: sfXxx` (or `= default`) infers the
+/// kind straight from `sfXxx`'s STI, `field_name: sfXxx { .. }`/
+/// `field_name: sfXxx [ .. ]` likewise infer `object`/`array`, and a
+/// homogeneous or named array element's own `Elem: sfY { .. }` infers
+/// `object(sfY)` the same way — every explicit spelling above keeps
+/// working unchanged, and the two forms produce byte-identical templates
+/// for the same field.
+///
+/// | STI | infers | setter |
+/// |---|---|---|
+/// | UINT8/16/32/64 | `u8_field`/`u16_field`/`u32_field`/`u64_field` | same, `= default` required |
+/// | UINT128/160 | `hash128`/`hash160` | same, zeroed |
+/// | UINT256 | `hash256` | same, zeroed |
+/// | CURRENCY | `currency` | same, zeroed |
+/// | ACCOUNT | `account_id` | same, zeroed |
+/// | OBJECT (with `{ .. }`) | `object` | same |
+/// | ARRAY (with `[ .. ]`) | `array` | same |
+///
+/// Not inferable — the wire shape depends on more than the STI alone, or
+/// `txn_template!` has no kind for the serialized type at all, so these
+/// stay explicit (or, for the last three, need
+/// [`crate::sto_writer::StoWriter`] instead): `native_amount`/`amount`
+/// (AMOUNT), `empty_vl`/`fixed_vl` (VL), `native_issue`/`issue` (ISSUE),
+/// `object`/`array` without a body (a bare `field_name: sfXxx` where
+/// `sfXxx` is OBJECT or ARRAY is a compile error, not a silent no-op),
+/// PATHSET, VECTOR256, UINT192, NUMBER, and XCHAIN_BRIDGE. Ascribing `=
+/// default` to a zeroed inferred kind, or omitting it on an integer
+/// inferred kind, is also a compile error — see
+/// [`crate::txn::codec::InferKind`]. An inferred integer field's default
+/// is type-checked directly against the field's integer type (`u8`/`u16`/
+/// `u32`/`u64`, no `as` cast), so a default that only compiled under the
+/// explicit form's own `as` cast (e.g. relying on truncation) does not
+/// compile in the bare form.
+///
+/// ### Default-shape kinds
+///
+/// `native_amount`/`amount`/`empty_vl`/`fixed_vl` stay non-inferable from
+/// the STI alone (`AMOUNT`/`VL` each cover more than one wire shape), but a
+/// bare `field_name: sfXxx = <default>` can still pick the right one from
+/// the *shape* of `<default>` itself — `NativeAmount`/`IouAmount` are
+/// syntax markers this desugar recognizes (not real types or functions):
+///
+/// | `<default>` shape | infers | notes |
+/// |---|---|---|
+/// | `NativeAmount(drops)` | `native_amount(sfX) = drops` | 8-byte native amount |
+/// | `IouAmount(xfl, cur, iss)` | `amount(sfX) = (xfl, cur, iss)` | 48-byte issued amount |
+/// | `[]` | `empty_vl(sfX)` | the one spelling for an empty blob |
+/// | `[ <elem>+ ]` | `fixed_vl(sfX, N) = [ <elem>+ ]` | `N` is the array literal's own length |
+/// | `*b".."` | `fixed_vl(sfX, N) = *b".."` | `N` is the byte-string literal's own length |
+///
+/// A `fixed_vl` default spelled as a named const (`field_name: sfX =
+/// SOME_CONST`) is not one of these literal shapes, so it falls through to
+/// the plain inferred-scalar arm and is rejected the same way any other
+/// ambiguous STI is — `fixed_vl(sfX, N) = SOME_CONST` (the explicit form,
+/// `N` spelled out) is still required, since there is no default-shape
+/// token to recover `N` from. `issue`/`native_issue`, and a zero-default
+/// `amount(sfX)` (no `=` at all), also stay explicit — none of the five
+/// shapes above apply to them.
 ///
 /// `amount`'s 48-byte value region is `[8-byte value][20-byte
 /// currency][20-byte issuer]`. The 8-byte value is a pure bit transform of
@@ -1321,15 +1582,15 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 ///     /// sfAmount < sfFee < sfSigningPubKey < sfAccount < sfDestination`).
 ///     pub struct Example {
 ///         transaction_type = ttPAYMENT,
-///         flags: u32_field(sfFlags) = tfCANONICAL,
-///         sequence: u32_field(sfSequence) = 0,
-///         first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
-///         last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+///         flags: sfFlags = tfCANONICAL,
+///         sequence: sfSequence = 0,
+///         first_ledger_sequence: sfFirstLedgerSequence = 0,
+///         last_ledger_sequence: sfLastLedgerSequence = 0,
 ///         amount: native_amount(sfAmount) = 0,
 ///         fee: native_amount(sfFee) = 0,
 ///         signing_pub_key: empty_vl(sfSigningPubKey),
-///         account: account_id(sfAccount),
-///         destination: account_id(sfDestination),
+///         account: sfAccount,
+///         destination: sfDestination,
 ///         emit_details: emit_details,
 ///     }
 /// }
@@ -2448,7 +2709,7 @@ macro_rules! __txn_template_step {
     ) => {
         const _: () = assert!(
             $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_VL,
-            concat!("txn_template!: `", stringify!($field), "` is declared as `fixed_vl` but its sfXxx code is not an STI_VL field")
+            concat!("txn_template!: `", stringify!($field), "` is declared as `fixed_vl` (or given an array / `*b\"..\"` default) but its sfXxx code is not an STI_VL field")
         );
         const _: () = assert!(
             ($n) >= 1usize,
@@ -2461,7 +2722,7 @@ macro_rules! __txn_template_step {
             setters = [
                 $($setters)*
 
-                #[doc = concat!("Sets `", stringify!($field), "`'s ", stringify!($n), "-byte payload.")]
+                #[doc = concat!("Sets `", stringify!($field), "`'s fixed-length payload (defaults to all-zero bytes).")]
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
                 $vis fn [<set_ $($prefix)* $field>](&mut self, value: &[u8; ($n)]) {
@@ -2510,7 +2771,7 @@ macro_rules! __txn_template_step {
     ) => {
         const _: () = assert!(
             $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_VL,
-            concat!("txn_template!: `", stringify!($field), "` is declared as `fixed_vl` but its sfXxx code is not an STI_VL field")
+            concat!("txn_template!: `", stringify!($field), "` is declared as `fixed_vl` (or given an array / `*b\"..\"` default) but its sfXxx code is not an STI_VL field")
         );
         const _: () = assert!(
             ($n) >= 1usize,
@@ -2523,7 +2784,7 @@ macro_rules! __txn_template_step {
             setters = [
                 $($setters)*
 
-                #[doc = concat!("Sets `", stringify!($field), "`'s ", stringify!($n), "-byte payload (default `", stringify!($default), "`).")]
+                #[doc = concat!("Sets `", stringify!($field), "`'s fixed-length payload (default `", stringify!($default), "`).")]
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
                 $vis fn [<set_ $($prefix)* $field>](&mut self, value: &[u8; ($n)]) {
@@ -2762,6 +3023,34 @@ macro_rules! __txn_template_step {
             stack = [$($stack)*],
             mode = $mode,
             fields = [ $($($rest)*)? ]
+        }
+    };
+    // Desugars a named array whose *outer* `array(..)` is already explicit
+    // but whose element type is a bare `$esf:ident` (inferred `object`).
+    // Placed ahead of the general named-array arm below, which would
+    // otherwise swallow `$($inner:tt)*` first and treat `Elem: sfY { .. }`
+    // as a heterogeneous field list instead of an inferred object element.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $name:ident : array($sfcode:expr) [ $Elem:ident : $esf:ident { $($efields:tt)* } ; $($n:tt)+ ] $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            prefix = [$($prefix)*], ctx = $ctx, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $name : array($sfcode) [ $Elem : object($esf) { $($efields)* } ; $($n)+ ] $(, $($rest)*)? ]
         }
     };
     (
@@ -3251,6 +3540,424 @@ macro_rules! __txn_template_step {
             stringify!($field),
             ": emit_details` must be the last top-level field — it cannot be declared inside a nested `object`/`array`"
         ));
+    };
+
+    // A top-level `emit_details` field not declared last: a named error,
+    // ahead of the inferred-scalar arms below (which would otherwise treat
+    // the bare `emit_details` keyword as an unrecognized `sfXxx` ident and
+    // fail with a confusing `cannot find value \`emit_details\`` instead).
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : emit_details , $($rest:tt)+ ]
+    ) => {
+        compile_error!(concat!(
+            "txn_template!: `",
+            stringify!($field),
+            ": emit_details` must be the last field"
+        ));
+    };
+
+    // --- Inferred-kind desugar arms ---
+    //
+    // A bare `name: sfXxx { .. }` / `name: sfXxx [ .. ]` is a pure token
+    // rewrite into the corresponding explicit `object(sfXxx)`/
+    // `array(sfXxx)` form, which the arms above already handle — these
+    // just recurse with the rewritten tokens, threading every accumulator
+    // through unchanged. Placed after both `emit_details` arms and before
+    // the catch-all below: `x: emit_details` must keep matching the
+    // dedicated arms above, not the inferred-scalar arm below.
+
+    // `name: sfXxx { .. }` -> `name: object(sfXxx) { .. }`.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $name:ident : $sfcode:ident { $($inner:tt)* } $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            prefix = [$($prefix)*], ctx = $ctx, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $name : object($sfcode) { $($inner)* } $(, $($rest)*)? ]
+        }
+    };
+    // `name: sfXxx [ Elem: esf { .. } ; N ]` (homogeneous, bare element) ->
+    // `name: array(sfXxx) [ Elem: object(esf) { .. } ; N ]`. Must come
+    // before the general bare-array arm below, or `$($inner:tt)*` there
+    // would swallow this shape first.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $name:ident : $sfcode:ident [ $Elem:ident : $esf:ident { $($efields:tt)* } ; $($n:tt)+ ] $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            prefix = [$($prefix)*], ctx = $ctx, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $name : array($sfcode) [ $Elem : object($esf) { $($efields)* } ; $($n)+ ] $(, $($rest)*)? ]
+        }
+    };
+    // `name: sfXxx [ .. ]` (named array, bare) -> `name: array(sfXxx) [ .. ]`.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $name:ident : $sfcode:ident [ $($inner:tt)* ] $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            prefix = [$($prefix)*], ctx = $ctx, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $name : array($sfcode) [ $($inner)* ] $(, $($rest)*)? ]
+        }
+    };
+    // --- Default-shape desugar arms ---
+    //
+    // The kinds `native_amount`/`amount`/`empty_vl`/`fixed_vl` cannot infer
+    // from the STI alone (`STI_AMOUNT`/`STI_VL` cover several distinct wire
+    // shapes), but a bare `field: sfXxx = <default>` can still infer the
+    // kind from the SHAPE of `<default>` itself: `NativeAmount(..)`/
+    // `IouAmount(..)` are macro syntax markers (not real types — never
+    // resolved as paths), and `[]`/`[ .. ]`/`*b".."` are the literal shapes
+    // `empty_vl`/`fixed_vl` already accept. Placed before the plain
+    // inferred-scalar-with-default arm below: `$default:expr` there would
+    // otherwise happily parse `NativeAmount(500)` as an ordinary call
+    // expression and fail later with a real, confusing `cannot find
+    // function` error instead of desugaring it.
+
+    // `field: sfXxx = NativeAmount(d)` -> `field: native_amount(sfXxx) = d`.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : $sfcode:ident = NativeAmount($d:expr $(,)?) $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $field : native_amount($sfcode) = $d $(, $($rest)*)? ]
+        }
+    };
+    // `field: sfXxx = IouAmount(xfl, cur, iss)` -> `field: amount(sfXxx) = (xfl, cur, iss)`.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : $sfcode:ident = IouAmount($xfl:expr, $cur:expr, $iss:expr $(,)?) $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $field : amount($sfcode) = ($xfl, $cur, $iss) $(, $($rest)*)? ]
+        }
+    };
+    // `field: sfXxx = []` -> `field: empty_vl(sfXxx)`.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : $sfcode:ident = [] $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $field : empty_vl($sfcode) $(, $($rest)*)? ]
+        }
+    };
+    // `field: sfXxx = [ ..+ ]` -> `field: fixed_vl(sfXxx, N) = [ ..+ ]`, `N`
+    // recovered from the default array literal itself via `array_len`.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : $sfcode:ident = [ $($arr:tt)+ ] $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $field : fixed_vl($sfcode, { $crate::txn::codec::array_len(&[ $($arr)+ ]) }) = [ $($arr)+ ] $(, $($rest)*)? ]
+        }
+    };
+    // `field: sfXxx = *lit` (e.g. `*b"note"`) -> `field: fixed_vl(sfXxx, N)
+    // = *lit`, `N` recovered from the byte-string literal itself.
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : $sfcode:ident = * $lit:literal $(, $($rest:tt)*)? ]
+    ) => {
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)*], setters = [$($setters)*], emit_region = [$($emit_region)*],
+            buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
+            table = [$($table)*], emit_details = [$($emit_details)*],
+            prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $field : fixed_vl($sfcode, { $crate::txn::codec::array_len(&*$lit) }) = *$lit $(, $($rest)*)? ]
+        }
+    };
+
+    // `field: sfXxx = default` (inferred scalar, required-with-default kind).
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : $sfcode:ident = $default:expr $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::INFERABLE,
+            concat!("txn_template!: `", stringify!($field), "`: the kind of `", stringify!($sfcode), "` cannot be inferred from its serialized type — declare it explicitly (`native_amount`/`amount`, `empty_vl`/`fixed_vl`, `native_issue`/`issue`, or a `{{ .. }}`/`[ .. ]` body for an object/array); serialized types with no `txn_template!` kind need `StoWriter`")
+        );
+        const _: () = assert!(
+            !(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::INFERABLE)
+                || <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::HAS_DEFAULT,
+            concat!("txn_template!: `", stringify!($field), "` is a zeroed kind and takes no `= default`")
+        );
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)* ($sfcode).code(),],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Sets `", stringify!($field), "` (inferred kind, default `", stringify!($default), "`). Overwritten by `prepare_for_emit` if this is one of the required emit-plumbing fields.")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction: `Self::LEN` sums these same field sizes
+                $vis fn [<set_ $($prefix)* $field>](&mut self, value: <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::Value<'_>) {
+                    const OFF: usize = ($($prev)*)
+                        .wrapping_add($crate::txn::codec::field_header($sfcode).1)
+                        .wrapping_add(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX.len());
+                    const LEN: usize = <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::LEN;
+                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::write(
+                        &mut self.bytes[OFF..OFF.wrapping_add(LEN)],
+                        value,
+                    );
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [
+                $($init)*
+                $crate::txn::codec::write_field_header(&mut $($buf)*, ($($prev)*), $sfcode);
+                $crate::txn::codec::write_const_bytes(
+                    &mut $($buf)*,
+                    ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1),
+                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX,
+                );
+                $crate::txn::codec::write_uint_be(
+                    &mut $($buf)*,
+                    ($($prev)*)
+                        .wrapping_add($crate::txn::codec::field_header($sfcode).1)
+                        .wrapping_add(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX.len()),
+                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::LEN,
+                    {
+                        let __v: <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::Value<'static> = $default;
+                        __v as u64
+                    },
+                );
+            ],
+            prev = [
+                ($($prev)*).wrapping_add($crate::txn::codec::fixed_field_size(
+                    $sfcode,
+                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX.len()
+                        .wrapping_add(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::LEN),
+                ))
+            ],
+            table = [
+                $($table)*
+                (
+                    ($sfcode).code(),
+                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::KIND,
+                    ($($prev)*)
+                        .wrapping_add($crate::txn::codec::field_header($sfcode).1)
+                        .wrapping_add(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX.len()),
+                    ($($depth)*),
+                ),
+            ],
+            emit_details = [$($emit_details)*],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $($($rest)*)? ]
+        }
+
+    };
+    // `field: sfXxx` (inferred scalar, zeroed kind, no default).
+    (
+        @step
+        name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
+        order = [$($order:tt)*], setters = [$($setters:tt)*], emit_region = [$($emit_region:tt)*],
+        buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
+        table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
+        prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
+        stack = [$($stack:tt)*],
+        mode = $mode:tt,
+        fields = [ $field:ident : $sfcode:ident $(, $($rest:tt)*)? ]
+    ) => {
+        const _: () = assert!(
+            <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::INFERABLE,
+            concat!("txn_template!: `", stringify!($field), "`: the kind of `", stringify!($sfcode), "` cannot be inferred from its serialized type — declare it explicitly (`native_amount`/`amount`, `empty_vl`/`fixed_vl`, `native_issue`/`issue`, or a `{{ .. }}`/`[ .. ]` body for an object/array); serialized types with no `txn_template!` kind need `StoWriter`")
+        );
+        const _: () = assert!(
+            !(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::INFERABLE)
+                || !(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::HAS_DEFAULT),
+            concat!("txn_template!: `", stringify!($field), "` is an integer kind and needs `= default`")
+        );
+        $crate::__txn_template_step! {
+            @step
+            name = $Name, meta = [$(#[$meta])*], vis = $vis,
+            order = [$($order)* ($sfcode).code(),],
+            setters = [
+                $($setters)*
+
+                #[doc = concat!("Sets `", stringify!($field), "` (inferred kind, defaults to all-zero bytes).")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction: `Self::LEN` sums these same field sizes
+                $vis fn [<set_ $($prefix)* $field>](&mut self, value: <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::Value<'_>) {
+                    const OFF: usize = ($($prev)*)
+                        .wrapping_add($crate::txn::codec::field_header($sfcode).1)
+                        .wrapping_add(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX.len());
+                    const LEN: usize = <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::LEN;
+                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::write(
+                        &mut self.bytes[OFF..OFF.wrapping_add(LEN)],
+                        value,
+                    );
+                }
+            ],
+            emit_region = [$($emit_region)*],
+            buf = [$($buf)*],
+            init = [
+                $($init)*
+                $crate::txn::codec::write_field_header(&mut $($buf)*, ($($prev)*), $sfcode);
+                $crate::txn::codec::write_const_bytes(
+                    &mut $($buf)*,
+                    ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1),
+                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX,
+                );
+            ],
+            prev = [
+                ($($prev)*).wrapping_add($crate::txn::codec::fixed_field_size(
+                    $sfcode,
+                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX.len()
+                        .wrapping_add(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::LEN),
+                ))
+            ],
+            table = [
+                $($table)*
+                (
+                    ($sfcode).code(),
+                    <$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::KIND,
+                    ($($prev)*)
+                        .wrapping_add($crate::txn::codec::field_header($sfcode).1)
+                        .wrapping_add(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::PREFIX.len()),
+                    ($($depth)*),
+                ),
+            ],
+            emit_details = [$($emit_details)*],
+            prefix = [$($prefix)*],
+            ctx = obj,
+            depth = [$($depth)*],
+            stack = [$($stack)*],
+            mode = $mode,
+            fields = [ $($($rest)*)? ]
+        }
+
     };
 
     (
@@ -4326,6 +5033,386 @@ mod tests {
         let _ = tpl.emit_details_region();
         assert_eq!(
             tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            crate::error::HookError::NotImplemented
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // Inferred kinds (`field: sfXxx` / `field: sfXxx = default` /
+    // `name: sfXxx { .. }` / `name: sfXxx [ .. ]`): each fixture below is
+    // an inferred-form twin of an explicit-form fixture above, asserting
+    // identical `FIELDS`/`LEN`/bytes and (where the explicit twin exposes
+    // one) `TEMPLATE`.
+    // -----------------------------------------------------------------
+
+    crate::txn_template! {
+        /// Inferred-kind twin of `TestPayment`: every `u32_field`/
+        /// `account_id` field below is inferred instead.
+        struct TestPaymentInferred {
+            transaction_type = ttPAYMENT,
+            flags: sfFlags = tfCANONICAL,
+            source_tag: sfSourceTag = 0,
+            sequence: sfSequence = 0,
+            destination_tag: sfDestinationTag = 0,
+            first_ledger_sequence: sfFirstLedgerSequence = 0,
+            last_ledger_sequence: sfLastLedgerSequence = 0,
+            amount: sfAmount = NativeAmount(0),
+            fee: sfFee = NativeAmount(0),
+            signing_pub_key: sfSigningPubKey = [],
+            account: sfAccount,
+            destination: sfDestination,
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn inferred_payment_matches_explicit_twin() {
+        assert_eq!(TestPaymentInferred::FIELDS, TestPayment::FIELDS);
+        assert_eq!(TestPaymentInferred::LEN, TestPayment::LEN);
+        assert_eq!(
+            TestPaymentInferred::new().bytes(),
+            TestPayment::new().bytes()
+        );
+    }
+
+    #[test]
+    fn inferred_payment_setters_match_explicit_setters() {
+        let mut inferred = TestPaymentInferred::new();
+        inferred.set_flags(0x1234);
+        inferred.set_source_tag(7);
+        inferred.set_sequence(8);
+        inferred.set_destination_tag(9);
+        inferred.set_first_ledger_sequence(10);
+        inferred.set_last_ledger_sequence(11);
+        inferred.set_account(&AccountId([0x22; ACC_ID_LEN]));
+        inferred.set_destination(&AccountId([0x33; ACC_ID_LEN]));
+
+        let mut explicit = TestPayment::new();
+        explicit.set_flags(0x1234);
+        explicit.set_source_tag(7);
+        explicit.set_sequence(8);
+        explicit.set_destination_tag(9);
+        explicit.set_first_ledger_sequence(10);
+        explicit.set_last_ledger_sequence(11);
+        explicit.set_account(&AccountId([0x22; ACC_ID_LEN]));
+        explicit.set_destination(&AccountId([0x33; ACC_ID_LEN]));
+
+        assert_eq!(inferred.bytes(), explicit.bytes());
+
+        // Exercise every remaining setter too (dead-code hygiene).
+        inferred.set_amount(1).expect("1 drop is in range");
+        inferred.set_fee(0).expect("0 drops is in range");
+        let _ = inferred.emit_details_region();
+        assert_eq!(
+            inferred
+                .prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            crate::error::HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// Inferred-kind twin of `PerKindFixture`: exercises every
+        /// inferable scalar kind (`u8`/`u16`/`u32`/`u64`/`hash128`/
+        /// `hash160`/`hash256`/`currency`/`account_id`) side by side with
+        /// the kinds that must stay explicit (`native_amount`, `empty_vl`,
+        /// `native_issue`).
+        struct PerKindFixtureInferred {
+            transaction_type = ttPAYMENT,
+            signer_weight: sfSignerWeight = 0x1234,
+            sequence: sfSequence = 0,
+            first_ledger_sequence: sfFirstLedgerSequence = 0,
+            last_ledger_sequence: sfLastLedgerSequence = 0,
+            index_next: sfIndexNext = 0x0102_0304_0506_0708,
+            email_hash: sfEmailHash,
+            invoice_id: sfInvoiceID,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: sfAccount,
+            transaction_result: sfTransactionResult = 0xAB,
+            taker_pays_currency: sfTakerPaysCurrency,
+            claim_currency: native_issue(sfClaimCurrency),
+            base_asset: sfBaseAsset,
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn inferred_per_kind_fixture_matches_explicit_twin() {
+        assert_eq!(PerKindFixtureInferred::FIELDS, PerKindFixture::FIELDS);
+        assert_eq!(PerKindFixtureInferred::LEN, PerKindFixture::LEN);
+        assert_eq!(
+            PerKindFixtureInferred::new().bytes(),
+            PerKindFixture::new().bytes()
+        );
+    }
+
+    #[test]
+    fn inferred_per_kind_fixture_setters_match_explicit_setters() {
+        let email_hash = [0xAB; 16];
+        let invoice = crate::types::Hash([0xCD; 32]);
+        let taker_pays_currency = [0xEF; 20];
+        let base = CurrencyCode::from_iso(b"EUR");
+
+        let mut inferred = PerKindFixtureInferred::new();
+        inferred.set_signer_weight(0xBEEF);
+        inferred.set_index_next(0xFFFF_FFFF_FFFF_FFFF);
+        inferred.set_email_hash(&email_hash);
+        inferred.set_invoice_id(&invoice);
+        inferred.set_transaction_result(0x42);
+        inferred.set_taker_pays_currency(&taker_pays_currency);
+        inferred.set_base_asset(&base);
+
+        let mut explicit = PerKindFixture::new();
+        explicit.set_signer_weight(0xBEEF);
+        explicit.set_index_next(0xFFFF_FFFF_FFFF_FFFF);
+        explicit.set_email_hash(&email_hash);
+        explicit.set_invoice_id(&invoice);
+        explicit.set_transaction_result(0x42);
+        explicit.set_taker_pays_currency(&taker_pays_currency);
+        explicit.set_base_asset(&base);
+
+        assert_eq!(inferred.bytes(), explicit.bytes());
+
+        // Exercise every remaining setter too (dead-code hygiene).
+        inferred.set_sequence(0);
+        inferred.set_first_ledger_sequence(0);
+        inferred.set_last_ledger_sequence(0);
+        inferred.set_fee(0).expect("0 drops is in range");
+        inferred.set_account(&AccountId::default());
+        let _ = inferred.emit_details_region();
+        assert_eq!(
+            inferred
+                .prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            crate::error::HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// Inferred-kind twin of `TestRemitIndexed`: the homogeneous array
+        /// element (`AmountEntry2`) is declared with a bare `sfAmountEntry`
+        /// instead of `object(sfAmountEntry)`.
+        struct TestRemitIndexedInferred {
+            transaction_type = ttREMIT,
+            flags: sfFlags = 0,
+            sequence: sfSequence = 0,
+            first_ledger_sequence: sfFirstLedgerSequence = 0,
+            last_ledger_sequence: sfLastLedgerSequence = 0,
+            fee: sfFee = NativeAmount(0),
+            signing_pub_key: sfSigningPubKey = [],
+            account: sfAccount,
+            destination: sfDestination,
+            amounts: sfAmounts [
+                AmountEntry2: sfAmountEntry {
+                    amount: sfAmount = IouAmount(
+                        XFL::from_raw_bits(0),
+                        CurrencyCode::from_iso(b"USD"),
+                        AccountId([0x44; ACC_ID_LEN])
+                    ),
+                }; 3
+            ],
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn inferred_amount_entry_matches_explicit_twin() {
+        assert_eq!(AmountEntry2::LEN, AmountEntry::LEN);
+        assert_eq!(AmountEntry2::TEMPLATE, AmountEntry::TEMPLATE);
+    }
+
+    #[test]
+    fn inferred_remit_indexed_matches_explicit_twin() {
+        assert_eq!(TestRemitIndexedInferred::FIELDS, TestRemitIndexed::FIELDS);
+        assert_eq!(TestRemitIndexedInferred::LEN, TestRemitIndexed::LEN);
+        assert_eq!(
+            TestRemitIndexedInferred::new().bytes(),
+            TestRemitIndexed::new().bytes()
+        );
+
+        // Exercise every setter too (dead-code hygiene).
+        let mut tpl = TestRemitIndexedInferred::new();
+        tpl.set_flags(0);
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        tpl.set_destination(&AccountId::default());
+        for i in 0..3usize {
+            let mut entry = tpl.amounts(i).expect("index in range");
+            entry.set_amount(
+                XFL::from_raw_bits(0),
+                &CurrencyCode::from_iso(b"USD"),
+                &AccountId([0x44; ACC_ID_LEN]),
+            );
+            entry.set_amount_value(XFL::from_raw_bits(0));
+            let _ = entry.bytes();
+        }
+        assert!(tpl.amounts(3).is_none());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            crate::error::HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// Inferred-kind twin of `TestMemoFixture`: the homogeneous array's
+        /// element is declared with a bare `sfMemo` instead of
+        /// `object(sfMemo)`.
+        struct TestMemoFixtureInferred {
+            transaction_type = ttPAYMENT,
+            sequence: sfSequence = 0,
+            first_ledger_sequence: sfFirstLedgerSequence = 0,
+            last_ledger_sequence: sfLastLedgerSequence = 0,
+            fee: sfFee = NativeAmount(0),
+            signing_pub_key: sfSigningPubKey = [],
+            account: sfAccount,
+            memos: sfMemos [
+                MemoInferred: sfMemo {
+                    memo_type: sfMemoType = *b"note",
+                    memo_data: sfMemoData = [0; 8],
+                }; 1
+            ],
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn inferred_memo_matches_explicit_twin() {
+        assert_eq!(MemoInferred::LEN, Memo::LEN);
+        assert_eq!(MemoInferred::TEMPLATE, Memo::TEMPLATE);
+    }
+
+    #[test]
+    fn inferred_memo_fixture_matches_explicit_twin() {
+        assert_eq!(TestMemoFixtureInferred::FIELDS, TestMemoFixture::FIELDS);
+        assert_eq!(TestMemoFixtureInferred::LEN, TestMemoFixture::LEN);
+        assert_eq!(
+            TestMemoFixtureInferred::new().bytes(),
+            TestMemoFixture::new().bytes()
+        );
+
+        // Exercise every setter too (dead-code hygiene).
+        let mut tpl = TestMemoFixtureInferred::new();
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        {
+            let mut memo = tpl.memos(0).expect("index in range");
+            memo.set_memo_type(b"cccc");
+            memo.set_memo_data(&[0xAB; 8]);
+            let _ = memo.bytes();
+        }
+        assert!(tpl.memos(1).is_none());
+        let _ = tpl.emit_details_region();
+        assert_eq!(
+            tpl.prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            crate::error::HookError::NotImplemented
+        );
+    }
+
+    crate::txn_template! {
+        /// Named array (no repetition count), explicit form: a single
+        /// `grant: object(sfHookGrant) { .. }` element flattened directly
+        /// into the parent's own setters (`set_grants_grant_hook_hash`/
+        /// `set_grants_grant_authorize`) -- see `txn_template!`'s "Named
+        /// elements" grammar.
+        struct NamedArrayExplicit {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            grants: array(sfHookGrants) [
+                grant: object(sfHookGrant) {
+                    hook_hash: hash256(sfHookHash),
+                    authorize: account_id(sfAuthorize),
+                },
+            ],
+            emit_details: emit_details,
+        }
+    }
+
+    crate::txn_template! {
+        /// Inferred-kind twin of `NamedArrayExplicit`: both the array's
+        /// name (`sfHookGrants`), its element's type (`sfHookGrant`), and
+        /// the element's own fields are declared with bare `sfXxx`
+        /// idents.
+        struct NamedArrayInferred {
+            transaction_type = ttPAYMENT,
+            sequence: sfSequence = 0,
+            first_ledger_sequence: sfFirstLedgerSequence = 0,
+            last_ledger_sequence: sfLastLedgerSequence = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: sfAccount,
+            grants: sfHookGrants [
+                grant: sfHookGrant {
+                    hook_hash: sfHookHash,
+                    authorize: sfAuthorize,
+                },
+            ],
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn inferred_named_array_matches_explicit_twin() {
+        assert_eq!(NamedArrayInferred::FIELDS, NamedArrayExplicit::FIELDS);
+        assert_eq!(NamedArrayInferred::LEN, NamedArrayExplicit::LEN);
+        assert_eq!(
+            NamedArrayInferred::new().bytes(),
+            NamedArrayExplicit::new().bytes()
+        );
+    }
+
+    #[test]
+    fn inferred_named_array_setters_match_explicit_setters() {
+        let hash = crate::types::Hash([0xAB; 32]);
+        let authorize = AccountId([0xCD; ACC_ID_LEN]);
+
+        let mut inferred = NamedArrayInferred::new();
+        inferred.set_grants_grant_hook_hash(&hash);
+        inferred.set_grants_grant_authorize(&authorize);
+
+        let mut explicit = NamedArrayExplicit::new();
+        explicit.set_grants_grant_hook_hash(&hash);
+        explicit.set_grants_grant_authorize(&authorize);
+
+        assert_eq!(inferred.bytes(), explicit.bytes());
+
+        // Exercise every remaining setter too (dead-code hygiene).
+        inferred.set_sequence(0);
+        inferred.set_first_ledger_sequence(0);
+        inferred.set_last_ledger_sequence(0);
+        inferred.set_fee(0).expect("0 drops is in range");
+        inferred.set_account(&AccountId::default());
+        let _ = inferred.emit_details_region();
+        assert_eq!(
+            inferred
+                .prepare_for_emit()
+                .expect_err("prepare_for_emit must fail on the host stub"),
+            crate::error::HookError::NotImplemented
+        );
+        explicit.set_sequence(0);
+        explicit.set_first_ledger_sequence(0);
+        explicit.set_last_ledger_sequence(0);
+        explicit.set_fee(0).expect("0 drops is in range");
+        explicit.set_account(&AccountId::default());
+        let _ = explicit.emit_details_region();
+        assert_eq!(
+            explicit
+                .prepare_for_emit()
                 .expect_err("prepare_for_emit must fail on the host stub"),
             crate::error::HookError::NotImplemented
         );

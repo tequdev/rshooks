@@ -30,29 +30,40 @@ path too, not just the 8-byte one.
 txn_template! {
     struct Remit {
         transaction_type = ttREMIT,
-        flags: u32_field(sfFlags) = tfCANONICAL,
-        sequence: u32_field(sfSequence) = 0,
-        first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
-        last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
-        fee: native_amount(sfFee) = 0,
-        signing_pub_key: empty_vl(sfSigningPubKey),
-        account: account_id(sfAccount),
-        destination: account_id(sfDestination),
-        memos: array(sfMemos) [
-            Memo: object(sfMemo) {
-                memo_type: fixed_vl(sfMemoType, 4) = *b"note",
-                memo_data: fixed_vl(sfMemoData, 8),
+        flags: sfFlags = tfCANONICAL,
+        sequence: sfSequence = 0,
+        first_ledger_sequence: sfFirstLedgerSequence = 0,
+        last_ledger_sequence: sfLastLedgerSequence = 0,
+        fee: sfFee = NativeAmount(0),
+        signing_pub_key: sfSigningPubKey = [],
+        account: sfAccount,
+        destination: sfDestination,
+        memos: sfMemos [
+            Memo: sfMemo {
+                memo_type: sfMemoType = *b"note",
+                memo_data: sfMemoData = [0; 8],
             }; 1
         ],
-        amounts: array(sfAmounts) [
-            AmountEntry: object(sfAmountEntry) {
-                amount: amount(sfAmount) = (XFL::from_raw_bits(0), USD, USD_ISSUER),
+        amounts: sfAmounts [
+            AmountEntry: sfAmountEntry {
+                amount: sfAmount = IouAmount(XFL::from_raw_bits(0), USD, USD_ISSUER),
             }; 2
         ],
         emit_details: emit_details,
     }
 }
 ```
+
+`flags`/`sequence`/`first_ledger_sequence`/`last_ledger_sequence`/`account`/`destination`
+above are the inferred bare form — `flags: sfFlags = tfCANONICAL` is exactly `flags:
+u32_field(sfFlags) = tfCANONICAL`, byte for byte (`crates/rshooks/src/txn.rs`'s
+`txn_template!` doc comment, "Inferred kinds"). `Memo`/`AmountEntry`'s own array names
+(`sfMemos`/`sfAmounts`) and element types (`sfMemo`/`sfAmountEntry`) are inferred the same
+way. `fee`/`signing_pub_key`/`memo_type`/`memo_data`/`amount`'s STIs (`AMOUNT`/`VL`) are
+ambiguous on their own, but each default's own shape still disambiguates it:
+`NativeAmount(0)` infers `native_amount`, `[]` infers `empty_vl`, `*b"note"`/`[0; 8]` infer
+`fixed_vl` (with `N` read off the literal itself), and `IouAmount(..)` infers `amount`
+(`crates/rshooks/src/txn.rs`'s `txn_template!` doc comment, "Default-shape kinds").
 
 `sfMemos` (canonical code `(15, 9)`) sorts before `sfAmounts` (`(15, 92)`),
 so it's declared first — canonical order is checked per container, same as

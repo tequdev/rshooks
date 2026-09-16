@@ -50,26 +50,38 @@ txn_template! {
     /// A payment template for emitted transactions.
     struct Payment {
         transaction_type = ttPAYMENT,
-        flags: u32_field(sfFlags) = tfCANONICAL,
-        source_tag: u32_field(sfSourceTag) = 0,
-        sequence: u32_field(sfSequence) = 0,
-        destination_tag: u32_field(sfDestinationTag) = 0,
-        first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
-        last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
-        amount: native_amount(sfAmount) = 0,
-        fee: native_amount(sfFee) = 0,
-        signing_pub_key: empty_vl(sfSigningPubKey),
-        account: account_id(sfAccount),
-        destination: account_id(sfDestination),
+        flags: sfFlags = tfCANONICAL,
+        source_tag: sfSourceTag = 0,
+        sequence: sfSequence = 0,
+        destination_tag: sfDestinationTag = 0,
+        first_ledger_sequence: sfFirstLedgerSequence = 0,
+        last_ledger_sequence: sfLastLedgerSequence = 0,
+        amount: sfAmount = NativeAmount(0),
+        fee: sfFee = NativeAmount(0),
+        signing_pub_key: sfSigningPubKey = [],
+        account: sfAccount,
+        destination: sfDestination,
         emit_details: emit_details,
     }
 }
 ```
 
-(from `examples/10_emit-txn`.) Each field uses one of the uniform kinds
-below, plus the structural `emit_details` marker, which must be declared
-last and reserves space for the host's own `EmitDetails` field with no
-header of its own:
+(from `examples/10_emit-txn`.) A bare `field: sfXxx` (or `= default`)
+infers its kind straight from `sfXxx`'s serialized type — `flags: sfFlags`
+above is exactly `flags: u32_field(sfFlags)`, byte for byte. `AMOUNT`/`VL`
+fields (`amount`/`fee`/`signing_pub_key` above) cover more than one wire
+shape, so their kind can't come from the STI alone — but it can still come
+from the *shape* of the default: `NativeAmount(0)` infers `native_amount`,
+`[]` infers `empty_vl` (the one spelling for an empty blob), and
+`IouAmount(xfl, cur, iss)`/`[ .. ]`/`*b".."` infer `amount`/`fixed_vl` the
+same way (see "`amount`: the 48-byte issued form" and "`fixed_vl`" below).
+The uniform kinds below remain fully supported and are what a bare field
+infers into; declare one explicitly only when neither the STI nor the
+default's shape disambiguates it (`native_issue`/`issue`, a zero-default
+`amount(sfX)`, or a `fixed_vl` default spelled as a named const rather
+than a literal) or when the field is a nested `object`/`array` you'd
+rather spell out. `emit_details` is the one structural marker (not a
+kind), and must be declared last:
 
 | kind | serialized type | wire bytes after header | default | setter |
 |---|---|---|---|---|
@@ -124,7 +136,11 @@ all of them, each with the matching kind:
 | Account | `sfAccount` | `account_id` |
 | *(structural)* | — | `emit_details` |
 
-A missing required field, or one declared with the wrong kind (`sfFee` as
+`Sequence`/`FirstLedgerSequence`/`LastLedgerSequence`/`Account` can all be declared with the
+inferred bare form (`sequence: sfSequence = 0`, `account: sfAccount`); `Fee`'s and
+`SigningPubKey`'s STIs (`AMOUNT`/`VL`) are ambiguous on their own, but their defaults'
+shapes still disambiguate them: `fee: sfFee = NativeAmount(0)`, `signing_pub_key:
+sfSigningPubKey = []`. A missing required field, or one declared with the wrong kind (`sfFee` as
 `u32_field` instead of `native_amount`, say), is a compile error naming
 exactly which field and check failed — never a runtime surprise. Declared
 fields' `sfXxx` codes must also be in strictly increasing canonical order,
@@ -150,9 +166,12 @@ segment instead:
 
 ```rust,ignore
 amount: amount(sfAmount) = (XFL!(0), CurrencyCode::from_iso(b"USD"), account_id!("r...")),
+// or, inferred straight from `sfAmount` and the default's shape:
+amount: sfAmount = IouAmount(XFL!(0), CurrencyCode::from_iso(b"USD"), account_id!("r...")),
 ```
 
-Two setters follow from that split:
+`IouAmount(..)` (like `NativeAmount(..)` above) is a syntax marker this desugar
+recognizes, not a real type. Two setters follow from that split:
 
 - `set_x(xfl, &currency, &issuer)` rewrites all 48 bytes.
 - `set_x_value(xfl)` writes only the 8 value bytes, keeping the baked or
@@ -172,26 +191,29 @@ empty blob, so `sfSigningPubKey`'s required-kind check keeps accepting
 only `empty_vl`.
 
 ```rust,ignore
-memo_type: fixed_vl(sfMemoType, 4) = *b"note",
-memo_data: fixed_vl(sfMemoData, 8),
+memo_type: sfMemoType = *b"note",
+memo_data: sfMemoData = [0; 8],
 ```
 
-Without a default the payload is `N` zero bytes; a declared default must
-be exactly `[u8; N]` — a wrong-length default is a compile-time type
-error, not a truncation. The setter, `set_x(&[u8; N])`, is an infallible
-fixed-size write. Only fixed-length `VL` is covered this way; a genuinely
-variable-length blob, `Vector256`, and `PathSet` stay out of scope (see
-"Deferred kinds" below).
+`memo_type`'s `N = 4` and `memo_data`'s `N = 8` are both inferred from the default literal
+itself (`*b"note"`'s/`[0; 8]`'s own length) — the explicit `fixed_vl(sfMemoType, 4)`/
+`fixed_vl(sfMemoData, 8)` spelling still works unchanged, and is the only option when the
+default is a named const rather than a literal (there is then no literal to recover `N`
+from). Without a default the payload is `N` zero bytes; a declared default must be exactly
+`[u8; N]` — a wrong-length default is a compile-time type error, not a truncation. The
+setter, `set_x(&[u8; N])`, is an infallible fixed-size write. Only fixed-length `VL` is
+covered this way; a genuinely variable-length blob, `Vector256`, and `PathSet` stay out of
+scope (see "Deferred kinds" below).
 
 `fixed_vl` works the same way inside a nested container — a homogeneous
 `sfMemos` array (see "Nested `STObject`/`STArray`" below) whose element
 declares both fields:
 
 ```rust,ignore
-memos: array(sfMemos) [
-    Memo: object(sfMemo) {
-        memo_type: fixed_vl(sfMemoType, 4) = *b"note",
-        memo_data: fixed_vl(sfMemoData, 8),
+memos: sfMemos [
+    Memo: sfMemo {
+        memo_type: sfMemoType = *b"note",
+        memo_data: sfMemoData = [0; 8],
     }; 1
 ],
 ```
@@ -225,13 +247,13 @@ native entry, one issued entry — fall out naturally:
 txn_template! {
     struct Remit {
         transaction_type = ttREMIT,
-        // .. the required fields, plus `destination: account_id(sfDestination)` ..
-        amounts: array(sfAmounts) [
-            native: object(sfAmountEntry) {
+        // .. the required fields, plus `destination: sfDestination` ..
+        amounts: sfAmounts [
+            native: sfAmountEntry {
                 amount: native_amount(sfAmount) = 1,
             },
-            usd: object(sfAmountEntry) {
-                amount: amount(sfAmount) = (XFL!(0), USD, USD_ISSUER),
+            usd: sfAmountEntry {
+                amount: sfAmount = IouAmount(XFL!(0), USD, USD_ISSUER),
             },
         ],
         emit_details: emit_details,
@@ -259,10 +281,10 @@ instead of one setter per element:
 txn_template! {
     struct Remit {
         transaction_type = ttREMIT,
-        // .. the required fields, plus `destination: account_id(sfDestination)` ..
-        amounts: array(sfAmounts) [
-            AmountEntry: object(sfAmountEntry) {
-                amount: amount(sfAmount) = (XFL!(0), USD, USD_ISSUER),
+        // .. the required fields, plus `destination: sfDestination` ..
+        amounts: sfAmounts [
+            AmountEntry: sfAmountEntry {
+                amount: sfAmount = IouAmount(XFL!(0), USD, USD_ISSUER),
             }; 2
         ],
         emit_details: emit_details,
