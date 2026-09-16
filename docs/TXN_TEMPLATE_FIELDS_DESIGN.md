@@ -75,8 +75,8 @@ txn_template! {
   | <name>: sfX = [ <elem>+ ]                     // default-shape: infers fixed_vl, N from the literal (§2.7)
   | <name>: sfX = *<byte string literal>          // default-shape: infers fixed_vl, N from the literal (§2.7)
 
-<element> := <name>: object(sfX) { <field>* }     // only objects directly inside an array
-           | <name>: sfX { <field>* }             // inferred object element
+<element> := [<name>:] object(sfX) { <field>* }   // only objects directly inside an array
+           | [<name>:] sfX { <field>* }          // inferred object element
 ```
 
 Trailing commas are accepted everywhere a field list is accepted (as today), except after
@@ -85,6 +85,10 @@ error (§4.5).
 
 `<Elem>` names the generated element-view type; `<N>` is a `usize` const expression
 (literal or a named const), at least 1. See §2.5.
+
+`<name>:` is optional on a named array's own element (only — the homogeneous `<Elem>: ..; N`
+form is unaffected, its `<Elem>` is never optional): an element without one is numbered by
+its zero-based position among every element in the list, named or not — see §2.7.
 
 ### 2.1 Kind table
 
@@ -342,6 +346,21 @@ Byte-for-byte identity with the explicit spelling is the whole point: `Infer<STI
 (`field_header`, `fixed_field_size`, `write_const_bytes`) the explicit arms call directly,
 so the generated `TEMPLATE`, `FIELDS` row, and setter offset are identical either way — see
 `crates/rshooks/src/txn.rs`'s `mod tests` for the twinned-fixture proofs.
+
+A named array's own elements (not the homogeneous `<Elem>: ..; N` form) go through one more
+rewrite ahead of all of the above: `$crate::__txn_template_index_elements!`, a `rshooks-macros`
+proc macro (alongside `$crate::__paste!`), splits the element list on top-level commas and
+prepends `<N>:` — `<N>` the element's zero-based position — to whichever ones don't already
+start `<tt>:` (an explicit name), before splicing the (now fully named) list back into
+`fields = [ .. ]`. Every element arm that captures the name — the explicit `object(sfY) {
+.. }`/`optional object(sfY) { .. }` forms and their inferred-kind desugars — takes it as
+`$name:tt` rather than `$name:ident` so an integer literal is accepted there too; the
+`@end_object`/`@end_opt_object`/`@end_array`/`@end_opt_array` arms that later name the
+container in a doc string or a generated method (`stringify!($name)`,
+`[<set_ $prefix $name>]`) do the same, since a bare digit literal stringifies and
+concatenates (via `$crate::__paste!`'s literal-digit support) exactly like an identifier
+does. The homogeneous form is untouched: its `<Elem>` always names a real view type, never a
+position.
 
 #### Default-shape desugar
 

@@ -16,6 +16,7 @@ mod hook_key;
 mod hooks_impl;
 mod hooks_shared;
 mod hooks_struct;
+mod index_elements;
 mod krate;
 mod param_name;
 mod param_value;
@@ -235,9 +236,11 @@ pub(crate) fn err(span: Span, msg: &str) -> TokenStream {
 /// Scans its input for bracket groups shaped like `[< tok tok .. >]` (first
 /// inner token `<`, last inner token `>`, both plain `Punct`s) and replaces
 /// each with a single new identifier formed by concatenating, in order, the
-/// string form of every `Ident` token strictly between them. Recurses into
-/// every other group unchanged, so this can wrap an arbitrarily large token
-/// stream and only the marked splice points are touched.
+/// string form of every `Ident` (verbatim) or all-digit integer `Literal`
+/// (its digits) token strictly between them — a numbered array element's
+/// position (`0`, `1`, ..) splices in this way. Recurses into every other
+/// group unchanged, so this can wrap an arbitrarily large token stream and
+/// only the marked splice points are touched.
 ///
 /// Only ever invoked internally, from `txn_template!`'s own expansion
 /// (`$crate::__paste! { .. }`) — not part of the public API.
@@ -245,6 +248,18 @@ pub(crate) fn err(span: Span, msg: &str) -> TokenStream {
 #[proc_macro]
 pub fn paste(input: TokenStream) -> TokenStream {
     rewrite_stream(input)
+}
+
+/// Numbers a `txn_template!` named array's unnamed elements by position —
+/// see [`index_elements::expand`] for the full mechanism.
+///
+/// Only ever invoked internally, from `txn_template!`'s own expansion
+/// (`$crate::__txn_template_index_elements! { .. }`) — not part of the
+/// public API.
+#[doc(hidden)]
+#[proc_macro]
+pub fn txn_template_index_elements(input: TokenStream) -> TokenStream {
+    index_elements::expand(input)
 }
 
 /// Applies [`rewrite_tree`] to every token in `input`.
@@ -272,17 +287,24 @@ fn rewrite_tree(tt: TokenTree) -> TokenTree {
 }
 
 /// If `stream` is shaped exactly like a `< ident ident .. >` splice marker
-/// (at least one `Ident` strictly between a leading and trailing `Punct`
-/// token spelled `<`/`>`), returns the concatenated identifier: each middle
-/// token's text, verbatim, joined with nothing between. Returns `None` for
-/// anything else (including a marker whose interior contains a non-`Ident`
-/// token) — such a group is left as ordinary bracketed tokens, which is not
-/// this macro's problem to diagnose.
+/// (at least one `Ident`/all-digit `Literal` strictly between a leading and
+/// trailing `Punct` token spelled `<`/`>`), returns the concatenated
+/// identifier: each middle token's text, verbatim, joined with nothing
+/// between. A `Literal` contributes only if its text is one or more ASCII
+/// digits (an unsuffixed, undecorated integer, e.g. the positional index
+/// `txn_template!`'s named-array elements are numbered with — never a
+/// string/char/byte/float/suffixed literal). Returns `None` for anything
+/// else (including a marker whose interior contains any other token kind)
+/// — such a group is left as ordinary bracketed tokens, which is not this
+/// macro's problem to diagnose.
 ///
-/// Concatenating only `Ident` text guarantees the result is itself always a
-/// valid identifier (an identifier's continuation characters are a superset
-/// of its allowed starting characters), so `Ident::new` below can never
-/// panic on the text this function builds.
+/// Concatenating only `Ident` text and all-digit `Literal` text guarantees
+/// the result is itself always a valid identifier — an identifier's
+/// continuation characters are a superset of its allowed starting
+/// characters, ASCII digits included, and every marker this crate ever
+/// builds starts with a genuine `Ident` (`set_`/`enable_`/etc.), never a
+/// bare digit segment — so `Ident::new` below can never panic on the text
+/// this function builds.
 fn try_concat_marker(stream: TokenStream) -> Option<Ident> {
     let tokens: Vec<TokenTree> = stream.into_iter().collect();
     if tokens.len() < 3 {
@@ -297,10 +319,17 @@ fn try_concat_marker(stream: TokenStream) -> Option<Ident> {
 
     let mut text = String::new();
     for tt in middle {
-        let TokenTree::Ident(id) = tt else {
-            return None;
-        };
-        text.push_str(&id.to_string());
+        match tt {
+            TokenTree::Ident(id) => text.push_str(&id.to_string()),
+            TokenTree::Literal(lit) => {
+                let digits = lit.to_string();
+                if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+                    return None;
+                }
+                text.push_str(&digits);
+            }
+            _ => return None,
+        }
     }
     if text.is_empty() {
         return None;

@@ -99,10 +99,10 @@ Non-goals:
   | <name>: optional sfX [ <element>* ]                   // == optional array(sfX) [ .. ]
   | <name>: sfX [ <Elem>: optional sfY { <field>* } ; <N> ]  // == array(sfX) [ Elem: optional object(sfY) { .. } ; N ]
 
-<element> := <name>: object(sfX) { <field>* }
-           | <name>: sfX { <field>* }                    // inferred: == object(sfX) { .. }
-           | <name>: optional object(sfX) { <field>* }
-           | <name>: optional sfX { <field>* }            // inferred: == optional object(sfX) { .. }
+<element> := [<name>:] object(sfX) { <field>* }
+           | [<name>:] sfX { <field>* }                  // inferred: == object(sfX) { .. }
+           | [<name>:] optional object(sfX) { <field>* }
+           | [<name>:] optional sfX { <field>* }          // inferred: == optional object(sfX) { .. }
 
 <scalar_kind> := u8_field | u16_field | u32_field | u64_field | hash128 | hash160 | hash256
                | currency | native_amount | amount | native_issue | issue | account_id
@@ -115,6 +115,14 @@ parentheses — none of these three kinds has a baked default to carry, so there
 to thread through even under `optional`). `optional native_issue`/`optional empty_vl` are
 allowed: the value is fixed, so the setter takes no argument and just makes the field
 present.
+
+`<name>:` on a named array's own element (`optional` or not) is itself optional: an
+unnamed element is numbered by its zero-based position among every element in the list, so
+`amounts: sfAmounts [ sfAmountEntry { .. }, optional sfAmountEntry { .. } ]` reaches its
+second (`optional`) entry as `set_amounts_1_amount_native`/`_issued`,
+`enable_amounts_1`/`clear_amounts_1`/`is_amounts_1_present` —
+`docs/TXN_TEMPLATE_FIELDS_DESIGN.md` §2.7 has the full mechanism
+(`$crate::__txn_template_index_elements!`).
 
 **Inferred spellings.** Every `optional` form above has a bare-`sfX` twin, on the same terms
 `docs/TXN_TEMPLATE_FIELDS_DESIGN.md` §2.7 already gives the non-`optional` kinds: the kind is
@@ -354,11 +362,11 @@ decoding, `otxn::from_emitted`, `emitted()` inspection), **strict** (today's beh
   sending one or two amounts with an `optional` `DestinationTag`), written entirely in the
   inferred style (§3.3) — explicit only where a kind cannot infer (`any_amount`, via the `=
   AnyAmount()` default-shape marker).
-  `amounts` is a named array with one required and one `optional` element (`first:
-  sfAmountEntry { amount: sfAmount = AnyAmount() }`, `second: optional sfAmountEntry
-  { .. }`, its own `amount` field a plain `set_amounts_second_amount_native`/`_issued` pair
-  directly on `Remit`) — the motivating case for a named array over a homogeneous one: one
-  required entry
+  `amounts` is a named array with one required and one `optional` element, both unnamed and
+  numbered by position (`sfAmountEntry { amount: sfAmount = AnyAmount() }`, `optional
+  sfAmountEntry { .. }`, its own `amount` field a plain `set_amounts_1_amount_native`/
+  `_issued` pair directly on `Remit`) — the motivating case for a named array over a
+  homogeneous one: one required entry
   (`remit` always writes a real, constructible amount into it — never left at `any_amount`'s
   raw issued-zero encoding default) and one that may or may not be there; two fully
   `optional` 52-byte `sfAmountEntry` elements would not fit one array's 63-NOP budget, but one

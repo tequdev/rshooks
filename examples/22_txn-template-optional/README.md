@@ -39,8 +39,8 @@ txn_template! {
         account: sfAccount,
         destination: sfDestination,
         amounts: sfAmounts [
-            first: sfAmountEntry { amount: sfAmount = AnyAmount() },
-            second: optional sfAmountEntry { amount: sfAmount = AnyAmount() },
+            sfAmountEntry { amount: sfAmount = AnyAmount() },
+            optional sfAmountEntry { amount: sfAmount = AnyAmount() },
         ],
         emit_details: emit_details,
     }
@@ -52,33 +52,35 @@ txn_template! {
   through the generated `set_destination_tag(u32)`. Container charge: `5`
   (the slot's own byte count, well under the top level's 63-`NOP`
   budget).
-- `amounts: sfAmounts [ first: sfAmountEntry { .. }, second: optional
-  sfAmountEntry { .. } ]` — a *named* array (not a homogeneous,
-  indexed one): `first`'s `amount: sfAmount = AnyAmount()` is always
-  present, flattened as `set_amounts_first_amount_native(u64) ->
-  Result<()>`/`set_amounts_first_amount_issued(xfl, &currency, &issuer)`;
+- `amounts: sfAmounts [ sfAmountEntry { .. }, optional sfAmountEntry
+  { .. } ]` — a *named* array (not a homogeneous, indexed one) whose two
+  elements omit their names entirely, so each is numbered by its
+  zero-based position instead: `amounts.0`'s `amount: sfAmount =
+  AnyAmount()` is always present, flattened as
+  `set_amounts_0_amount_native(u64) ->
+  Result<()>`/`set_amounts_0_amount_issued(xfl, &currency, &issuer)`;
   `remit` always writes a real, constructible amount into it (`AMT1`, or
   `1` drop by default) rather than leaving it at `any_amount`'s raw
-  issued-zero encoding default — a required named element, unlike an
-  `optional` one, has no "absent" state to fall back to. `second` is a
-  whole `optional` container with no view type: its own `amount` field is
-  a plain `set_amounts_second_amount_native(u64) ->
-  Result<()>`/`set_amounts_second_amount_issued(xfl, &currency, &issuer)`
-  pair directly on `Remit`, exactly like `first`'s — calling either one
-  makes `second` present as a side effect (`remit` calls one only when
-  `AMT2` is supplied); `clear_amounts_second()`/`is_amounts_second_present()`
-  round out the trio. A homogeneous array can't express "one required,
-  one that may or may not be there" (its elements share one presence
-  rule), and two fully `optional` `sfAmountEntry` elements (each
-  `header(2) + any_amount(sfAmount)`'s 49-byte slot + terminator(1) = 52
-  bytes; `2 * 52 = 104 > 63`) wouldn't fit the array's own budget anyway —
-  one required (`0` charge, always writes) plus one `optional`
-  (`52 <= 63`) does.
+  issued-zero encoding default — a required element, unlike an `optional`
+  one, has no "absent" state to fall back to. `amounts.1` is a whole
+  `optional` container with no view type: its own `amount` field is a
+  plain `set_amounts_1_amount_native(u64) ->
+  Result<()>`/`set_amounts_1_amount_issued(xfl, &currency, &issuer)` pair
+  directly on `Remit`, exactly like `amounts.0`'s — calling either one
+  makes `amounts.1` present as a side effect (`remit` calls one only when
+  `AMT2` is supplied); `clear_amounts_1()`/`is_amounts_1_present()` round
+  out the trio. A homogeneous array can't express "one required, one that
+  may or may not be there" (its elements share one presence rule), and
+  two fully `optional` `sfAmountEntry` elements (each `header(2) +
+  any_amount(sfAmount)`'s 49-byte slot + terminator(1) = 52 bytes;
+  `2 * 52 = 104 > 63`) wouldn't fit the array's own budget anyway — one
+  required (`0` charge, always writes) plus one `optional` (`52 <= 63`)
+  does.
 
 Container budget: `amounts` itself charges the top level nothing (arrays
-are always-present containers); `second`'s own charge (its whole reserved
-slot, `52` bytes) lands against `amounts`'s own 63-NOP budget instead,
-where it fits comfortably alone.
+are always-present containers); `amounts.1`'s own charge (its whole
+reserved slot, `52` bytes) lands against `amounts`'s own 63-NOP budget
+instead, where it fits comfortably alone.
 
 ## Build
 
@@ -101,7 +103,7 @@ Two layers, split by what each needs to observe:
 - `src/lib.rs`'s in-crate `#[cfg(test)]` module constructs `Remit`
   directly (a private type, so only reachable in-crate) and asserts its
   raw, pre-emit `bytes()` — the NOP-padding mechanism itself: an absent
-  field's `NOP` bytes at the exact declared offset, and `amounts.first`'s
+  field's `NOP` bytes at the exact declared offset, and `amounts.0`'s
   native form leaving 40 trailing `NOP` bytes in its reserved 48-byte
   value region. No host backend is needed, since none of these calls
   reach `prepare_for_emit`/`emit`.
@@ -115,9 +117,9 @@ Two layers, split by what each needs to observe:
   elsewhere in the blob, e.g. `EmitDetails`); `amounts`'s element count
   by counting the array's own `0xE1` terminators between `sfAmounts`'s
   header and its closing `0xF1` (one with `AMT2` absent, two once it
-  enables `second`); both entries' issued form (`ISSUER` present) versus
-  native form (absent); and a zero `AMT1`/`AMT2` rolling back rather than
-  emitting.
+  enables `amounts.1`); both entries' issued form (`ISSUER` present)
+  versus native form (absent); and a zero `AMT1`/`AMT2` rolling back
+  rather than emitting.
 
 Every expected region in both layers is built from
 `rshooks::txn::codec::field_header`/`NOP` rather than hardcoded header

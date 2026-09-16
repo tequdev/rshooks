@@ -270,6 +270,12 @@ Setter names are the `_`-joined declaration path
 element's own name (`native`, `usd`) is only a path segment, not a
 repetition index.
 
+An element can also omit its name entirely — `amounts: sfAmounts [
+sfAmountEntry { .. }, sfAmountEntry { .. } ]` — in which case it's
+numbered by its zero-based position among every element in the list
+(named or not): `set_amounts_0_amount`/`set_amounts_1_amount`. Naming and
+numbering mix freely in one list.
+
 #### Homogeneous, indexed elements
 
 When every element has the *same* declared shape, `array(sfX) [ Elem:
@@ -387,6 +393,11 @@ bare-`sfX` `optional` twin too: `optional sfX`, `optional sfX { .. }`/
 `[ .. ]`, and a homogeneous array's `Elem: optional sfY { .. }` — same
 budget, same generated API, only the spelling differs; a kind that cannot
 infer (`Amount`, `VL`, `Issue`) still needs its explicit `optional` form.
+A named array's own element (the homogeneous `Elem: ..; N` form aside) can
+also omit its name entirely: it's numbered by its zero-based position
+among every element in the list, named or not, instead — `[ sfY { .. },
+kept: sfY { .. }, optional sfY { .. } ]` reaches its elements as `_0`,
+`_kept`, `_2`.
 
 Every container — the top level, each named `object`/`array`, each
 homogeneous array, each named `optional object`/`optional array` — has its
@@ -397,13 +408,13 @@ naming the container and the budget. This is why a hook author sometimes
 has to nest a field into its own small container, or choose a named array
 over a homogeneous one, rather than declare fields alongside each other
 freely: `examples/22_txn-template-optional`'s `Remit::amounts` is a
-*named* array with one required and one `optional` element (`first:
-sfAmountEntry { amount: sfAmount = AnyAmount() }`, `second: optional
-sfAmountEntry { .. }`) — it can hold what two fully `optional` 52-byte
-`sfAmountEntry` elements (`2 * 52 = 104 > 63`) could not, since a required
-element charges its container nothing (`Elem::LEN`, not `Elem::LEN`
-reserved-but-optional) while only `second`'s own 52 bytes count against
-the array's budget.
+*named* array with one required and one `optional` element, both unnamed
+and numbered by position (`sfAmountEntry { amount: sfAmount =
+AnyAmount() }`, `optional sfAmountEntry { .. }`) — it can hold what two
+fully `optional` 52-byte `sfAmountEntry` elements (`2 * 52 = 104 > 63`)
+could not, since a required element charges its container nothing
+(`Elem::LEN`, not `Elem::LEN` reserved-but-optional) while only the second
+(`optional`) element's own 52 bytes count against the array's budget.
 
 The generated API mirrors `fixed_vl`/homogeneous-element setters: `set_x`
 writes the field (making it present), `clear_x` restores the `NOP`-filled
@@ -426,8 +437,9 @@ if let Ok(Some(tag)) = self.hook_param.dest_tag.get() {
     txn.set_destination_tag(u32::from_be_bytes(tag));   // optional sfDestinationTag
 }
 if let Ok(Some(bytes)) = self.hook_param.amt2.get() {
-    // optional sfAmountEntry { .. } -- this setter makes `second` present.
-    txn.set_amounts_second_amount_native(u64::from_be_bytes(bytes))?;
+    // optional sfAmountEntry { .. } (unnamed, position 1) -- this setter
+    // makes it present.
+    txn.set_amounts_1_amount_native(u64::from_be_bytes(bytes))?;
 }
 ```
 

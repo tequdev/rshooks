@@ -1,4 +1,4 @@
-error: txn_template!: unrecognized field declaration: amount: native_amount(sfAmount) = 1, , @ end_array, emit_details:
+error: txn_template!: unrecognized field declaration: amount : native_amount(sfAmount) = 1, , @ end_array, emit_details :
        emit_details,
   --> tests/ui/fail/txn_template_scalar_in_array.rs:8:1
    |

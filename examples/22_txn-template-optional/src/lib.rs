@@ -29,8 +29,8 @@ txn_template! {
         account: sfAccount,
         destination: sfDestination,
         amounts: sfAmounts [
-            first: sfAmountEntry { amount: sfAmount = AnyAmount() },
-            second: optional sfAmountEntry { amount: sfAmount = AnyAmount() },
+            sfAmountEntry { amount: sfAmount = AnyAmount() },
+            optional sfAmountEntry { amount: sfAmount = AnyAmount() },
         ],
         emit_details: emit_details,
     }
@@ -67,17 +67,17 @@ pub struct TxnTemplateOptional {
     /// `destination_tag`, if present.
     #[hook_param(name = b"DTAG")]
     dest_tag: HookParam<[u8; 4]>,
-    /// `amounts.first`'s value in drops; defaults to `1` if absent, must
+    /// `amounts.0`'s value in drops; defaults to `1` if absent, must
     /// not be `0` if present.
     #[hook_param(name = b"AMT1")]
     amt1: HookParam<[u8; 8]>,
-    /// `amounts.second`'s value in drops, if present (absent leaves
-    /// `second` unwritten); must not be `0` if present.
+    /// `amounts.1`'s value in drops, if present (absent leaves it
+    /// unwritten); must not be `0` if present.
     #[hook_param(name = b"AMT2")]
     amt2: HookParam<[u8; 8]>,
-    /// When present, both `amounts.first` and (if enabled) `.second` are
-    /// written in the issued form (`USD`, this account as issuer) instead
-    /// of the native form.
+    /// When present, both `amounts.0` and (if enabled) `.1` are written in
+    /// the issued form (`USD`, this account as issuer) instead of the
+    /// native form.
     #[hook_param(name = b"ISSUER")]
     issuer: HookParam<AccountId>,
 }
@@ -139,10 +139,10 @@ impl TxnTemplateOptional {
                         RemitError::AmountFailed
                     );
                 };
-                txn.set_amounts_first_amount_issued(xfl, &USD, iss);
+                txn.set_amounts_0_amount_issued(xfl, &USD, iss);
             }
             None => {
-                if txn.set_amounts_first_amount_native(amt1).is_err() {
+                if txn.set_amounts_0_amount_native(amt1).is_err() {
                     rollback!(
                         b"txn-template-optional: AMT1 native amount out of range",
                         RemitError::AmountFailed
@@ -167,10 +167,10 @@ impl TxnTemplateOptional {
                             RemitError::AmountFailed
                         );
                     };
-                    txn.set_amounts_second_amount_issued(xfl, &USD, iss);
+                    txn.set_amounts_1_amount_issued(xfl, &USD, iss);
                 }
                 None => {
-                    if txn.set_amounts_second_amount_native(amt2).is_err() {
+                    if txn.set_amounts_1_amount_native(amt2).is_err() {
                         rollback!(
                             b"txn-template-optional: AMT2 native amount out of range",
                             RemitError::AmountFailed
@@ -248,14 +248,15 @@ mod tests {
         assert_eq!(&bytes[start..start + hdr_len + 4], &[codec::NOP; 9][..5]);
     }
 
-    /// `amounts.first` (`amount: sfAmount = AnyAmount()`, always present)
+    /// `amounts.0` (`amount: sfAmount = AnyAmount()`, always present)
     /// leaves 40 trailing `NOP` bytes after the 8-byte value in its native
-    /// form; `amounts.second` (`optional sfAmountEntry { .. }`, no view
-    /// type -- its own `amount` field is a plain `set_amounts_second_
-    /// amount_native`/`_issued` pair on `Remit` itself) defaults absent
-    /// (the whole element, header included, is `NOP`s) and, once its
-    /// setter is called, carries the same native-form shape at the same
-    /// offset; `clear_amounts_second()` restores the `NOP`s.
+    /// form; `amounts.1` (`optional sfAmountEntry { .. }`, no view type --
+    /// its own `amount` field is a plain `set_amounts_1_amount_native`/
+    /// `_issued` pair on `Remit` itself, unnamed and numbered by
+    /// position) defaults absent (the whole element, header included, is
+    /// `NOP`s) and, once its setter is called, carries the same
+    /// native-form shape at the same offset; `clear_amounts_1()` restores
+    /// the `NOP`s.
     #[test]
     fn first_leaves_nop_tail_second_defaults_absent_and_enables() {
         let mut txn = Remit::new();
@@ -268,15 +269,15 @@ mod tests {
         let first_start = bytes
             .windows(entry_hdr_len)
             .position(|w| w == &entry_hdr[..entry_hdr_len])
-            .expect("sfAmountEntry header present for `first`");
+            .expect("sfAmountEntry header present for `amounts.0`");
         let second_start = first_start + region_len;
         assert_eq!(
             &bytes[second_start..second_start + region_len],
             &[codec::NOP; 128][..region_len],
-            "`second` defaults absent"
+            "`amounts.1` defaults absent"
         );
 
-        txn.set_amounts_first_amount_native(5)
+        txn.set_amounts_0_amount_native(5)
             .expect("5 drops is in range");
         let bytes = txn.bytes();
         assert_eq!(
@@ -296,7 +297,7 @@ mod tests {
             &[codec::NOP; codec::ANY_AMOUNT_NATIVE_NOPS]
         );
 
-        txn.set_amounts_second_amount_native(9)
+        txn.set_amounts_1_amount_native(9)
             .expect("9 drops is in range");
         let bytes = txn.bytes();
         assert_eq!(
@@ -316,7 +317,7 @@ mod tests {
         );
         assert_eq!(bytes[second_start + region_len - 1], 0xE1); // object end marker
 
-        txn.clear_amounts_second();
+        txn.clear_amounts_1();
         let bytes = txn.bytes();
         assert_eq!(
             &bytes[second_start..second_start + region_len],
