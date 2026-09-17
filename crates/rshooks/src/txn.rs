@@ -1492,8 +1492,8 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 ///     }
 /// }
 ///
-/// <element> := field_name: object(sfXxx) { <field>* }  // objects only, directly in an array
-///            | field_name: sfXxx { <field>* }           // inferred object element
+/// <element> := object(sfXxx) { <field>* }  // objects only, directly in an array, by position
+///            | sfXxx { <field>* }           // inferred object element
 /// ```
 ///
 /// Every scalar field uses one of the uniform kinds in the table below —
@@ -1525,7 +1525,7 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// | `object(sfX) { .. }` | OBJECT | inner + 1 (`0xE1`) | inner defaults | inner setters, prefixed |
 /// | `array(sfX) [ .. ]` | ARRAY | elements + 1 (`0xF1`) | inner defaults | inner setters, prefixed |
 /// | `optional <scalar_kind>(sfX $(, N)?)` | (of `<scalar_kind>`) | that kind's slot | all [`NOP`](crate::txn::codec::NOP) (absent) | `set_x(<same args as the kind>)`, `clear_x()` |
-/// | `any_amount(sfX)` | AMOUNT | 1 + 48 | issued zero (as `amount`) | `set_x_native(u64) -> Result<()>`, `set_x_issued(XFL, &CurrencyCode, &AccountId)` |
+/// | `any_amount(sfX)` | AMOUNT | 1 + 48 | issued zero (as `amount`) | `set_x_native(u64) -> Result<()>`, `set_x_iou(XFL, &CurrencyCode, &AccountId)` |
 /// | `optional any_amount(sfX)` | AMOUNT | 1 + 48 | all NOP (absent) | the two above, plus `clear_x()` |
 /// | `vl(sfX, MAX)` / `vl(sfX, MIN, MAX)` | VL | VL-prefix(MAX) + MAX | prefix(MIN) + MIN zeros + NOP tail | `set_x(&[u8]) -> Result<()>` |
 /// | `optional vl(sfX, MIN, MAX)` | VL | VL-prefix(MAX) + MAX | all NOP (absent) | `set_x(&[u8]) -> Result<()>`, `clear_x()` |
@@ -1546,9 +1546,10 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// A field whose serialized type fixes its wire shape can skip the
 /// explicit kind wrapper: `field_name: sfXxx` (or `= default`) infers the
 /// kind straight from `sfXxx`'s STI, `field_name: sfXxx { .. }`/
-/// `field_name: sfXxx [ .. ]` likewise infer `object`/`array`, and a
-/// homogeneous or named array element's own `Elem: sfY { .. }` infers
-/// `object(sfY)` the same way — every explicit spelling above keeps
+/// `field_name: sfXxx [ .. ]` likewise infer `object`/`array`, a
+/// positional array element's own `sfY { .. }` infers `object(sfY)`, and
+/// a homogeneous array element's own `Elem: sfY { .. }` infers
+/// `object(sfY)` too — every explicit spelling above keeps
 /// working unchanged, and the two forms produce byte-identical templates
 /// for the same field.
 ///
@@ -1648,18 +1649,20 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// `object(sfX) { <field>* }` nests a fixed inner field list — its field
 /// count and shape are known at declaration time, so the whole template
 /// stays `const fn`-computable exactly like the scalar kinds. An
-/// `array(sfX) [ .. ]` field takes a named-element form or a homogeneous
-/// indexed form:
+/// `array(sfX) [ .. ]` field takes a positional-element form or a
+/// homogeneous indexed form:
 ///
-/// - **Named elements**: `array(sfX) [ name: object(sfY) { <field>* },
-///   name2: object(sfY) { <field>* }, .. ]` — each element declared
-///   individually (so heterogeneous element shapes, one native and one
-///   issued entry say, fall out naturally), reached through its own
-///   `_`-joined setter path (below).
+/// - **Array elements**: `array(sfX) [ object(sfY) { <field>* },
+///   object(sfY) { <field>* }, .. ]` — each element declared individually
+///   (so heterogeneous element shapes, one native and one issued entry
+///   say, fall out naturally), reached through its zero-based position
+///   among every element in the list: `[ sfY { .. }, optional sfY { .. }
+///   ]` reaches its elements as `_0`, `_1`.
 /// - **Homogeneous, indexed elements**: `array(sfX) [ Elem: object(sfY) {
 ///   <field>* } ; N ]` — exactly one element shape, declared once and
 ///   repeated `N` times (`N` a `usize` const expression, at least 1); see
-///   "Homogeneous arrays" below.
+///   "Homogeneous arrays" below. `Elem` names the generated element-view
+///   type, not a position.
 ///
 /// Either way, an array's elements must each be an `object(sfY) { .. }` —
 /// a scalar or a nested `array` directly inside an `array` is a compile
@@ -1669,19 +1672,23 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// Canonical `(type, field)` order is checked **per container**, not just
 /// at the top level: each object's own direct fields (and the template's
 /// own top-level fields) must have strictly increasing `sfXxx` codes. An
-/// array's elements are not order-checked against each other (named
-/// elements typically share one repeated `sfcode` anyway, e.g. every
-/// `sfAmounts` element is an `sfAmountEntry`). Nesting depth is bounded at
-/// compile time by [`crate::sto_writer::STO_WRITER_MAX_DEPTH`], the same
-/// limit xahaud's deserializer enforces — a homogeneous array's element
-/// counts as **two** levels (the array itself, then the element), the same
-/// as a named array's object element.
+/// array's elements are not order-checked against each other (they
+/// typically share one repeated `sfcode` anyway, e.g. every `sfAmounts`
+/// element is an `sfAmountEntry`). Nesting depth is bounded at compile
+/// time by [`crate::sto_writer::STO_WRITER_MAX_DEPTH`], the same limit
+/// xahaud's deserializer enforces — a homogeneous array's element counts
+/// as **two** levels (the array itself, then the element), the same as a
+/// positional array's object element.
 ///
-/// Setter names for a *named* nested field are the full `_`-joined
-/// declaration path: `amounts: array(sfAmounts) [ usd: object(sfAmountEntry)
-/// { amount: amount(sfAmount) = .. } ]` generates `set_amounts_usd_amount`/
-/// `set_amounts_usd_amount_value` — an array element's own name is only a
-/// path segment, not a repetition index.
+/// Setter names for an array element are the full `_`-joined declaration
+/// path, its position standing in for a field name: `amounts:
+/// array(sfAmounts) [ object(sfAmountEntry) { amount: amount(sfAmount) =
+/// .. } ]` generates `set_amounts_0_amount`/`set_amounts_0_amount_value`.
+/// The position is assigned by `$crate::__txn_template_index_elements!`
+/// (a proc macro that splits the element list on top-level commas and
+/// prepends `<N>:` to each one, ahead of the arms below ever seeing them)
+/// — an element spelled `name: object(sfY) { .. }` is a compile error, not
+/// a name override.
 ///
 /// ## Homogeneous arrays
 ///
@@ -1742,7 +1749,7 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// - **`any_amount(sfX)`**: a 49-byte slot (header + 48) holding either
 ///   the 8-byte native form (`set_x_native(u64) -> Result<()>`) padded
 ///   with 40 NOPs, or the full 48-byte issued form
-///   (`set_x_issued(XFL, &CurrencyCode, &AccountId)`) — chosen at
+///   (`set_x_iou(XFL, &CurrencyCode, &AccountId)`) — chosen at
 ///   runtime. Always present; defaults to issued zero, the same bytes
 ///   `amount(sfX)`'s default uses. `optional any_amount(sfX)` is the same
 ///   slot, absent (all NOP) by default, with an added `clear_x()`.
@@ -1773,8 +1780,8 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 ///   defaults. `clear_x(&mut self)` NOP-fills the whole slot back to
 ///   absent; `is_x_present(&self) -> bool` reads presence without
 ///   changing it. Legal at the top level, inside a nested `object`, or —
-///   for `optional object(sfX) { .. }` only — as a named element inside
-///   an `array`.
+///   for `optional object(sfX) { .. }` only — as a named (or unnamed,
+///   numbered) element inside an `array`.
 /// - A **homogeneous array of optional elements** — `array(sfX) [ Elem:
 ///   optional object(sfY) { <field>* } ; N ]` — reserves `N * Elem::LEN`
 ///   bytes exactly like the non-optional form (`Elem::LEN`/`TEMPLATE`,
@@ -1802,8 +1809,8 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// `optional` entries in one array (`2 * 52 = 104 > 63`) do not fit, but
 /// one *required* entry (0 NOPs — it always writes) plus one `optional`
 /// entry (`52 <= 63`) does; `examples/22_txn-template-optional`'s `Remit`
-/// declares exactly this shape as a named array (`first: sfAmountEntry {
-/// .. }`, `second: optional sfAmountEntry { .. }`).
+/// declares exactly this shape as an array (`sfAmountEntry { .. }`,
+/// `optional sfAmountEntry { .. }`).
 ///
 /// ### Inferred `optional` spellings
 ///
@@ -2242,7 +2249,7 @@ macro_rules! txn_template {
 /// down to independent `const _: () = assert!(...)` items: one STI check
 /// per declared field, one order check per container, one depth check per
 /// nested container (two for a homogeneous array's element, matching a
-/// named array's object element), one element-count check per homogeneous
+/// positional array's object element), one element-count check per homogeneous
 /// array, plus the fixed set of required-field checks generated in a
 /// `tpl`-mode base case — a presence check and a kind-agreement check per
 /// required field (via [`crate::txn::codec::field_present`] /
@@ -2289,7 +2296,7 @@ macro_rules! __txn_template_check_nop_budget {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __txn_template_check_not_plumbing {
-    ($sfcode:expr, $field:ident, $kindword:literal, $depth:expr) => {
+    ($sfcode:expr, $field:tt, $kindword:literal, $depth:expr) => {
         const _: () = assert!(
             ($depth) != 0usize
                 || !$crate::txn::codec::is_one_of(
@@ -3594,9 +3601,9 @@ macro_rules! __txn_template_step {
         }
 
     };
-    // Desugars a named array whose *outer* `array(..)` is already explicit
+    // Desugars an array whose *outer* `array(..)` is already explicit
     // but whose element type is a bare `$esf:ident` (inferred `object`).
-    // Placed ahead of the general named-array arm below, which would
+    // Placed ahead of the general array arm below, which would
     // otherwise swallow `$($inner:tt)*` first and treat `Elem: sfY { .. }`
     // as a heterogeneous field list instead of an inferred object element.
     (
@@ -4444,7 +4451,7 @@ macro_rules! __txn_template_step {
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
-        fields = [ $name:ident : $sfcode:ident { $($inner:tt)* } $(, $($rest:tt)*)? ]
+        fields = [ $name:tt : $sfcode:ident { $($inner:tt)* } $(, $($rest:tt)*)? ]
     ) => {
         $crate::__txn_template_step! {
             @step
@@ -4488,7 +4495,7 @@ macro_rules! __txn_template_step {
             fields = [ $name : array($sfcode) [ $Elem : object($esf) { $($efields)* } ; $($n)+ ] $(, $($rest)*)? ]
         }
     };
-    // `name: sfXxx [ .. ]` (named array, bare) -> `name: array(sfXxx) [ .. ]`.
+    // `name: sfXxx [ .. ]` (array, bare) -> `name: array(sfXxx) [ .. ]`.
     (
         @step
         name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
@@ -4517,7 +4524,7 @@ macro_rules! __txn_template_step {
     // `name: optional sfX { .. }` -> `name: optional object(sfX) { .. }` --
     // bare-`sfX` twin of the explicit `optional object(sfX) { .. }` form
     // below; legal wherever that one is (`ctx = obj`/`ctx = arr` alike,
-    // since a named array element can itself be a whole optional object).
+    // since an array element can itself be a whole optional object).
     (
         @step
         name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
@@ -4528,7 +4535,7 @@ macro_rules! __txn_template_step {
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
-        fields = [ $name:ident : optional $sfcode:ident { $($inner:tt)* } $(, $($rest:tt)*)? ]
+        fields = [ $name:tt : optional $sfcode:ident { $($inner:tt)* } $(, $($rest:tt)*)? ]
     ) => {
         $crate::__txn_template_step! {
             @step
@@ -4544,8 +4551,8 @@ macro_rules! __txn_template_step {
         }
     };
     // `name: optional sfX [ .. ]` -> `name: optional array(sfX) [ .. ]`
-    // (`ctx = obj` only -- a whole optional array can't be a named array's
-    // own element, matching the explicit `optional array(sfX) [ .. ]` form).
+    // (`ctx = obj` only -- a whole optional array can't be an array's own
+    // element, matching the explicit `optional array(sfX) [ .. ]` form).
     (
         @step
         name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
@@ -5304,7 +5311,7 @@ macro_rules! __txn_template_step {
                 #[doc = concat!("Sets `", stringify!($field), "` to the 48-byte issued (IOU) form of `xfl`/`currency`/`issuer`.")]
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
-                $vis fn [<set_ $($prefix)* $field _issued>](&mut self, xfl: $crate::xfl::XFL, currency: &$crate::types::CurrencyCode, issuer: &$crate::types::AccountId) {
+                $vis fn [<set_ $($prefix)* $field _iou>](&mut self, xfl: $crate::xfl::XFL, currency: &$crate::types::CurrencyCode, issuer: &$crate::types::AccountId) {
                     $crate::__txn_template_ensure!($mode, self.bytes);
                     const OFF: usize = ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1);
                     self.bytes[OFF..OFF.wrapping_add($crate::types::IOU_AMOUNT_LEN)].copy_from_slice(&$crate::txn::codec::encode_iou_amount_const(xfl, currency, issuer));
@@ -5385,7 +5392,7 @@ macro_rules! __txn_template_step {
                 #[doc = concat!("Sets `", stringify!($field), "` to the 48-byte issued (IOU) form of `xfl`/`currency`/`issuer`, making it present (absent by default).")]
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
-                $vis fn [<set_ $($prefix)* $field _issued>](&mut self, xfl: $crate::xfl::XFL, currency: &$crate::types::CurrencyCode, issuer: &$crate::types::AccountId) {
+                $vis fn [<set_ $($prefix)* $field _iou>](&mut self, xfl: $crate::xfl::XFL, currency: &$crate::types::CurrencyCode, issuer: &$crate::types::AccountId) {
                     $crate::__txn_template_ensure!($mode, self.bytes);
                     const OFF: usize = $($prev)*;
                     const HDR: ([u8; 3], usize) = $crate::txn::codec::field_header($sfcode);
@@ -5763,7 +5770,7 @@ macro_rules! __txn_template_step {
             fields = [ $($inner)* , @ end_opt_object $(, $($rest)*)? ]
         }
     };
-    // Same as above, but as a named element directly inside an `array`
+    // Same as above, but as an element directly inside an `array`
     // (`ctx = arr`): not order-checked, and its NOP charge belongs to the
     // enclosing *array*'s own budget.
     (
@@ -5776,7 +5783,7 @@ macro_rules! __txn_template_step {
         prefix = [$($prefix:tt)*], ctx = arr, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = [$tag:tt $($entry:tt)*],
-        fields = [ $name:ident : optional object($sfcode:expr) { $($inner:tt)* } $(, $($rest:tt)*)? ]
+        fields = [ $name:tt : optional object($sfcode:expr) { $($inner:tt)* } $(, $($rest:tt)*)? ]
     ) => {
         const _: () = assert!(
             $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_OBJECT,
@@ -5837,29 +5844,32 @@ macro_rules! __txn_template_step {
             concat!("txn_template!: `", stringify!($name), "` would nest deeper than STO_WRITER_MAX_DEPTH")
         );
         $crate::__txn_template_check_not_plumbing!($sfcode, $name, "optional array", ($($depth)*));
-        $crate::__txn_template_step! {
-            @step
-            name = $Name, meta = [$(#[$meta])*], vis = $vis,
-            order = [],
-            setters = [$($setters)*],
-            emit_region = [$($emit_region)*],
-            buf = [__slot],
-            init = [
-                $crate::txn::codec::write_field_header(&mut __slot, ($($prev)*), $sfcode);
-            ],
-            prev = [ ($($prev)*).wrapping_add($crate::txn::codec::container_header_size($sfcode)) ],
-            table = [
-                $($table)*
-                (($sfcode).code(), $crate::txn::codec::KIND_OPTIONAL_ARRAY, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
-            ],
-            emit_details = [$($emit_details)*],
-            nops = [],
-            prefix = [$($prefix)* $name _],
-            ctx = arr,
-            depth = [ (($($depth)*).wrapping_add(1usize)) ],
-            stack = [ [ [$($prefix)*] [$($order)* ($sfcode).code(),] [$($nops)*] $name obj [$($buf)*] [$($init)*] [$($prev)*] [$tag $($entry)*] ] $($stack)* ],
-            mode = [$tag $($entry)* (($($prev)*), [<__ $Name _ $($prefix)* $name _SLOT>])],
-            fields = [ $($inner)* , @ end_opt_array $(, $($rest)*)? ]
+        $crate::__txn_template_index_elements! {
+            [ $($inner)* ]
+            $crate::__txn_template_step! {
+                @step
+                name = $Name, meta = [$(#[$meta])*], vis = $vis,
+                order = [],
+                setters = [$($setters)*],
+                emit_region = [$($emit_region)*],
+                buf = [__slot],
+                init = [
+                    $crate::txn::codec::write_field_header(&mut __slot, ($($prev)*), $sfcode);
+                ],
+                prev = [ ($($prev)*).wrapping_add($crate::txn::codec::container_header_size($sfcode)) ],
+                table = [
+                    $($table)*
+                    (($sfcode).code(), $crate::txn::codec::KIND_OPTIONAL_ARRAY, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
+                ],
+                emit_details = [$($emit_details)*],
+                nops = [],
+                prefix = [$($prefix)* $name _],
+                ctx = arr,
+                depth = [ (($($depth)*).wrapping_add(1usize)) ],
+                stack = [ [ [$($prefix)*] [$($order)* ($sfcode).code(),] [$($nops)*] $name obj [$($buf)*] [$($init)*] [$($prev)*] [$tag $($entry)*] ] $($stack)* ],
+                mode = [$tag $($entry)* (($($prev)*), [<__ $Name _ $($prefix)* $name _SLOT>])],
+                fields = [ @ ELEMS , @ end_opt_array $(, $($rest)*)? ]
+            }
         }
     };
     // Closes `optional object(sfX) { .. }`: runs the same canonical-order
@@ -5885,7 +5895,7 @@ macro_rules! __txn_template_step {
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
-        stack = [ [ [$($pfx:tt)*] [$($ord:tt)*] [$($nps:tt)*] $cname:ident $old_ctx:tt [$($pbuf:tt)*] [$($pinit:tt)*] [$($poff:tt)*] [$($omode:tt)*] ] $($stack:tt)* ],
+        stack = [ [ [$($pfx:tt)*] [$($ord:tt)*] [$($nps:tt)*] $cname:tt $old_ctx:tt [$($pbuf:tt)*] [$($pinit:tt)*] [$($poff:tt)*] [$($omode:tt)*] ] $($stack:tt)* ],
         mode = $mode:tt,
         fields = [ @ end_opt_object $(, $($rest:tt)*)? ]
     ) => {
@@ -5983,7 +5993,7 @@ macro_rules! __txn_template_step {
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
-        stack = [ [ [$($pfx:tt)*] [$($ord:tt)*] [$($nps:tt)*] $cname:ident $old_ctx:tt [$($pbuf:tt)*] [$($pinit:tt)*] [$($poff:tt)*] [$($omode:tt)*] ] $($stack:tt)* ],
+        stack = [ [ [$($pfx:tt)*] [$($ord:tt)*] [$($nps:tt)*] $cname:tt $old_ctx:tt [$($pbuf:tt)*] [$($pinit:tt)*] [$($poff:tt)*] [$($omode:tt)*] ] $($stack:tt)* ],
         mode = $mode:tt,
         fields = [ @ end_opt_array $(, $($rest:tt)*)? ]
     ) => {
@@ -6239,7 +6249,7 @@ macro_rules! __txn_template_step {
         prefix = [$($prefix:tt)*], ctx = arr, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
-        fields = [ $name:ident : object($sfcode:expr) { $($inner:tt)* } $(, $($rest:tt)*)? ]
+        fields = [ $name:tt : object($sfcode:expr) { $($inner:tt)* } $(, $($rest:tt)*)? ]
     ) => {
         const _: () = assert!(
             $crate::txn::codec::sti_of($sfcode) == $crate::txn::codec::sti::STI_OBJECT,
@@ -6406,30 +6416,33 @@ macro_rules! __txn_template_step {
             (($($depth)*).wrapping_add(1usize)) < $crate::sto_writer::STO_WRITER_MAX_DEPTH,
             concat!("txn_template!: `", stringify!($name), "` would nest deeper than STO_WRITER_MAX_DEPTH")
         );
-        $crate::__txn_template_step! {
-            @step
-            name = $Name, meta = [$(#[$meta])*], vis = $vis,
-            order = [],
-            setters = [$($setters)*],
-            emit_region = [$($emit_region)*],
-            buf = [$($buf)*],
-            init = [
-                $($init)*
-                $crate::txn::codec::write_field_header(&mut $($buf)*, ($($prev)*), $sfcode);
-            ],
-            prev = [ ($($prev)*).wrapping_add($crate::txn::codec::container_header_size($sfcode)) ],
-            table = [
-                $($table)*
-                (($sfcode).code(), $crate::txn::codec::KIND_ARRAY, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
-            ],
-            emit_details = [$($emit_details)*],
-            nops = [],
-            prefix = [$($prefix)* $name _],
-            ctx = arr,
-            depth = [ (($($depth)*).wrapping_add(1usize)) ],
-            stack = [ [ [$($prefix)*] [$($order)* ($sfcode).code(),] [$($nops)*] $name obj ] $($stack)* ],
-            mode = $mode,
-            fields = [ $($inner)* , @ end_array $(, $($rest)*)? ]
+        $crate::__txn_template_index_elements! {
+            [ $($inner)* ]
+            $crate::__txn_template_step! {
+                @step
+                name = $Name, meta = [$(#[$meta])*], vis = $vis,
+                order = [],
+                setters = [$($setters)*],
+                emit_region = [$($emit_region)*],
+                buf = [$($buf)*],
+                init = [
+                    $($init)*
+                    $crate::txn::codec::write_field_header(&mut $($buf)*, ($($prev)*), $sfcode);
+                ],
+                prev = [ ($($prev)*).wrapping_add($crate::txn::codec::container_header_size($sfcode)) ],
+                table = [
+                    $($table)*
+                    (($sfcode).code(), $crate::txn::codec::KIND_ARRAY, ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1), ($($depth)*)),
+                ],
+                emit_details = [$($emit_details)*],
+                nops = [],
+                prefix = [$($prefix)* $name _],
+                ctx = arr,
+                depth = [ (($($depth)*).wrapping_add(1usize)) ],
+                stack = [ [ [$($prefix)*] [$($order)* ($sfcode).code(),] [$($nops)*] $name obj ] $($stack)* ],
+                mode = $mode,
+                fields = [ @ ELEMS , @ end_array $(, $($rest)*)? ]
+            }
         }
 
     };
@@ -6441,7 +6454,7 @@ macro_rules! __txn_template_step {
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
-        stack = [ [ [$($pfx:tt)*] [$($ord:tt)*] [$($nps:tt)*] $cname:ident $old_ctx:tt ] $($stack:tt)* ],
+        stack = [ [ [$($pfx:tt)*] [$($ord:tt)*] [$($nps:tt)*] $cname:tt $old_ctx:tt ] $($stack:tt)* ],
         mode = $mode:tt,
         fields = [ @ end_object $(, $($rest:tt)*)? ]
     ) => {
@@ -6492,7 +6505,7 @@ macro_rules! __txn_template_step {
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
-        stack = [ [ [$($pfx:tt)*] [$($ord:tt)*] [$($nps:tt)*] $cname:ident $old_ctx:tt ] $($stack:tt)* ],
+        stack = [ [ [$($pfx:tt)*] [$($ord:tt)*] [$($nps:tt)*] $cname:tt $old_ctx:tt ] $($stack:tt)* ],
         mode = $mode:tt,
         fields = [ @ end_array $(, $($rest:tt)*)? ]
     ) => {
@@ -7173,10 +7186,10 @@ mod tests {
             account: account_id(sfAccount),
             destination: account_id(sfDestination),
             amounts: array(sfAmounts) [
-                native: object(sfAmountEntry) {
+                object(sfAmountEntry) {
                     amount: native_amount(sfAmount) = 1,
                 },
-                usd: object(sfAmountEntry) {
+                object(sfAmountEntry) {
                     amount: amount(sfAmount) = (
                         XFL::from_raw_bits(0),
                         CurrencyCode::from_iso(b"USD"),
@@ -7196,7 +7209,7 @@ mod tests {
     /// with `type < 16`, so their headers are the two-byte
     /// `[type << 4, field]` form (`0xF0 0x5C` and `0xE0 0x5B`); every other
     /// field here is the same one-byte or two-byte form already proven by
-    /// `TestPayment`'s fixture above. The `usd` entry's `amount` value is
+    /// `TestPayment`'s fixture above. Element `1`'s `amount` value is
     /// the 48-byte issued form of XFL zero (`0x80` + 7 zero bytes),
     /// `CurrencyCode::from_iso(b"USD")`, and `AccountId([0x44; 20])`.
     #[rustfmt::skip]
@@ -7238,11 +7251,10 @@ mod tests {
     #[test]
     fn remit_nested_setters_write_at_the_expected_offsets() {
         let mut tpl = TestRemit::new();
-        tpl.set_amounts_native_amount(5)
-            .expect("5 drops is in range");
+        tpl.set_amounts_0_amount(5).expect("5 drops is in range");
         assert_eq!(&tpl.bytes()[85..93], &[0x40, 0, 0, 0, 0, 0, 0, 5]);
 
-        tpl.set_amounts_usd_amount_value(XFL::from_raw_bits(6_107_031_094_714_392_576));
+        tpl.set_amounts_1_amount_value(XFL::from_raw_bits(6_107_031_094_714_392_576));
         // Overwrites only the 8-byte value region; currency/issuer (the
         // baked default) are untouched.
         assert_eq!(
@@ -7250,7 +7262,7 @@ mod tests {
             &REMIT_EXPECTED_FIXED_PREFIX[105..145]
         );
 
-        tpl.set_amounts_usd_amount(
+        tpl.set_amounts_1_amount(
             XFL::from_raw_bits(6_107_081_094_714_392_576),
             &CurrencyCode::from_iso(b"EUR"),
             &AccountId([0x55; ACC_ID_LEN]),
@@ -8925,7 +8937,7 @@ mod tests {
 
         let currency = CurrencyCode::from_iso(b"USD");
         let issuer = AccountId([0x44; ACC_ID_LEN]);
-        tpl.set_balance_issued(XFL::from_raw_bits(0), &currency, &issuer);
+        tpl.set_balance_iou(XFL::from_raw_bits(0), &currency, &issuer);
         assert_eq!(
             &tpl.bytes()[off + 1..off + 49],
             &codec::encode_iou_amount_const(XFL::from_raw_bits(0), &currency, &issuer)
@@ -8978,8 +8990,8 @@ mod tests {
 
         let currency = CurrencyCode::from_iso(b"USD");
         let issuer = AccountId([0x44; ACC_ID_LEN]);
-        inferred.set_balance_issued(XFL::from_raw_bits(0), &currency, &issuer);
-        explicit.set_balance_issued(XFL::from_raw_bits(0), &currency, &issuer);
+        inferred.set_balance_iou(XFL::from_raw_bits(0), &currency, &issuer);
+        explicit.set_balance_iou(XFL::from_raw_bits(0), &currency, &issuer);
         assert_eq!(inferred.bytes(), explicit.bytes());
 
         // Exercise every remaining setter too (dead-code hygiene).
@@ -9035,7 +9047,7 @@ mod tests {
 
         let currency = CurrencyCode::from_iso(b"EUR");
         let issuer = AccountId([0x22; ACC_ID_LEN]);
-        tpl.set_limit_amount_issued(XFL::from_raw_bits(0), &currency, &issuer);
+        tpl.set_limit_amount_iou(XFL::from_raw_bits(0), &currency, &issuer);
         assert_eq!(tpl.bytes()[off], 0x63);
         assert_eq!(
             &tpl.bytes()[off + 1..off + 49],
@@ -9105,8 +9117,8 @@ mod tests {
 
         let currency = CurrencyCode::from_iso(b"EUR");
         let issuer = AccountId([0x22; ACC_ID_LEN]);
-        inferred.set_limit_amount_issued(XFL::from_raw_bits(0), &currency, &issuer);
-        explicit.set_limit_amount_issued(XFL::from_raw_bits(0), &currency, &issuer);
+        inferred.set_limit_amount_iou(XFL::from_raw_bits(0), &currency, &issuer);
+        explicit.set_limit_amount_iou(XFL::from_raw_bits(0), &currency, &issuer);
         assert_eq!(inferred.bytes(), explicit.bytes());
 
         // Exercise every remaining setter too (dead-code hygiene).
@@ -9308,7 +9320,7 @@ mod tests {
     // -----------------------------------------------------------------
     // Whole-container `optional sfX { .. }` / `optional sfX [ .. ]` (and
     // their explicit `optional object(sfX) { .. }` / `optional
-    // array(sfX) [ .. ]` spellings), plus a named array's own `optional`
+    // array(sfX) [ .. ]` spellings), plus an array's own `optional`
     // element and a homogeneous array whose element is
     // `optional object(sfY) { .. }`. A named optional container compiles
     // inline (no view type): its own fields are plain `set_<name>_<..>`
@@ -9414,9 +9426,9 @@ mod tests {
     }
 
     crate::txn_template! {
-        /// A plain (always-present) named array (`sfHookGrants`) whose
-        /// one named element (`grant`) is itself a whole `optional`
-        /// object -- the array-element form of the same mechanism.
+        /// A plain (always-present) array (`sfHookGrants`) whose one
+        /// element (position `0`) is itself a whole `optional` object --
+        /// the array-element form of the same mechanism.
         struct OptionalArrayFixture {
             transaction_type = ttPAYMENT,
             sequence: u32_field(sfSequence) = 0,
@@ -9426,7 +9438,7 @@ mod tests {
             signing_pub_key: empty_vl(sfSigningPubKey),
             account: account_id(sfAccount),
             grants: sfHookGrants [
-                grant: optional sfHookGrant {
+                optional sfHookGrant {
                     amount: native_amount(sfAmount) = 0,
                 },
             ],
@@ -9437,16 +9449,16 @@ mod tests {
     #[test]
     fn optional_array_element_defaults_absent_setter_makes_present() {
         let mut tpl = OptionalArrayFixture::new();
-        assert!(!tpl.is_grants_grant_present());
+        assert!(!tpl.is_grants_0_present());
 
-        tpl.set_grants_grant_amount(9).expect("9 drops is in range");
-        assert!(tpl.is_grants_grant_present());
+        tpl.set_grants_0_amount(9).expect("9 drops is in range");
+        assert!(tpl.is_grants_0_present());
 
-        tpl.clear_grants_grant();
-        assert!(!tpl.is_grants_grant_present());
+        tpl.clear_grants_0();
+        assert!(!tpl.is_grants_0_present());
 
-        tpl.enable_grants_grant();
-        assert!(tpl.is_grants_grant_present());
+        tpl.enable_grants_0();
+        assert!(tpl.is_grants_0_present());
 
         tpl.set_sequence(0);
         tpl.set_first_ledger_sequence(0);
@@ -9571,8 +9583,9 @@ mod tests {
     crate::txn_template! {
         /// `optional array(sfX) [ .. ]` (explicit form): a whole nested
         /// array that is entirely present or entirely absent, holding one
-        /// named `optional` element -- exercises the explicit-container
-        /// spelling alongside `OptionalArrayFixture`'s bare-`sfX` one.
+        /// (position `0`) `optional` element -- exercises the
+        /// explicit-container spelling alongside `OptionalArrayFixture`'s
+        /// bare-`sfX` one.
         struct OptionalArrayContainerFixture {
             transaction_type = ttPAYMENT,
             sequence: u32_field(sfSequence) = 0,
@@ -9582,7 +9595,7 @@ mod tests {
             signing_pub_key: empty_vl(sfSigningPubKey),
             account: account_id(sfAccount),
             grants: optional array(sfHookGrants) [
-                grant: optional object(sfHookGrant) {
+                optional object(sfHookGrant) {
                     amount: native_amount(sfAmount) = 0,
                 },
             ],
@@ -9594,24 +9607,24 @@ mod tests {
     fn optional_array_container_defaults_absent_and_round_trips() {
         let mut tpl = OptionalArrayContainerFixture::new();
         assert!(!tpl.is_grants_present());
-        assert!(!tpl.is_grants_grant_present());
+        assert!(!tpl.is_grants_0_present());
 
-        tpl.set_grants_grant_amount(4).expect("4 drops is in range");
+        tpl.set_grants_0_amount(4).expect("4 drops is in range");
         assert!(tpl.is_grants_present());
-        assert!(tpl.is_grants_grant_present());
+        assert!(tpl.is_grants_0_present());
 
         tpl.clear_grants();
         assert!(!tpl.is_grants_present());
-        assert!(!tpl.is_grants_grant_present());
+        assert!(!tpl.is_grants_0_present());
 
         tpl.enable_grants();
         assert!(tpl.is_grants_present());
-        assert!(!tpl.is_grants_grant_present());
+        assert!(!tpl.is_grants_0_present());
 
-        tpl.enable_grants_grant();
-        assert!(tpl.is_grants_grant_present());
-        tpl.clear_grants_grant();
-        assert!(!tpl.is_grants_grant_present());
+        tpl.enable_grants_0();
+        assert!(tpl.is_grants_0_present());
+        tpl.clear_grants_0();
+        assert!(!tpl.is_grants_0_present());
         assert!(tpl.is_grants_present());
 
         tpl.set_sequence(0);
@@ -9909,12 +9922,12 @@ mod tests {
     }
 
     crate::txn_template! {
-        /// Named array (no repetition count), explicit form: a single
-        /// `grant: object(sfHookGrant) { .. }` element flattened directly
-        /// into the parent's own setters (`set_grants_grant_hook_hash`/
-        /// `set_grants_grant_authorize`) -- see `txn_template!`'s "Named
-        /// elements" grammar.
-        struct NamedArrayExplicit {
+        /// A positional array (no repetition count), explicit form: a
+        /// single `object(sfHookGrant) { .. }` element, unnamed, flattened
+        /// directly into the parent's own setters
+        /// (`set_grants_0_hook_hash`/`set_grants_0_authorize`) -- see
+        /// `txn_template!`'s "Array elements" grammar.
+        struct ArrayElementExplicit {
             transaction_type = ttPAYMENT,
             sequence: u32_field(sfSequence) = 0,
             first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
@@ -9923,7 +9936,7 @@ mod tests {
             signing_pub_key: empty_vl(sfSigningPubKey),
             account: account_id(sfAccount),
             grants: array(sfHookGrants) [
-                grant: object(sfHookGrant) {
+                object(sfHookGrant) {
                     hook_hash: hash256(sfHookHash),
                     authorize: account_id(sfAuthorize),
                 },
@@ -9933,11 +9946,11 @@ mod tests {
     }
 
     crate::txn_template! {
-        /// Inferred-kind twin of `NamedArrayExplicit`: both the array's
+        /// Inferred-kind twin of `ArrayElementExplicit`: both the array's
         /// name (`sfHookGrants`), its element's type (`sfHookGrant`), and
         /// the element's own fields are declared with bare `sfXxx`
         /// idents.
-        struct NamedArrayInferred {
+        struct ArrayElementInferred {
             transaction_type = ttPAYMENT,
             sequence: sfSequence = 0,
             first_ledger_sequence: sfFirstLedgerSequence = 0,
@@ -9946,7 +9959,7 @@ mod tests {
             signing_pub_key: empty_vl(sfSigningPubKey),
             account: sfAccount,
             grants: sfHookGrants [
-                grant: sfHookGrant {
+                sfHookGrant {
                     hook_hash: sfHookHash,
                     authorize: sfAuthorize,
                 },
@@ -9956,27 +9969,27 @@ mod tests {
     }
 
     #[test]
-    fn inferred_named_array_matches_explicit_twin() {
-        assert_eq!(NamedArrayInferred::FIELDS, NamedArrayExplicit::FIELDS);
-        assert_eq!(NamedArrayInferred::LEN, NamedArrayExplicit::LEN);
+    fn inferred_array_element_matches_explicit_twin() {
+        assert_eq!(ArrayElementInferred::FIELDS, ArrayElementExplicit::FIELDS);
+        assert_eq!(ArrayElementInferred::LEN, ArrayElementExplicit::LEN);
         assert_eq!(
-            NamedArrayInferred::new().bytes(),
-            NamedArrayExplicit::new().bytes()
+            ArrayElementInferred::new().bytes(),
+            ArrayElementExplicit::new().bytes()
         );
     }
 
     #[test]
-    fn inferred_named_array_setters_match_explicit_setters() {
+    fn inferred_array_element_setters_match_explicit_setters() {
         let hash = crate::types::Hash([0xAB; 32]);
         let authorize = AccountId([0xCD; ACC_ID_LEN]);
 
-        let mut inferred = NamedArrayInferred::new();
-        inferred.set_grants_grant_hook_hash(&hash);
-        inferred.set_grants_grant_authorize(&authorize);
+        let mut inferred = ArrayElementInferred::new();
+        inferred.set_grants_0_hook_hash(&hash);
+        inferred.set_grants_0_authorize(&authorize);
 
-        let mut explicit = NamedArrayExplicit::new();
-        explicit.set_grants_grant_hook_hash(&hash);
-        explicit.set_grants_grant_authorize(&authorize);
+        let mut explicit = ArrayElementExplicit::new();
+        explicit.set_grants_0_hook_hash(&hash);
+        explicit.set_grants_0_authorize(&authorize);
 
         assert_eq!(inferred.bytes(), explicit.bytes());
 

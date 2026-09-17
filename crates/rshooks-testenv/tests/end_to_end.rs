@@ -53,10 +53,10 @@ txn_template! {
         account: sfAccount,
         destination: sfDestination,
         amounts: sfAmounts [
-            native: sfAmountEntry {
+            sfAmountEntry {
                 amount: sfAmount = NativeAmount(1),
             },
-            usd: sfAmountEntry {
+            sfAmountEntry {
                 amount: sfAmount = IouAmount(
                     XFL::from_raw_bits(0),
                     REMIT_USD,
@@ -128,10 +128,10 @@ impl Payments {
         }
         let mut tpl = RemitTemplate::new();
         tpl.set_destination(&AccountId([0xCDu8; 20]));
-        if tpl.set_amounts_native_amount(2_000_000).is_err() {
+        if tpl.set_amounts_0_amount(2_000_000).is_err() {
             rollback!(b"native amount out of range", 2);
         }
-        tpl.set_amounts_usd_amount_value(XFL::one());
+        tpl.set_amounts_1_amount_value(XFL::one());
         let prepared = match tpl.prepare_for_emit() {
             Ok(p) => p,
             Err(_) => rollback!(b"prepare_for_emit failed", 3),
@@ -164,10 +164,10 @@ impl Payments {
         }
         let mut tpl = RemitTemplate::new();
         tpl.set_destination(&AccountId([0xCDu8; 20]));
-        if tpl.set_amounts_native_amount(2_000_000).is_err() {
+        if tpl.set_amounts_0_amount(2_000_000).is_err() {
             rollback!(b"native amount out of range", 2);
         }
-        tpl.set_amounts_usd_amount_value(XFL::one());
+        tpl.set_amounts_1_amount_value(XFL::one());
         let prepared = match tpl.prepare_for_emit() {
             Ok(p) => p,
             Err(_) => rollback!(b"prepare_for_emit failed", 3),

@@ -851,6 +851,12 @@ pub use rshooks_macros::ParamValue;
 #[doc(hidden)]
 pub use rshooks_macros::paste as __paste;
 
+// `txn_template!`'s named-array elements are numbered by position through
+// `$crate::__txn_template_index_elements!`; re-export it (hidden) at the
+// crate root for the same reason as `__paste!` above.
+#[doc(hidden)]
+pub use rshooks_macros::txn_template_index_elements as __txn_template_index_elements;
+
 /// Common imports for hook developers: `use rshooks::prelude::*;` pulls in
 /// the `api::*` wrapper functions, the typed slot layer
 /// ([`slot_obj::SlotObject`] and the generated [`sfield`] constants), the
