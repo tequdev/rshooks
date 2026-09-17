@@ -553,18 +553,22 @@ specifically to hold values that might *be* negative error codes.
 an infallible `Output` for any operator that can fail, since that would
 force a panic (or a silently wrong answer) on the failure path. `XFL`
 implements `core::ops::{Add, Sub, Mul, Div, Neg}`, all with `Output =
-Result<XFL, HookError>` — every one of these, including `Neg`, is a
-fallible host round trip (`float_sum`/`float_multiply`/`float_divide`/
-`float_negate`; `Sub` is `self + (-rhs)?`: one `float_negate` call plus one
-`float_sum` call, since there is no dedicated `float_subtract` function).
-`Neg` and comparison are host round trips rather than local bit
-manipulation on principle, not just for `Neg`/comparison specifically:
-this crate treats the host's `float_*` implementations as the sole
-authority on XFL bit-pattern semantics, and never maintains a parallel
-guest-side reimplementation of them — [`XFL::exponent`]'s local bit-field
-extraction is not an exception to this, since it only unpacks an
-already-host-produced value's fields rather than computing a new,
-independently-derived value the way negation or comparison would.
+Result<XFL, HookError>` — `Add`/`Mul`/`Div`/`Neg` are each a fallible host
+round trip (`float_sum`/`float_multiply`/`float_divide`/`float_negate`,
+respectively). `Sub` is `self + rhs.negated()`: one `float_sum` call, since
+there is no dedicated `float_subtract` function, and `XFL::negated` (unlike
+the `Neg` operator) is a local sign-bit flip, not a `float_negate` round
+trip — the sign of a canonical XFL is a single bit (bit 62), so negating
+one for a subtraction never needs the host. `Neg` and comparison are still
+host round trips rather than local bit manipulation on principle: this
+crate treats the host's `float_*` implementations as the sole authority on
+XFL bit-pattern semantics, and never maintains a parallel guest-side
+reimplementation of them for a value whose fields it does not already hold
+— `XFL::negated`'s bit flip is not an exception to this any more than
+[`XFL::exponent`]'s local bit-field extraction is, since both only
+manipulate an already-host-produced value's existing bits rather than
+computing a new, independently-derived value the way arithmetic or
+comparison would.
 Comparison has named methods (`eq`/`lt`/`gt`/`compare`, all `Result<bool>`
 via `float_compare`) *and* `PartialEq`/`PartialOrd` (`==`/`<`/`>`/...),
 both backed by the same `float_compare` calls — see below for the fallback
@@ -583,7 +587,7 @@ diagnostic, not just reasoned about).
 ```rust
 impl XFL {
     pub fn new(exponent: i32, mantissa: i64) -> Result<XFL>;      // float_set
-    pub fn one() -> XFL;
+    pub const fn one() -> XFL;                                     // fixed bits, no host call
     pub fn unchecked(self) -> XFLUnchecked;                        // zero-cost reinterpret, see below
     pub fn invert(self) -> Result<XFL>;
     pub fn mulratio(self, round_up: bool, num: u32, den: u32) -> Result<XFL>;
@@ -593,9 +597,10 @@ impl XFL {
     pub fn compare(self, rhs: XFL, mode: u32) -> Result<bool>;     // float_compare
     pub fn eq(self, rhs: XFL) -> Result<bool>; pub fn lt(self, rhs: XFL) -> Result<bool>; pub fn gt(self, rhs: XFL) -> Result<bool>;
     pub fn log(self) -> Result<XFL>; pub fn root(self, n: u32) -> Result<XFL>;
+    pub const fn negated(self) -> XFL;                             // sign-bit flip, no host call
 }
 impl core::ops::Add for XFL { type Output = Result<XFL>; ... }   // float_sum
-impl core::ops::Sub for XFL { type Output = Result<XFL>; ... }   // self + (-rhs)?: float_negate + float_sum
+impl core::ops::Sub for XFL { type Output = Result<XFL>; ... }   // self + rhs.negated(): float_sum only
 impl core::ops::Mul for XFL { type Output = Result<XFL>; ... }   // float_multiply
 impl core::ops::Div for XFL { type Output = Result<XFL>; ... }   // float_divide
 impl core::ops::Neg for XFL { type Output = Result<XFL>; ... }   // float_negate -- a host round trip, not a bit flip
@@ -670,7 +675,6 @@ types, N=1/4/8 chained ops):
 | checked `Result`-chain `Mul` | +14 |
 | raw `float_negate`+`float_sum` (baseline) | +5 |
 | `XFLUnchecked` `Sub` chain | +5 (matches raw exactly) |
-| checked `Result`-chain `Sub` | +27 |
 
 `XFLUnchecked`'s marginal cost matches a hand-written raw host-call chain
 exactly for both operators — its performance win over the checked operators

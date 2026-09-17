@@ -139,7 +139,17 @@ impl XFL {
         crate::xfl_unchecked::XFLUnchecked::from_raw_bits(self.raw_bits())
     }
 
-    /// Construct a normalized XFL from `exponent` and `mantissa`.
+    /// Construct a normalized XFL from `exponent` and `mantissa`, via the
+    /// `float_set` host call.
+    ///
+    /// For a literal exponent/mantissa pair known at compile time,
+    /// [`crate::XFL!`] produces the bit-identical value with no host call
+    /// and no `Result`: `XFL::new(-21, 1_000_000_000_000_000)` and
+    /// `XFL!(0.000001)` encode to the same raw bits, as do
+    /// `XFL::new(-15, 1_010_000_000_000_000)` and `XFL!(1.01)`. Keep
+    /// `XFL::new` for an exponent/mantissa pair computed at runtime —
+    /// normalizing one guest-side would need a loop and a guard, which the
+    /// host call avoids.
     #[inline(always)]
     pub fn new(exponent: i32, mantissa: i64) -> Result<XFL> {
         #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
@@ -149,16 +159,14 @@ impl XFL {
         res(unsafe { rshooks_core::float_set(exponent, mantissa) }).map(XFL::from_raw_bits)
     }
 
-    /// The XFL representation of `1.0`. Cannot practically fail, so this is
-    /// a bare `XFL`, not a `Result`.
+    /// The XFL representation of `1.0`. `1.0` has exactly one canonical
+    /// encoding, so this is the fixed bit pattern directly — no host call,
+    /// no `Result`, and `const fn`, so it's usable in a `const`/`static`
+    /// item (same as [`XFL::from_raw_bits`]/[`crate::XFL!`]).
     #[inline(always)]
     #[must_use]
-    pub fn one() -> XFL {
-        #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
-        if let Some(v) = rshooks_core::backend::with_backend(|b| b.float_one()) {
-            return XFL::from_raw_bits(v);
-        }
-        XFL::from_raw_bits(unsafe { rshooks_core::float_one() })
+    pub const fn one() -> XFL {
+        XFL::from_raw_bits(6_089_866_696_204_910_592)
     }
 
     /// `1 / self`.
@@ -427,6 +435,28 @@ impl XFL {
     pub fn from_slot(slot_no: u32) -> Result<XFL> {
         api::float::slot_float(slot_no)
     }
+
+    /// `-self`, as a local bit flip: the sign of a canonical XFL lives in
+    /// bit 62 (see the module doc comment's bit layout), so negation never
+    /// needs to touch the mantissa or exponent fields, and canonical zero
+    /// (no sign bit set either way) is its own negation. No host call and
+    /// infallible, unlike [`core::ops::Neg`]'s `float_negate` host round
+    /// trip.
+    ///
+    /// Assumes `self` is canonical, as every `XFL` obtained through the
+    /// validated API is. For a non-canonical bit pattern from
+    /// [`XFL::from_raw_bits`], the flipped bits stay just as non-canonical —
+    /// the next host call that consults them rejects them exactly as it
+    /// would have rejected the un-negated value.
+    #[inline(always)]
+    #[must_use]
+    pub const fn negated(self) -> XFL {
+        if self.0 == 0 {
+            self
+        } else {
+            XFL(self.0 ^ (1u64 << SIGN_SHIFT))
+        }
+    }
 }
 
 impl IouAmount {
@@ -494,19 +524,22 @@ impl core::ops::Add for XFL {
 impl core::ops::Sub for XFL {
     type Output = Result<XFL>;
 
-    /// `self - rhs`, implemented as `self + (-rhs)?`: one `float_negate`
-    /// host call plus one `float_sum` host call. There is no dedicated
-    /// `float_subtract` host function. The `?` on `-rhs` propagates a
-    /// negation failure (e.g. `rhs` already invalid) as this call's own
-    /// error, rather than feeding a poisoned value into `float_sum`.
+    /// `self - rhs`, implemented as `self + rhs.negated()`: one `float_sum`
+    /// host call. There is no dedicated `float_subtract` host function;
+    /// unlike [`core::ops::Neg`] (`float_negate`), negating `rhs` here is a
+    /// local bit flip ([`XFL::negated`]), so this costs exactly one host
+    /// call, the same as [`core::ops::Add`].
     #[inline(always)]
-    // Dispatches to this module's own fallible `Add`/`Neg` impls, not raw
-    // integer arithmetic -- `clippy::arithmetic_side_effects` can't tell
-    // the difference from the operator syntax alone, so it flags this
-    // unconditionally with no real overflow/panic risk.
-    #[allow(clippy::arithmetic_side_effects)]
+    // Dispatches to this module's own fallible `Add` impl, not raw integer
+    // arithmetic -- `clippy::arithmetic_side_effects` can't tell the
+    // difference from the operator syntax alone, so it flags this
+    // unconditionally with no real overflow/panic risk. `clippy::
+    // suspicious_arithmetic_impl` flags `Sub::sub` calling `+` at all,
+    // regardless of what it's built from -- this genuinely is `Sub`
+    // implemented via a local negation plus `Add`, not a copy-paste bug.
+    #[allow(clippy::arithmetic_side_effects, clippy::suspicious_arithmetic_impl)]
     fn sub(self, rhs: XFL) -> Result<XFL> {
-        self + (-rhs)?
+        self + rhs.negated()
     }
 }
 
@@ -611,6 +644,7 @@ xfl_result_chain_ops!(Add::add, Sub::sub, Mul::mul, Div::div);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::XFL;
     use crate::error::HookError;
 
     #[test]
@@ -910,6 +944,64 @@ mod tests {
                  must hold for {v:?}"
             );
         }
+    }
+
+    #[test]
+    fn new_and_xfl_macro_agree_on_known_literal_encodings() {
+        // `XFL::new`'s host call (`float_set`) and `XFL!`'s compile-time
+        // encoder must produce the same bits for the same normalized value
+        // -- see `XFL::new`'s doc comment. Verified here against the known
+        // encoding (mantissa | (exponent field << `EXPONENT_SHIFT`) | sign
+        // bit) rather than by calling `XFL::new` itself, since `float_set`
+        // has no host stub outside the `testenv` feature (see
+        // `smoke_not_implemented_on_host` above).
+        assert_eq!(
+            encode(
+                1_000_000_000_000_000,
+                (-21i64).wrapping_add(EXPONENT_BIAS) as u64,
+                true
+            ),
+            XFL!(0.000001).raw_bits()
+        );
+        assert_eq!(
+            encode(
+                1_010_000_000_000_000,
+                (-15i64).wrapping_add(EXPONENT_BIAS) as u64,
+                true
+            ),
+            XFL!(1.01).raw_bits()
+        );
+    }
+
+    #[test]
+    fn one_matches_xfl_macro_encoding() {
+        assert_eq!(XFL::one().raw_bits(), XFL!(1).raw_bits());
+    }
+
+    #[test]
+    fn negated_flips_only_the_sign_bit() {
+        assert_eq!(XFL!(1).negated().raw_bits(), XFL!(-1).raw_bits());
+        assert_eq!(XFL!(-1).negated().raw_bits(), XFL!(1).raw_bits());
+        assert_eq!(XFL!(0.1).negated().raw_bits(), XFL!(-0.1).raw_bits());
+    }
+
+    #[test]
+    fn negated_is_its_own_inverse() {
+        for v in [XFL!(1), XFL!(-1), XFL!(0.1), XFL!(-0.1), XFL!(0)] {
+            assert_eq!(v.negated().negated().raw_bits(), v.raw_bits());
+        }
+    }
+
+    #[test]
+    fn negated_zero_is_zero() {
+        assert_eq!(XFL!(0).negated().raw_bits(), XFL!(0).raw_bits());
+        assert!(XFL!(0).negated().is_zero());
+    }
+
+    #[test]
+    fn negated_is_usable_in_const_position() {
+        const NEG_ONE: XFL = XFL!(1).negated();
+        assert_eq!(NEG_ONE.raw_bits(), XFL!(-1).raw_bits());
     }
 }
 
