@@ -281,7 +281,7 @@ impl XFL {
     ///     match amount.is_strictly_positive() {
     ///         Ok(true) => Ok(()),
     ///         Ok(false) => Err("amount must be positive"),
-    ///         Err(HookError::InvalidFloat) => Err("amount is not a valid XFL value"),
+    ///         Err(e) if e == HookError::InvalidFloat => Err("amount is not a valid XFL value"),
     ///         Err(_) => Err("could not evaluate amount"),
     ///     }
     /// }
@@ -605,6 +605,44 @@ impl PartialOrd for XFL {
             },
             Err(_) => None,
         }
+    }
+
+    /// `self < other`, via one `float_compare` host call under
+    /// `COMPARE_LESS`. `false` on failure.
+    #[inline(always)]
+    fn lt(&self, other: &XFL) -> bool {
+        XFL::lt(*self, *other).unwrap_or(false)
+    }
+
+    /// `self <= other`, via one `float_compare` host call under
+    /// `COMPARE_LESS | COMPARE_EQUAL`. `false` on failure.
+    #[inline(always)]
+    fn le(&self, other: &XFL) -> bool {
+        XFL::compare(
+            *self,
+            *other,
+            rshooks_core::COMPARE_LESS | rshooks_core::COMPARE_EQUAL,
+        )
+        .unwrap_or(false)
+    }
+
+    /// `self > other`, via one `float_compare` host call under
+    /// `COMPARE_GREATER`. `false` on failure.
+    #[inline(always)]
+    fn gt(&self, other: &XFL) -> bool {
+        XFL::gt(*self, *other).unwrap_or(false)
+    }
+
+    /// `self >= other`, via one `float_compare` host call under
+    /// `COMPARE_GREATER | COMPARE_EQUAL`. `false` on failure.
+    #[inline(always)]
+    fn ge(&self, other: &XFL) -> bool {
+        XFL::compare(
+            *self,
+            *other,
+            rshooks_core::COMPARE_GREATER | rshooks_core::COMPARE_EQUAL,
+        )
+        .unwrap_or(false)
     }
 }
 
