@@ -1525,7 +1525,7 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// | `object(sfX) { .. }` | OBJECT | inner + 1 (`0xE1`) | inner defaults | inner setters, prefixed |
 /// | `array(sfX) [ .. ]` | ARRAY | elements + 1 (`0xF1`) | inner defaults | inner setters, prefixed |
 /// | `optional <scalar_kind>(sfX $(, N)?)` | (of `<scalar_kind>`) | that kind's slot | all [`NOP`](crate::txn::codec::NOP) (absent) | `set_x(<same args as the kind>)`, `clear_x()` |
-/// | `any_amount(sfX)` | AMOUNT | 1 + 48 | issued zero (as `amount`) | `set_x_native(u64) -> Result<()>`, `set_x_iou(XFL, &CurrencyCode, &AccountId)` |
+/// | `any_amount(sfX)` | AMOUNT | 1 + 48 | native zero (8 bytes) + NOP tail (40) | `set_x_native(u64) -> Result<()>`, `set_x_iou(XFL, &CurrencyCode, &AccountId)` |
 /// | `optional any_amount(sfX)` | AMOUNT | 1 + 48 | all NOP (absent) | the two above, plus `clear_x()` |
 /// | `vl(sfX, MAX)` / `vl(sfX, MIN, MAX)` | VL | VL-prefix(MAX) + MAX | prefix(MIN) + MIN zeros + NOP tail | `set_x(&[u8]) -> Result<()>` |
 /// | `optional vl(sfX, MIN, MAX)` | VL | VL-prefix(MAX) + MAX | all NOP (absent) | `set_x(&[u8]) -> Result<()>`, `clear_x()` |
@@ -1596,10 +1596,10 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// | `[ <elem>+ ]` | `fixed_vl(sfX, N) = [ <elem>+ ]` | `N` is the array literal's own length |
 /// | `*b".."` | `fixed_vl(sfX, N) = *b".."` | `N` is the byte-string literal's own length |
 ///
-/// `AnyAmount()` takes no value — `any_amount` has no baked default to
-/// thread through (issued zero, always) — so it desugars straight to the
-/// explicit kind with no `= ..` left over, unlike `NativeAmount`/
-/// `IouAmount` above.
+/// `AnyAmount()` takes no value — `any_amount` has no default *value* to
+/// thread through (its baked default is fixed regardless: the native form,
+/// native zero, NOP-padded) — so it desugars straight to the explicit kind
+/// with no `= ..` left over, unlike `NativeAmount`/`IouAmount` above.
 ///
 /// A `fixed_vl` default spelled as a named const (`field_name: sfX =
 /// SOME_CONST`) is not one of these literal shapes, so it falls through to
@@ -1750,9 +1750,17 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 ///   the 8-byte native form (`set_x_native(u64) -> Result<()>`) padded
 ///   with 40 NOPs, or the full 48-byte issued form
 ///   (`set_x_iou(XFL, &CurrencyCode, &AccountId)`) — chosen at
-///   runtime. Always present; defaults to issued zero, the same bytes
-///   `amount(sfX)`'s default uses. `optional any_amount(sfX)` is the same
-///   slot, absent (all NOP) by default, with an added `clear_x()`.
+///   runtime. Always present; defaults to the native form, native zero
+///   plus a NOP-padded tail, so `set_x_native` only ever needs to write
+///   its own 8 bytes. `optional any_amount(sfX)` is the same slot, absent
+///   (all NOP) by default, with an added `clear_x()`; its slot is already
+///   all-NOP when absent, so `set_x_native` there is likewise only 8
+///   bytes. An `any_amount` field's form is chosen once per hook
+///   execution: call `set_x_native` before `set_x_iou` on the same field
+///   within one execution, never after — an issued write's tail bytes are
+///   not NOP-filled back, so a later native write leaves them behind. No
+///   runtime check guards this, since one would not lower the static
+///   worst case.
 /// - **`vl(sfX, MAX)`** (short for `vl(sfX, 0, MAX)`) and `vl(sfX, MIN,
 ///   MAX)`: a slot sized for `MAX` bytes of payload (`MAX`/`MIN` are
 ///   `usize` const expressions bounded by `MIN <= MAX` and `MAX <=`
@@ -4646,8 +4654,9 @@ macro_rules! __txn_template_step {
     };
     // `field: sfXxx = AnyAmount()` -> `field: any_amount(sfXxx)`. `AnyAmount`
     // is a macro syntax marker like `NativeAmount`/`IouAmount` above, but
-    // takes no value: `any_amount` has no baked default to thread through
-    // (issued zero, always).
+    // takes no value: `any_amount` has no default value to thread through
+    // (its baked default is fixed regardless: the native form, native zero,
+    // NOP-padded).
     (
         @step
         name = $Name:ident, meta = [$(#[$meta:meta])*], vis = $vis:vis,
@@ -4939,8 +4948,9 @@ macro_rules! __txn_template_step {
     // native_amount(sfXxx)` / `= IouAmount()` -> `optional amount(sfXxx)`.
     // Same macro syntax markers as the non-`optional` default-shape
     // desugar above, still taking no value: none of these three kinds has
-    // a baked default to thread through (absent, or issued zero once
-    // present). Placed before the bare `optional sfXxx` arm below:
+    // a default value to thread through -- all default absent (all NOP),
+    // a present value coming from the setter's own arguments. Placed
+    // before the bare `optional sfXxx` arm below:
     // `$sfcode:ident $(, ...)?` there never matches a trailing `= ..`, so
     // ordering is not load-bearing for correctness, only for grouping
     // with the arms it mirrors.
@@ -5290,7 +5300,7 @@ macro_rules! __txn_template_step {
             setters = [
                 $($setters)*
 
-                #[doc = concat!("Sets `", stringify!($field), "` to the 8-byte native form of `drops`, NOP-padding the remaining ", stringify!($crate::txn::codec::ANY_AMOUNT_NATIVE_NOPS), " bytes of its reserved 48-byte value region.")]
+                #[doc = concat!("Sets `", stringify!($field), "` to the 8-byte native form of `drops` (the baked default already leaves the remaining ", stringify!($crate::txn::codec::ANY_AMOUNT_NATIVE_NOPS), " bytes of its reserved 48-byte value region NOP-padded). `", stringify!($field), "` picks its form once per hook execution: call this *before* its issued setter within one execution, never after -- an issued write's tail bytes are not NOP-filled back, so a later native write leaves them behind.")]
                 ///
                 /// # Errors
                 ///
@@ -5302,13 +5312,10 @@ macro_rules! __txn_template_step {
                     $crate::__txn_template_ensure!($mode, self.bytes);
                     const OFF: usize = ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1);
                     $crate::txn::codec::encode_native_amount(&mut self.bytes[OFF..OFF.wrapping_add(8)], drops)?;
-                    const NOP_OFF: usize = OFF.wrapping_add(8);
-                    const NOP_LEN: usize = $crate::txn::codec::ANY_AMOUNT_NATIVE_NOPS;
-                    self.bytes[NOP_OFF..NOP_OFF.wrapping_add(NOP_LEN)].copy_from_slice(&[$crate::txn::codec::NOP; NOP_LEN]);
                     Ok(())
                 }
 
-                #[doc = concat!("Sets `", stringify!($field), "` to the 48-byte issued (IOU) form of `xfl`/`currency`/`issuer`.")]
+                #[doc = concat!("Sets `", stringify!($field), "` to the 48-byte issued (IOU) form of `xfl`/`currency`/`issuer`. `", stringify!($field), "` picks its form once per hook execution: call this *before* its native setter within one execution, never after -- see that setter's doc.")]
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
                 $vis fn [<set_ $($prefix)* $field _iou>](&mut self, xfl: $crate::xfl::XFL, currency: &$crate::types::CurrencyCode, issuer: &$crate::types::AccountId) {
@@ -5325,7 +5332,12 @@ macro_rules! __txn_template_step {
                 $crate::txn::codec::write_const_bytes(
                     &mut $($buf)*,
                     ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1),
-                    &$crate::txn::codec::encode_iou_amount_const($crate::xfl::XFL::from_raw_bits(0), &$crate::types::CurrencyCode::zeroed(), &$crate::types::AccountId::zeroed()),
+                    &$crate::txn::codec::encode_native_amount_const(0),
+                );
+                $crate::txn::codec::write_nops(
+                    &mut $($buf)*,
+                    ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1).wrapping_add(8usize),
+                    $crate::txn::codec::ANY_AMOUNT_NATIVE_NOPS,
                 );
             ],
             prev = [ ($($prev)*).wrapping_add($crate::txn::codec::any_amount_field_size($sfcode)) ],
@@ -5368,7 +5380,7 @@ macro_rules! __txn_template_step {
             setters = [
                 $($setters)*
 
-                #[doc = concat!("Sets `", stringify!($field), "` to the 8-byte native form of `drops`, making it present and NOP-padding the rest of its reserved 48-byte value region (absent by default).")]
+                #[doc = concat!("Sets `", stringify!($field), "` to the 8-byte native form of `drops`, making it present (absent by default -- the rest of its reserved 48-byte value region is already NOP-padded, whether from that default or from ", stringify!([<clear_ $($prefix)* $field>]), "). `", stringify!($field), "` picks its form once per hook execution: call this *before* its issued setter within one execution, never after -- an issued write's tail bytes are not NOP-filled back, so a later native write leaves them behind.")]
                 ///
                 /// # Errors
                 ///
@@ -5383,13 +5395,10 @@ macro_rules! __txn_template_step {
                     self.bytes[OFF..OFF.wrapping_add(HDR.1)].copy_from_slice(&HDR.0[..HDR.1]);
                     let vstart = OFF.wrapping_add(HDR.1);
                     $crate::txn::codec::encode_native_amount(&mut self.bytes[vstart..vstart.wrapping_add(8)], drops)?;
-                    let nop_start = vstart.wrapping_add(8);
-                    const NOP_LEN: usize = $crate::txn::codec::ANY_AMOUNT_NATIVE_NOPS;
-                    self.bytes[nop_start..nop_start.wrapping_add(NOP_LEN)].copy_from_slice(&[$crate::txn::codec::NOP; NOP_LEN]);
                     Ok(())
                 }
 
-                #[doc = concat!("Sets `", stringify!($field), "` to the 48-byte issued (IOU) form of `xfl`/`currency`/`issuer`, making it present (absent by default).")]
+                #[doc = concat!("Sets `", stringify!($field), "` to the 48-byte issued (IOU) form of `xfl`/`currency`/`issuer`, making it present (absent by default). `", stringify!($field), "` picks its form once per hook execution: call this *before* its native setter within one execution, never after -- see that setter's doc.")]
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
                 $vis fn [<set_ $($prefix)* $field _iou>](&mut self, xfl: $crate::xfl::XFL, currency: &$crate::types::CurrencyCode, issuer: &$crate::types::AccountId) {
@@ -8890,8 +8899,9 @@ mod tests {
 
     crate::txn_template! {
         /// `any_amount(sfX)` on `sfBalance` (sorts before `sfFee`, both
-        /// `STI_AMOUNT`). Always present; defaults to issued zero (the
-        /// same bytes as `amount(sfX)`'s default).
+        /// `STI_AMOUNT`). Always present; defaults to native zero (`8`
+        /// zeroed-but-flagged bytes) plus a NOP-padded tail, so `set_x_native`
+        /// only ever needs to write its own 8 bytes.
         struct AnyAmountFixture {
             transaction_type = ttPAYMENT,
             sequence: u32_field(sfSequence) = 0,
@@ -8906,20 +8916,22 @@ mod tests {
     }
 
     #[test]
-    fn any_amount_defaults_to_issued_zero_and_switches_forms() {
+    fn any_amount_defaults_to_native_zero_and_switches_forms() {
         let mut tpl = AnyAmountFixture::new();
         let off = 20usize;
         // Balance (6,2): 1-byte header + 48-byte value = 49-byte slot.
         assert_eq!(tpl.bytes()[off], 0x62);
         assert_eq!(
-            &tpl.bytes()[off + 1..off + 49],
-            &codec::encode_iou_amount_const(
-                XFL::from_raw_bits(0),
-                &CurrencyCode::zeroed(),
-                &AccountId::zeroed()
-            )
+            &tpl.bytes()[off + 1..off + 9],
+            &codec::encode_native_amount_const(0)
+        );
+        assert_eq!(
+            &tpl.bytes()[off + 9..off + 49],
+            &[codec::NOP; codec::ANY_AMOUNT_NATIVE_NOPS]
         );
 
+        // `set_native` writes only its own 8 bytes -- the tail is already
+        // NOP from the baked default, untouched.
         tpl.set_balance_native(5).expect("5 drops is in range");
         assert_eq!(tpl.bytes()[off], 0x62);
         assert_eq!(
@@ -8935,6 +8947,8 @@ mod tests {
             Err(HookError::InvalidArgument)
         );
 
+        // `set_iou` overwrites the whole 48-byte value region -- no NOP
+        // remnants from the native form left behind.
         let currency = CurrencyCode::from_iso(b"USD");
         let issuer = AccountId([0x44; ACC_ID_LEN]);
         tpl.set_balance_iou(XFL::from_raw_bits(0), &currency, &issuer);

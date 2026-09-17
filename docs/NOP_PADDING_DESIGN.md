@@ -143,7 +143,7 @@ spelling differs.
 | kind | slot bytes | baked default | worst-case NOPs charged to the enclosing container | setters |
 |---|---|---|---|---|
 | `optional <scalar>(sfX)` | that kind's header + value | all NOPs | slot bytes | `set_x(<same args as the kind>)`, `clear_x()` |
-| `any_amount(sfX)` | header + 48 | header + issued zero (48 bytes) | 40 | `set_x_native(u64) -> Result<()>`, `set_x_iou(XFL, &CurrencyCode, &AccountId)` |
+| `any_amount(sfX)` | header + 48 | header + native zero (8 bytes) + NOP tail (40) | 40 | `set_x_native(u64) -> Result<()>`, `set_x_iou(XFL, &CurrencyCode, &AccountId)` |
 | `optional any_amount(sfX)` | header + 48 | all NOPs | header + 48 | the two above, plus `clear_x()` |
 | `vl(sfX, MIN, MAX)` | header + `vl_length_prefix(MAX)` + MAX | header + prefix(MIN) + MIN zero bytes + NOPs | `slot(MAX).saturating_sub(slot(MIN))` where `slot(n) = prefix_len(n) + n` | `set_x(&[u8]) -> Result<()>` (length must be in `[MIN, MAX]`, else `HookError::InvalidArgument`) — call at most once per hook execution, see §3.1.1 |
 | `optional vl(sfX, MIN, MAX)` | as above | all NOPs | slot bytes | `set_x(&[u8]) -> Result<()>`, `clear_x()` — same once-per-execution rule |
@@ -162,7 +162,14 @@ fills). `FieldEntry`'s `payload offset` column keeps the same meaning between a 
 `any_amount`'s native form is `header + encode_native_amount(drops) + [NOP; 40]`; the 40 NOPs
 sit after the 8-byte value, where the parser expects the next field header. Its issued form
 is exactly the existing `amount` encoding. `set_x_native` returns `Err(InvalidArgument)` for
-drops above the native maximum, as `native_amount`'s setter does.
+drops above the native maximum, as `native_amount`'s setter does. `any_amount`'s baked default
+is the native form (native zero, NOP-padded tail), so `set_x_native` only ever needs to write
+its own 8 bytes; `optional any_amount`'s slot is already all-NOP when absent, so the same
+holds there. **An `any_amount` field's form is chosen once per hook execution**: calling
+`set_x_native` after `set_x_iou` on the same field within one execution leaves the issued
+form's tail bytes behind the newly-written native value, since neither setter NOP-fills the
+other's leftover bytes. There is no runtime check for this ordering — one would not lower the
+static worst case, which already charges the native form's NOPs regardless of call order.
 
 Every `optional`/`vl`/`any_amount` field whose `sfcode` is one of the six emit-plumbing codes
 is rejected **only at depth 0** — `find_field`/`prepare_for_emit` only recognize a plumbing
@@ -368,7 +375,7 @@ decoding, `otxn::from_emitted`, `emitted()` inspection), **strict** (today's beh
   directly on `Remit`) — the motivating case for a positional array over a homogeneous
   one: one required entry
   (`remit` always writes a real, constructible amount into it — never left at `any_amount`'s
-  raw issued-zero encoding default) and one that may or may not be there; two fully
+  raw native-zero encoding default) and one that may or may not be there; two fully
   `optional` 52-byte `sfAmountEntry` elements would not fit one array's 63-NOP budget, but one
   required (0 charge) plus one `optional` (52) does. `env.emitted()` is canonical (NOP-free,
   matching the ledger's re-serialized form), so the byte-level NOP-padding assertions (a

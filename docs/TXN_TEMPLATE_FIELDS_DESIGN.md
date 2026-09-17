@@ -385,8 +385,9 @@ field: sfXxx = *<byte string literal>       -> field: fixed_vl(sfXxx, N) = *<byt
 
 `NativeAmount`/`IouAmount`/`AnyAmount` are macro syntax markers matched as literal tokens,
 not real types or functions — nothing named that way needs to exist in scope. `AnyAmount()`
-takes no value: `any_amount` has no baked default to thread through (issued zero, always),
-so its rewrite leaves no `= ..` behind, unlike the other two. `N` in the two array/byte-string
+takes no value: `any_amount` has no default *value* to thread through (its baked default is
+fixed regardless: the native form, native zero, NOP-padded), so its rewrite leaves no `= ..`
+behind, unlike the other two. `N` in the two array/byte-string
 rewrites is recovered from the default literal itself via a new `codec::array_len<const N:
 usize>(_: &[u8; N]) -> usize { N }`, spliced in as `{ array_len(&[ <elem>+ ]) }`/`{
 array_len(&*<byte string literal>) }` — a block expression, since `fixed_vl`'s own `$n:expr`
