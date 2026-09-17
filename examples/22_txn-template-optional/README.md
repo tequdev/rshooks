@@ -61,7 +61,7 @@ txn_template! {
   Result<()>`/`set_amounts_0_amount_iou(xfl, &currency, &issuer)`;
   `remit` always writes a real, constructible amount into it (`AMT1`, or
   `1` drop by default) rather than leaving it at `any_amount`'s raw
-  issued-zero encoding default — a required element, unlike an `optional`
+  native-zero encoding default — a required element, unlike an `optional`
   one, has no "absent" state to fall back to. `amounts.1` is a whole
   `optional` container with no view type: its own `amount` field is a
   plain `set_amounts_1_amount_native(u64) ->

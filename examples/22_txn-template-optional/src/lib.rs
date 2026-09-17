@@ -249,8 +249,10 @@ mod tests {
     }
 
     /// `amounts.0` (`amount: sfAmount = AnyAmount()`, always present)
-    /// leaves 40 trailing `NOP` bytes after the 8-byte value in its native
-    /// form; `amounts.1` (`optional sfAmountEntry { .. }`, no view type --
+    /// defaults to the native form of zero, NOP-padded, so it already
+    /// leaves 40 trailing `NOP` bytes after the 8-byte value before any
+    /// setter runs -- `set_amounts_0_amount_native` only ever needs to
+    /// write its own 8 bytes; `amounts.1` (`optional sfAmountEntry { .. }`, no view type --
     /// its own `amount` field is a plain `set_amounts_1_amount_native`/
     /// `_iou` pair on `Remit` itself, unnamed and numbered by
     /// position) defaults absent (the whole element, header included, is
@@ -275,6 +277,23 @@ mod tests {
             &bytes[second_start..second_start + region_len],
             &[codec::NOP; 128][..region_len],
             "`amounts.1` defaults absent"
+        );
+        assert_eq!(
+            &bytes[first_start + entry_hdr_len..first_start + entry_hdr_len + amount_hdr_len],
+            &amount_hdr[..amount_hdr_len],
+            "`amounts.0` is always present, header included, by default"
+        );
+        assert_eq!(
+            &bytes[first_start + entry_hdr_len + amount_hdr_len
+                ..first_start + entry_hdr_len + amount_hdr_len + 8],
+            &codec::encode_native_amount_const(0),
+            "`amounts.0` defaults to the native form of zero"
+        );
+        assert_eq!(
+            &bytes[first_start + entry_hdr_len + amount_hdr_len + 8
+                ..first_start + entry_hdr_len + amount_hdr_len + 48],
+            &[codec::NOP; codec::ANY_AMOUNT_NATIVE_NOPS],
+            "`amounts.0`'s tail is NOP-padded by default, before any setter runs"
         );
 
         txn.set_amounts_0_amount_native(5)
