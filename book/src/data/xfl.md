@@ -37,19 +37,25 @@ let same = XFL::from_raw_bits(bits);
 assert_eq!(same.raw_bits(), bits);
 ```
 
-`XFL::one()` is the only constructor guaranteed not to fail. `XFL::new(exponent, mantissa)` builds a normalized value from its two components:
+`XFL::one()` and `XFL::new(exponent, mantissa)` never need `f64`-style
+rounding, but only `XFL::one()` is guaranteed not to fail — it's the fixed
+bit pattern for `1.0`, a `const fn`, no host call. `XFL::new` builds a
+normalized value from a runtime-computed exponent/mantissa pair, via the
+`float_set` host call:
 
 ```rust,ignore
-let min_share = XFL::new(-21, 1_000_000_000_000_000)?;
+let min_share = XFL::new(exponent, mantissa)?;
 ```
 
-(from `examples/07_xfl-math`). XFL's mantissa is always normalized to 16
-significant digits (`10^15` to `10^16 - 1`), so `0.000001` is not written as
-exponent `-6` with mantissa `1` — it has to be mantissa
-`1_000_000_000_000_000` (`1e15`) with exponent `-21`, since
-`1e15 * 10^-21 == 10^-6`. Getting the mantissa/exponent split wrong is an
-easy mistake, and `XFL::new` returning `Result` rather than silently
-normalizing is what catches it.
+XFL's mantissa is always normalized to 16 significant digits (`10^15` to
+`10^16 - 1`), so `0.000001` is not written as exponent `-6` with mantissa
+`1` — it has to be mantissa `1_000_000_000_000_000` (`1e15`) with exponent
+`-21`, since `1e15 * 10^-21 == 10^-6`. Getting the mantissa/exponent split
+wrong is an easy mistake, and `XFL::new` returning `Result` rather than
+silently normalizing is what catches it — but for a fixed constant known at
+compile time, like `0.000001` itself, `XFL!` below does that split for you
+and needs no `Result` at all; keep `XFL::new` for a pair actually computed
+at runtime.
 
 ## The `XFL!` compile-time literal macro
 
@@ -116,11 +122,14 @@ rshooks::XFL!(1e96);
 ## Checked arithmetic
 
 `XFL` implements `Add`, `Sub`, `Mul`, `Div`, and `Neg` — but every one of
-these has `Output = Result<XFL, HookError>`, not a bare `XFL`. There is no
-local arithmetic: `self + rhs` issues a `float_sum` host call,
-`self * rhs` issues `float_multiply`, and so on. `Sub` is built from `Neg`
-plus `float_sum` (there is no dedicated `float_subtract` host function), and
-`Neg` is a real `float_negate` round trip, never a local sign-bit flip.
+these has `Output = Result<XFL, HookError>`, not a bare `XFL`.
+`Add`/`Mul`/`Div`/`Neg` each issue one host call: `self + rhs` is
+`float_sum`, `self * rhs` is `float_multiply`, and so on, and `Neg` is a
+real `float_negate` round trip, never a local sign-bit flip. `Sub` is
+`self + rhs.negated()`: also one host call (`float_sum`), since negating
+the right-hand side is a local sign-bit flip (`XFL::negated`), not the
+`Neg` operator's host round trip — there is no dedicated `float_subtract`
+host function either way.
 
 ```rust,ignore
 let remaining = match amount - share {

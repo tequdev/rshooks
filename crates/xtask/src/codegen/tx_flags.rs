@@ -1,5 +1,5 @@
 //! Generates `crates/rshooks-core/src/tx_flags.rs` from `tx_flags.h`'s parsed
-//! [`ConstGroup`]s (`crates/xtask/src/ir.rs`, `hook_api.json`).
+//! [`ConstGroup`]s (`crates/xtask/src/ir.rs`).
 
 use anyhow::Result;
 

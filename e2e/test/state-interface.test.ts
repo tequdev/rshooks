@@ -8,51 +8,19 @@
 // design doc's own §7 spec vector shape for the keyed entry, plus the
 // singleton entry's key/value shape.
 
-import { readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import {
-  ExecutionUtility,
-  StateUtility,
-  Xrpld,
-  clearAllHooks,
-  clearHookState,
-  hexNamespace,
-  readHookBinaryHexFromNS,
-  serverUrl,
-  setHooks,
-  setupClient,
-  teardownClient,
-  type XrplIntegrationTestContext,
-  type iHook,
-} from '@xahau/hooks-toolkit'
-import { calculateHookOn, decodeAccountID, type TransactionMetadata } from 'xahau'
-import { HookFlags } from 'xahau/dist/npm/models/common/xahau'
+import { ExecutionUtility, StateUtility, Xrpld, hexNamespace, type XrplIntegrationTestContext } from '@xahau/hooks-toolkit'
+import { decodeAccountID, type TransactionMetadata } from 'xahau'
+import { installHook, readDeclaredHookParameters } from './harness'
 
 const namespace = 'rshooks-e2e-state-interface'
+const hookNamespace = hexNamespace(namespace)
 const WORST_CASE_INSTRUCTIONS = 374
-
-// This file lives in `e2e/test/`, mirroring `e2e/scripts/copy-wasm.mjs`'s
-// own two-level walk up to the repo root.
-const e2eRoot = dirname(dirname(fileURLToPath(import.meta.url)))
-const repoRoot = dirname(e2eRoot)
-const templatePath = join(
-  repoRoot,
-  'examples',
-  '20_state-interface',
-  'out',
-  'current',
-  'sethook.template.json',
-)
 
 // The generated template's own `HookParameters` declaration array for this
 // entry - `balances`(id 0) then `config`(id 1), each with the real value
 // schema as `HookParameterValue` (not a "00" marker - see
 // docs/STATE_INTERFACE_DESIGN.md §5). Installed verbatim below.
-const template = JSON.parse(readFileSync(templatePath, 'utf8'))
-const declaredHookParameters = template.Hooks[0].Hook.HookParameters as Array<{
-  HookParameter: { HookParameterName: string; HookParameterValue: string }
-}>
+const declaredHookParameters = readDeclaredHookParameters('20_state-interface')
 
 // The keyed `balances` entry's `HookStateKey`
 // (docs/STATE_INTERFACE_DESIGN.md §1.6): State ID (1 byte) || account (20
@@ -82,46 +50,17 @@ function balanceStateDataHex(amount: bigint, updated: number): string {
 }
 
 describe('state-interface', () => {
-  let testContext: XrplIntegrationTestContext
-  const hookNamespace = hexNamespace(namespace)
-
-  beforeAll(async () => {
-    testContext = await setupClient(serverUrl)
-
-    const hook: iHook = {
-      CreateCode: readHookBinaryHexFromNS('state_interface', 'wasm'),
-      Flags: HookFlags.hsfOverride,
-      HookOn: calculateHookOn(['Invoke']),
-      HookNamespace: hookNamespace,
-      HookApiVersion: 0,
-      // Installed verbatim from the generated template (see header comment).
-      HookParameters: declaredHookParameters,
-    } as iHook
-    await setHooks({
-      client: testContext.client,
-      wallet: testContext.hook1,
-      hooks: [{ Hook: hook }],
-    })
-  })
-
-  afterAll(async () => {
-    const clearStateHook: iHook = {
-      Flags: HookFlags.hsfNSDelete,
-      HookNamespace: hookNamespace,
-    }
-    await clearHookState({
-      client: testContext.client,
-      wallet: testContext.hook1,
-      hooks: [{ Hook: clearStateHook }],
-    })
-    await clearAllHooks({
-      client: testContext.client,
-      wallet: testContext.hook1,
-    })
-    await teardownClient(testContext)
+  const getContext = installHook({
+    wasmName: 'state_interface',
+    namespace,
+    hookOn: ['Invoke'],
+    // Installed verbatim from the generated template (see header comment).
+    hookParameters: declaredHookParameters,
+    clearState: true,
   })
 
   function invoke(sender: XrplIntegrationTestContext['alice']) {
+    const testContext = getContext()
     return Xrpld.submit(testContext.client, {
       tx: {
         TransactionType: 'Invoke',
@@ -147,6 +86,7 @@ describe('state-interface', () => {
   })
 
   it('accepts an Invoke and returns the new balance as the accept code', async () => {
+    const testContext = getContext()
     const response = await invoke(testContext.alice)
 
     const meta = response.meta as TransactionMetadata
@@ -164,6 +104,7 @@ describe('state-interface', () => {
   })
 
   it('persists the keyed balance as amount=1, updated=1, both big-endian, no field-count prefix', async () => {
+    const testContext = getContext()
     const entry = await StateUtility.getHookState(
       testContext.client,
       testContext.hook1.classicAddress,
@@ -174,6 +115,7 @@ describe('state-interface', () => {
   })
 
   it('persists the singleton config entry as paused=0', async () => {
+    const testContext = getContext()
     const entry = await StateUtility.getHookState(
       testContext.client,
       testContext.hook1.classicAddress,
@@ -184,6 +126,7 @@ describe('state-interface', () => {
   })
 
   it('accumulates across invocations, keyed per (account, token)', async () => {
+    const testContext = getContext()
     const response = await invoke(testContext.alice)
     const meta = response.meta as TransactionMetadata
     const hookExecutions = await ExecutionUtility.getHookExecutionsFromMeta(
@@ -202,6 +145,7 @@ describe('state-interface', () => {
   })
 
   it("bob's own balance is independent of alice's", async () => {
+    const testContext = getContext()
     const response = await invoke(testContext.bob)
     const meta = response.meta as TransactionMetadata
     const hookExecutions = await ExecutionUtility.getHookExecutionsFromMeta(

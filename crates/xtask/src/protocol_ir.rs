@@ -4,8 +4,7 @@
 //! [`crate::protocol_parse`]) exactly once into a single serializable
 //! [`ProtocolFormats`] tree, cross-validates it against the vendored
 //! `hook/sfcodes.h`, and `gen_core` round-trips that tree through
-//! `crates/rshooks-core/protocol_formats.json`, exactly as it does for
-//! [`crate::ir::HookApiSpec`] and `hook_api.json`. The JSON is the real
+//! `crates/rshooks-core/protocol_formats.json`. The JSON is the real
 //! intermediate artifact of the pipeline: every later consumer (a view
 //! renderer, a transaction-builder renderer) reads it, never a re-parse of
 //! the vendored files.

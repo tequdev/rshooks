@@ -15,8 +15,10 @@ undifferentiated rollback code everywhere.
 
 Every Hook API function returns an `i64`: a non-negative value is a success
 payload (often a byte count, or a slot/field-pointer value), and a negative
-value is one of 45 documented error codes from the Hook API. `rshooks`
-decodes that negative range into a typed enum, `rshooks::error::HookError`:
+value is one of the documented error codes from the Hook API.
+`rshooks::error::HookError` wraps that negative code directly — it is a
+`#[repr(transparent)]` newtype over the raw `i64`, not a decoding enum, so
+building one and reading the code back out are both the identity:
 
 ```rust
 use rshooks::error::HookError;
@@ -29,10 +31,14 @@ assert_eq!(err.code(), -5);
 Every wrapper in `rshooks::api::*` and `rshooks::xfl` returns
 `rshooks::error::Result<T>` — a plain type alias for
 `core::result::Result<T, HookError>` — so a failed host call surfaces as an
-ordinary `Err(HookError::SomeVariant)` you can match on, rather than a raw
-negative integer. `HookError::Unknown(i64)` exists for forward
-compatibility, carrying the raw code for any negative value this version of
-the crate doesn't yet recognize by name.
+ordinary `Err(HookError::SomeConstant)` you can compare against, rather than
+a raw negative integer. Each named Hook API error has an associated
+constant with that name (`HookError::DoesntExist`, `HookError::TooBig`, …).
+`HookError` is not an enum, so those constants are not patterns; matching a
+specific error is a guard (`Err(e) if e == HookError::DoesntExist => ..`),
+and `HookError::kind()` returns a `HookErrorKind` — an ordinary enum, with
+`HookErrorKind::Unknown` for any code without a named constant — for
+exhaustive dispatch.
 
 It's worth being precise about what `HookError` represents: it's about *why
 a host call failed* (out of bounds, doesn't exist, invalid argument, and so
@@ -124,21 +130,16 @@ throughout.
 
 ### The one hard rule: never `?` a raw `HookError` into `Rollback`
 
-There is **no** `From<HookError> for Rollback` impl, and none is planned.
-`HookError::code` (see the `HookError` section above) is a 46-arm
-re-encode match — decoding the negative Hook API return code back into an
-enum variant, then re-encoding that variant back into the same `i64` it
-came from — and measurement (design doc §5, probe P5) showed a
-`?`-propagated two-hop `HookError` → `Rollback` conversion costs **3.1x**
-the worst-case instruction count and **+67%** the size of the equivalent
-raw-code-check twin. That is exactly the class of regression
-`docs/TODO.md`'s item 2 flagged as this feature's biggest risk, and it is
-why this crate does not offer the convenient-looking blanket conversion at
-all.
+There is **no** `From<HookError> for Rollback` impl, and none is planned. A
+Hook API error code (`-1..=-45`, `-10024`) is not the hook's own
+`HookReturnCode` — the two are different code spaces that happen to share
+the `i64` representation — so an implicit `?`-propagated conversion from a
+raw `HookError` into `Rollback` would publish the host's code as the
+hook's own verdict, which is never the right default.
 
 The supported pattern for a fallible Hook API call inside a typed entry is
-`.map_err(..)`, discarding the decoded `HookError` and keeping only "some
-call failed":
+`.map_err(..)`, discarding the `HookError` and keeping only "some call
+failed":
 
 ```rust,ignore
 let value = some_hook_api_call().map_err(|_| MyError::SomeCallFailed)?;
@@ -146,8 +147,8 @@ let value = some_hook_api_call().map_err(|_| MyError::SomeCallFailed)?;
 
 — exactly what `read_amount` does above. Fall back to `accept!`/
 `rollback!` directly (see below) when a computed, non-`'static` message is
-needed, or when a match on the specific `HookError` variant is genuinely
-required (its larger measured cost is exactly what was just described).
+needed, or when dispatching on the specific error via `HookError::kind()`
+is genuinely required.
 
 ## `accept!` and `rollback!`: the in-body escape hatch
 

@@ -35,10 +35,15 @@ Failure/rollback codes are declared on `XflMathError` in `src/lib.rs`
 | `NoAmountField` | `.get(sfAmount)` | `DOESNT_EXIST` |
 | `InvalidAmount` | `.as_xfl()` | `NOT_AN_AMOUNT` |
 | `MulratioFailed` | `mulratio` | `XFL_OVERFLOW` |
-| `MinShareConstructFailed`/`GrowthConstructFailed` | `XFL::new` | `MANTISSA_OVERSIZED`/`MANTISSA_UNDERSIZED`/`EXPONENT_OVERSIZED`/`EXPONENT_UNDERSIZED` |
 | `ComparisonFailed`/`RemainingComparisonFailed`/`CompoundComparisonFailed` | `.lt()`/`.compare()` | `INVALID_FLOAT` |
-| `RemainingComputeFailed` | the checked `Sub` operator | `INVALID_FLOAT` |
+| `RemainingComputeFailed` | the checked `Sub` operator (`self + rhs.negated()`, one `float_sum` call; the local sign flip cannot fail) | `INVALID_FLOAT` |
 | `CompoundValidationFailed` | `XFLUnchecked::validate()` | `INVALID_FLOAT` |
+
+The two fixed constants (`min_share = XFL!(0.000001)`, `growth = XFL!(1.01)`)
+are built with the `XFL!` literal macro, which validates and normalizes the
+mantissa/exponent split at compile time and expands to `XFL::from_raw_bits`,
+so they have no runtime failure path. `XFL::new` stays the right tool only
+for a split computed at runtime.
 
 ## Build
 
@@ -64,12 +69,12 @@ One-off probe against the shipped types (`rshooks::xfl`/
 | checked `Result`-chain `Mul` | 27 | 69 | 125 | +14 |
 | raw `float_negate`+`float_sum` (baseline) | 29 | 44 | 64 | +5 |
 | `XFLUnchecked` `Sub` chain | 31 | 46 | 66 | +5 (matches raw exactly) |
-| checked `Result`-chain `Sub` | 40 | 121 | 229 | +27 |
 
 `XFLUnchecked`'s marginal cost matches a hand-written raw host-call chain
-exactly — its win over the checked operators comes entirely from skipping
-the per-step `Result` branch, not from skipping any host validation a
-correct implementation actually needs.
+exactly (for `Sub`, two host calls per step, since `XFLUnchecked`'s own
+`Neg` is a real `float_negate` round trip) — its win over the checked
+operators comes entirely from skipping the per-step `Result` branch, not
+from skipping any host validation a correct implementation actually needs.
 
 ## Expected behavior
 
