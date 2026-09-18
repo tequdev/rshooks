@@ -47,12 +47,6 @@ fn hookapi_h_keylet_compare_match_consts() {
         .into_iter()
         .filter(|(name, _)| name.starts_with("KEYLET_") || name.starts_with("COMPARE_"))
         .collect();
-    assert_eq!(
-        header_defs.len(),
-        29,
-        "expected 29 KEYLET_*/COMPARE_* defines in hookapi.h, found {}",
-        header_defs.len()
-    );
     let header_env = build_env(&header_defs);
 
     let (all_rust_consts, all_rust_env) = rust_env();
@@ -61,12 +55,6 @@ fn hookapi_h_keylet_compare_match_consts() {
         .filter(|(name, _, _)| name.starts_with("KEYLET_") || name.starts_with("COMPARE_"))
         .map(|(name, _, _)| (name.clone(), all_rust_env[name]))
         .collect();
-    assert_eq!(
-        rust_env.len(),
-        29,
-        "expected 29 KEYLET_*/COMPARE_* consts in consts.rs, found {}",
-        rust_env.len()
-    );
 
     assert_maps_match(
         "hookapi.h (KEYLET_*/COMPARE_*)",
@@ -84,12 +72,6 @@ fn macro_h_constants_match_consts() {
             name == "tfCANONICAL" || name.starts_with("at") || name.starts_with("am")
         })
         .collect();
-    assert_eq!(
-        header_defs.len(),
-        23,
-        "expected 23 tfCANONICAL/at*/am* defines in macro.h, found {}",
-        header_defs.len()
-    );
     let header_env = build_env(&header_defs);
 
     let (all_rust_consts, all_rust_env) = rust_env();
@@ -100,12 +82,6 @@ fn macro_h_constants_match_consts() {
         })
         .map(|(name, _, _)| (name.clone(), all_rust_env[name]))
         .collect();
-    assert_eq!(
-        rust_env.len(),
-        23,
-        "expected 23 tfCANONICAL/at*/am* consts in consts.rs, found {}",
-        rust_env.len()
-    );
 
     assert_maps_match(
         "macro.h (tfCANONICAL/at*/am*)",

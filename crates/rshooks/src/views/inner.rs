@@ -12,7 +12,10 @@
 //! the one thing that distinguishes these from the ledger views; presence,
 //! value types and slot lifetime are identical.
 
-use crate::views::source::FieldSource as _;
+use crate::error::Result;
+use crate::slot_obj::SlotObject;
+use crate::types::STObject;
+use crate::views::source::FieldSource;
 
 /// View of the `sfEmitDetails` inner object (STObject).
 pub struct EmitDetails {
@@ -23,7 +26,7 @@ impl EmitDetails {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -31,45 +34,43 @@ impl EmitDetails {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfEmitGeneration` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn emit_generation(&self) -> crate::error::Result<u32> {
+    pub fn emit_generation(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfEmitGeneration)
     }
 
     /// `sfEmitBurden` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn emit_burden(&self) -> crate::error::Result<u64> {
+    pub fn emit_burden(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfEmitBurden)
     }
 
     /// `sfEmitParentTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn emit_parent_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn emit_parent_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfEmitParentTxnID)
     }
 
     /// `sfEmitNonce` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn emit_nonce(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn emit_nonce(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfEmitNonce)
     }
 
     /// `sfEmitCallback` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn emit_callback(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn emit_callback(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfEmitCallback)
     }
 
     /// `sfEmitHookHash` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn emit_hook_hash(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn emit_hook_hash(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfEmitHookHash)
     }
 }
@@ -83,7 +84,7 @@ impl SignerEntry {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -91,27 +92,25 @@ impl SignerEntry {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAccount)
     }
 
     /// `sfSignerWeight` — UInt16, `soeREQUIRED`.
     #[inline(always)]
-    pub fn signer_weight(&self) -> crate::error::Result<u16> {
+    pub fn signer_weight(&self) -> Result<u16> {
         self.src.read(crate::sfield::sfSignerWeight)
     }
 
     /// `sfWalletLocator` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn wallet_locator(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn wallet_locator(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfWalletLocator)
     }
 }
@@ -125,7 +124,7 @@ impl Signer {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -133,36 +132,26 @@ impl Signer {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAccount)
     }
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src
             .read_raw(crate::sfield::sfSigningPubKey.code(), out)
     }
 
     /// `sfTxnSignature` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfTxnSignature.code(), out)
     }
 }
@@ -176,7 +165,7 @@ impl Majority {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -184,19 +173,19 @@ impl Majority {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAmendment` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn amendment(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn amendment(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfAmendment)
     }
 
     /// `sfCloseTime` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn close_time(&self) -> crate::error::Result<u32> {
+    pub fn close_time(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfCloseTime)
     }
 }
@@ -210,7 +199,7 @@ impl DisabledValidator {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -218,24 +207,19 @@ impl DisabledValidator {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfPublicKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfPublicKey.code(), out)
     }
 
     /// `sfFirstLedgerSequence` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<u32> {
+    pub fn first_ledger_sequence(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfFirstLedgerSequence)
     }
 }
@@ -249,7 +233,7 @@ impl HookExecution {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -257,75 +241,68 @@ impl HookExecution {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfHookResult` — UInt8, `soeREQUIRED`.
     #[inline(always)]
-    pub fn hook_result(&self) -> crate::error::Result<u8> {
+    pub fn hook_result(&self) -> Result<u8> {
         self.src.read(crate::sfield::sfHookResult)
     }
 
     /// `sfHookHash` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn hook_hash(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn hook_hash(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfHookHash)
     }
 
     /// `sfHookAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn hook_account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn hook_account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfHookAccount)
     }
 
     /// `sfHookReturnCode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn hook_return_code(&self) -> crate::error::Result<u64> {
+    pub fn hook_return_code(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfHookReturnCode)
     }
 
     /// `sfHookReturnString` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn hook_return_string_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn hook_return_string_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src
             .read_raw(crate::sfield::sfHookReturnString.code(), out)
     }
 
     /// `sfHookInstructionCount` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn hook_instruction_count(&self) -> crate::error::Result<u64> {
+    pub fn hook_instruction_count(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfHookInstructionCount)
     }
 
     /// `sfHookExecutionIndex` — UInt16, `soeREQUIRED`.
     #[inline(always)]
-    pub fn hook_execution_index(&self) -> crate::error::Result<u16> {
+    pub fn hook_execution_index(&self) -> Result<u16> {
         self.src.read(crate::sfield::sfHookExecutionIndex)
     }
 
     /// `sfHookStateChangeCount` — UInt16, `soeREQUIRED`.
     #[inline(always)]
-    pub fn hook_state_change_count(&self) -> crate::error::Result<u16> {
+    pub fn hook_state_change_count(&self) -> Result<u16> {
         self.src.read(crate::sfield::sfHookStateChangeCount)
     }
 
     /// `sfHookEmitCount` — UInt16, `soeREQUIRED`.
     #[inline(always)]
-    pub fn hook_emit_count(&self) -> crate::error::Result<u16> {
+    pub fn hook_emit_count(&self) -> Result<u16> {
         self.src.read(crate::sfield::sfHookEmitCount)
     }
 
     /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+    pub fn flags(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfFlags)
     }
 }
@@ -339,7 +316,7 @@ impl HookEmission {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -347,33 +324,31 @@ impl HookEmission {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfHookHash` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn hook_hash(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn hook_hash(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfHookHash)
     }
 
     /// `sfHookAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn hook_account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn hook_account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfHookAccount)
     }
 
     /// `sfEmittedTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn emitted_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn emitted_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfEmittedTxnID)
     }
 
     /// `sfEmitNonce` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn emit_nonce(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn emit_nonce(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfEmitNonce)
     }
 }
@@ -387,7 +362,7 @@ impl Hook {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -395,152 +370,97 @@ impl Hook {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfHookHash` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn hook_hash(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn hook_hash(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfHookHash)
     }
 
     /// `sfCreateCode` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn create_code_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn create_code_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfCreateCode.code(), out)
     }
 
     /// `sfHookGrants` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_grants_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn hook_grants_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn hook_grants_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfHookGrants.code(), out)
     }
 
     /// `sfHookGrants` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn hook_grants_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+    pub fn hook_grants_slot(&self) -> Result<Option<SlotObject<crate::types::STArray>>> {
         self.src.subobject_opt(crate::sfield::sfHookGrants)
     }
 
     /// `sfHookNamespace` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn hook_namespace(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn hook_namespace(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfHookNamespace)
     }
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
     pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
     }
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+    pub fn hook_parameters_slot(&self) -> Result<Option<SlotObject<crate::types::STArray>>> {
         self.src.subobject_opt(crate::sfield::sfHookParameters)
     }
 
     /// `sfHookOn` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn hook_on(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn hook_on(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfHookOn)
     }
 
     /// `sfHookOnIncoming` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn hook_on_incoming(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn hook_on_incoming(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfHookOnIncoming)
     }
 
     /// `sfHookOnOutgoing` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn hook_on_outgoing(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn hook_on_outgoing(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfHookOnOutgoing)
     }
 
     /// `sfHookCanEmit` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn hook_can_emit(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn hook_can_emit(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfHookCanEmit)
     }
 
     /// `sfHookApiVersion` — UInt16, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn hook_api_version(&self) -> crate::error::Result<Option<u16>> {
+    pub fn hook_api_version(&self) -> Result<Option<u16>> {
         self.src.read_opt(crate::sfield::sfHookApiVersion)
     }
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn hook_name_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src.read_raw_opt(crate::sfield::sfHookName.code(), out)
     }
 
     /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+    pub fn flags(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfFlags)
     }
 }
@@ -554,7 +474,7 @@ impl HookGrant {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -562,29 +482,25 @@ impl HookGrant {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfHookHash` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn hook_hash(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn hook_hash(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfHookHash)
     }
 
     /// `sfAuthorize` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn authorize(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn authorize(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfAuthorize)
     }
 
     /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+    pub fn flags(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfFlags)
     }
 }
@@ -598,7 +514,7 @@ impl HookParameter {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -606,32 +522,23 @@ impl HookParameter {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfHookParameterName` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn hook_parameter_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn hook_parameter_name_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src
             .read_raw(crate::sfield::sfHookParameterName.code(), out)
     }
 
     /// `sfHookParameterValue` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
     pub fn hook_parameter_value_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfHookParameterValue.code(), out)
     }
@@ -650,7 +557,7 @@ impl NFToken {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -658,26 +565,19 @@ impl NFToken {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfNFTokenID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn nftoken_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn nftoken_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfNFTokenID)
     }
 
     /// `sfURI` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn uri_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn uri_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src.read_raw_opt(crate::sfield::sfURI.code(), out)
     }
 }
@@ -691,7 +591,7 @@ impl GenesisMint {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -699,37 +599,31 @@ impl GenesisMint {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfDestination` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn destination(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfDestination)
     }
 
     /// `sfAmount` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn amount(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfAmount)
     }
 
     /// `sfGovernanceFlags` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn governance_flags(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn governance_flags(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfGovernanceFlags)
     }
 
     /// `sfGovernanceMarks` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn governance_marks(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn governance_marks(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfGovernanceMarks)
     }
 }
@@ -743,7 +637,7 @@ impl ActiveValidator {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -751,26 +645,19 @@ impl ActiveValidator {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfPublicKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfPublicKey.code(), out)
     }
 
     /// `sfAccount` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn account(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfAccount)
     }
 }
@@ -784,7 +671,7 @@ impl ImportVLKey {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -792,26 +679,19 @@ impl ImportVLKey {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfPublicKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfPublicKey.code(), out)
     }
 
     /// `sfAccount` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn account(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfAccount)
     }
 }
@@ -825,7 +705,7 @@ impl AmountEntry {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -833,13 +713,13 @@ impl AmountEntry {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAmount` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn amount(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfAmount)
     }
 }
@@ -853,7 +733,7 @@ impl MintURIToken {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -861,31 +741,25 @@ impl MintURIToken {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfURI` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn uri_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> crate::error::Result<usize> {
+    pub fn uri_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfURI.code(), out)
     }
 
     /// `sfDigest` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn digest(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn digest(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfDigest)
     }
 
     /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+    pub fn flags(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfFlags)
     }
 }
@@ -899,7 +773,7 @@ impl Remark {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -907,40 +781,26 @@ impl Remark {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfRemarkName` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn remark_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn remark_name_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfRemarkName.code(), out)
     }
 
     /// `sfRemarkValue` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn remark_value_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn remark_value_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfRemarkValue.code(), out)
     }
 
     /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn flags(&self) -> crate::error::Result<Option<u32>> {
+    pub fn flags(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfFlags)
     }
 }
@@ -958,7 +818,7 @@ impl VoteEntry {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -966,27 +826,25 @@ impl VoteEntry {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAccount)
     }
 
     /// `sfTradingFee` — UInt16, `soeDEFAULT`.
-    ///
-    /// `Ok(None)` when omitted; `soeDEFAULT` defines no value to substitute.
     #[inline(always)]
-    pub fn trading_fee(&self) -> crate::error::Result<Option<u16>> {
+    pub fn trading_fee(&self) -> Result<Option<u16>> {
         self.src.read_opt(crate::sfield::sfTradingFee)
     }
 
     /// `sfVoteWeight` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn vote_weight(&self) -> crate::error::Result<u32> {
+    pub fn vote_weight(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfVoteWeight)
     }
 }
@@ -1004,7 +862,7 @@ impl AuctionSlot {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -1012,60 +870,47 @@ impl AuctionSlot {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAccount)
     }
 
     /// `sfExpiration` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn expiration(&self) -> crate::error::Result<u32> {
+    pub fn expiration(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfExpiration)
     }
 
     /// `sfDiscountedFee` — UInt16, `soeDEFAULT`.
-    ///
-    /// `Ok(None)` when omitted; `soeDEFAULT` defines no value to substitute.
     #[inline(always)]
-    pub fn discounted_fee(&self) -> crate::error::Result<Option<u16>> {
+    pub fn discounted_fee(&self) -> Result<Option<u16>> {
         self.src.read_opt(crate::sfield::sfDiscountedFee)
     }
 
     /// `sfPrice` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn price(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn price(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfPrice)
     }
 
     /// `sfAuthAccounts` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `auth_accounts_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
     pub fn auth_accounts_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfAuthAccounts.code(), out)
     }
 
     /// `sfAuthAccounts` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn auth_accounts_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+    pub fn auth_accounts_slot(&self) -> Result<Option<SlotObject<crate::types::STArray>>> {
         self.src.subobject_opt(crate::sfield::sfAuthAccounts)
     }
 }
@@ -1083,7 +928,7 @@ impl XChainClaimAttestationCollectionElement {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -1091,73 +936,61 @@ impl XChainClaimAttestationCollectionElement {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAttestationSignerAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn attestation_signer_account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn attestation_signer_account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAttestationSignerAccount)
     }
 
     /// `sfPublicKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfPublicKey.code(), out)
     }
 
     /// `sfSignature` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn signature_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfSignature.code(), out)
     }
 
     /// `sfAmount` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn amount(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfAmount)
     }
 
     /// `sfAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAccount)
     }
 
     /// `sfAttestationRewardAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn attestation_reward_account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn attestation_reward_account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAttestationRewardAccount)
     }
 
     /// `sfWasLockingChainSend` — UInt8, `soeREQUIRED`.
     #[inline(always)]
-    pub fn was_locking_chain_send(&self) -> crate::error::Result<u8> {
+    pub fn was_locking_chain_send(&self) -> Result<u8> {
         self.src.read(crate::sfield::sfWasLockingChainSend)
     }
 
     /// `sfXChainClaimID` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn xchain_claim_id(&self) -> crate::error::Result<u64> {
+    pub fn xchain_claim_id(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfXChainClaimID)
     }
 
     /// `sfDestination` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn destination(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfDestination)
     }
 }
@@ -1175,7 +1008,7 @@ impl XChainCreateAccountAttestationCollectionElement {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -1183,77 +1016,67 @@ impl XChainCreateAccountAttestationCollectionElement {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAttestationSignerAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn attestation_signer_account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn attestation_signer_account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAttestationSignerAccount)
     }
 
     /// `sfPublicKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfPublicKey.code(), out)
     }
 
     /// `sfSignature` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn signature_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfSignature.code(), out)
     }
 
     /// `sfAmount` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn amount(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfAmount)
     }
 
     /// `sfAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAccount)
     }
 
     /// `sfAttestationRewardAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn attestation_reward_account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn attestation_reward_account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAttestationRewardAccount)
     }
 
     /// `sfWasLockingChainSend` — UInt8, `soeREQUIRED`.
     #[inline(always)]
-    pub fn was_locking_chain_send(&self) -> crate::error::Result<u8> {
+    pub fn was_locking_chain_send(&self) -> Result<u8> {
         self.src.read(crate::sfield::sfWasLockingChainSend)
     }
 
     /// `sfXChainAccountCreateCount` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn xchain_account_create_count(&self) -> crate::error::Result<u64> {
+    pub fn xchain_account_create_count(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfXChainAccountCreateCount)
     }
 
     /// `sfDestination` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn destination(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfDestination)
     }
 
     /// `sfSignatureReward` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn signature_reward(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn signature_reward(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfSignatureReward)
     }
 }
@@ -1271,7 +1094,7 @@ impl XChainClaimProofSig {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -1279,50 +1102,43 @@ impl XChainClaimProofSig {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAttestationSignerAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn attestation_signer_account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn attestation_signer_account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAttestationSignerAccount)
     }
 
     /// `sfPublicKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfPublicKey.code(), out)
     }
 
     /// `sfAmount` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn amount(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfAmount)
     }
 
     /// `sfAttestationRewardAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn attestation_reward_account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn attestation_reward_account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAttestationRewardAccount)
     }
 
     /// `sfWasLockingChainSend` — UInt8, `soeREQUIRED`.
     #[inline(always)]
-    pub fn was_locking_chain_send(&self) -> crate::error::Result<u8> {
+    pub fn was_locking_chain_send(&self) -> Result<u8> {
         self.src.read(crate::sfield::sfWasLockingChainSend)
     }
 
     /// `sfDestination` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn destination(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfDestination)
     }
 }
@@ -1340,7 +1156,7 @@ impl XChainCreateAccountProofSig {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -1348,54 +1164,49 @@ impl XChainCreateAccountProofSig {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAttestationSignerAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn attestation_signer_account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn attestation_signer_account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAttestationSignerAccount)
     }
 
     /// `sfPublicKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfPublicKey.code(), out)
     }
 
     /// `sfAmount` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn amount(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfAmount)
     }
 
     /// `sfSignatureReward` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn signature_reward(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn signature_reward(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfSignatureReward)
     }
 
     /// `sfAttestationRewardAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn attestation_reward_account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn attestation_reward_account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAttestationRewardAccount)
     }
 
     /// `sfWasLockingChainSend` — UInt8, `soeREQUIRED`.
     #[inline(always)]
-    pub fn was_locking_chain_send(&self) -> crate::error::Result<u8> {
+    pub fn was_locking_chain_send(&self) -> Result<u8> {
         self.src.read(crate::sfield::sfWasLockingChainSend)
     }
 
     /// `sfDestination` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn destination(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfDestination)
     }
 }
@@ -1413,7 +1224,7 @@ impl AuthAccount {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -1421,13 +1232,13 @@ impl AuthAccount {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAccount)
     }
 }
@@ -1441,7 +1252,7 @@ impl PriceData {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -1449,35 +1260,31 @@ impl PriceData {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfBaseAsset` — Currency, `soeREQUIRED`.
     #[inline(always)]
-    pub fn base_asset(&self) -> crate::error::Result<crate::types::CurrencyCode> {
+    pub fn base_asset(&self) -> Result<crate::types::CurrencyCode> {
         self.src.read(crate::sfield::sfBaseAsset)
     }
 
     /// `sfQuoteAsset` — Currency, `soeREQUIRED`.
     #[inline(always)]
-    pub fn quote_asset(&self) -> crate::error::Result<crate::types::CurrencyCode> {
+    pub fn quote_asset(&self) -> Result<crate::types::CurrencyCode> {
         self.src.read(crate::sfield::sfQuoteAsset)
     }
 
     /// `sfAssetPrice` — UInt64, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn asset_price(&self) -> crate::error::Result<Option<u64>> {
+    pub fn asset_price(&self) -> Result<Option<u64>> {
         self.src.read_opt(crate::sfield::sfAssetPrice)
     }
 
     /// `sfScale` — UInt8, `soeDEFAULT`.
-    ///
-    /// `Ok(None)` when omitted; `soeDEFAULT` defines no value to substitute.
     #[inline(always)]
-    pub fn scale(&self) -> crate::error::Result<Option<u8>> {
+    pub fn scale(&self) -> Result<Option<u8>> {
         self.src.read_opt(crate::sfield::sfScale)
     }
 }
@@ -1495,7 +1302,7 @@ impl Credential {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -1503,24 +1310,19 @@ impl Credential {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfIssuer` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn issuer(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn issuer(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfIssuer)
     }
 
     /// `sfCredentialType` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn credential_type_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn credential_type_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src
             .read_raw(crate::sfield::sfCredentialType.code(), out)
     }
@@ -1535,7 +1337,7 @@ impl HighReward {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -1543,33 +1345,31 @@ impl HighReward {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfRewardLgrFirst` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn reward_lgr_first(&self) -> crate::error::Result<u32> {
+    pub fn reward_lgr_first(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfRewardLgrFirst)
     }
 
     /// `sfRewardLgrLast` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn reward_lgr_last(&self) -> crate::error::Result<u32> {
+    pub fn reward_lgr_last(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfRewardLgrLast)
     }
 
     /// `sfRewardTime` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn reward_time(&self) -> crate::error::Result<u32> {
+    pub fn reward_time(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfRewardTime)
     }
 
     /// `sfTrustLineRewardAccumulator` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn trust_line_reward_accumulator(
-        &self,
-    ) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn trust_line_reward_accumulator(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfTrustLineRewardAccumulator)
     }
 }
@@ -1583,7 +1383,7 @@ impl LowReward {
     /// Takes a child slot without type-checking it; inner objects have no type field.
     #[inline(always)]
     #[must_use]
-    pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
         Self {
             src: crate::views::source::SlotSource::new(obj),
         }
@@ -1591,33 +1391,31 @@ impl LowReward {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfRewardLgrFirst` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn reward_lgr_first(&self) -> crate::error::Result<u32> {
+    pub fn reward_lgr_first(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfRewardLgrFirst)
     }
 
     /// `sfRewardLgrLast` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn reward_lgr_last(&self) -> crate::error::Result<u32> {
+    pub fn reward_lgr_last(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfRewardLgrLast)
     }
 
     /// `sfRewardTime` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn reward_time(&self) -> crate::error::Result<u32> {
+    pub fn reward_time(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfRewardTime)
     }
 
     /// `sfTrustLineRewardAccumulator` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn trust_line_reward_accumulator(
-        &self,
-    ) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn trust_line_reward_accumulator(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfTrustLineRewardAccumulator)
     }
 }

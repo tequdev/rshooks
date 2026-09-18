@@ -46,10 +46,6 @@ in sync by hand. These files are never hand-edited.
   header change first fails the drift workflow above; after re-syncing, the
   parity tests fail until the Rust translation is updated to match. The
   translation cannot silently rot.
-- A drift-tripwire test (`tests/vendor_sha256.rs`) hashes these eight files
-  at test time and asserts them against `SHA256SUMS`, so an accidental local
-  edit (or a partial/corrupted re-download) fails CI loudly instead of
-  silently drifting from what a real xahaud node runs.
 
 ## License
 

@@ -250,7 +250,7 @@ call-site choice about which API shape to go through, not a second,
 diverging declaration. See [Hook State](../data/state.md) and [Hook and
 Transaction Parameters](../data/parameters.md) for the raw
 `state`/`state_set`/`hook_param`/`otxn_param` layer this falls back to, and
-`examples/80_governance`'s own `README.md` for the full measured numbers
+`examples/80_governance/metrics.json` for the current measured numbers
 behind this section.
 
 ## Where to go next

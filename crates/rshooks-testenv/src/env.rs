@@ -745,7 +745,6 @@ mod tests {
 
     use super::*;
     use rshooks::decl::NativeEntry;
-    use rshooks::tx_type::TxType;
 
     struct NoEntries;
     impl HookChainEntries for NoEntries {
@@ -872,12 +871,5 @@ mod tests {
         let exit = env.invoke::<OneEntry>(1);
         assert!(!exit.is_success());
         assert!(env.hook_again_requested());
-    }
-
-    #[test]
-    fn otxn_defaults_to_non_emitted() {
-        let env = TestEnv::new();
-        let _ = env.invoke::<OneEntry>(0); // exercise the path; otxn fields unread here
-        let _ = TxType::Payment; // silence unused import in case of future edits
     }
 }
