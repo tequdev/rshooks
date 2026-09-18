@@ -16,13 +16,11 @@ cargo fmt --all --manifest-path examples/Cargo.toml
 """
 
 [tasks.lint]
-description = "Lint the root workspace (all targets, plus rshooks with all features) and the examples workspace (wasm32v1-none), denying warnings"
-# `active-amendments` clippy/test runs are cut here and from `test` below
-# because the feature currently gates nothing (no generated
-# `not(feature = "active-amendments")` cfg exists yet); re-add both once
-# the pending amendment tier is non-empty.
+description = "Lint the root workspace (all targets, plus rshooks in each amendment-availability state) and the examples workspace (wasm32v1-none), denying warnings"
 run = """
 cargo clippy --workspace --all-targets -- -D warnings
+# Cover the active-only and widest-wins generated surfaces too.
+cargo clippy -p rshooks --all-targets --features active-amendments -- -D warnings
 cargo clippy -p rshooks --all-targets --all-features -- -D warnings
 cargo clippy --manifest-path examples/Cargo.toml --workspace --target wasm32v1-none -- -D warnings
 """
@@ -32,9 +30,11 @@ description = "Verify every version reference tracks the root workspace version"
 run = "cargo run -q -p xtask -- check-versions"
 
 [tasks.test]
-description = "Run all workspace tests, plus rshooks with all features"
+description = "Run all workspace tests, plus rshooks in each amendment-availability state"
 run = """
 cargo test --workspace
+# Exercise generated availability gates in every state.
+cargo test -p rshooks --features active-amendments
 cargo test -p rshooks --all-features
 """
 
