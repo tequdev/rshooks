@@ -78,27 +78,24 @@
 use std::vec::Vec;
 
 use rshooks::tx_type::TxType;
-use rshooks::txn::codec::{MAX_NOPS_PER_CONTAINER, NOP};
+use rshooks::txn::codec::{ARRAY_END_MARKER, MAX_NOPS_PER_CONTAINER, NOP, OBJECT_END_MARKER};
 
-/// The STObject terminator (see [`crate::details::OBJECT_END_MARKER`]).
-const OBJECT_END_MARKER: u8 = 0xE1;
-/// The STArray terminator: `sfArrayEndMarker`'s wire byte (type 15, field 1,
-/// both `< 16` → a single byte `(15 << 4) | 1`).
-const ARRAY_END_MARKER: u8 = 0xF1;
+const SF_TRANSACTION_TYPE: u64 = rshooks::sfield::sfTransactionType.code() as u64;
+const SF_SEQUENCE: u64 = rshooks::sfield::sfSequence.code() as u64;
+const SF_FIRST_LEDGER_SEQUENCE: u64 = rshooks::sfield::sfFirstLedgerSequence.code() as u64;
+const SF_LAST_LEDGER_SEQUENCE: u64 = rshooks::sfield::sfLastLedgerSequence.code() as u64;
+const SF_ACCOUNT_TXN_ID: u64 = rshooks::sfield::sfAccountTxnID.code() as u64;
+const SF_FEE: u64 = rshooks::sfield::sfFee.code() as u64;
+const SF_SIGNING_PUB_KEY: u64 = rshooks::sfield::sfSigningPubKey.code() as u64;
+const SF_TXN_SIGNATURE: u64 = rshooks::sfield::sfTxnSignature.code() as u64;
+const SF_ACCOUNT: u64 = rshooks::sfield::sfAccount.code() as u64;
+const SF_EMIT_DETAILS: u64 = rshooks::sfield::sfEmitDetails.code() as u64;
+const SF_SIGNERS: u64 = rshooks::sfield::sfSigners.code() as u64;
+const SF_TICKET_SEQUENCE: u64 = rshooks::sfield::sfTicketSequence.code() as u64;
 
-const SF_TRANSACTION_TYPE: u64 = sfcode(1, 2);
-const SF_SEQUENCE: u64 = sfcode(2, 4);
-const SF_FIRST_LEDGER_SEQUENCE: u64 = sfcode(2, 26);
-const SF_LAST_LEDGER_SEQUENCE: u64 = sfcode(2, 27);
-const SF_ACCOUNT_TXN_ID: u64 = sfcode(5, 9);
-const SF_FEE: u64 = sfcode(6, 8);
-const SF_SIGNING_PUB_KEY: u64 = sfcode(7, 3);
-const SF_TXN_SIGNATURE: u64 = sfcode(7, 4);
-const SF_ACCOUNT: u64 = sfcode(8, 1);
-const SF_EMIT_DETAILS: u64 = sfcode(14, 13);
-const SF_SIGNERS: u64 = sfcode(15, 3);
-const SF_TICKET_SEQUENCE: u64 = sfcode(2, 41);
-
+/// Packs a raw `(type, field)` pair into the same `u64` code shape as the
+/// `SF_*` constants above — for ad-hoc/synthetic test codes with no
+/// corresponding `rshooks::sfield::sfXxx` constant.
 const fn sfcode(ty: u32, field: u32) -> u64 {
     ((ty as u64) << 16) | (field as u64)
 }
@@ -167,12 +164,23 @@ pub(crate) enum NopMode {
 /// Skips a run of zero or more [`NOP`] bytes at `*pos` when `mode` is
 /// [`NopMode::Tolerant`] (a no-op under [`NopMode::Strict`]), incrementing
 /// `*nop_count` (the calling container's own counter) for each one and
-/// failing once that counter would exceed [`MAX_NOPS_PER_CONTAINER`].
-fn skip_nops(data: &[u8], pos: &mut usize, nop_count: &mut usize, mode: NopMode) -> Result<(), ()> {
+/// failing once that counter would exceed [`MAX_NOPS_PER_CONTAINER`]. Each
+/// skipped NOP's offset is also pushed to `nops` — unused by every caller
+/// except [`canonicalize`], which walks once under [`NopMode::Tolerant`]
+/// and re-serializes `data` with exactly those offsets dropped, rather than
+/// maintaining a second, parallel copy-and-recurse walk.
+fn skip_nops(
+    data: &[u8],
+    pos: &mut usize,
+    nop_count: &mut usize,
+    mode: NopMode,
+    nops: &mut Vec<usize>,
+) -> Result<(), ()> {
     if mode != NopMode::Tolerant {
         return Ok(());
     }
     while data.get(*pos) == Some(&NOP) {
+        nops.push(*pos);
         *pos = pos.checked_add(1).ok_or(())?;
         *nop_count = nop_count.checked_add(1).ok_or(())?;
         if *nop_count > MAX_NOPS_PER_CONTAINER {
@@ -312,6 +320,7 @@ fn dispatch_value(
     ty: u32,
     depth: u32,
     mode: NopMode,
+    nops: &mut Vec<usize>,
 ) -> Result<(), ()> {
     match ty {
         6 => skip_amount(data, pos),
@@ -320,13 +329,13 @@ fn dispatch_value(
             if depth.checked_add(1).ok_or(())? > STO_MAX_RECURSION_DEPTH {
                 return Err(());
             }
-            walk_object_body(data, pos, depth.wrapping_add(1), mode).map(|_| ())
+            walk_object_body(data, pos, depth.wrapping_add(1), mode, nops).map(|_| ())
         }
         15 => {
             if depth.checked_add(1).ok_or(())? > STO_MAX_RECURSION_DEPTH {
                 return Err(());
             }
-            walk_array_body(data, pos, depth.wrapping_add(1), mode)
+            walk_array_body(data, pos, depth.wrapping_add(1), mode, nops)
         }
         other => {
             let len = fixed_len_for_type(other).ok_or(())?;
@@ -349,11 +358,12 @@ fn walk_fields(
     depth: u32,
     in_object: bool,
     mode: NopMode,
+    nops: &mut Vec<usize>,
 ) -> Result<Vec<FieldSpan>, ()> {
     let mut fields = Vec::new();
     let mut nop_count = 0usize;
     loop {
-        skip_nops(data, pos, &mut nop_count, mode)?;
+        skip_nops(data, pos, &mut nop_count, mode, nops)?;
         if in_object {
             match data.get(*pos) {
                 Some(&OBJECT_END_MARKER) => {
@@ -370,7 +380,7 @@ fn walk_fields(
         let (ty, field) = decode_header(data, pos)?;
         let value_start = *pos;
         let code = sfcode(ty, field);
-        dispatch_value(data, pos, ty, depth, mode)?;
+        dispatch_value(data, pos, ty, depth, mode, nops)?;
         fields.push(FieldSpan {
             code,
             range: (start, *pos),
@@ -385,8 +395,9 @@ pub(crate) fn walk_object_body(
     pos: &mut usize,
     depth: u32,
     mode: NopMode,
+    nops: &mut Vec<usize>,
 ) -> Result<Vec<FieldSpan>, ()> {
-    walk_fields(data, pos, depth, true, mode)
+    walk_fields(data, pos, depth, true, mode, nops)
 }
 
 /// The STI_OBJECT type code — every STArray element's field header must
@@ -404,10 +415,16 @@ const STI_ARRAY: u32 = 15;
 const STI_VL: u32 = 7;
 const STI_ACCOUNT: u32 = 8;
 
-fn walk_array_body(data: &[u8], pos: &mut usize, depth: u32, mode: NopMode) -> Result<(), ()> {
+fn walk_array_body(
+    data: &[u8],
+    pos: &mut usize,
+    depth: u32,
+    mode: NopMode,
+    nops: &mut Vec<usize>,
+) -> Result<(), ()> {
     let mut nop_count = 0usize;
     loop {
-        skip_nops(data, pos, &mut nop_count, mode)?;
+        skip_nops(data, pos, &mut nop_count, mode, nops)?;
         match data.get(*pos) {
             Some(&ARRAY_END_MARKER) => {
                 *pos = pos.checked_add(1).ok_or(())?;
@@ -420,7 +437,7 @@ fn walk_array_body(data: &[u8], pos: &mut usize, depth: u32, mode: NopMode) -> R
         if ty != STI_OBJECT {
             return Err(());
         }
-        dispatch_value(data, pos, ty, depth, mode)?;
+        dispatch_value(data, pos, ty, depth, mode, nops)?;
     }
 }
 
@@ -439,8 +456,9 @@ pub(crate) fn walk_array_elements(data: &[u8], mode: NopMode) -> Result<Vec<(usi
     let mut pos = 0usize;
     let mut spans = Vec::new();
     let mut nop_count = 0usize;
+    let mut nops = Vec::new();
     loop {
-        skip_nops(data, &mut pos, &mut nop_count, mode)?;
+        skip_nops(data, &mut pos, &mut nop_count, mode, &mut nops)?;
         match data.get(pos) {
             Some(&ARRAY_END_MARKER) => {
                 pos = pos.checked_add(1).ok_or(())?;
@@ -458,7 +476,7 @@ pub(crate) fn walk_array_elements(data: &[u8], mode: NopMode) -> Result<Vec<(usi
         if ty != STI_OBJECT {
             return Err(());
         }
-        dispatch_value(data, &mut pos, ty, 0, mode)?;
+        dispatch_value(data, &mut pos, ty, 0, mode, &mut nops)?;
         spans.push((start, pos));
     }
 }
@@ -489,7 +507,7 @@ pub(crate) fn walk_top_level_fields_or_object(
 ) -> Result<Vec<FieldSpan>, ()> {
     if in_object {
         let mut pos = 0usize;
-        walk_object_body(data, &mut pos, 0, mode)
+        walk_object_body(data, &mut pos, 0, mode, &mut Vec::new())
     } else {
         walk_top_level_fields(data, mode)
     }
@@ -497,7 +515,7 @@ pub(crate) fn walk_top_level_fields_or_object(
 
 fn walk_top_level(data: &[u8], mode: NopMode) -> Result<Vec<FieldSpan>, ()> {
     let mut pos = 0usize;
-    walk_fields(data, &mut pos, 0, false, mode)
+    walk_fields(data, &mut pos, 0, false, mode, &mut Vec::new())
 }
 
 /// Re-serializes `data` (a top-level field sequence, no wrapping header or
@@ -508,128 +526,28 @@ fn walk_top_level(data: &[u8], mode: NopMode) -> Result<Vec<FieldSpan>, ()> {
 /// returned bytes: see [`NopMode::Tolerant`]'s doc comment). Every real
 /// field's own bytes — header, value, and (for a nested `STI_OBJECT`(14)/
 /// `STI_ARRAY`(15) field) its own terminator — survive unchanged; only NOP
-/// bytes are dropped. Structurally equivalent to [`walk_top_level_fields`]
-/// under [`NopMode::Tolerant`] (same grammar, same per-container 63-NOP
-/// budget, same `Err(())` conditions — including a container's 64th NOP)
-/// except that it *emits* the canonical bytes instead of a [`FieldSpan`]
-/// list.
+/// bytes are dropped. One [`walk_fields`] pass under [`NopMode::Tolerant`]
+/// (same grammar, same per-container 63-NOP budget, same `Err(())`
+/// conditions — including a container's 64th NOP), collecting each skipped
+/// NOP's offset via [`skip_nops`]'s `nops` output rather than a second,
+/// parallel copy-and-recurse walk; those offsets are then the exact
+/// positions dropped when copying `data` to the output — recorded in
+/// increasing order since the walk visits every byte strictly left to
+/// right, depth-first.
 pub(crate) fn canonicalize(data: &[u8]) -> Result<Vec<u8>, ()> {
-    let mut out = Vec::with_capacity(data.len());
     let mut pos = 0usize;
-    canonicalize_fields(data, &mut pos, 0, false, &mut out)?;
+    let mut nops = Vec::new();
+    walk_fields(data, &mut pos, 0, false, NopMode::Tolerant, &mut nops)?;
+    let mut out = Vec::with_capacity(data.len().saturating_sub(nops.len()));
+    let mut nops = nops.into_iter().peekable();
+    for (i, &b) in data.iter().enumerate() {
+        if nops.peek() == Some(&i) {
+            nops.next();
+            continue;
+        }
+        out.push(b);
+    }
     Ok(out)
-}
-
-/// [`canonicalize`]'s field-sequence pass — mirrors [`walk_fields`] one to
-/// one (same loop shape, same NOP-skip/terminator/depth rules), copying
-/// each real field's header verbatim via [`canonicalize_value`] rather than
-/// recording a [`FieldSpan`].
-fn canonicalize_fields(
-    data: &[u8],
-    pos: &mut usize,
-    depth: u32,
-    in_object: bool,
-    out: &mut Vec<u8>,
-) -> Result<(), ()> {
-    let mut nop_count = 0usize;
-    loop {
-        skip_nops(data, pos, &mut nop_count, NopMode::Tolerant)?;
-        if in_object {
-            match data.get(*pos) {
-                Some(&OBJECT_END_MARKER) => {
-                    *pos = pos.checked_add(1).ok_or(())?;
-                    out.push(OBJECT_END_MARKER);
-                    break;
-                }
-                None => return Err(()),
-                _ => {}
-            }
-        } else if *pos >= data.len() {
-            break;
-        }
-        let start = *pos;
-        let (ty, _field) = decode_header(data, pos)?;
-        out.extend_from_slice(data.get(start..*pos).ok_or(())?);
-        canonicalize_value(data, pos, ty, depth, out)?;
-    }
-    Ok(())
-}
-
-/// [`canonicalize`]'s value pass — mirrors [`dispatch_value`] one to one:
-/// a scalar/amount/VL value's bytes are copied verbatim (they cannot
-/// themselves contain a header-position NOP), a nested `STI_OBJECT`(14)
-/// recurses into [`canonicalize_fields`], a nested `STI_ARRAY`(15)
-/// recurses into [`canonicalize_array_body`].
-fn canonicalize_value(
-    data: &[u8],
-    pos: &mut usize,
-    ty: u32,
-    depth: u32,
-    out: &mut Vec<u8>,
-) -> Result<(), ()> {
-    match ty {
-        6 => {
-            let start = *pos;
-            skip_amount(data, pos)?;
-            out.extend_from_slice(data.get(start..*pos).ok_or(())?);
-            Ok(())
-        }
-        7 | 8 => {
-            let start = *pos;
-            skip_vl(data, pos)?;
-            out.extend_from_slice(data.get(start..*pos).ok_or(())?);
-            Ok(())
-        }
-        14 => {
-            if depth.checked_add(1).ok_or(())? > STO_MAX_RECURSION_DEPTH {
-                return Err(());
-            }
-            canonicalize_fields(data, pos, depth.wrapping_add(1), true, out)
-        }
-        15 => {
-            if depth.checked_add(1).ok_or(())? > STO_MAX_RECURSION_DEPTH {
-                return Err(());
-            }
-            canonicalize_array_body(data, pos, depth.wrapping_add(1), out)
-        }
-        other => {
-            let len = fixed_len_for_type(other).ok_or(())?;
-            let start = *pos;
-            skip_fixed(data, pos, len)?;
-            out.extend_from_slice(data.get(start..*pos).ok_or(())?);
-            Ok(())
-        }
-    }
-}
-
-/// [`canonicalize`]'s array-body pass — mirrors [`walk_array_body`] one to
-/// one.
-fn canonicalize_array_body(
-    data: &[u8],
-    pos: &mut usize,
-    depth: u32,
-    out: &mut Vec<u8>,
-) -> Result<(), ()> {
-    let mut nop_count = 0usize;
-    loop {
-        skip_nops(data, pos, &mut nop_count, NopMode::Tolerant)?;
-        match data.get(*pos) {
-            Some(&ARRAY_END_MARKER) => {
-                *pos = pos.checked_add(1).ok_or(())?;
-                out.push(ARRAY_END_MARKER);
-                return Ok(());
-            }
-            None => return Err(()),
-            _ => {}
-        }
-        let start = *pos;
-        let (ty, _field) = decode_header(data, pos)?;
-        if ty != STI_OBJECT {
-            return Err(());
-        }
-        out.extend_from_slice(data.get(start..*pos).ok_or(())?);
-        canonicalize_value(data, pos, ty, depth, out)?;
-    }
 }
 
 fn field_bytes(data: &[u8], range: (usize, usize)) -> Option<&[u8]> {
@@ -696,7 +614,7 @@ fn reject_duplicate_fields(fields: &[FieldSpan], data: &[u8]) -> Result<(), ()> 
         if ty == STI_OBJECT {
             let body = data.get(f.value_range.0..f.value_range.1).ok_or(())?;
             let mut pos = 0usize;
-            let nested = walk_fields(body, &mut pos, 0, true, NopMode::Tolerant)?;
+            let nested = walk_fields(body, &mut pos, 0, true, NopMode::Tolerant, &mut Vec::new())?;
             reject_duplicate_fields(&nested, body)?;
         } else if ty == STI_ARRAY {
             let body = data.get(f.value_range.0..f.value_range.1).ok_or(())?;
@@ -704,7 +622,14 @@ fn reject_duplicate_fields(fields: &[FieldSpan], data: &[u8]) -> Result<(), ()> 
                 let element = body.get(start..end).ok_or(())?;
                 let mut pos = 0usize;
                 decode_header(element, &mut pos)?;
-                let nested = walk_fields(element, &mut pos, 0, true, NopMode::Tolerant)?;
+                let nested = walk_fields(
+                    element,
+                    &mut pos,
+                    0,
+                    true,
+                    NopMode::Tolerant,
+                    &mut Vec::new(),
+                )?;
                 reject_duplicate_fields(&nested, element)?;
             }
         }
@@ -907,6 +832,7 @@ mod tests {
 
     use super::*;
     use crate::details::{EmitDetailsInputs, build_etxn_details};
+    use crate::testutil::{nested_object_chain, sf_flags_bytes, sf_sequence_bytes};
 
     /// The emitting hook's account, shared by every test below.
     const HOOK_ACCOUNT: [u8; 20] = [9u8; 20];
@@ -939,8 +865,14 @@ mod tests {
     /// can mutate exactly one thing and re-validate. Every field
     /// `validate_emit_blob` requires (including `protocol_formats.json`'s
     /// Payment-specific `sfDestination`) is present and legal against
-    /// `HOOK_ACCOUNT`/`LEDGER_SEQ`/`MIN_FEE` above.
-    fn minimal_payment(emit_details: &[u8]) -> Vec<u8> {
+    /// `HOOK_ACCOUNT`/`LEDGER_SEQ`/`MIN_FEE` above. `signing_pub_key` is the
+    /// VL length prefix plus payload that goes after the `SigningPubKey`
+    /// (7, 3) header — `&[0x00]` (empty VL) for the ordinary unsigned case,
+    /// or something else for a test that specifically varies this field.
+    fn minimal_payment_with_signing_pub_key(
+        emit_details: &[u8],
+        signing_pub_key: &[u8],
+    ) -> Vec<u8> {
         let mut out = Vec::new();
         out.extend_from_slice(&[0x12, 0x00, 0x00]); // TransactionType = 0 (Payment)
         out.extend_from_slice(&[0x24, 0, 0, 0, 0]); // Sequence = 0
@@ -954,7 +886,8 @@ mod tests {
         out.extend_from_slice(&native_amount(1));
         out.push(0x68); // Fee (6, 8): native, exactly MIN_FEE
         out.extend_from_slice(&native_amount(MIN_FEE));
-        out.extend_from_slice(&[0x73, 0x00]); // SigningPubKey: empty VL
+        out.push(0x73); // SigningPubKey (7, 3)
+        out.extend_from_slice(signing_pub_key);
         out.push(0x81); // Account (8, 1)
         out.push(20);
         out.extend_from_slice(&HOOK_ACCOUNT);
@@ -963,6 +896,10 @@ mod tests {
         out.extend_from_slice(&DESTINATION);
         out.extend_from_slice(emit_details);
         out
+    }
+
+    fn minimal_payment(emit_details: &[u8]) -> Vec<u8> {
+        minimal_payment_with_signing_pub_key(emit_details, &[0x00])
     }
 
     fn details() -> Vec<u8> {
@@ -1051,57 +988,18 @@ mod tests {
         // rule 2: an unsigned emitted txn may carry either an empty
         // SigningPubKey or a 33-byte all-zero one.
         let d = details();
-        let mut out = Vec::new();
-        out.extend_from_slice(&[0x12, 0x00, 0x00]);
-        out.extend_from_slice(&[0x24, 0, 0, 0, 0]);
-        out.push(0x20);
-        out.push(26);
-        out.extend_from_slice(&FIRST_LEDGER_SEQUENCE.to_be_bytes());
-        out.push(0x20);
-        out.push(27);
-        out.extend_from_slice(&LAST_LEDGER_SEQUENCE.to_be_bytes());
-        out.push(0x61);
-        out.extend_from_slice(&native_amount(1));
-        out.push(0x68);
-        out.extend_from_slice(&native_amount(MIN_FEE));
-        out.push(0x73);
-        out.push(33);
-        out.extend_from_slice(&[0u8; 33]); // 33 all-zero bytes
-        out.push(0x81);
-        out.push(20);
-        out.extend_from_slice(&HOOK_ACCOUNT);
-        out.push(0x83);
-        out.push(20);
-        out.extend_from_slice(&DESTINATION);
-        out.extend_from_slice(&d);
-        assert!(validate(&out, Some(&d)).is_ok());
+        let mut signing_pub_key = vec![33u8]; // VL length prefix
+        signing_pub_key.extend_from_slice(&[0u8; 33]); // 33 all-zero bytes
+        let blob = minimal_payment_with_signing_pub_key(&d, &signing_pub_key);
+        assert!(validate(&blob, Some(&d)).is_ok());
     }
 
     #[test]
     fn rejects_nonempty_signing_pub_key() {
         let d = details();
-        let mut out = Vec::new();
-        out.extend_from_slice(&[0x12, 0x00, 0x00]);
-        out.extend_from_slice(&[0x24, 0, 0, 0, 0]);
-        out.push(0x20);
-        out.push(26);
-        out.extend_from_slice(&FIRST_LEDGER_SEQUENCE.to_be_bytes());
-        out.push(0x20);
-        out.push(27);
-        out.extend_from_slice(&LAST_LEDGER_SEQUENCE.to_be_bytes());
-        out.push(0x68);
-        out.extend_from_slice(&native_amount(MIN_FEE));
-        out.push(0x73);
-        out.push(1);
-        out.push(0xAB); // non-empty, non-zero-length SigningPubKey
-        out.push(0x81);
-        out.push(20);
-        out.extend_from_slice(&HOOK_ACCOUNT);
-        out.push(0x83);
-        out.push(20);
-        out.extend_from_slice(&DESTINATION);
-        out.extend_from_slice(&d);
-        assert!(validate(&out, Some(&d)).is_err());
+        // non-empty, non-zero-length SigningPubKey: VL length 1, byte 0xAB
+        let blob = minimal_payment_with_signing_pub_key(&d, &[1u8, 0xAB]);
+        assert!(validate(&blob, Some(&d)).is_err());
     }
 
     #[test]
@@ -1398,21 +1296,6 @@ mod tests {
         assert!(validate(&blob, Some(&d)).is_err());
     }
 
-    /// A single top-level `Object`-typed(14) field nested `depth` levels
-    /// deep (an empty innermost object): `depth` copies of the
-    /// `(type 14, field 2)` header, each opening one more level, followed
-    /// by `depth` [`OBJECT_END_MARKER`]s closing them all back out. Its
-    /// fields parse at [`dispatch_value`]'s `depth` running from `0`
-    /// (the outer header itself) up to `depth - 1` (the innermost, empty
-    /// body) — see [`STO_MAX_RECURSION_DEPTH`]'s doc comment for the
-    /// convention.
-    fn nested_object_chain(depth: u32) -> Vec<u8> {
-        let depth = depth as usize;
-        let mut out = vec![0xE2u8; depth]; // (type 14, field 2), repeated
-        out.extend(vec![OBJECT_END_MARKER; depth]);
-        out
-    }
-
     #[test]
     fn accepts_nesting_up_to_the_real_hosts_limit() {
         // Real xahaud's `get_stobject_length` accepts recursion depths
@@ -1578,20 +1461,6 @@ mod tests {
         assert!(walk_top_level_fields(&padded, NopMode::Strict).is_err());
     }
 
-    /// `sfSequence(2,4) = v`.
-    fn sf_sequence_bytes(v: u32) -> Vec<u8> {
-        let mut out = vec![0x24];
-        out.extend_from_slice(&v.to_be_bytes());
-        out
-    }
-
-    /// `sfFlags(2,2) = v`.
-    fn sf_flags_bytes(v: u32) -> Vec<u8> {
-        let mut out = vec![0x22];
-        out.extend_from_slice(&v.to_be_bytes());
-        out
-    }
-
     #[test]
     fn tolerant_mode_skips_nops_between_top_level_fields_yielding_the_same_fields() {
         let plain = {
@@ -1705,13 +1574,13 @@ mod tests {
     // -- canonicalize --
 
     #[test]
-    fn canonicalize_strips_top_level_nops_leaving_the_plain_fields_bytes() {
+    fn canonicalize_cases() {
         let plain = {
             let mut out = sf_flags_bytes(1);
             out.extend_from_slice(&sf_sequence_bytes(7));
             out
         };
-        let padded = {
+        let padded_top_level = {
             let mut out = vec![NOP, NOP];
             out.extend_from_slice(&sf_flags_bytes(1));
             out.push(NOP);
@@ -1719,33 +1588,24 @@ mod tests {
             out.push(NOP);
             out
         };
-        assert_eq!(canonicalize(&padded).unwrap(), plain);
-        // Already-canonical bytes canonicalize to themselves.
-        assert_eq!(canonicalize(&plain).unwrap(), plain);
-    }
-
-    #[test]
-    fn canonicalize_leaves_a_0x99_byte_inside_a_vl_payload_untouched() {
         // `0x99` only means NOP in a field-*header* position; `skip_vl`
-        // consumes a VL field's payload as opaque bytes (the length
-        // prefix already says how many), so a `0x99` inside one is
-        // ordinary data, not a NOP -- it must survive canonicalization
-        // exactly where it was written, not be stripped or miscounted.
-        let mut data = vec![0x73]; // sfSigningPubKey (7,3): both < 16, one-byte header
-        data.push(3); // one-byte VL length prefix
-        data.extend_from_slice(&[0x99, 0x01, 0x99]); // payload, two 0x99 bytes
-        assert_eq!(canonicalize(&data).unwrap(), data);
-    }
-
-    #[test]
-    fn canonicalize_strips_nops_between_array_elements_and_inside_an_element_object() {
-        // Same shape as
-        // `tolerant_mode_skips_nops_between_array_elements_and_inside_an_element_object`:
-        // one array field with two STObject elements, a NOP inside the
-        // first element's own body (object-level) and a NOP between the
-        // two elements (array-level) — both must disappear, independently,
-        // leaving exactly the NOP-free equivalent bytes (hand-pinned).
-        let padded: &[u8] = &[
+        // consumes a VL field's payload as opaque bytes (the length prefix
+        // already says how many), so a `0x99` inside one is ordinary data,
+        // not a NOP — it must survive canonicalization exactly where it was
+        // written, not be stripped or miscounted.
+        let vl_with_0x99_payload = {
+            let mut out = vec![0x73]; // sfSigningPubKey (7,3): both < 16, one-byte header
+            out.push(3); // one-byte VL length prefix
+            out.extend_from_slice(&[0x99, 0x01, 0x99]); // payload, two 0x99 bytes
+            out
+        };
+        // One array field with two STObject elements, a NOP inside the
+        // first element's own body (object-level) and a NOP between the two
+        // elements (array-level) — both must disappear, independently,
+        // leaving exactly the NOP-free equivalent bytes (hand-pinned). Same
+        // shape as
+        // `tolerant_mode_skips_nops_between_array_elements_and_inside_an_element_object`.
+        let padded_array: &[u8] = &[
             0xFF, // array field header
             0xE2, // element 0 header (STObject)
             0x24,
@@ -1760,7 +1620,7 @@ mod tests {
             OBJECT_END_MARKER,
             ARRAY_END_MARKER,
         ];
-        let expected: &[u8] = &[
+        let plain_array: &[u8] = &[
             0xFF, // array field header
             0xE2, // element 0 header (STObject)
             0x24,
@@ -1773,31 +1633,60 @@ mod tests {
             OBJECT_END_MARKER,
             ARRAY_END_MARKER,
         ];
-        assert_eq!(canonicalize(padded).unwrap(), expected);
-    }
-
-    #[test]
-    fn canonicalize_allows_63_nops_in_one_container_and_rejects_the_64th() {
-        let mut ok = vec![NOP; MAX_NOPS_PER_CONTAINER];
-        ok.extend_from_slice(&sf_sequence_bytes(9));
-        assert_eq!(canonicalize(&ok).unwrap(), sf_sequence_bytes(9));
-
-        let mut too_many = vec![NOP; MAX_NOPS_PER_CONTAINER + 1];
-        too_many.extend_from_slice(&sf_sequence_bytes(9));
-        assert!(canonicalize(&too_many).is_err());
-    }
-
-    #[test]
-    fn canonicalize_containers_have_independent_nop_budgets() {
-        // Same shape as `tolerant_mode_containers_have_independent_nop_budgets`:
+        let exactly_max_nops = {
+            let mut out = vec![NOP; MAX_NOPS_PER_CONTAINER];
+            out.extend_from_slice(&sf_sequence_bytes(9));
+            out
+        };
+        let one_past_max_nops = {
+            let mut out = vec![NOP; MAX_NOPS_PER_CONTAINER + 1];
+            out.extend_from_slice(&sf_sequence_bytes(9));
+            out
+        };
         // 63 NOPs at the top level plus another 63 inside a nested object —
         // both disappear, and the container's own containment (the nested
-        // object's `0xE1`) is preserved.
-        let mut data = vec![NOP; MAX_NOPS_PER_CONTAINER];
-        data.push(0xE2); // nested object field header (STObject)
-        data.extend_from_slice(&[NOP; MAX_NOPS_PER_CONTAINER]);
-        data.push(OBJECT_END_MARKER);
+        // object's `0xE1`) is preserved. Same shape as
+        // `tolerant_mode_containers_have_independent_nop_budgets`.
+        let independent_budgets = {
+            let mut out = vec![NOP; MAX_NOPS_PER_CONTAINER];
+            out.push(0xE2); // nested object field header (STObject)
+            out.extend_from_slice(&[NOP; MAX_NOPS_PER_CONTAINER]);
+            out.push(OBJECT_END_MARKER);
+            out
+        };
 
-        assert_eq!(canonicalize(&data).unwrap(), [0xE2, OBJECT_END_MARKER]);
+        type Case<'a> = (&'a str, &'a [u8], Result<&'a [u8], &'a ()>);
+        let cases: &[Case<'_>] = &[
+            ("strips_top_level_nops", &padded_top_level, Ok(&plain)),
+            ("already_canonical_bytes_are_unchanged", &plain, Ok(&plain)),
+            (
+                "0x99_inside_a_vl_payload_is_untouched",
+                &vl_with_0x99_payload,
+                Ok(&vl_with_0x99_payload),
+            ),
+            (
+                "strips_nops_between_array_elements_and_inside_an_element_object",
+                padded_array,
+                Ok(plain_array),
+            ),
+            (
+                "allows_exactly_the_max_nops_in_one_container",
+                &exactly_max_nops,
+                Ok(&sf_sequence_bytes(9)),
+            ),
+            (
+                "rejects_one_past_the_max_nops",
+                &one_past_max_nops,
+                Err(&()),
+            ),
+            (
+                "containers_have_independent_nop_budgets",
+                &independent_budgets,
+                Ok(&[0xE2, OBJECT_END_MARKER]),
+            ),
+        ];
+        for &(name, input, expected) in cases {
+            assert_eq!(canonicalize(input).as_deref(), expected, "case: {name}");
+        }
     }
 }

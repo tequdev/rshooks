@@ -79,12 +79,14 @@ pub struct EmittedTxn {
 impl EmittedTxn {
     /// The raw emitted-transaction bytes.
     #[must_use]
+    #[deprecated(since = "0.2.2", note = "read the public `blob` field directly")]
     pub fn blob(&self) -> &[u8] {
         &self.blob
     }
 
     /// The emitted transaction's hash, as returned by `emit`.
     #[must_use]
+    #[deprecated(since = "0.2.2", note = "read the public `hash` field directly")]
     pub fn hash(&self) -> [u8; 32] {
         self.hash
     }
@@ -164,11 +166,9 @@ pub(crate) struct World {
     pub(crate) ledger_objects: HashMap<[u8; 34], Vec<u8>>,
     /// The current transaction's metadata, if seeded — backs `meta_slot`.
     /// Builder: [`crate::TestEnv::otxn_meta`].
-    #[allow(dead_code)]
     pub(crate) otxn_meta: Option<Vec<u8>>,
     /// An XPOP's `(transaction, metadata)` pair, if seeded — backs
     /// `xpop_slot`. Builder: [`crate::TestEnv::xpop`].
-    #[allow(dead_code)]
     pub(crate) xpop: Option<(Vec<u8>, Vec<u8>)>,
     /// Parameters written by `hook_param_set` during a *previous*,
     /// already-`accept!`ed invocation — `(hook_hash, name) -> value` — read

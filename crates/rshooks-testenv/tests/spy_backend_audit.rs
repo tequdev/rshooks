@@ -41,328 +41,103 @@ impl SpyBackend {
     }
 }
 
-impl HostBackend for SpyBackend {
-    fn state(&self, _key: &[u8]) -> Result<Vec<u8>, i64> {
-        self.mark("state");
-        Ok(Vec::new())
-    }
-    fn state_set(&self, _key: &[u8], _data: &[u8]) -> Result<i64, i64> {
-        self.mark("state_set");
-        Ok(0)
-    }
-    fn state_foreign(
-        &self,
-        _key: &[u8],
-        _ns: Option<&[u8; 32]>,
-        _acc: Option<&[u8; 20]>,
-    ) -> Result<Vec<u8>, i64> {
-        self.mark("state_foreign");
-        Ok(Vec::new())
-    }
-    fn state_foreign_set(
-        &self,
-        _key: &[u8],
-        _data: &[u8],
-        _ns: Option<&[u8; 32]>,
-        _acc: Option<&[u8; 20]>,
-    ) -> Result<i64, i64> {
-        self.mark("state_foreign_set");
-        Ok(0)
-    }
-    fn otxn_field(&self, _field_id: u32) -> Result<Vec<u8>, i64> {
-        self.mark("otxn_field");
-        Ok(Vec::new())
-    }
-    fn otxn_type(&self) -> i64 {
-        self.mark("otxn_type");
-        0
-    }
-    fn otxn_id(&self, _flags: u32) -> Result<Vec<u8>, i64> {
-        self.mark("otxn_id");
-        Ok(vec![0u8; 32])
-    }
-    fn otxn_param(&self, _name: &[u8]) -> Result<Vec<u8>, i64> {
-        self.mark("otxn_param");
-        Ok(Vec::new())
-    }
-    fn otxn_burden(&self) -> i64 {
-        self.mark("otxn_burden");
-        1
-    }
-    fn otxn_generation(&self) -> i64 {
-        self.mark("otxn_generation");
-        0
-    }
-    fn hook_param(&self, _name: &[u8]) -> Result<Vec<u8>, i64> {
-        self.mark("hook_param");
-        Ok(Vec::new())
-    }
-    fn hook_account(&self) -> Result<[u8; 20], i64> {
-        self.mark("hook_account");
-        Ok([0u8; 20])
-    }
-    fn hook_hash(&self, _hook_no: i32) -> Result<[u8; 32], i64> {
-        self.mark("hook_hash");
-        Ok([0u8; 32])
-    }
-    fn hook_pos(&self) -> i64 {
-        self.mark("hook_pos");
-        0
-    }
-    fn ledger_seq(&self) -> i64 {
-        self.mark("ledger_seq");
-        1
-    }
-    fn ledger_last_time(&self) -> i64 {
-        self.mark("ledger_last_time");
-        0
-    }
-    fn ledger_last_hash(&self) -> Result<[u8; 32], i64> {
-        self.mark("ledger_last_hash");
-        Ok([0u8; 32])
-    }
-    fn ledger_nonce(&self) -> Result<[u8; 32], i64> {
-        self.mark("ledger_nonce");
-        Ok([0u8; 32])
-    }
-    fn fee_base(&self) -> i64 {
-        self.mark("fee_base");
-        10
-    }
-    fn etxn_reserve(&self, count: u32) -> i64 {
-        self.mark("etxn_reserve");
-        i64::from(count)
-    }
-    fn etxn_fee_base(&self, _tx_blob: &[u8]) -> i64 {
-        self.mark("etxn_fee_base");
-        10
-    }
-    fn etxn_details(&self) -> Result<Vec<u8>, i64> {
-        self.mark("etxn_details");
-        Ok(Vec::new())
-    }
-    fn etxn_burden(&self) -> i64 {
-        self.mark("etxn_burden");
-        1
-    }
-    fn etxn_generation(&self) -> i64 {
-        self.mark("etxn_generation");
-        1
-    }
-    fn etxn_nonce(&self) -> Result<[u8; 32], i64> {
-        self.mark("etxn_nonce");
-        Ok([0u8; 32])
-    }
-    fn emit(&self, _tx_blob: &[u8]) -> Result<[u8; 32], i64> {
-        self.mark("emit");
-        Ok([0u8; 32])
-    }
-    fn accept(&self, _msg: &[u8], _code: i64) -> ! {
-        self.mark("accept");
-        panic!("SpyBackend::accept");
-    }
-    fn rollback(&self, _msg: &[u8], _code: i64) -> ! {
-        self.mark("rollback");
-        panic!("SpyBackend::rollback");
-    }
-    fn trace(&self, _msg: &[u8], _data: &[u8], _as_hex: bool) -> i64 {
-        self.mark("trace");
-        0
-    }
-    fn trace_num(&self, _msg: &[u8], _num: i64) -> i64 {
-        self.mark("trace_num");
-        0
-    }
+/// Generates one `HostBackend` method per `fn NAME(&self, args...) -> RET { BODY }`
+/// entry: `self.mark("NAME")` then `BODY`, for whichever of the trait's
+/// i64-returning/`Result`-returning/diverging (`accept`/`rollback`, `-> !`)
+/// shapes `RET` and `BODY` spell out — the marking wrapper is identical
+/// across all three, only the signature and tail value differ.
+macro_rules! spy_backend_methods {
+    ($(fn $name:ident(&self $(, $arg:ident : $ty:ty)* $(,)?) -> $ret:ty { $body:expr })*) => {
+        impl HostBackend for SpyBackend {
+            $(
+                fn $name(&self, $($arg: $ty),*) -> $ret {
+                    self.mark(stringify!($name));
+                    $body
+                }
+            )*
+        }
+    };
+}
+
+spy_backend_methods! {
+    fn state(&self, _key: &[u8]) -> Result<Vec<u8>, i64> { Ok(Vec::new()) }
+    fn state_set(&self, _key: &[u8], _data: &[u8]) -> Result<i64, i64> { Ok(0) }
+    fn state_foreign(&self, _key: &[u8], _ns: Option<&[u8; 32]>, _acc: Option<&[u8; 20]>) -> Result<Vec<u8>, i64> { Ok(Vec::new()) }
+    fn state_foreign_set(&self, _key: &[u8], _data: &[u8], _ns: Option<&[u8; 32]>, _acc: Option<&[u8; 20]>) -> Result<i64, i64> { Ok(0) }
+    fn otxn_field(&self, _field_id: u32) -> Result<Vec<u8>, i64> { Ok(Vec::new()) }
+    fn otxn_type(&self) -> i64 { 0 }
+    fn otxn_id(&self, _flags: u32) -> Result<Vec<u8>, i64> { Ok(vec![0u8; 32]) }
+    fn otxn_param(&self, _name: &[u8]) -> Result<Vec<u8>, i64> { Ok(Vec::new()) }
+    fn otxn_burden(&self) -> i64 { 1 }
+    fn otxn_generation(&self) -> i64 { 0 }
+    fn hook_param(&self, _name: &[u8]) -> Result<Vec<u8>, i64> { Ok(Vec::new()) }
+    fn hook_account(&self) -> Result<[u8; 20], i64> { Ok([0u8; 20]) }
+    fn hook_hash(&self, _hook_no: i32) -> Result<[u8; 32], i64> { Ok([0u8; 32]) }
+    fn hook_pos(&self) -> i64 { 0 }
+    fn ledger_seq(&self) -> i64 { 1 }
+    fn ledger_last_time(&self) -> i64 { 0 }
+    fn ledger_last_hash(&self) -> Result<[u8; 32], i64> { Ok([0u8; 32]) }
+    fn ledger_nonce(&self) -> Result<[u8; 32], i64> { Ok([0u8; 32]) }
+    fn fee_base(&self) -> i64 { 10 }
+    fn etxn_reserve(&self, count: u32) -> i64 { i64::from(count) }
+    fn etxn_fee_base(&self, _tx_blob: &[u8]) -> i64 { 10 }
+    fn etxn_details(&self) -> Result<Vec<u8>, i64> { Ok(Vec::new()) }
+    fn etxn_burden(&self) -> i64 { 1 }
+    fn etxn_generation(&self) -> i64 { 1 }
+    fn etxn_nonce(&self) -> Result<[u8; 32], i64> { Ok([0u8; 32]) }
+    fn emit(&self, _tx_blob: &[u8]) -> Result<[u8; 32], i64> { Ok([0u8; 32]) }
+    fn accept(&self, _msg: &[u8], _code: i64) -> ! { panic!("SpyBackend::accept") }
+    fn rollback(&self, _msg: &[u8], _code: i64) -> ! { panic!("SpyBackend::rollback") }
+    fn trace(&self, _msg: &[u8], _data: &[u8], _as_hex: bool) -> i64 { 0 }
+    fn trace_num(&self, _msg: &[u8], _num: i64) -> i64 { 0 }
 
     // -- Phase 2 --
 
-    fn float_set(&self, _exponent: i32, _mantissa: i64) -> i64 {
-        self.mark("float_set");
-        0
-    }
-    fn float_multiply(&self, _f1: i64, _f2: i64) -> i64 {
-        self.mark("float_multiply");
-        0
-    }
-    fn float_mulratio(&self, _f1: i64, _round_up: u32, _numerator: u32, _denominator: u32) -> i64 {
-        self.mark("float_mulratio");
-        0
-    }
-    fn float_negate(&self, _f1: i64) -> i64 {
-        self.mark("float_negate");
-        0
-    }
-    fn float_compare(&self, _f1: i64, _f2: i64, _mode: u32) -> i64 {
-        self.mark("float_compare");
-        0
-    }
-    fn float_sum(&self, _f1: i64, _f2: i64) -> i64 {
-        self.mark("float_sum");
-        0
-    }
-    fn float_sto(
-        &self,
-        _currency: Option<&[u8]>,
-        _issuer: Option<&[u8]>,
-        _amount: i64,
-        _field_code: u32,
-    ) -> Result<Vec<u8>, i64> {
-        self.mark("float_sto");
-        Ok(vec![0u8; 8])
-    }
-    fn float_sto_set(&self, _sto: &[u8]) -> i64 {
-        self.mark("float_sto_set");
-        0
-    }
-    fn float_invert(&self, _f1: i64) -> i64 {
-        self.mark("float_invert");
-        0
-    }
-    fn float_divide(&self, _f1: i64, _f2: i64) -> i64 {
-        self.mark("float_divide");
-        0
-    }
-    fn float_one(&self) -> i64 {
-        self.mark("float_one");
-        0
-    }
-    fn float_mantissa(&self, _f1: i64) -> i64 {
-        self.mark("float_mantissa");
-        0
-    }
-    fn float_sign(&self, _f1: i64) -> i64 {
-        self.mark("float_sign");
-        0
-    }
-    fn float_int(&self, _f1: i64, _decimal_places: u32, _absolute: u32) -> i64 {
-        self.mark("float_int");
-        0
-    }
-    fn float_log(&self, _f1: i64) -> i64 {
-        self.mark("float_log");
-        0
-    }
-    fn float_root(&self, _f1: i64, _n: u32) -> i64 {
-        self.mark("float_root");
-        0
-    }
-    fn slot(&self, _slot_no: u32) -> Result<Vec<u8>, i64> {
-        self.mark("slot");
-        Ok(Vec::new())
-    }
-    fn slot_clear(&self, _slot_no: u32) -> i64 {
-        self.mark("slot_clear");
-        0
-    }
-    fn slot_count(&self, _slot_no: u32) -> i64 {
-        self.mark("slot_count");
-        0
-    }
-    fn slot_float(&self, _slot_no: u32) -> i64 {
-        self.mark("slot_float");
-        0
-    }
-    fn slot_set(&self, _data: &[u8], _slot_into: u32) -> i64 {
-        self.mark("slot_set");
-        1
-    }
-    fn slot_size(&self, _slot_no: u32) -> i64 {
-        self.mark("slot_size");
-        0
-    }
-    fn slot_subarray(&self, _parent_slot: u32, _array_id: u32, _new_slot: u32) -> i64 {
-        self.mark("slot_subarray");
-        1
-    }
-    fn slot_subfield(&self, _parent_slot: u32, _field_id: u32, _new_slot: u32) -> i64 {
-        self.mark("slot_subfield");
-        1
-    }
-    fn slot_type(&self, _slot_no: u32, _flags: u32) -> i64 {
-        self.mark("slot_type");
-        0
-    }
-    fn otxn_slot(&self, _slot_into: u32) -> i64 {
-        self.mark("otxn_slot");
-        1
-    }
-    fn meta_slot(&self, _slot_into: u32) -> i64 {
-        self.mark("meta_slot");
-        1
-    }
-    fn xpop_slot(&self, _slot_no_tx: u32, _slot_no_meta: u32) -> i64 {
-        self.mark("xpop_slot");
-        0
-    }
-    fn sto_subfield(&self, _sto: &[u8], _field_id: u32) -> i64 {
-        self.mark("sto_subfield");
-        0
-    }
-    fn sto_subarray(&self, _array: &[u8], _index: u32) -> i64 {
-        self.mark("sto_subarray");
-        0
-    }
-    fn sto_validate(&self, _sto: &[u8]) -> i64 {
-        self.mark("sto_validate");
-        1
-    }
-    fn sto_emplace(&self, _source: &[u8], _field: &[u8], _field_id: u32) -> Result<Vec<u8>, i64> {
-        self.mark("sto_emplace");
-        Ok(Vec::new())
-    }
-    fn sto_erase(&self, _source: &[u8], _field_id: u32) -> Result<Vec<u8>, i64> {
-        self.mark("sto_erase");
-        Ok(Vec::new())
-    }
-    fn util_sha512h(&self, _data: &[u8]) -> Result<[u8; 32], i64> {
-        self.mark("util_sha512h");
-        Ok([0u8; 32])
-    }
-    fn util_accid(&self, _r_address: &[u8]) -> Result<Vec<u8>, i64> {
-        self.mark("util_accid");
-        Ok(vec![0u8; 20])
-    }
-    fn util_raddr(&self, _accid: &[u8]) -> Result<Vec<u8>, i64> {
-        self.mark("util_raddr");
-        Ok(Vec::new())
-    }
-    fn util_verify(&self, _data: &[u8], _signature: &[u8], _public_key: &[u8]) -> i64 {
-        self.mark("util_verify");
-        0
-    }
-    fn util_keylet(&self, _keylet_type: u32, _args: [KeyletArg<'_>; 6]) -> Result<[u8; 34], i64> {
-        self.mark("util_keylet");
-        Ok([0u8; 34])
-    }
-    fn ledger_keylet(&self, _low: &[u8], _high: &[u8]) -> Result<Vec<u8>, i64> {
-        self.mark("ledger_keylet");
-        Ok(vec![0u8; 34])
-    }
-    fn hook_again(&self) -> i64 {
-        self.mark("hook_again");
-        0
-    }
-    fn hook_skip(&self, _hash: &[u8], _flags: u32) -> i64 {
-        self.mark("hook_skip");
-        0
-    }
-    fn hook_param_set(&self, _value: &[u8], _name: &[u8], _hook_hash: &[u8]) -> i64 {
-        self.mark("hook_param_set");
-        0
-    }
-    fn prepare(&self, _template: &[u8]) -> Result<Vec<u8>, i64> {
-        self.mark("prepare");
-        Ok(Vec::new())
-    }
-    fn trace_float(&self, _msg: &[u8], _value: i64) -> i64 {
-        self.mark("trace_float");
-        0
-    }
-
-    fn static_take_allowed(&self, _cell_addr: usize) -> bool {
-        self.mark("static_take_allowed");
-        true
-    }
+    fn float_set(&self, _exponent: i32, _mantissa: i64) -> i64 { 0 }
+    fn float_multiply(&self, _f1: i64, _f2: i64) -> i64 { 0 }
+    fn float_mulratio(&self, _f1: i64, _round_up: u32, _numerator: u32, _denominator: u32) -> i64 { 0 }
+    fn float_negate(&self, _f1: i64) -> i64 { 0 }
+    fn float_compare(&self, _f1: i64, _f2: i64, _mode: u32) -> i64 { 0 }
+    fn float_sum(&self, _f1: i64, _f2: i64) -> i64 { 0 }
+    fn float_sto(&self, _currency: Option<&[u8]>, _issuer: Option<&[u8]>, _amount: i64, _field_code: u32) -> Result<Vec<u8>, i64> { Ok(vec![0u8; 8]) }
+    fn float_sto_set(&self, _sto: &[u8]) -> i64 { 0 }
+    fn float_invert(&self, _f1: i64) -> i64 { 0 }
+    fn float_divide(&self, _f1: i64, _f2: i64) -> i64 { 0 }
+    fn float_one(&self) -> i64 { 0 }
+    fn float_mantissa(&self, _f1: i64) -> i64 { 0 }
+    fn float_sign(&self, _f1: i64) -> i64 { 0 }
+    fn float_int(&self, _f1: i64, _decimal_places: u32, _absolute: u32) -> i64 { 0 }
+    fn float_log(&self, _f1: i64) -> i64 { 0 }
+    fn float_root(&self, _f1: i64, _n: u32) -> i64 { 0 }
+    fn slot(&self, _slot_no: u32) -> Result<Vec<u8>, i64> { Ok(Vec::new()) }
+    fn slot_clear(&self, _slot_no: u32) -> i64 { 0 }
+    fn slot_count(&self, _slot_no: u32) -> i64 { 0 }
+    fn slot_float(&self, _slot_no: u32) -> i64 { 0 }
+    fn slot_set(&self, _data: &[u8], _slot_into: u32) -> i64 { 1 }
+    fn slot_size(&self, _slot_no: u32) -> i64 { 0 }
+    fn slot_subarray(&self, _parent_slot: u32, _array_id: u32, _new_slot: u32) -> i64 { 1 }
+    fn slot_subfield(&self, _parent_slot: u32, _field_id: u32, _new_slot: u32) -> i64 { 1 }
+    fn slot_type(&self, _slot_no: u32, _flags: u32) -> i64 { 0 }
+    fn otxn_slot(&self, _slot_into: u32) -> i64 { 1 }
+    fn meta_slot(&self, _slot_into: u32) -> i64 { 1 }
+    fn xpop_slot(&self, _slot_no_tx: u32, _slot_no_meta: u32) -> i64 { 0 }
+    fn sto_subfield(&self, _sto: &[u8], _field_id: u32) -> i64 { 0 }
+    fn sto_subarray(&self, _array: &[u8], _index: u32) -> i64 { 0 }
+    fn sto_validate(&self, _sto: &[u8]) -> i64 { 1 }
+    fn sto_emplace(&self, _source: &[u8], _field: &[u8], _field_id: u32) -> Result<Vec<u8>, i64> { Ok(Vec::new()) }
+    fn sto_erase(&self, _source: &[u8], _field_id: u32) -> Result<Vec<u8>, i64> { Ok(Vec::new()) }
+    fn util_sha512h(&self, _data: &[u8]) -> Result<[u8; 32], i64> { Ok([0u8; 32]) }
+    fn util_accid(&self, _r_address: &[u8]) -> Result<Vec<u8>, i64> { Ok(vec![0u8; 20]) }
+    fn util_raddr(&self, _accid: &[u8]) -> Result<Vec<u8>, i64> { Ok(Vec::new()) }
+    fn util_verify(&self, _data: &[u8], _signature: &[u8], _public_key: &[u8]) -> i64 { 0 }
+    fn util_keylet(&self, _keylet_type: u32, _args: [KeyletArg<'_>; 6]) -> Result<[u8; 34], i64> { Ok([0u8; 34]) }
+    fn ledger_keylet(&self, _low: &[u8], _high: &[u8]) -> Result<Vec<u8>, i64> { Ok(vec![0u8; 34]) }
+    fn hook_again(&self) -> i64 { 0 }
+    fn hook_skip(&self, _hash: &[u8], _flags: u32) -> i64 { 0 }
+    fn hook_param_set(&self, _value: &[u8], _name: &[u8], _hook_hash: &[u8]) -> i64 { 0 }
+    fn prepare(&self, _template: &[u8]) -> Result<Vec<u8>, i64> { Ok(Vec::new()) }
+    fn trace_float(&self, _msg: &[u8], _value: i64) -> i64 { 0 }
+    fn static_take_allowed(&self, _cell_addr: usize) -> bool { true }
 }
 
 static SCRATCH: HookStatic<[u8; 4]> = HookStatic::new([0, 0, 0, 0]);
