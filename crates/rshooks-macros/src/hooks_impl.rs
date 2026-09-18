@@ -2028,20 +2028,25 @@ fn render_native_entries_table(struct_name: &str, entries: &[EntryJson]) -> Stri
 fn encode_entries_json(struct_name: &str, entries: &[EntryJson]) -> Result<Vec<u8>, String> {
     let mut arr = Vec::new();
     for e in entries {
-        let mut obj = serde_json::json!({
-            "index": e.index,
-            "hook_fn": e.hook_fn,
-            "cbak_fn": e.cbak_fn,
-            "HookName": e.hook_name,
-            "on": {
+        let mut obj = serde_json::Map::new();
+        obj.insert("index".to_string(), serde_json::json!(e.index));
+        obj.insert("hook_fn".to_string(), serde_json::json!(e.hook_fn));
+        obj.insert("cbak_fn".to_string(), serde_json::json!(e.cbak_fn));
+        obj.insert("HookName".to_string(), serde_json::json!(e.hook_name));
+        obj.insert(
+            "on".to_string(),
+            serde_json::json!({
                 "form": e.on_form.as_str(),
                 "HookOn": e.hook_on,
                 "HookOnIncoming": e.hook_on_incoming,
                 "HookOnOutgoing": e.hook_on_outgoing,
-            },
-            "HookCanEmit": e.hook_can_emit,
-            "description": e.description,
-        });
+            }),
+        );
+        obj.insert(
+            "HookCanEmit".to_string(),
+            serde_json::json!(e.hook_can_emit),
+        );
+        obj.insert("description".to_string(), serde_json::json!(e.description));
 
         // Only `field`/`type_byte`/`name_hex` are part of the wire carrier
         // (`docs/PARAM_SIGNATURE_DESIGN.md` §4) — `SigParamJson::type_text`
@@ -2050,9 +2055,7 @@ fn encode_entries_json(struct_name: &str, entries: &[EntryJson]) -> Result<Vec<u
         // built with `unstable-param-sig-interface`; its presence in the
         // carrier is what signals to `rshooks-build` that the interface was
         // compiled in.
-        if cfg!(feature = "unstable-param-sig-interface")
-            && let Some(map) = obj.as_object_mut()
-        {
+        if cfg!(feature = "unstable-param-sig-interface") {
             let sig_params: Vec<serde_json::Value> = e
                 .sig_params
                 .iter()
@@ -2064,10 +2067,10 @@ fn encode_entries_json(struct_name: &str, entries: &[EntryJson]) -> Result<Vec<u
                     })
                 })
                 .collect();
-            map.insert("sig_params".to_string(), sig_params.into());
+            obj.insert("sig_params".to_string(), sig_params.into());
         }
 
-        arr.push(obj);
+        arr.push(serde_json::Value::Object(obj));
     }
 
     let object = serde_json::json!({

@@ -1794,10 +1794,21 @@ fn si_declaration_value_bytes(value_fields: &[SiFieldSpec]) -> Vec<u8> {
 /// Human-readable `(name: Type, ..)` display form of a key/value field
 /// list — `"()"` for an empty list (a singleton's `key(..)`).
 fn si_field_list_display(fields: &[SiFieldSpec]) -> String {
-    let parts: Vec<String> = fields
+    let pairs: Vec<(&str, String)> = fields
         .iter()
-        .map(|f| format!("{}: {}", f.name, tokens_to_string(&f.ty_tokens)))
+        .map(|f| (f.name.as_str(), tokens_to_string(&f.ty_tokens)))
         .collect();
+    join_name_type_pairs(pairs.iter().map(|(name, ty)| (*name, ty.as_str())))
+}
+
+/// Joins `(name, type text)` pairs into [`si_field_list_display`]'s
+/// `(name: Type, ..)` form — split out from the `SiFieldSpec`/`TokenTree`
+/// extraction above so the separator/parenthesization shape is testable
+/// with plain strings (a `proc_macro::TokenTree` panics outside a live
+/// macro invocation, so a real, non-empty type text can't be built in a
+/// unit test).
+fn join_name_type_pairs<'a>(pairs: impl Iterator<Item = (&'a str, &'a str)>) -> String {
+    let parts: Vec<String> = pairs.map(|(name, ty)| format!("{name}: {ty}")).collect();
     format!("({})", parts.join(", "))
 }
 
@@ -1921,19 +1932,16 @@ fn encode_chain_json(
         }
     }
 
-    let mut decls = serde_json::json!({
-        "state": state,
-        "hook_params": hook_params,
-        "otxn_params": otxn_params,
-    });
+    let mut decls = serde_json::Map::new();
+    decls.insert("state".to_string(), state.into());
+    decls.insert("hook_params".to_string(), hook_params.into());
+    decls.insert("otxn_params".to_string(), otxn_params.into());
     // Byte-identity with a pre-`unstable-state-interface` build: only emit
     // this key when non-empty, so a struct with no `#[state_interface]`
     // fields carries the exact same carrier JSON (and therefore the exact
     // same wasm) it always did.
-    if !state_interface.is_empty()
-        && let Some(map) = decls.as_object_mut()
-    {
-        map.insert("state_interface".to_string(), state_interface.into());
+    if !state_interface.is_empty() {
+        decls.insert("state_interface".to_string(), state_interface.into());
     }
 
     let object = serde_json::json!({
@@ -2218,5 +2226,13 @@ mod tests {
     #[test]
     fn si_field_list_display_is_empty_parens_for_a_singleton() {
         assert_eq!(si_field_list_display(&[]), "()");
+    }
+
+    #[test]
+    fn si_field_list_display_joins_name_type_pairs_with_commas() {
+        assert_eq!(
+            join_name_type_pairs([("account", "AccountId"), ("token", "u32")].into_iter()),
+            "(account: AccountId, token: u32)"
+        );
     }
 }

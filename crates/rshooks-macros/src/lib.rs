@@ -161,6 +161,10 @@ pub fn account_id(input: TokenStream) -> TokenStream {
     }
 
     let span = literal.span();
+    // Only the `syn`-parse-failure branch of `parse_string_value` can ever
+    // trigger here (`literal` is already a single `Literal` token, checked
+    // above) — substitute this macro's own worked-example message for that
+    // branch's generic one, at the same span.
     let address = match hooks_shared::parse_string_value(
         Some(&[TokenTree::Literal(literal)]),
         span,
@@ -168,7 +172,12 @@ pub fn account_id(input: TokenStream) -> TokenStream {
         "address",
     ) {
         Ok(s) => s,
-        Err(e) => return e,
+        Err(_) => {
+            return err(
+                span,
+                "account_id! expects a single string literal, e.g. account_id!(\"r...\")",
+            );
+        }
     };
 
     let bytes = match base58::decode(&address) {
