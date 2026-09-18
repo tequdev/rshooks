@@ -8,10 +8,12 @@ on:
     branches: [main]
     paths:
       - "book/**"
+      - "Cargo.toml"
       - ".github/workflows/deploy-book.yml"
   pull_request:
     paths:
       - "book/**"
+      - "Cargo.toml"
       - ".github/workflows/deploy-book.yml"
   workflow_dispatch:
 

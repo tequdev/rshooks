@@ -5,6 +5,9 @@ authors = ["tequ"]
 language = "en"
 src = "src"
 
+[preprocessor.version]
+command = "python3 version.py"
+
 [output.html]
 default-theme = "light"
 preferred-dark-theme = "navy"
