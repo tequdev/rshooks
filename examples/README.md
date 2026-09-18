@@ -24,29 +24,31 @@ the numbering — Cargo package names can't start with a digit, so only the
 directory is prefixed) and matches what its own README, `Cargo.toml`, and
 `use` statements call it.
 
-| # | example | demonstrates |
-|---|---|---|
-| 01 | [`accept-all`](01_accept-all) | minimal hook: `accept` everything (starter template) |
-| 02 | [`state-counter`](02_state-counter) | `state`/`state_set` round-trip, counter in hook state |
-| 03 | [`hook-params`](03_hook-params) | `#[hook_param]`-configurable threshold, with a compiled-in default |
-| 04 | [`errors`](04_errors) | a meaningful `hook_errors!`-based rollback error-code system, matched to `HookReturnCode` |
-| 05 | [`firewall`](05_firewall) | read `otxn_field(sfAccount)` + a hook parameter blacklist → `rollback` |
-| 06 | [`guard-patterns`](06_guard-patterns) | `guard!`/`guard_m!` correctness, choosing `maxiter`, and the array-`==` memcmp-loop pitfall |
-| 07 | [`xfl-math`](07_xfl-math) | reading `Amount` as XFL (`slot_float`/`sto_set`), `mulratio`, checked `Add`/`Sub`/`Mul`/`Div`/`Neg` operators, `.compare()`-family methods, and `XFLUnchecked`'s hot-path chain |
-| 8 | [`slot-ledger`](08_slot-ledger) | the **typed slot layer**: `SlotObject::from_otxn()` -> `.get(sfXxx)` -> `.value()`, with no slot numbers in sight, measured against the raw numbered API it replaced |
-| 09 | [`state-foreign`](09_state-foreign) | `state_foreign`: reading another (hook-parameter-configured) account's hook state |
-| 10 | [`emit-txn`](10_emit-txn) | `etxn_reserve` + a `txn_template!`-declared Payment/`emit`, with a `cbak` |
-| 12 | [`typed-data`](12_typed-data) | `#[derive(HookData)]`: composite (multi-field) state keys/values and `otxn_param`/`hook_param` structs, in place of hand-packed byte buffers |
-| 13 | [`keylets`](13_keylets) | `rshooks::api::keylet`'s 26 typed `keylet_xxx` helpers (one per `KEYLET_*` constant), in place of the single untyped `util_keylet` |
-| 14 | [`account-id-macro`](14_account-id-macro) | `rshooks::account_id!`: compile-time r-address -> `AccountId` decode, cross-checked against `hook_account`/`util_accid`/`util_raddr` |
-| 15 | [`slot-objects`](15_slot-objects) | the typed slot layer's live acceptance harness: account-root walk, native-amount drops round-trip, parent-clear/child-read, and two 300-iteration loops proving `take_*` recycling and leak-free `slot_path!` failures |
-| 16 | [`typed-results`](16_typed-results) | typed entry returns (`HookResult`): an idiomatic `?`/`Ok` entry with a `hook_errors!` message clause, alongside a raw `accept!`/`rollback!`-style entry in the same chain |
-| 17 | [`sto-writer`](17_sto-writer) | `rshooks::sto_writer::StoWriter`: a runtime-shaped Remit — a native `sfAmounts` entry always, an issued one when hook parameters supply it — built field-by-field and emitted via `prepare_for_emit()`/`Prepared::emit()` (see `22_txn-template-optional` for the fixed-shape, present-or-absent alternative to a conditional entry like this) |
-| 18 | [`typed-views`](18_typed-views) | `rshooks::views`: generated, type-checked read views — an incoming-IOU gate reading `tx::Payment`, then `ledger::RippleState`'s freeze flags and `ledger::AccountRoot`'s optional `sfTransferRate`, with a per-read cost table |
-| 19 | [`param-signature`](19_param-signature) | the Hook Parameter Signature Interface: `#[hook(..)]` fn arguments (`increment(account: AccountID, count: UInt16)`) as declared, typed, machine-readable Hook parameters, with generated `sethook.template.json` declarations |
-| 20 | [`state-interface`](20_state-interface) | the Hook State Interface: `#[state_interface(id = .., key(..), value(..))]` chain-struct fields as a declared, typed, machine-readable state schema, with generated value structs and `sethook.template.json` declarations |
-| 21 | [`txn-template-nested`](21_txn-template-nested) | `txn_template!`'s homogeneous indexed array form (`array(sfX) [ Elem: object(sfY) { .. } ; N ]`) and `fixed_vl(sfX, N)` (a compile-time-length-prefixed VL blob): a Remit whose two-element `sfAmounts` array (an issued `amount` entry with a baked currency/issuer, repeated) and single-element `sfMemos` array (a fixed-length memo type/data) are declared once and filled at runtime through generated `amounts(index)`/`memos(index) -> Option<Elem<'_>>` accessors, with no `StoWriter` needed |
-| 22 | [`txn-template-optional`](22_txn-template-optional) | `txn_template!`'s NOP-padded optional field kinds (`docs/NOP_PADDING_DESIGN.md`), written entirely in the inferred style: `optional sfX`, `any_amount` via the `= AnyAmount()` default-shape marker, and an array with one required and one `optional` element, both by position — a single Remit sending one or two amounts, with an optional `DestinationTag`, with per-container 63-NOP budgets checked at compile time |
+<!-- ANCHOR: examples-table -->
+| # | example | demonstrates | book chapter |
+|---|---|---|---|
+| 01 | [`accept-all`](01_accept-all) | minimal hook: `accept` everything (starter template) | [Anatomy of a Hook](../book/src/concepts/anatomy.md) |
+| 02 | [`state-counter`](02_state-counter) | `state`/`state_set` round-trip, counter in hook state | [Hook State](../book/src/data/state.md) |
+| 03 | [`hook-params`](03_hook-params) | `#[hook_param]`-configurable threshold, with a compiled-in default | [Hook and Transaction Parameters](../book/src/data/parameters.md) |
+| 04 | [`errors`](04_errors) | a meaningful `hook_errors!`-based rollback error-code system, matched to `HookReturnCode` | [Accept, Rollback, and Errors](../book/src/concepts/errors.md) |
+| 05 | [`firewall`](05_firewall) | read `otxn_field(sfAccount)` + a hook parameter blacklist → `rollback` | [Reading the Originating Transaction](../book/src/data/otxn.md) |
+| 06 | [`guard-patterns`](06_guard-patterns) | `guard!`/`guard_m!` correctness, choosing `maxiter`, and the array-`==` memcmp-loop pitfall | [Guards and Loops](../book/src/concepts/guards.md) |
+| 07 | [`xfl-math`](07_xfl-math) | reading `Amount` as XFL (`slot_float`/`sto_set`), `mulratio`, checked `Add`/`Sub`/`Mul`/`Div`/`Neg` operators, `.compare()`-family methods, and `XFLUnchecked`'s hot-path chain | [XFL: Decimal Floating Point](../book/src/data/xfl.md) |
+| 8 | [`slot-ledger`](08_slot-ledger) | the **typed slot layer**: `SlotObject::from_otxn()` -> `.get(sfXxx)` -> `.value()`, with no slot numbers in sight, measured against the raw numbered API it replaced | [Slots and Ledger Objects](../book/src/data/slots.md) |
+| 09 | [`state-foreign`](09_state-foreign) | `state_foreign`: reading another (hook-parameter-configured) account's hook state | [Hook State](../book/src/data/state.md) |
+| 10 | [`emit-txn`](10_emit-txn) | `etxn_reserve` + a `txn_template!`-declared Payment/`emit`, with a `cbak` | [Emitting Transactions](../book/src/emit/emitting.md) |
+| 12 | [`typed-data`](12_typed-data) | `#[derive(HookData)]`: composite (multi-field) state keys/values and `otxn_param`/`hook_param` structs, in place of hand-packed byte buffers | [Typed Data with Derives](../book/src/data/typed-data.md) |
+| 13 | [`keylets`](13_keylets) | `rshooks::api::keylet`'s 26 typed `keylet_xxx` helpers (one per `KEYLET_*` constant), in place of the single untyped `util_keylet` | [Keylets](../book/src/data/keylets.md) |
+| 14 | [`account-id-macro`](14_account-id-macro) | `rshooks::account_id!`: compile-time r-address -> `AccountId` decode, cross-checked against `hook_account`/`util_accid`/`util_raddr` | [Reading the Originating Transaction](../book/src/data/otxn.md) |
+| 15 | [`slot-objects`](15_slot-objects) | the typed slot layer's live acceptance harness: account-root walk, native-amount drops round-trip, parent-clear/child-read, and two 300-iteration loops proving `take_*` recycling and leak-free `slot_path!` failures | [Slots and Ledger Objects](../book/src/data/slots.md) |
+| 16 | [`typed-results`](16_typed-results) | typed entry returns (`HookResult`): an idiomatic `?`/`Ok` entry with a `hook_errors!` message clause, alongside a raw `accept!`/`rollback!`-style entry in the same chain | [Accept, Rollback, and Errors](../book/src/concepts/errors.md#typed-entry-returns-hookresult) |
+| 17 | [`sto-writer`](17_sto-writer) | `rshooks::sto_writer::StoWriter`: a runtime-shaped Remit — a native `sfAmounts` entry always, an issued one when hook parameters supply it — built field-by-field and emitted via `prepare_for_emit()`/`Prepared::emit()` (see `22_txn-template-optional` for the fixed-shape, present-or-absent alternative to a conditional entry like this) | [The `StoWriter` API](../book/src/emit/sto-writer.md) |
+| 18 | [`typed-views`](18_typed-views) | `rshooks::views`: generated, type-checked read views — an incoming-IOU gate reading `tx::Payment`, then `ledger::RippleState`'s freeze flags and `ledger::AccountRoot`'s optional `sfTransferRate`, with a per-read cost table | [Typed Views](../book/src/data/views.md) |
+| 19 | [`param-signature`](19_param-signature) | the Hook Parameter Signature Interface: `#[hook(..)]` fn arguments (`increment(account: AccountID, count: UInt16)`) as declared, typed, machine-readable Hook parameters, with generated `sethook.template.json` declarations | [Hook and Transaction Parameters](../book/src/data/parameters.md#signature-parameters-fn-arguments) |
+| 20 | [`state-interface`](20_state-interface) | the Hook State Interface: `#[state_interface(id = .., key(..), value(..))]` chain-struct fields as a declared, typed, machine-readable state schema, with generated value structs and `sethook.template.json` declarations | [Hook State](../book/src/data/state.md#state-interface-typed-on-ledger-schema) |
+| 21 | [`txn-template-nested`](21_txn-template-nested) | `txn_template!`'s homogeneous indexed array form (`array(sfX) [ Elem: object(sfY) { .. } ; N ]`) and `fixed_vl(sfX, N)` (a compile-time-length-prefixed VL blob): a Remit whose two-element `sfAmounts` array (an issued `amount` entry with a baked currency/issuer, repeated) and single-element `sfMemos` array (a fixed-length memo type/data) are declared once and filled at runtime through generated `amounts(index)`/`memos(index) -> Option<Elem<'_>>` accessors, with no `StoWriter` needed | [Emitting Transactions](../book/src/emit/emitting.md) |
+| 22 | [`txn-template-optional`](22_txn-template-optional) | `txn_template!`'s NOP-padded optional field kinds (`docs/NOP_PADDING_DESIGN.md`), written entirely in the inferred style: `optional sfX`, `any_amount` via the `= AnyAmount()` default-shape marker, and an array with one required and one `optional` element, both by position — a single Remit sending one or two amounts, with an optional `DestinationTag`, with per-container 63-NOP budgets checked at compile time | [Emitting Transactions](../book/src/emit/emitting.md) |
+<!-- ANCHOR_END: examples-table -->
 
 ## 80+: Production hooks in Rust
 
@@ -63,9 +65,11 @@ table for any intentional deviation, and its "Toolchain limitation"
 sections documenting the real Guard-type nesting-depth/floating-point
 constraints discovered while porting them.
 
-| # | example | ports |
-|---|---|---|
-| 80 | [`governance`](80_governance) | [`hook/genesis/govern.c`](https://raw.githubusercontent.com/Xahau/xahaud/dev/hook/genesis/govern.c) + [`hook/genesis/reward.c`](https://raw.githubusercontent.com/Xahau/xahaud/dev/hook/genesis/reward.c) — the 20-seat L1/L2 governance state machine (`govern`, chain position 0) and the `GenesisMint`-emitting `ClaimReward` payout hook (`reward`, chain position 1) |
+<!-- ANCHOR: examples-table-80 -->
+| # | example | ports | book chapter |
+|---|---|---|---|
+| 80 | [`governance`](80_governance) | [`hook/genesis/govern.c`](https://raw.githubusercontent.com/Xahau/xahaud/dev/hook/genesis/govern.c) + [`hook/genesis/reward.c`](https://raw.githubusercontent.com/Xahau/xahaud/dev/hook/genesis/reward.c) — the 20-seat L1/L2 governance state machine (`govern`, chain position 0) and the `GenesisMint`-emitting `ClaimReward` payout hook (`reward`, chain position 1) | [Hook Chains](../book/src/concepts/chains.md) |
+<!-- ANCHOR_END: examples-table-80 -->
 
 ## Entry points: `#[hooks]`
 
@@ -124,7 +128,10 @@ Every example manifest sets `test = false` on its `[lib]` target: these
 crates are `no_std` with no `test` crate available for `wasm32v1-none`, so
 the lib target's own (impossible) unit-test harness stays disabled and
 `cargo test`/`--all-targets` does not try to build one; a separate `tests/`
-integration-test target, where present, is unaffected.
+integration-test target, where present, is unaffected. A crate whose
+`tests/` directory needs to link it as an ordinary dependency also declares
+`crate-type = ["cdylib", "rlib"]` — the `rlib` output has nothing to do
+with the shipped wasm.
 
 ## Recorded cost (WCE / size / nesting)
 
