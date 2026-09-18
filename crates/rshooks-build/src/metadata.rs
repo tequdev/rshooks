@@ -135,29 +135,23 @@ pub(crate) fn decode_upper_hex(encoded: &str) -> Result<Vec<u8>> {
     if encoded.len() % 2 != 0 {
         bail!("metadata carrier payload has an odd number of hex digits");
     }
-
-    let bytes = encoded.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len() / 2);
-    for pair in bytes.chunks_exact(2) {
-        let high = pair
-            .first()
-            .copied()
-            .context("metadata carrier hex pair is missing its first digit")?;
-        let low = pair
-            .get(1)
-            .copied()
-            .context("metadata carrier hex pair is missing its second digit")?;
-        decoded.push((upper_hex_value(high)? << 4) | upper_hex_value(low)?);
+    if let Some(bad) = encoded
+        .bytes()
+        .find(|b| !matches!(b, b'0'..=b'9' | b'A'..=b'F'))
+    {
+        bail!("metadata carrier contains non-uppercase-hex byte 0x{bad:02X}");
     }
-    Ok(decoded)
-}
 
-fn upper_hex_value(byte: u8) -> Result<u8> {
-    match byte {
-        b'0'..=b'9' => Ok(byte - b'0'),
-        b'A'..=b'F' => Ok(byte - b'A' + 10),
-        _ => bail!("metadata carrier contains non-uppercase-hex byte 0x{byte:02X}"),
-    }
+    encoded
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            // Every byte was already verified ASCII uppercase-hex above.
+            let pair = str::from_utf8(pair).context("internal error: hex pair is not ASCII")?;
+            u8::from_str_radix(pair, 16)
+                .context("internal error: verified hex pair failed to parse")
+        })
+        .collect()
 }
 
 #[cfg(test)]

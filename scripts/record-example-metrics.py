@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -39,11 +38,6 @@ ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES_DIR = ROOT / "examples"
 SCHEMA = "rshooks-example-metrics-v1"
 METRICS_NAME = "metrics.json"
-
-NESTING_RE = re.compile(r"^max nesting depth: (\d+)\s*$", re.MULTILINE)
-WCE_LINE_RE = re.compile(
-    r"^worst-case instructions: hook=(\d+) cbak=(\d+)\s*$", re.MULTILINE
-)
 
 
 def discover_examples() -> list[str]:
@@ -147,17 +141,17 @@ def sidecar_for(wasm: Path) -> Path:
 
 
 def parse_check_output(stdout: str, wasm: Path) -> tuple[int, int, int]:
-    nesting_match = NESTING_RE.search(stdout)
-    if nesting_match is None:
-        raise SystemExit(
-            f"FATAL: {wasm}: `rshooks check` did not print max nesting depth:\n{stdout}"
+    try:
+        result = json.loads(stdout)
+        return (
+            int(result["wce"]["hook"]),
+            int(result["wce"]["cbak"]),
+            int(result["max_nesting_depth"]),
         )
-    wce_match = WCE_LINE_RE.search(stdout)
-    if wce_match is None:
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         raise SystemExit(
-            f"FATAL: {wasm}: `rshooks check` did not print worst-case instructions:\n{stdout}"
-        )
-    return int(wce_match.group(1)), int(wce_match.group(2)), int(nesting_match.group(1))
+            f"FATAL: {wasm}: could not parse `rshooks check --json` output: {exc}\n{stdout}"
+        ) from exc
 
 
 def collect_entry(bin_path: Path, wasm: Path) -> dict[str, Any]:
@@ -174,7 +168,7 @@ def collect_entry(bin_path: Path, wasm: Path) -> dict[str, Any]:
     except (KeyError, TypeError, ValueError) as exc:
         raise SystemExit(f"FATAL: {sidecar}: expected index/hook_fn/WCE: {exc}") from exc
 
-    completed = run_rshooks(bin_path, ["check", str(wasm)], capture=True)
+    completed = run_rshooks(bin_path, ["check", str(wasm), "--json"], capture=True)
     check_hook, check_cbak, max_nesting = parse_check_output(completed.stdout, wasm)
 
     if meta_hook != check_hook or meta_cbak != check_cbak:
