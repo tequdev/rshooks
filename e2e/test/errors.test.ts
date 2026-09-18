@@ -1,8 +1,8 @@
 import { ExecutionUtility, Xrpld } from '@xahau/hooks-toolkit'
 import type { TransactionMetadata } from 'xahau'
-import { installHook, readWorstCaseHook } from './harness'
+import { installHook } from './harness'
 
-const WORST_CASE_INSTRUCTIONS = readWorstCaseHook('04_errors')
+const WORST_CASE_INSTRUCTIONS = 200
 const BLOCKED_SOURCE_TAG = 13
 const MAX_DROPS = 100_000_000
 

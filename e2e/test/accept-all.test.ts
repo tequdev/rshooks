@@ -1,8 +1,8 @@
 import { ExecutionUtility, Xrpld } from '@xahau/hooks-toolkit'
 import type { TransactionMetadata } from 'xahau'
-import { installHook, readWorstCaseHook } from './harness'
+import { installHook } from './harness'
 
-const WORST_CASE_INSTRUCTIONS = readWorstCaseHook('01_accept-all')
+const WORST_CASE_INSTRUCTIONS = 15
 
 describe('accept-all', () => {
   const getContext = installHook({

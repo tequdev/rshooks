@@ -10,11 +10,11 @@
 
 import { ExecutionUtility, StateUtility, Xrpld, hexNamespace } from '@xahau/hooks-toolkit'
 import { decodeAccountID, type TransactionMetadata } from 'xahau'
-import { installHook, readDeclaredHookParameters, readWorstCaseHook, type Wallet } from './harness'
+import { installHook, readDeclaredHookParameters, type Wallet } from './harness'
 
 const namespace = 'rshooks-e2e-param-signature'
 const hookNamespace = hexNamespace(namespace)
-const WORST_CASE_INSTRUCTIONS = readWorstCaseHook('19_param-signature', 'increment')
+const WORST_CASE_INSTRUCTIONS = 280
 
 // The generated template's own `HookParameters` declaration array for this
 // entry - `[{ HookParameter: { HookParameterName, HookParameterValue: "00" } }, ...]`,

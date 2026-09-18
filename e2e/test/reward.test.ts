@@ -1,7 +1,9 @@
 import { ExecutionUtility, Xrpld } from '@xahau/hooks-toolkit'
-import { installHook, readWorstCaseHook } from './harness'
+import { installHook } from './harness'
 
-const WORST_CASE_HOOK_INSTRUCTIONS = readWorstCaseHook('80_governance', 'reward')
+// The hook's static worst case, from
+// out/current/1.reward.metadata.json (WCE.hook).
+const WORST_CASE_HOOK_INSTRUCTIONS = 12881
 
 describe('reward', () => {
   const getContext = installHook({

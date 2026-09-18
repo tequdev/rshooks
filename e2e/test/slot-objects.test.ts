@@ -1,9 +1,9 @@
 import { ExecutionUtility, Xrpld, setHooks } from '@xahau/hooks-toolkit'
 import { convertStringToHex, decodeAccountID, type TransactionMetadata } from 'xahau'
-import { buildHook, installHook, readWorstCaseHook } from './harness'
+import { buildHook, installHook } from './harness'
 
 const namespace = 'rshooks-e2e-slot-objects'
-const WORST_CASE_INSTRUCTIONS = readWorstCaseHook('15_slot-objects')
+const WORST_CASE_INSTRUCTIONS = 61658
 
 const BIT_ACCOUNT_WALK = 1
 const BIT_DROPS_ROUNDTRIP = 2
@@ -40,7 +40,7 @@ const IOU_CURRENCY = 'USD'
 const IOU_AMOUNT = '100'
 
 describe('slot-objects (typed slot layer)', () => {
-  const getContext = installHook({ namespace })
+  const getContext = installHook({})
   let checks = 0
 
   beforeAll(async () => {

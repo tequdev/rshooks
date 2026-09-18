@@ -1,10 +1,10 @@
 import { ExecutionUtility, StateUtility, Xrpld, hexNamespace } from '@xahau/hooks-toolkit'
 import type { TransactionMetadata } from 'xahau'
-import { installHook, readWorstCaseHook } from './harness'
+import { installHook } from './harness'
 
 const namespace = 'rshooks-e2e-state-counter'
 const hookNamespace = hexNamespace(namespace)
-const WORST_CASE_INSTRUCTIONS = readWorstCaseHook('02_state-counter')
+const WORST_CASE_INSTRUCTIONS = 254
 
 // Hook state keys are left-padded to 32 bytes by the host.
 const COUNTER_KEY = Buffer.from('counter', 'ascii')

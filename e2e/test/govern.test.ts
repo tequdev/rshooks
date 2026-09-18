@@ -1,9 +1,11 @@
 import { ExecutionUtility, Xrpld, setHooks, type XrplIntegrationTestContext } from '@xahau/hooks-toolkit'
 import { convertStringToHex, decodeAccountID } from 'xahau'
-import { buildHook, installHook, readWorstCaseHook, type Wallet } from './harness'
+import { buildHook, installHook, type Wallet } from './harness'
 
 const namespace = 'rshooks-e2e-govern'
-const WORST_CASE_HOOK_INSTRUCTIONS = readWorstCaseHook('80_governance', 'govern')
+// The hook's static worst case, from
+// out/current/0.govern.metadata.json (WCE.hook).
+const WORST_CASE_HOOK_INSTRUCTIONS = 27751
 
 function accountIdHex(classicAddress: string): string {
   return Buffer.from(decodeAccountID(classicAddress)).toString('hex').toUpperCase()
@@ -78,7 +80,7 @@ function layerParam(layer: number) {
 }
 
 describe('govern: L2 table setup', () => {
-  const getContext = installHook({ namespace, wallet: (ctx) => ctx.hook1 })
+  const getContext = installHook({ wallet: (ctx) => ctx.hook1 })
 
   it('first Invoke on a fresh table populates the seat table and accepts', async () => {
     const testContext = getContext()
@@ -101,7 +103,7 @@ describe('govern: L2 table setup', () => {
 })
 
 describe('govern: L2 table seat voting', () => {
-  const getContext = installHook({ namespace, wallet: (ctx) => ctx.hook1 })
+  const getContext = installHook({ wallet: (ctx) => ctx.hook1 })
 
   beforeAll(async () => {
     const testContext = getContext()
@@ -155,7 +157,7 @@ describe('govern: L2 table seat voting', () => {
 })
 
 describe('govern: L1 table (real genesis account) reward-rate vote', () => {
-  const getContext = installHook({ namespace, wallet: (ctx) => ctx.master })
+  const getContext = installHook({ wallet: (ctx) => ctx.master })
 
   it('installs on the real genesis account and completes L1 setup', async () => {
     const testContext = getContext()
@@ -201,7 +203,7 @@ describe('govern: L1 table (real genesis account) reward-rate vote', () => {
 })
 
 describe('govern: L1 table (real genesis account) — intentional IRR/IRD length-strictness divergence', () => {
-  const getContext = installHook({ namespace, wallet: (ctx) => ctx.master })
+  const getContext = installHook({ wallet: (ctx) => ctx.master })
 
   it('rejects a too-short IRR value at setup instead of silently zero-padding it (govern.c would accept it)', async () => {
     const testContext = getContext()

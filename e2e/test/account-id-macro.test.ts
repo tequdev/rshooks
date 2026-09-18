@@ -1,7 +1,7 @@
 import { ExecutionUtility, Xrpld } from '@xahau/hooks-toolkit'
-import { installHook, readWorstCaseHook } from './harness'
+import { installHook } from './harness'
 
-const WORST_CASE_HOOK_INSTRUCTIONS = readWorstCaseHook('14_account-id-macro')
+const WORST_CASE_HOOK_INSTRUCTIONS = 245
 
 describe('account-id-macro', () => {
   const getContext = installHook({

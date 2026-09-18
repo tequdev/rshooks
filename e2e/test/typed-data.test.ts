@@ -1,9 +1,9 @@
 import { ExecutionUtility, StateUtility, Xrpld, hexNamespace, setHooks, type XrplIntegrationTestContext } from '@xahau/hooks-toolkit'
 import { convertStringToHex, decodeAccountID, type TransactionMetadata } from 'xahau'
-import { buildHook, installHook, readWorstCaseHook } from './harness'
+import { buildHook, installHook } from './harness'
 
 const namespace = 'rshooks-e2e-typed-data'
-const WORST_CASE_INSTRUCTIONS = readWorstCaseHook('12_typed-data')
+const WORST_CASE_INSTRUCTIONS = 504
 
 const ACTION_DEPOSIT = 1
 const ACTION_WITHDRAW = 2

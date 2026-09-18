@@ -10,11 +10,11 @@
 
 import { ExecutionUtility, StateUtility, Xrpld, hexNamespace, type XrplIntegrationTestContext } from '@xahau/hooks-toolkit'
 import { decodeAccountID, type TransactionMetadata } from 'xahau'
-import { installHook, readDeclaredHookParameters, readWorstCaseHook } from './harness'
+import { installHook, readDeclaredHookParameters } from './harness'
 
 const namespace = 'rshooks-e2e-state-interface'
 const hookNamespace = hexNamespace(namespace)
-const WORST_CASE_INSTRUCTIONS = readWorstCaseHook('20_state-interface')
+const WORST_CASE_INSTRUCTIONS = 374
 
 // The generated template's own `HookParameters` declaration array for this
 // entry - `balances`(id 0) then `config`(id 1), each with the real value

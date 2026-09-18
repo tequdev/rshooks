@@ -3,8 +3,6 @@
 // it, then tears the hook down. `installHook` wires that `beforeAll`/
 // `afterAll` pair; `buildHook` is the bare `iHook` builder for suites
 // (govern.test.ts) that install more than once per suite.
-// `readWorstCaseHook` reads the CI-gated static bound straight from
-// `examples/<dir>/metrics.json` instead of a copy that can drift from it.
 
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -32,7 +30,7 @@ export type HookParam = {
 // This file lives in `e2e/test/`, mirroring `e2e/scripts/copy-wasm.mjs`'s
 // own two-level walk up to the repo root.
 const e2eRoot = dirname(dirname(fileURLToPath(import.meta.url)))
-export const repoRoot = dirname(e2eRoot)
+const repoRoot = dirname(e2eRoot)
 
 /** Builds one `iHook` for `setHooks` - the object every suite otherwise assembles by hand. */
 export function buildHook(
@@ -54,7 +52,8 @@ export function buildHook(
 export interface HookLifecycle {
   /** Omit together with `hookOn` when a suite installs its own hook per test (govern.test.ts). */
   wasmName?: string
-  namespace: string
+  /** Required whenever `wasmName`/`hookOn` or `clearState` are set. */
+  namespace?: string
   hookOn?: string[]
   /** A function form can read the wallets `setupClient` just produced (e.g. `bob`'s address). */
   hookParameters?: HookParam[] | ((ctx: XrplIntegrationTestContext) => HookParam[])
@@ -85,7 +84,7 @@ export function installHook(config: HookLifecycle): () => XrplIntegrationTestCon
       await setHooks({
         client: testContext.client,
         wallet: walletOf(testContext),
-        hooks: [{ Hook: buildHook(config.wasmName, config.namespace, config.hookOn, hookParameters) }],
+        hooks: [{ Hook: buildHook(config.wasmName, config.namespace as string, config.hookOn, hookParameters) }],
       })
     }
   })
@@ -100,7 +99,7 @@ export function installHook(config: HookLifecycle): () => XrplIntegrationTestCon
           {
             Hook: {
               Flags: HookFlags.hsfNSDelete,
-              HookNamespace: hexNamespace(config.namespace),
+              HookNamespace: hexNamespace(config.namespace as string),
             } as iHook,
           },
         ],
@@ -109,7 +108,7 @@ export function installHook(config: HookLifecycle): () => XrplIntegrationTestCon
     const teardownHooks = () => clearAllHooks({ client: testContext.client, wallet })
     if (config.ignoreClearErrors) {
       await teardownHooks().catch((e) =>
-        console.warn(`${config.namespace}: clearAllHooks failed (ignored) -`, e),
+        console.warn(`${config.namespace ?? 'installHook'}: clearAllHooks failed (ignored) -`, e),
       )
     } else {
       await teardownHooks()
@@ -118,20 +117,6 @@ export function installHook(config: HookLifecycle): () => XrplIntegrationTestCon
   })
 
   return () => testContext
-}
-
-/** The static worst-case instruction count CI gates on (`wce.hook` in `examples/<dir>/metrics.json`). */
-export function readWorstCaseHook(exampleDir: string, hookFn = 'main'): number {
-  const metrics = JSON.parse(
-    readFileSync(join(repoRoot, 'examples', exampleDir, 'metrics.json'), 'utf8'),
-  )
-  const entry = (metrics.entries as Array<{ hook_fn: string; wce: { hook: number } }>).find(
-    (e) => e.hook_fn === hookFn,
-  )
-  if (!entry) {
-    throw new Error(`metrics.json: no entry for hook_fn "${hookFn}" in ${exampleDir}`)
-  }
-  return entry.wce.hook
 }
 
 /** The generated `sethook.template.json`'s own `HookParameters` declaration array. */

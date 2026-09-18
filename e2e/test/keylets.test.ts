@@ -2,10 +2,10 @@ import { createHash } from 'node:crypto'
 import { ExecutionUtility, StateUtility, Xrpld, hexNamespace } from '@xahau/hooks-toolkit'
 import { decodeAccountID, hashes, type TransactionMetadata } from 'xahau'
 import { hashCron } from 'xahau/dist/npm/utils/hashes'
-import { installHook, readWorstCaseHook } from './harness'
+import { installHook } from './harness'
 
 const namespace = 'rshooks-e2e-keylets'
-const WORST_CASE_INSTRUCTIONS = readWorstCaseHook('13_keylets')
+const WORST_CASE_INSTRUCTIONS = 4150
 
 const SPACE = {
   account: 'a',
