@@ -83,7 +83,6 @@ impl_buf_eq!(
     ]
 );
 impl_buf_eq!(
-    #[deprecated(note = "backs no type in this crate; unused")]
     buf_eq_40,
     40,
     [
@@ -107,7 +106,6 @@ impl_buf_eq!(
     ]
 );
 impl_buf_eq!(
-    #[deprecated(note = "backs no type in this crate; unused")]
     buf_eq_64,
     64,
     [
@@ -214,7 +212,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn buf_eq_40_matches_slice_eq() {
         check_eq_and_all_single_byte_diffs(buf_eq_40);
     }
@@ -225,7 +222,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn buf_eq_64_matches_slice_eq() {
         check_eq_and_all_single_byte_diffs(buf_eq_64);
     }

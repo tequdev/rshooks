@@ -390,7 +390,6 @@ pub fn state_update_u64<K: AsRef<[u8]> + ?Sized>(
 /// Read-modify-write this hook's own state entry for `key` as a `u32`
 /// (little-endian convention, matching [`state_u32`]). See
 /// [`state_update_u64`] for the `Option`/error-propagation semantics.
-#[deprecated(note = "duplicates state_update_loose; use that instead")]
 #[inline(always)]
 pub fn state_update_u32<K: AsRef<[u8]> + ?Sized>(
     key: &K,
@@ -414,7 +413,6 @@ pub fn state_update_u32<K: AsRef<[u8]> + ?Sized>(
 /// Read-modify-write this hook's own state entry for `key` as an `i64`
 /// (little-endian convention, matching [`state_i64`]). See
 /// [`state_update_u64`] for the `Option`/error-propagation semantics.
-#[deprecated(note = "duplicates state_update_loose; use that instead")]
 #[inline(always)]
 pub fn state_update_i64<K: AsRef<[u8]> + ?Sized>(
     key: &K,
@@ -438,7 +436,6 @@ pub fn state_update_i64<K: AsRef<[u8]> + ?Sized>(
 /// Read-modify-write this hook's own state entry for `key` as an [`XFL`]
 /// (little-endian raw-bits convention, matching [`state_xfl`]). See
 /// [`state_update_u64`] for the `Option`/error-propagation semantics.
-#[deprecated(note = "duplicates state_update_loose; use that instead")]
 #[inline(always)]
 pub fn state_update_xfl<K: AsRef<[u8]> + ?Sized>(
     key: &K,
@@ -693,7 +690,6 @@ mod tests {
     use crate::error::HookError;
 
     #[test]
-    #[allow(deprecated)] // covers state_update_u32/i64/xfl despite their deprecation
     fn smoke_not_implemented_on_host() {
         let mut out = [0u8; 32];
         let key = [0u8; 32];
