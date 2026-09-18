@@ -26,6 +26,7 @@ fn repo_root() -> PathBuf {
 }
 
 /// One version reference that disagrees with the source of truth.
+#[derive(Debug)]
 struct Mismatch {
     /// Repo-root-relative path of the file the reference was found in.
     path: String,
@@ -111,24 +112,6 @@ fn bare_key_versions(line: &str) -> Vec<String> {
     out
 }
 
-/// Every value assigned to a JSON `"version": "..."` key on `line`.
-fn json_key_versions(line: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut i = 0;
-    while let Some(pos) = line[i..].find("\"version\"") {
-        let start = i + pos;
-        let end = start + "\"version\"".len();
-        let after = line[end..].trim_start();
-        if let Some(rest) = after.strip_prefix(':')
-            && let Some(v) = quoted_tokens(rest).first()
-        {
-            out.push((*v).to_string());
-        }
-        i = end;
-    }
-    out
-}
-
 /// Finds the `version = "..."` line inside a named TOML section (e.g.
 /// `[workspace.package]`) in `content`, tracking `[section]` headers to
 /// know when the target section has been left. Returns the 1-based line
@@ -201,8 +184,8 @@ fn collect_doc_mismatches(
         if line.contains("rustc") || line.contains("channel") || line.contains("xahaud") {
             continue;
         }
-        let applicable = line.contains("rshooks")
-            || (follows_builder_name && !json_key_versions(line).is_empty());
+        let applicable =
+            line.contains("rshooks") || (follows_builder_name && line.contains("\"version\""));
         if !applicable {
             continue;
         }
@@ -318,4 +301,91 @@ pub fn run_check() -> Result<()> {
         "check-versions: {} version reference(s) do not match {source_version}",
         mismatches.len()
     );
+}
+
+#[cfg(test)]
+mod tests {
+    //! Test code is exempt from the workspace's panic-freedom lints
+    //! (`docs/DESIGN.md` §8).
+    #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
+    use super::*;
+
+    #[test]
+    fn three_part_semver_accepts_only_the_exact_shape() {
+        assert!(is_three_part_semver("0.2.1"));
+        assert!(!is_three_part_semver("0.2"));
+        assert!(!is_three_part_semver("0.2.1.0"));
+        assert!(!is_three_part_semver("v0.2.1"));
+        assert!(!is_three_part_semver("1.88"));
+    }
+
+    #[test]
+    fn bare_key_versions_skips_rust_version() {
+        let line = r#"rust-version = "1.88""#;
+        assert!(bare_key_versions(line).is_empty());
+
+        let line = r#"rshooks-core = { path = "crates/rshooks-core", version = "0.2.1" }"#;
+        assert_eq!(bare_key_versions(line), vec!["0.2.1".to_string()]);
+    }
+
+    #[test]
+    fn section_version_finds_the_version_key_in_the_named_section() {
+        let toml = "[package]\nname = \"x\"\n\n[workspace.package]\nversion = \"0.2.1\"\nedition = \"2024\"\n";
+        let (line, version) = section_version(toml, "[workspace.package]").expect("found");
+        assert_eq!(line, 5);
+        assert_eq!(version, "0.2.1");
+    }
+
+    #[test]
+    fn dependency_mismatch_is_reported_with_its_line_and_value() {
+        let toml = "[workspace.dependencies]\nrshooks = { path = \"crates/rshooks\", version = \"0.2.0\" }\n";
+        let mut mismatches = Vec::new();
+        collect_dependency_mismatches(
+            toml,
+            "Cargo.toml",
+            "[workspace.dependencies]",
+            "0.2.1",
+            &mut mismatches,
+        );
+        assert_eq!(mismatches.len(), 1);
+        assert_eq!(mismatches[0].found, "0.2.0");
+        assert_eq!(mismatches[0].line, 2);
+    }
+
+    #[test]
+    fn doc_mismatch_flags_a_stale_rshooks_dependency_line() {
+        let doc = "```toml\nrshooks = \"0.2.0\"\n```\n";
+        let mut mismatches = Vec::new();
+        collect_doc_mismatches(doc, "book/src/x.md", "0.2.1", &mut mismatches);
+        assert_eq!(mismatches.len(), 1);
+        assert_eq!(mismatches[0].found, "0.2.0");
+    }
+
+    #[test]
+    fn doc_scan_leaves_a_hook_crates_own_package_version_alone() {
+        // A hook crate's `[package] version` is independent of the library
+        // version and must never be flagged even when it disagrees with it.
+        let doc = "```toml\n[package]\nname = \"my-hook\"\nversion = \"0.1.0\"\n```\n";
+        let mut mismatches = Vec::new();
+        collect_doc_mismatches(doc, "book/src/x.md", "0.2.1", &mut mismatches);
+        assert!(mismatches.is_empty(), "{mismatches:?}");
+    }
+
+    #[test]
+    fn doc_scan_ignores_rustc_channel_and_xahaud_lines() {
+        let doc = "channel = \"1.88.0\"\nxahaud version 2.5.1\nrustc 1.88.0\n";
+        let mut mismatches = Vec::new();
+        collect_doc_mismatches(doc, "book/src/x.md", "0.2.1", &mut mismatches);
+        assert!(mismatches.is_empty(), "{mismatches:?}");
+    }
+
+    #[test]
+    fn doc_scan_flags_a_stale_builder_block_version_after_a_name_line() {
+        let doc = "\"name\": \"rshooks-build\",\n\"version\": \"0.2.0\"\n";
+        let mut mismatches = Vec::new();
+        collect_doc_mismatches(doc, "book/src/x.md", "0.2.1", &mut mismatches);
+        assert_eq!(mismatches.len(), 1);
+        assert_eq!(mismatches[0].found, "0.2.0");
+    }
 }
