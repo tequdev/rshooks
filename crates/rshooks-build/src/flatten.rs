@@ -151,7 +151,7 @@ pub fn flatten(wasm: &[u8]) -> Result<(Vec<u8>, FlattenReport)> {
     // functions. Standard DFS post-order over a DAG has this property (for
     // every edge u -> v, v finishes before u), hence the recursion check
     // above. ---
-    let post_order = topo_post_order(&m, n_imp_funcs, total_funcs);
+    let post_order = topo_post_order(&m, n_imp_funcs, total_funcs)?;
 
     let mut dup_counts: HashMap<u32, u32> = HashMap::new();
     for f_idx in post_order {
@@ -259,7 +259,7 @@ pub fn flatten(wasm: &[u8]) -> Result<(Vec<u8>, FlattenReport)> {
     // No table section: the cleaner already dropped the table and every
     // element segment (call_indirect is banned), and flatten never adds one.
 
-    module.section(&encode::encode_memory_section(&m.memories));
+    module.section(&encode::encode_memory_section(&m.memories)?);
 
     let mut remapper = ir::IndexRemapper::new(|x| x, |x| x);
     module.section(&encode::encode_global_section(&m.globals, &mut remapper)?);
@@ -549,57 +549,21 @@ fn encode_function(f: &FlatFunc) -> Result<wasm_encoder::Function> {
 
 /// Computes a reverse topological order (callees before callers) over the
 /// direct-call graph restricted to defined functions (imports are leaves
-/// and never appear in the result). Standard iterative DFS post-order: for
-/// a DAG, every edge `u -> v` has `v` finish before `u`. Assumes the graph
-/// is already known to be acyclic (checked by the caller via
-/// [`ir::find_call_cycle`] beforehand).
-fn topo_post_order(m: &ir::ParsedModule, n_imp_funcs: u32, total_funcs: u32) -> Vec<u32> {
-    #[derive(Clone, Copy, PartialEq, Eq)]
-    enum State {
-        Unvisited,
-        InProgress,
-        Done,
-    }
-
-    let mut state = vec![State::Unvisited; total_funcs as usize];
-    let get = |state: &[State], idx: u32| state.get(idx as usize).copied().unwrap_or(State::Done);
-    let set = |state: &mut [State], idx: u32, s: State| {
-        if let Some(slot) = state.get_mut(idx as usize) {
-            *slot = s;
-        }
-    };
-    let defined_edges = |idx: u32| -> Vec<u32> {
+/// and never appear in the result). Assumes the graph is already known to
+/// be acyclic (checked by the caller via [`ir::find_call_cycle`]
+/// beforehand); `Err` here would mean that check missed a cycle.
+fn topo_post_order(m: &ir::ParsedModule, n_imp_funcs: u32, total_funcs: u32) -> Result<Vec<u32>> {
+    ir::topo_sort_or_cycle(total_funcs, n_imp_funcs..total_funcs, |idx| {
         ir::out_edges(m, idx)
             .into_iter()
             .filter(|&c| c >= n_imp_funcs)
             .collect()
-    };
-
-    let mut order = Vec::new();
-    for start in n_imp_funcs..total_funcs {
-        if get(&state, start) != State::Unvisited {
-            continue;
-        }
-        let mut stack: Vec<(u32, Vec<u32>)> = vec![(start, defined_edges(start))];
-        set(&mut state, start, State::InProgress);
-        while let Some((node, edges)) = stack.last_mut() {
-            let node = *node;
-            if let Some(next) = edges.pop() {
-                if get(&state, next) == State::Unvisited {
-                    set(&mut state, next, State::InProgress);
-                    let next_edges = defined_edges(next);
-                    stack.push((next, next_edges));
-                }
-                // `InProgress` would mean a cycle (excluded by the caller's
-                // pre-check); `Done` needs no further action.
-            } else {
-                set(&mut state, node, State::Done);
-                order.push(node);
-                stack.pop();
-            }
-        }
-    }
-    order
+    })
+    .map_err(|cycle| {
+        anyhow::anyhow!(
+            "internal error: call graph has a cycle the pre-check did not find: {cycle:?}"
+        )
+    })
 }
 
 #[cfg(test)]

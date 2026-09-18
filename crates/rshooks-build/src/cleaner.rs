@@ -175,7 +175,7 @@ pub fn clean(wasm: &[u8], _opts: &Options) -> Result<Vec<u8>> {
     // Tables and element segments are always dropped (call_indirect is
     // banned, so a table can never be a legitimate reachability root).
 
-    module.section(&encode::encode_memory_section(&m.memories));
+    module.section(&encode::encode_memory_section(&m.memories)?);
 
     let mut globals_sec = wasm_encoder::GlobalSection::new();
     {

@@ -13,48 +13,15 @@
 
 use rshooks_build::Options;
 
+mod common;
+use common::{append_custom_section, strip_custom_sections, target_features_payload};
+
 fn wasm(src: &str) -> Vec<u8> {
     wat::parse_str(src).expect("fixture is valid wat")
 }
 
-/// Drops every custom section (`wat::parse_str` emits a debug name section
-/// the native guard checker rejects outright: "Hook contained a custom
-/// section, which is not allowed. Use cleaner."), leaving every other
-/// section's raw bytes untouched. Used by fixtures that need to reach the
-/// native checker without going through the full `clean()` pipeline (which
-/// would also strip the very export/section this test is targeting).
-fn strip_custom_sections(wasm: &[u8]) -> Vec<u8> {
-    rshooks_build::strip_custom_sections(wasm).expect("valid wasm")
-}
-
 fn opts() -> Options {
     Options::default()
-}
-
-fn write_leb128(mut n: u64, out: &mut Vec<u8>) {
-    loop {
-        let byte = (n & 0x7f) as u8;
-        n >>= 7;
-        if n == 0 {
-            out.push(byte);
-            break;
-        }
-        out.push(byte | 0x80);
-    }
-}
-
-/// Appends a raw custom section (id 0) to an existing wasm binary.
-fn append_custom_section(wasm: &[u8], name: &str, payload: &[u8]) -> Vec<u8> {
-    let mut content = Vec::new();
-    write_leb128(name.len() as u64, &mut content);
-    content.extend_from_slice(name.as_bytes());
-    content.extend_from_slice(payload);
-
-    let mut out = wasm.to_vec();
-    out.push(0x00);
-    write_leb128(content.len() as u64, &mut out);
-    out.extend_from_slice(&content);
-    out
 }
 
 /// Returns every `wasmparser::Payload` variant name found in `wasm`, for
@@ -850,21 +817,6 @@ fn run_pipeline_reports_fee_relevant_size() {
 }
 
 // End-to-end: `run_pipeline` post-processes clang-shaped wasm
-
-/// Encodes a `target_features` custom-section payload (a feature count
-/// followed by one `(prefix, name)` entry per feature, each declared
-/// required with `+`) — the format clang emits for any non-`mvp` target
-/// CPU.
-fn target_features_payload(features: &[&str]) -> Vec<u8> {
-    let mut payload = Vec::new();
-    write_leb128(features.len() as u64, &mut payload);
-    for feature in features {
-        payload.push(b'+');
-        write_leb128(feature.len() as u64, &mut payload);
-        payload.extend_from_slice(feature.as_bytes());
-    }
-    payload
-}
 
 #[test]
 fn clang_shaped_module_with_helpers_flattens_to_valid_hook() {
