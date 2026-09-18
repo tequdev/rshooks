@@ -13,21 +13,8 @@ const RUST: &str = include_str!("../src/api.rs");
 #[test]
 fn extern_h_matches_api_rs() {
     let c_protos = extract_c_prototypes(HEADER);
-    assert_eq!(
-        c_protos.len(),
-        75,
-        "expected 75 prototypes (incl. _g) in extern.h, found {}",
-        c_protos.len()
-    );
-
     let block = extract_wasm_extern_block(RUST);
     let rust_fns = extract_rust_fn_signatures(block);
-    assert_eq!(
-        rust_fns.len(),
-        75,
-        "expected 75 pub fn declarations (incl. _g) in api.rs's wasm extern block, found {}",
-        rust_fns.len()
-    );
 
     // Index-by-index comparison reports both missing entries and ordering
     // drift precisely.

@@ -78,10 +78,19 @@ sync_group() {
                 diff -u "${vendor_dir}/${b}" "${group_tmp}/${b}" | head -40 >&2 || true
                 group_status=1
             fi
-        done
 
-        # SHA256SUMS itself is checked against the vendored files by each
-        # crate's own `vendored_files_match_recorded_sha256` test.
+            recorded="$(awk -v n="${b}" '$2==n{print $1}' "${sums_file}")"
+            if [ -z "${recorded}" ]; then
+                echo "DRIFT: [${name}] ${b} missing from ${sums_file}" >&2
+                group_status=1
+                continue
+            fi
+            actual="$(sha256 "${vendor_dir}/${b}")"
+            if [ "${actual}" != "${recorded}" ]; then
+                echo "DRIFT: [${name}] ${b} sha256 mismatch — recorded ${recorded}, actual ${actual} (${sums_file})" >&2
+                group_status=1
+            fi
+        done
 
         if [ "${group_status}" -eq 0 ]; then
             echo "OK: [${name}] vendored files are byte-identical to ${REPO}@${BRANCH}"
