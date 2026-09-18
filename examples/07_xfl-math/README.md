@@ -102,17 +102,18 @@ match remaining.compare(XFL::from_raw_bits(0), COMPARE_LESS | COMPARE_EQUAL) {
 }
 ```
 
-`Sub`'s `Output` is `Result<XFL, HookError>` — implemented as `self + (-rhs)?`:
-one `float_negate` host call (via the `Neg` operator) plus one `float_sum`
-host call. There is no dedicated `float_subtract` host function, and `Neg`
-is *not* a local sign-bit flip — see `rshooks::xfl`'s module doc comment,
-which covers both why `Neg` still has to be a host round trip and why its
-`Output` can be `Result<XFL, HookError>` even though `PartialEq`/
-`PartialOrd` can't (unlike those two, `Neg`'s `Output` type isn't fixed by
-the trait). Handled explicitly here exactly like every other fallible step
-in this hook — the operator changes *how* the call is spelled
-(`amount - share` vs. the equivalent `amount.sub(share)`), not whether the
-`Result` gets checked. `XFL::from_raw_bits(0)` constructs canonical zero
+`Sub`'s `Output` is `Result<XFL, HookError>` — implemented as
+`self + rhs.negated()`: one `float_sum` host call. There is no dedicated
+`float_subtract` host function; `negated()` negates the right-hand side as
+a local sign-bit flip (no host call, cannot itself fail), unlike the `Neg`
+operator (`-rhs`), which is a real `float_negate` host round trip — see
+`rshooks::xfl`'s module doc comment for both, and for why `Neg`'s `Output`
+can be `Result<XFL, HookError>` even though `PartialEq`/`PartialOrd` can't
+(unlike those two, `Neg`'s `Output` type isn't fixed by the trait).
+Handled explicitly here exactly like every other fallible step in this
+hook — the operator changes *how* the call is spelled (`amount - share` vs.
+the equivalent `amount.sub(share)`), not whether the `Result` gets checked.
+`XFL::from_raw_bits(0)` constructs canonical zero
 with no host call at all (the all-zero bit pattern is always valid);
 `COMPARE_LESS | COMPARE_EQUAL` is `.compare()`'s bitmask spelling of `<=`
 (there's no dedicated `le`/`ge` convenience method — `.eq()`/`.lt()`/
@@ -178,22 +179,25 @@ any realistic `Amount` — `>` here is a pure sanity check that would only
 trip on a logic bug earlier in this hook, same spirit as the
 `CompoundNotIncreasing` check above it.
 
-### Constructing a fixed XFL constant
+### Constructing a fixed XFL constant with `XFL!`
 
 ```rust
-let min_share = XFL::new(-21, 1_000_000_000_000_000)?;
+let min_share = XFL!(0.000001);
+let growth = XFL!(1.01);
 ```
 
-XFL's mantissa is normalized to 16 significant digits (`10^15` to
-`10^16 - 1`, per `rshooks::xfl`'s module doc comment on the bit layout),
-so `0.000001` (1e-6) is written as mantissa `1_000_000_000_000_000` (1e15)
-with exponent `-21` (`1e15 * 10^-21 == 10^-6`) — not exponent `-6`, which
-with that mantissa would be `1e9`. Getting this wrong is an easy mistake;
-`XFL::new` returning `Result` (rather than silently normalizing or
-truncating) is what surfaces it if the exponent/mantissa combination is
-out of the valid range. The growth-factor constant (`1.01`) later in the
-hook is constructed the same way: mantissa `1_010_000_000_000_000`,
-exponent `-15`.
+Both constants are fixed at compile time, so they're built with the `XFL!`
+literal macro rather than the fallible, host-call-backed `XFL::new`: `XFL!`
+expands to `XFL::from_raw_bits(<bits>i64)`, computing the same normalized
+mantissa/exponent split `XFL::new` would (mantissa
+`1_000_000_000_000_000`, exponent `-21` for `0.000001`; mantissa
+`1_010_000_000_000_000`, exponent `-15` for `1.01` — XFL's mantissa is
+always normalized to 16 significant digits, `10^15` to `10^16 - 1`, per
+`rshooks::xfl`'s module doc comment on the bit layout) entirely at compile
+time, with no host call and no `Result` to handle. `XFL::new` stays the
+right tool for an exponent/mantissa pair computed at runtime, where
+there's no bit pattern to precompute and a bad split has to surface as a
+real error rather than a compile failure.
 
 ## Migrating from the pre-operator method API
 
@@ -236,8 +240,10 @@ operators, both via `float_compare`" section) — true for
 comparisons in this hook.
 
 `a - b` (`Sub`) is new — there was no `sub`/`subtract` method before, since
-there's no dedicated `float_subtract` host function; it's built from `Neg`
-plus `float_sum` (two host calls total). Chains that mix a plain `XFL` with
+there's no dedicated `float_subtract` host function; it's `self +
+rhs.negated()`, one `float_sum` host call (negating `rhs` is a local
+sign-bit flip, not the `Neg` operator's own `float_negate` round trip).
+Chains that mix a plain `XFL` with
 an already-`Result<XFL, HookError>` value on either side (`a + b + c`) work
 without an explicit `?` between steps; see `rshooks::xfl`'s module doc
 comment for exactly which combinations are (and, for one specific
@@ -249,19 +255,20 @@ demonstrated above.
 ## Handling XFL's failure modes
 
 Every fallible step here — `otxn_slot`, `slot_subfield`, `XFL::from_slot`,
-`mulratio`, `XFL::new`, `.lt()`/`.compare()`, the `Sub` operator,
-`XFLUnchecked::validate` — is matched explicitly and rolls back with a
-distinct message on `Err`, rather than being unwrapped. Concretely, the
-kinds of `HookError` these can surface include:
+`mulratio`, `.lt()`/`.compare()`, the `Sub` operator, `XFLUnchecked::validate`
+— is matched explicitly and rolls back with a distinct message on `Err`,
+rather than being unwrapped. (`min_share`/`growth`, built with `XFL!`, are
+not on this list — the literal macro validates its input at compile time
+and cannot fail at runtime.) Concretely, the kinds of `HookError` these can
+surface include:
 
 | Call | Example failure |
 |---|---|
 | `slot_subfield` | `DOESNT_EXIST` — no `Amount` field on this transaction type |
 | `XFL::from_slot` | `NOT_AN_AMOUNT` — the field isn't an Amount-shaped object |
 | `mulratio` | `XFL_OVERFLOW` — the scaled result doesn't fit |
-| `XFL::new` | `MANTISSA_OVERSIZED`/`MANTISSA_UNDERSIZED`/`EXPONENT_OVERSIZED`/`EXPONENT_UNDERSIZED` — out-of-range inputs |
 | `.lt()`/`.compare()` | `INVALID_FLOAT` — either operand isn't a valid XFL bit pattern |
-| `Sub` (`amount - share`) | `INVALID_FLOAT` — either operand isn't a valid XFL bit pattern (via `Neg` or `float_sum`) |
+| `Sub` (`amount - share`) | `INVALID_FLOAT` — either operand isn't a valid XFL bit pattern (via `float_sum`; negating `share` first cannot itself fail) |
 | `XFLUnchecked::validate` | `INVALID_FLOAT` — the chain's final raw value (or any poisoned value it passed through) didn't validate |
 
 `compounded > remaining` is the one comparison in this hook *not* in that
@@ -285,12 +292,13 @@ compiler-generated `bcmp`-style loop to guard.
 
 The mulratio-and-`.lt()` logic is **unchanged, byte-for-byte, from the
 pre-operator method API** — isolated on its own, it reproduces the
-pre-operator worst-case instruction count exactly. The `Add`/`Mul`/
-`Div` arithmetic operators are a pure syntax change over the pre-operator
-`.add()`/`.mul()`/`.div()` methods (same single host call each) and so are
-zero-cost by construction; `Sub`/`Neg` are the one place cost actually
-differs, because `Neg` is a real `float_negate` host round trip, not a
-local bit flip. The full version in this crate — with the `Sub`,
+pre-operator worst-case instruction count exactly. The `Add`/`Sub`/`Mul`/
+`Div` arithmetic operators are all one host call each — `Sub`'s
+`rhs.negated()` step is a local sign-bit flip, not a second host call — so
+they're zero-cost by construction; `Neg` (`-rhs`, not used by `Sub` since
+`XFL::negated`) is the one operator that actually costs more, because it's
+a real `float_negate` host round trip, not a local bit flip. The full
+version in this crate — with the `Sub`,
 `XFLUnchecked`, and `==`/`<`/`>` operator sections added on top purely for
 demonstration — measures higher, purely from those added sections (see
 below for where that comes from); current values live in
@@ -307,14 +315,13 @@ Chained-operator benchmark against the actual shipped types
 | checked `Result`-chain `Mul` | 27 | 69 | 125 | +14 |
 | raw `float_negate`+`float_sum` (baseline) | 29 | 44 | 64 | +5 |
 | `XFLUnchecked` `Sub` chain | 31 | 46 | 66 | +5 (matches raw exactly) |
-| checked `Result`-chain `Sub` | 40 | 121 | 229 | +27 |
 
 `XFLUnchecked`'s marginal cost matches a hand-written raw host-call chain
 exactly, for both `Mul` (single host call per step) and `Sub` (two host
-calls per step, since `Neg` isn't free) — its performance win over the
-checked operators is real and comes entirely from skipping the per-step
-`Result` branch, not from skipping any host validation a correct
-implementation actually needs.
+calls per step, since `XFLUnchecked`'s own `Neg` isn't free) — its
+performance win over the checked operators is real and comes entirely from
+skipping the per-step `Result` branch, not from skipping any host
+validation a correct implementation actually needs.
 
 ## Expected behavior
 
@@ -337,13 +344,11 @@ implementation actually needs.
 | `NoAmountField` | 2 | `slot_subfield` found no `Amount` field on the originating transaction |
 | `InvalidAmount` | 3 | `XFL::from_slot` could not decode the `Amount` slot as a valid XFL amount |
 | `MulratioFailed` | 4 | `mulratio` failed (e.g. overflow) computing the percentage share |
-| `MinShareConstructFailed` | 5 | `XFL::new` failed to construct the fixed minimum-share constant |
 | `ComparisonFailed` | 6 | the `.lt()` comparison between the computed share and the minimum failed |
 | `BelowMinimum` | 7 | the computed share fell below the fixed minimum |
 | `RemainingComputeFailed` | 8 | `amount - share` (the checked `Sub` operator) failed |
 | `RemainingComparisonFailed` | 9 | the `remaining <= 0` comparison (`.compare()`) failed |
 | `NotEnoughRemaining` | 10 | `amount - share` was not strictly positive |
-| `GrowthConstructFailed` | 11 | `XFL::new` failed to construct the fixed growth-factor constant |
 | `CompoundValidationFailed` | 12 | the `XFLUnchecked` compounding chain's final `validate()` call failed |
 | `CompoundComparisonFailed` | 13 | the `compounded <= share` comparison (`.compare()`) failed |
 | `CompoundNotIncreasing` | 14 | the compounded value did not come out strictly greater than `share` |
