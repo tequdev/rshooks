@@ -2,94 +2,27 @@
 
 ## What you'll learn
 
-How to make a Hook's behavior configurable at install time via a **Hook
-parameter** (`#[hook_param]`), with a sensible compiled-in default when the
-operator doesn't set one.
+Making a hook's behavior configurable at install time via a **Hook
+parameter** (`#[hook_param(...)]`), with a compiled-in default when the
+operator doesn't set one. See [Hook and Transaction
+Parameters](../../book/src/data/parameters.md) ("`default`: a compiled-in
+fallback") for the field-attribute grammar and what "absent" vs.
+"present-but-malformed" each resolve to.
 
 ## The hook
 
 Rolls back the originating transaction if its native (XRP/XAH) `Amount` is
 below a minimum threshold; accepts otherwise. The threshold comes from a
-Hook parameter named `MIN` — 8 raw bytes, a little-endian `u64` drops
-value — falling back to a baked-in default (`1,000,000` drops = 1 XAH) if
-`MIN` isn't configured.
+Hook parameter named `MIN` (a little-endian `u64` drops value, wrapped in a
+one-field `MinDrops` via `#[derive(ParamValue)]` so its meaning travels
+with its type), falling back to a baked-in default (1 XAH) via `MinDrops`'s
+own `Default` impl when `MIN` isn't configured.
 
-## Code walkthrough
-
-```rust
-#[derive(ParamValue)]
-struct MinDrops {
-    drops: u64,
-}
-
-impl Default for MinDrops {
-    fn default() -> Self {
-        Self {
-            drops: DEFAULT_MIN_DROPS,
-        }
-    }
-}
-
-fn min_drops() -> u64 {
-    match HookParams.hook_param.min.get_or_default() {
-        Ok(min) => min.drops,
-        Err(_) => rollback!(
-            b"hook-params: could not read MIN parameter",
-            HookParamsError::CouldNotReadMinDrops
-        ),
-    }
-}
-
-#[hooks]
-pub struct HookParams {
-    #[hook_param(name = b"MIN", default = MinDrops::default())]
-    min: HookParam<MinDrops>,
-}
-```
-
-The `min` field declares the `MIN` Hook parameter permanently paired with
-its value shape, closing the gap the loose `hook_param_exact::<T>(name)`
-accessor leaves open (a typo or copy-paste error can pair the right name
-with the wrong type, or vice versa, and both compile fine). `MinDrops`
-wraps the `u64` value in a one-field `ParamValue` struct so `MIN`'s meaning
-travels with its type instead of reading a bare `[u8; 8]` (`FixedRead` is
-implemented for `[u8; N]`, `rshooks::types` newtypes, `XFL`, and
-`#[derive(ParamValue)]`/`#[derive(HookData)]` structs — not for a bare
-`u64`) — the same house idiom `examples/12_typed-data` uses for its
-`Config`/`Instruction` fields. The compiled-in fallback is single-sourced
-through `MinDrops`'s `Default` impl: the attribute's `default =
-MinDrops::default()` covers the absent case inside
-`HookParam<V>::get_or_default()`, which returns `Ok(<the field's
-default>)` when `MIN` is absent and `Err` when `MIN` is present but the
-wrong number of bytes for `MinDrops` (8). Only the absent case resolves to
-the default; `min_drops` matches that `Result` explicitly and rolls back
-on `Err` instead of masking it, since a malformed `MIN` is an operator
-configuration error, not "unset". `MinDrops`'s `drops: u64` field decodes via this crate's
-little-endian `FromBytes` trait (`rshooks::convert::FromBytes for u64`).
-A Hook parameter like `MIN` carries no protocol-mandated endianness of its
-own — its byte convention is whatever the operator who set it wrote — so
-it's the declared-field tier itself that fixes `MIN` to little-endian,
-matching `examples/12_typed-data`'s `CFG`. Contrast the originating
-transaction's `Amount`, read below: a genuine protocol field decoded
-through `otxn_field_exact` stays big-endian per Xahau Binary's own wire
-format, and the `u64::from_be_bytes(n.0)` line below applies that same
-convention by hand to the raw bytes `otxn_field_typed` hands back.
-
-The originating transaction's `Amount` is read via
-`otxn_field_typed(sfAmount)`, which classifies the field by its wire length
-and hands back an `AmountBytes` — `Native([u8; 8])` for an 8-byte native
-amount, `Iou(_)` for a 48-byte IOU amount — so only the `Native` arm is
-accepted; `Iou` (and any read error) falls to the same "unsupported" arm.
-The top two bits of a serialized native amount are format flags, not
-part of the drops value (`0x80` = "not an IOU", `0xC0`'s low bit = sign,
-always set since XRP/XAH amounts are never negative) — see
-`rshooks::txn::codec::encode_native_amount_const`'s doc comment for the
-same bit layout used in the other direction (encoding a drops value for an
-emitted transaction). Masking `NATIVE_AMOUNT_FLAG_BITS` off recovers the
-plain drops magnitude.
-
-This example intentionally only supports native amounts — reading *any*
-`Amount` kind (native or IOU) uniformly is what `examples/07_xfl-math` is for.
+This example intentionally only supports native amounts — rejecting an IOU
+`Amount` outright — using the same `otxn_field_typed`/`AmountBytes` match
+[Reading the Originating Transaction](../../book/src/data/otxn.md) covers.
+Reading *any* `Amount` kind uniformly is what `examples/07_xfl-math` is
+for.
 
 ## Hook parameter hex encoding
 
@@ -132,22 +65,10 @@ two `[u8; 20]`s and avoids that loop with `buf_eq_20`).
 ## Expected behavior
 
 - `MIN` unset, `Amount` = 1 XAH or more → accept.
-- `MIN` unset, `Amount` below 1 XAH → rollback (`"hook-params: amount below
-  configured minimum"`, code `2`).
-- `MIN` set to some threshold, `Amount` at or above it → accept.
-- `MIN` set, `Amount` below it → rollback, code `2`.
-- `MIN` present but not exactly 8 bytes → rollback (`"hook-params: could
-  not read MIN parameter"`, code `3`), regardless of `Amount`.
-- `Amount` is an IOU (not native XRP/XAH) → rollback (`"hook-params:
-  unsupported (non-native) Amount"`, code `1`), regardless of `MIN`.
+- `MIN` unset, `Amount` below 1 XAH → rollback.
+- `MIN` set, `Amount` at or above it → accept.
+- `MIN` set, `Amount` below it → rollback.
+- `MIN` present but not exactly 8 bytes → rollback, regardless of `Amount`.
+- `Amount` is an IOU (not native XRP/XAH) → rollback, regardless of `MIN`.
 
-## Error codes
-
-`HookParamsError` (`rshooks::hook_errors!`, see `src/lib.rs`) is the
-`rollback!` code for each failure this hook can exit with:
-
-| variant | code | meaning |
-|---|---|---|
-| `UnsupportedAmount` | 1 | the originating transaction's `Amount` isn't an 8-byte native (XRP/XAH) amount |
-| `BelowMinimum` | 2 | the native `Amount` fell below the configured (or default) minimum |
-| `CouldNotReadMinDrops` | 3 | `MIN` is present but not exactly 8 bytes, or the host call otherwise failed (an absent `MIN` is not an error: it falls back to the compiled-in default) |
+Failure/rollback codes are declared on `HookParamsError` in `src/lib.rs`.
