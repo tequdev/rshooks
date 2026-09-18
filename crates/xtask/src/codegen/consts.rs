@@ -1,6 +1,5 @@
 //! Generates `crates/rshooks-core/src/consts.rs` from `hookapi.h`'s and
-//! `macro.h`'s parsed [`ConstSpec`] families (`crates/xtask/src/ir.rs`,
-//! `hook_api.json`).
+//! `macro.h`'s parsed [`ConstSpec`] families (`crates/xtask/src/ir.rs`).
 
 use anyhow::Result;
 

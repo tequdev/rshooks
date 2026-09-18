@@ -1,5 +1,5 @@
 //! Generates `crates/rshooks-core/src/api.rs` from `extern.h`'s
-//! [`FunctionSpec`]s (`crates/xtask/src/ir.rs`, `hook_api.json`).
+//! [`FunctionSpec`]s (`crates/xtask/src/ir.rs`).
 
 use anyhow::Result;
 

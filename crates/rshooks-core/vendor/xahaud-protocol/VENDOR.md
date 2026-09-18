@@ -49,8 +49,6 @@ verbatim so generated Rust can be parity-tested against xahaud.
 - **Parity test** (`../../tests/protocol_formats_parity.rs`) re-parses the
   three `.macro` files with an independent parser and compares every parsed
   format with the generated artifact.
-- A drift-tripwire test (`../../tests/vendor_sha256.rs`) hashes these seven
-  files and checks them against `SHA256SUMS`.
 
 ## License
 
