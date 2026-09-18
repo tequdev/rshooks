@@ -85,26 +85,6 @@ impl BuilderInfo {
             wasm_opt: true,
         }
     }
-
-    /// Builds this package's provenance record with the reproducibility
-    /// flags recorded alongside it: the `cargo`/`rustc` arguments the build
-    /// actually used, and whether the `wasm-opt` pass ran.
-    #[must_use]
-    pub fn with_flags(
-        rustc: Option<String>,
-        cargo_args: Vec<String>,
-        rustc_args: Vec<String>,
-        wasm_opt: bool,
-    ) -> Self {
-        Self {
-            name: env!("CARGO_PKG_NAME").to_string(),
-            version: env!("CARGO_PKG_VERSION").to_string(),
-            rustc,
-            cargo_args,
-            rustc_args,
-            wasm_opt,
-        }
-    }
 }
 
 /// Encodes Xahau's inverted transaction-type bitmask used by HookOn and

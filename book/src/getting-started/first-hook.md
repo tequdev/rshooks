@@ -158,7 +158,7 @@ exactly what that pipeline does. A successful build prints something like:
 ```text
 discovery build (my-hook)
 building entry 0 (`main`)
-wrote out/current/0.main.wasm (172 bytes, estimated SetHook fee 860000 drops)
+wrote out/current/0.main.wasm (171 bytes, estimated SetHook fee 855000 drops)
 wrote out/current/0.main.metadata.json
 wrote out/current/sethook.template.json
 wrote out/current/sethook.template.meta.json
@@ -197,7 +197,7 @@ exist). For `AcceptAll`, `out/current/` contains:
   "HookOn": "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF7FFFFFFFFFFFFFFFFFFBFFFFF",
   "HookCanEmit": null,
   "HookName": "616363657074",
-  "HookHash": "F1BDDA989FF72A7C6C3C8E298C7BCFEA2A68F521CC5144D044600340913C0654",
+  "HookHash": "68A7D6BD77FB98A7E05E0BFD12180352903F131B2780F848267C37DC0837707C",
   "WCE": {
     "hook": 14,
     "cbak": 0
@@ -207,7 +207,7 @@ exist). For `AcceptAll`, `out/current/` contains:
     "version": "0.2.0",
     "rustc": "rustc 1.89.0 (29483883e 2025-08-04)",
     "cargo_args": ["rustc", "--release", "--locked", "--target", "wasm32v1-none", "--crate-type", "cdylib"],
-    "rustc_args": ["--cfg", "rshooks_entry=\"0\"", "--check-cfg", "cfg(rshooks_entry,values(\"0\",\"1\",\"2\",\"3\",\"4\",\"5\",\"6\",\"7\",\"8\",\"9\"))", "-C", "link-arg=-zstack-size=131072", "-C", "link-arg=--initial-memory=262144", "-C", "link-arg=--no-growable-memory"],
+    "rustc_args": ["--cfg", "rshooks_entry=\"0\"", "--check-cfg", "cfg(rshooks_entry,values(\"0\",\"1\",\"2\",\"3\",\"4\",\"5\",\"6\",\"7\",\"8\",\"9\"))", "-C", "link-arg=-zstack-size=131072"],
     "wasm_opt": true
   },
   "human": {

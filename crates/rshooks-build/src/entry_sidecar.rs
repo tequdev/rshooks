@@ -350,12 +350,11 @@ mod tests {
     #[test]
     fn builder_flags_round_trip_through_build_entry_sidecar_with() {
         let report = ValidationReport::default();
-        let builder = BuilderInfo::with_flags(
-            Some("rustc 1.89.0 (test)".to_string()),
-            vec!["rustc".to_string(), "--release".to_string()],
-            vec!["--cfg".to_string(), "rshooks_entry=\"0\"".to_string()],
-            true,
-        );
+        let builder = BuilderInfo {
+            cargo_args: vec!["rustc".to_string(), "--release".to_string()],
+            rustc_args: vec!["--cfg".to_string(), "rshooks_entry=\"0\"".to_string()],
+            ..BuilderInfo::current(None)
+        };
         let built =
             build_entry_sidecar_with(&entry(omitted_on()), &chain(), b"AAAA", &report, builder)
                 .expect("sidecar builds");

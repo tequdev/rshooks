@@ -1825,7 +1825,7 @@ only.
     "version": "0.2.0",
     "rustc": "rustc 1.89.0 (29483883e 2025-08-04)",
     "cargo_args": ["rustc", "--release", "--locked", "--target", "wasm32v1-none", "--crate-type", "cdylib"],
-    "rustc_args": ["--cfg", "rshooks_entry=\"0\"", "--check-cfg", "cfg(rshooks_entry,values(\"0\",\"1\",\"2\",\"3\",\"4\",\"5\",\"6\",\"7\",\"8\",\"9\"))", "-C", "link-arg=-zstack-size=131072", "-C", "link-arg=--initial-memory=262144", "-C", "link-arg=--no-growable-memory"],
+    "rustc_args": ["--cfg", "rshooks_entry=\"0\"", "--check-cfg", "cfg(rshooks_entry,values(\"0\",\"1\",\"2\",\"3\",\"4\",\"5\",\"6\",\"7\",\"8\",\"9\"))", "-C", "link-arg=-zstack-size=131072"],
     "wasm_opt": true
   },
   "human": {
@@ -1850,11 +1850,12 @@ fails; detection never fails the build). Because optimization behavior can
 shift across toolchain updates even for unchanged source, this is what
 lets a given `HookHash`/`WCE` pair be reproduced deterministically later.
 `cargo_args`/`rustc_args` extend this to every build-affecting cargo/rustc
-flag, including the link arguments that fix linear memory as 4 pages,
-initial equal to max, with a 2-page stack — xahaud's guard checker rejects
-`memory.grow`, so growth is disabled at link time rather than left
-unreachable; `wasm_opt` records whether the `wasm-opt -Oz` pass ran. A
-build is reproducible from the sidecar alone.
+flag, including the one link argument that fixes the linear memory
+layout: a 2-page stack, with wasm-ld sizing memory to the pages the stack
+plus data/bss need and no maximum declared, because xahaud's guard checker
+rejects `memory.grow` and a maximum could never be exercised; `wasm_opt`
+records whether the `wasm-opt -Oz` pass ran. A build is reproducible from
+the sidecar alone.
 
 The metadata schema follows the requested 2..=8 Unicode-character rule for
 `HookName`. Deployment tooling must additionally account for the current
