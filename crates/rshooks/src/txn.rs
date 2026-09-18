@@ -7089,7 +7089,7 @@ mod tests {
         let mut tpl = TestRemitIndexed::new();
         for i in 0..3usize {
             let mut entry = tpl.amounts(i).expect("index in range");
-            entry.set_amount_value(XFL::from_raw_bits(6_089_866_696_204_910_592)); // XFL!(1)
+            entry.set_amount_value(XFL::one());
         }
 
         let b = tpl.bytes();

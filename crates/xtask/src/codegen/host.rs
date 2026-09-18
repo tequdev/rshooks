@@ -1,6 +1,6 @@
 //! Generates `crates/rshooks-core/src/host.rs`: the `HookHost` trait and its
 //! `Guest` implementor, from `extern.h`'s parsed [`FunctionSpec`]s
-//! (`crates/xtask/src/ir.rs`, `hook_api.json`).
+//! (`crates/xtask/src/ir.rs`).
 
 use anyhow::Result;
 
@@ -12,8 +12,8 @@ const MODULE_DOC: &str = "\
 //! `HookHost`: the raw Hook API as a trait, plus `Guest`, the trait's one
 //! real implementor.
 //!
-//! Generated from `crates/rshooks-core/hook_api.json` (`crates/xtask/src/ir.rs`),
-//! itself generated from `extern.h` (`docs/DESIGN.md` §4). Every method here
+//! Generated from `extern.h` via `crates/xtask/src/ir.rs`'s `HookApiSpec`
+//! (`docs/DESIGN.md` §4). Every method here
 //! is a 1:1 forward to the same-named function in [`crate::api`] — same
 //! name, same signature (raw `u32`/`i64` Hook API types), same safety
 //! contract — so this trait adds an indirection point without adding any
@@ -94,7 +94,7 @@ pub fn generate(fns: &[FunctionSpec]) -> Result<String> {
     impl_body.truncate(impl_body.trim_end_matches('\n').len());
     impl_body.push('\n');
 
-    let mut out = with_generated_marker("extern.h (via hook_api.json)", MODULE_DOC);
+    let mut out = with_generated_marker("extern.h", MODULE_DOC);
     out.push('\n');
     out.push_str("/// Every Hook API host function (`_g` plus the 74 `extern.h` functions), as\n");
     out.push_str(

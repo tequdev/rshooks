@@ -1,19 +1,18 @@
 //! Orchestrates `cargo xtask gen-core`: reads the vendored xahaud headers
 //! (`crates/rshooks-core/vendor/xahaud-hook/`), parses them once into a single
-//! [`crate::ir::HookApiSpec`], round-trips that spec through
-//! `crates/rshooks-core/hook_api.json`, runs each per-file generator in
-//! [`crate::codegen`] against the round-tripped spec, formats the output
-//! with `rustfmt` under the repo's `rustfmt.toml`, and either writes the
-//! result into `crates/rshooks-core/` or (`--check`) compares it against
-//! what's already there without touching the working tree.
+//! [`crate::ir::HookApiSpec`], runs each per-file generator in
+//! [`crate::codegen`] against that spec, formats the output with `rustfmt`
+//! under the repo's `rustfmt.toml`, and either writes the result into
+//! `crates/rshooks-core/` or (`--check`) compares it against what's already
+//! there without touching the working tree.
 //!
 //! It does the same for the second vendor group and its own artifact: the
 //! protocol format definitions in
 //! `crates/rshooks-core/vendor/xahaud-protocol/` are parsed into a
 //! [`crate::protocol_ir::ProtocolFormats`] and round-tripped through
-//! `crates/rshooks-core/protocol_formats.json`, which the ledger-entry
-//! generators then read the same way the header generators read
-//! `hook_api.json`.
+//! `crates/rshooks-core/protocol_formats.json`, which every later consumer
+//! (the ledger-entry generators, a parity test) reads instead of re-parsing
+//! the vendored files.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -29,11 +28,7 @@ use crate::protocol_ir::{self, ProtocolFormats};
 
 /// The generated intermediate-representation file, checked in at the
 /// `rshooks-core` crate root (not under `src/`, since it isn't Rust source):
-/// the pipeline's `hook_api.json` artifact (module docs on [`crate::ir`]).
-const HOOK_API_JSON: &str = "hook_api.json";
-
-/// The second generated intermediate-representation file, checked in beside
-/// [`HOOK_API_JSON`]: the protocol format artifact (module docs on
+/// the pipeline's protocol format artifact (module docs on
 /// [`crate::protocol_ir`]).
 const PROTOCOL_FORMATS_JSON: &str = "protocol_formats.json";
 
@@ -54,8 +49,8 @@ fn repo_root() -> PathBuf {
         .join("..")
 }
 
-/// `crates/rshooks-core`'s crate root — where `hook_api.json` lives, one level
-/// above `src/`.
+/// `crates/rshooks-core`'s crate root — where `protocol_formats.json` lives,
+/// one level above `src/`.
 fn crate_dir() -> PathBuf {
     repo_root().join("crates/rshooks-core")
 }
@@ -64,11 +59,8 @@ fn read(path: &Path) -> Result<String> {
     fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))
 }
 
-/// Parses the eight vendored headers into a [`HookApiSpec`] and renders it
-/// as pretty-printed, canonical JSON (trailing newline, no ambiguity in
-/// key/array order — struct field order is derive-stable, and every
-/// sequence here is already in header order).
-fn build_hook_api_json() -> Result<String> {
+/// Parses the eight vendored headers into a [`HookApiSpec`].
+fn build_hook_api_spec() -> Result<HookApiSpec> {
     let vendor = repo_root().join("crates/rshooks-core/vendor/xahaud-hook");
     let error_h = read(&vendor.join("error.h"))?;
     let tts_h = read(&vendor.join("tts.h"))?;
@@ -79,7 +71,7 @@ fn build_hook_api_json() -> Result<String> {
     let macro_h = read(&vendor.join("macro.h"))?;
     let extern_h = read(&vendor.join("extern.h"))?;
 
-    let spec = ir::build(
+    ir::build(
         &error_h,
         &tts_h,
         &ls_flags_h,
@@ -88,10 +80,7 @@ fn build_hook_api_json() -> Result<String> {
         &hookapi_h,
         &macro_h,
         &extern_h,
-    )?;
-    let mut json = serde_json::to_string_pretty(&spec).context("serializing HookApiSpec")?;
-    json.push('\n');
-    Ok(json)
+    )
 }
 
 /// Parses the six vendored protocol format definitions into a
@@ -99,16 +88,14 @@ fn build_hook_api_json() -> Result<String> {
 /// (trailing newline; struct field order is derive-stable and every sequence
 /// is in file order, so the output is deterministic).
 ///
-/// `hook_api_json` is the text [`build_hook_api_json`] just produced: the
-/// `sfcodes.h` constants are read back out of it so
-/// [`protocol_ir::build`]'s cross-validation gate compares against the
-/// constants `rshooks-core` actually ships, not a second interpretation of
-/// the header.
+/// `hook_api`'s `sfcodes.h` constants feed [`protocol_ir::build`]'s
+/// cross-validation gate, so it compares against the constants
+/// `rshooks-core` actually ships, not a second interpretation of the header.
 ///
 /// The result is deserialized back into a [`ProtocolFormats`] and
 /// re-serialized here, so every `gen-core` run exercises the round trip a
 /// later renderer depends on, not only tests.
-fn build_protocol_formats_json(hook_api_json: &str) -> Result<String> {
+fn build_protocol_formats_json(hook_api: &HookApiSpec) -> Result<String> {
     let vendor = repo_root().join("crates/rshooks-core/vendor/xahaud-protocol");
     let sfields_macro = read(&vendor.join("sfields.macro"))?;
     let transactions_macro = read(&vendor.join("transactions.macro"))?;
@@ -116,9 +103,6 @@ fn build_protocol_formats_json(hook_api_json: &str) -> Result<String> {
     let tx_formats_cpp = read(&vendor.join("TxFormats.cpp"))?;
     let ledger_formats_cpp = read(&vendor.join("LedgerFormats.cpp"))?;
     let inner_object_formats_cpp = read(&vendor.join("InnerObjectFormats.cpp"))?;
-
-    let hook_api: HookApiSpec =
-        serde_json::from_str(hook_api_json).context("deserializing hook_api.json")?;
 
     let formats = protocol_ir::build(
         &sfields_macro,
@@ -162,28 +146,28 @@ fn render_format_availability(a: &FormatAvailability) -> Result<String> {
 }
 
 /// Generates every target `.rs` file's *unformatted* content, keyed by its
-/// `src/`-relative filename, from the two artifact texts that get written to
-/// (or checked against) `crates/rshooks-core/hook_api.json` and
-/// `crates/rshooks-core/protocol_formats.json`. Both are deserialized back
-/// here (rather than reusing the in-memory values that produced them) so
-/// every generator consumes the intermediate representation, not the
-/// parser's output directly.
+/// `src/`-relative filename, from the parsed [`HookApiSpec`] and the
+/// `crates/rshooks-core/protocol_formats.json` artifact text, which is
+/// deserialized back here (rather than reusing the in-memory value that
+/// produced it) so every generator consumes the intermediate representation,
+/// not the parser's output directly.
 fn generate_rust_files(
-    hook_api_json: &str,
+    spec: &HookApiSpec,
     protocol_formats_json: &str,
 ) -> Result<BTreeMap<&'static str, String>> {
-    let spec: HookApiSpec =
-        serde_json::from_str(hook_api_json).context("deserializing hook_api.json")?;
     let formats: ProtocolFormats = serde_json::from_str(protocol_formats_json)
         .context("deserializing protocol_formats.json")?;
 
     let mut out = BTreeMap::new();
-    out.insert("error.rs", codegen::error::generate(&spec.error_codes)?);
-    out.insert("tts.rs", codegen::tts::generate(&spec.tts)?);
+    out.insert("error.rs", codegen::const_tables::error(&spec.error_codes)?);
+    out.insert("tts.rs", codegen::const_tables::tts(&spec.tts)?);
     out.insert("lets.rs", codegen::lets::generate(&formats.ledger_entries)?);
-    out.insert("ls_flags.rs", codegen::ls_flags::generate(&spec.ls_flags)?);
+    out.insert(
+        "ls_flags.rs",
+        codegen::const_tables::ls_flags(&spec.ls_flags)?,
+    );
     out.insert("tx_flags.rs", codegen::tx_flags::generate(&spec.tx_flags)?);
-    out.insert("sfcodes.rs", codegen::sfcodes::generate(&spec.sfcodes)?);
+    out.insert("sfcodes.rs", codegen::const_tables::sfcodes(&spec.sfcodes)?);
     out.insert(
         "consts.rs",
         codegen::consts::generate(
@@ -201,18 +185,16 @@ fn generate_rust_files(
 }
 
 /// Generates every `rshooks`-targeted file's *unformatted* content, keyed
-/// by its `rshooks/src/`-relative filename, from the same two artifact texts
-/// [`generate_rust_files`] consumes — [`codegen::sfield`]'s `sfield.rs`,
-/// [`codegen::tx_type`]'s `tx_type.rs`,
+/// by its `rshooks/src/`-relative filename, from the same [`HookApiSpec`]
+/// and `protocol_formats.json` text [`generate_rust_files`] consumes —
+/// [`codegen::sfield`]'s `sfield.rs`, [`codegen::tx_type`]'s `tx_type.rs`,
 /// [`codegen::ledger_entry_type`]'s `ledger_entry_type.rs` and
 /// [`codegen::views`]'s three `views/*.rs` modules.
 fn generate_rshooks_files(
-    hook_api_json: &str,
+    spec: &HookApiSpec,
     protocol_formats_json: &str,
     availability: &FormatAvailability,
 ) -> Result<BTreeMap<&'static str, String>> {
-    let spec: HookApiSpec =
-        serde_json::from_str(hook_api_json).context("deserializing hook_api.json")?;
     let formats: ProtocolFormats = serde_json::from_str(protocol_formats_json)
         .context("deserializing protocol_formats.json")?;
 
@@ -248,16 +230,18 @@ fn generate_rshooks_files(
 /// Generates every `rshooks-build`-targeted file's *unformatted* content,
 /// keyed by its `rshooks-build/src/`-relative filename —
 /// [`codegen::tx_type_table`]'s build-side transaction-type name/code
-/// table, derived from the same `hook_api.json` artifact as
-/// [`generate_rshooks_files`]'s `tx_type.rs`.
-fn generate_build_files(hook_api_json: &str) -> Result<BTreeMap<&'static str, String>> {
-    let spec: HookApiSpec =
-        serde_json::from_str(hook_api_json).context("deserializing hook_api.json")?;
-
+/// table, derived from the same [`HookApiSpec`] as
+/// [`generate_rshooks_files`]'s `tx_type.rs`, and
+/// [`codegen::whitelist`]'s Hook API import whitelist.
+fn generate_build_files(spec: &HookApiSpec) -> Result<BTreeMap<&'static str, String>> {
     let mut out = BTreeMap::new();
     out.insert(
         "tx_type_table.rs",
         codegen::tx_type_table::generate(&spec.tts)?,
+    );
+    out.insert(
+        "whitelist.rs",
+        codegen::whitelist::generate(&spec.functions)?,
     );
 
     Ok(out)
@@ -416,19 +400,19 @@ fn write_files_atomically(files: &[(PathBuf, String)]) -> Result<()> {
 type GeneratedFile = (PathBuf, String);
 
 /// Runs the full generation pipeline shared by [`run_update`] and
-/// [`run_check`]: parses the vendored xahaud sources, builds
-/// `hook_api.json` / `protocol_formats.json` / `format_availability.json`,
-/// and renders every generated `.rs` file, already formatted with
-/// `rustfmt`. Returns the formats newly classified as `dormant` (empty
-/// unless `auto_add_dormant`) alongside every generated artifact.
+/// [`run_check`]: parses the vendored xahaud sources into a [`HookApiSpec`],
+/// builds `protocol_formats.json` / `format_availability.json`, and renders
+/// every generated `.rs` file, already formatted with `rustfmt`. Returns the
+/// formats newly classified as `dormant` (empty unless `auto_add_dormant`)
+/// alongside every generated artifact.
 ///
 /// `auto_add_dormant` is the one behavioral difference between the two
 /// callers: `run_update` classifies a newly declared upstream format as
 /// `dormant` automatically; `run_check` instead treats it as a validation
 /// failure, since only a human can decide a tier.
 fn generate_all(auto_add_dormant: bool) -> Result<(Vec<String>, Vec<GeneratedFile>)> {
-    let hook_api_json = build_hook_api_json()?;
-    let protocol_formats_json = build_protocol_formats_json(&hook_api_json)?;
+    let spec = build_hook_api_spec()?;
+    let protocol_formats_json = build_protocol_formats_json(&spec)?;
 
     let formats: ProtocolFormats = serde_json::from_str(&protocol_formats_json)
         .context("deserializing protocol_formats.json")?;
@@ -445,12 +429,11 @@ fn generate_all(auto_add_dormant: bool) -> Result<(Vec<String>, Vec<GeneratedFil
     };
     let availability_json = render_format_availability(&availability)?;
 
-    let generated = generate_rust_files(&hook_api_json, &protocol_formats_json)?;
+    let generated = generate_rust_files(&spec, &protocol_formats_json)?;
     let formatted = format_all(&generated)?;
-    let generated_rshooks =
-        generate_rshooks_files(&hook_api_json, &protocol_formats_json, &availability)?;
+    let generated_rshooks = generate_rshooks_files(&spec, &protocol_formats_json, &availability)?;
     let formatted_rshooks = format_all(&generated_rshooks)?;
-    let generated_build = generate_build_files(&hook_api_json)?;
+    let generated_build = generate_build_files(&spec)?;
     let formatted_build = format_all(&generated_build)?;
     let generated_testenv = generate_testenv_files(&protocol_formats_json)?;
     let formatted_testenv = format_all(&generated_testenv)?;
@@ -461,7 +444,6 @@ fn generate_all(auto_add_dormant: bool) -> Result<(Vec<String>, Vec<GeneratedFil
     let rshooks_testenv_dir = repo_root().join("crates/rshooks-testenv/src");
 
     let mut files: Vec<(PathBuf, String)> = vec![
-        (crate_dir().join(HOOK_API_JSON), hook_api_json),
         (
             crate_dir().join(PROTOCOL_FORMATS_JSON),
             protocol_formats_json,
@@ -495,8 +477,8 @@ fn generate_all(auto_add_dormant: bool) -> Result<(Vec<String>, Vec<GeneratedFil
     Ok((added, files))
 }
 
-/// `cargo xtask gen-core`: writes `hook_api.json`, then the generated +
-/// `rustfmt`-formatted `.rs` files, into `crates/rshooks-core/`, (for
+/// `cargo xtask gen-core`: writes `protocol_formats.json`, then the
+/// generated + `rustfmt`-formatted `.rs` files, into `crates/rshooks-core/`, (for
 /// [`codegen::sfield`]'s and [`codegen::tx_type`]'s output) `crates/rshooks/`,
 /// (for [`codegen::tx_type_table`]'s output) `crates/rshooks-build/`, and
 /// (for [`codegen::testenv_required_fields`]'s output) `crates/rshooks-testenv/`,
@@ -571,7 +553,7 @@ pub fn run_check() -> Result<()> {
 
     if mismatched.is_empty() {
         println!(
-            "cargo xtask gen-core --check: crates/rshooks-core/hook_api.json, crates/rshooks-core/protocol_formats.json, crates/rshooks-core/src/*.rs, crates/rshooks/src/sfield.rs + tx_type.rs + ledger_entry_type.rs + views/{{tx,ledger,inner}}.rs, crates/rshooks-build/src/tx_type_table.rs, and crates/rshooks-testenv/src/protocol_formats_generated.rs are up to date"
+            "cargo xtask gen-core --check: crates/rshooks-core/protocol_formats.json, crates/rshooks-core/src/*.rs, crates/rshooks/src/sfield.rs + tx_type.rs + ledger_entry_type.rs + views/{{tx,ledger,inner}}.rs, crates/rshooks-build/src/tx_type_table.rs + whitelist.rs, and crates/rshooks-testenv/src/protocol_formats_generated.rs are up to date"
         );
         Ok(())
     } else {
