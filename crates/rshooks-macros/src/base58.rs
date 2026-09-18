@@ -131,6 +131,7 @@ mod tests {
     #![allow(clippy::expect_used, clippy::indexing_slicing)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
 
     use super::*;
+    use crate::test_support::hex_to_bytes;
 
     /// Test-only base58 (XRPL alphabet) encode, used to cross-check
     /// [`base58_decode`] via a round trip — independent of the fixed
@@ -163,23 +164,15 @@ mod tests {
         out
     }
 
-    fn hex_to_20(hex: &str) -> [u8; 20] {
-        assert_eq!(hex.len(), 40, "test vector AccountID must be 40 hex chars");
-        let mut out = [0u8; 20];
-        for i in 0..20 {
-            out[i] =
-                u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).expect("valid hex in test vector");
-        }
-        out
-    }
-
     #[test]
     fn genesis_master_account() {
         // Genesis/master account (seed "masterpassphrase"), also hardcoded
         // as `GENESIS_ACCOUNT` in examples/80_governance.
         assert_eq!(
-            decode("rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh").ok(),
-            Some(hex_to_20("b5f762798a53d543a014caf8b297cff8f2f937e8"))
+            decode("rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh")
+                .ok()
+                .map(|a| a.to_vec()),
+            Some(hex_to_bytes("b5f762798a53d543a014caf8b297cff8f2f937e8"))
         );
     }
 

@@ -28,7 +28,7 @@ use proc_macro::{Delimiter, Group, Ident, Punct, Spacing, Span, TokenStream, Tok
 use crate::hooks_shared::{
     AttrEntry, classify_fixed_sti_type_text, hex_lower, hex_upper, is_punct,
     is_valid_interface_name, parse_attr_entries, parse_balanced_angle, parse_string_value,
-    render_carrier_export, split_top_level_commas,
+    render_carrier_export, scan_attrs, scan_vis, split_top_level_commas,
 };
 use crate::shape::tokens_to_string;
 use crate::{err, sha256};
@@ -111,20 +111,8 @@ fn parse_impl_item(item: TokenStream) -> Result<ParsedImpl, TokenStream> {
     let tokens: Vec<TokenTree> = item.into_iter().collect();
     let mut i = 0usize;
 
-    let mut leading_attrs = Vec::new();
-    while let Some(tt) = tokens.get(i) {
-        if !is_punct(tt, '#') {
-            break;
-        }
-        leading_attrs.push(tt.clone());
-        match tokens.get(i.wrapping_add(1)) {
-            Some(g @ TokenTree::Group(group)) if group.delimiter() == Delimiter::Bracket => {
-                leading_attrs.push(g.clone());
-            }
-            _ => return Err(err(Span::call_site(), "malformed attribute before `impl`")),
-        }
-        i = i.wrapping_add(2);
-    }
+    let (leading_attrs, next) = scan_attrs(&tokens, i, "malformed attribute before `impl`")?;
+    i = next;
 
     let impl_kw = match tokens.get(i) {
         Some(tt @ TokenTree::Ident(id)) if id.to_string() == "impl" => tt.clone(),
@@ -522,19 +510,8 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
             break;
         }
 
-        let mut vis: Vec<TokenTree> = Vec::new();
-        if let Some(tt @ TokenTree::Ident(id)) = tokens.get(i)
-            && id.to_string() == "pub"
-        {
-            vis.push(tt.clone());
-            i = i.wrapping_add(1);
-            if let Some(g @ TokenTree::Group(group)) = tokens.get(i)
-                && group.delimiter() == Delimiter::Parenthesis
-            {
-                vis.push(g.clone());
-                i = i.wrapping_add(1);
-            }
-        }
+        let (vis, next) = scan_vis(tokens, i);
+        i = next;
 
         let is_entry = hook_attr.is_some() || cbak_attr.is_some();
         if is_entry && cfg_span.is_some() {
@@ -671,7 +648,7 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
                              associated function",
                         ));
                     }
-                    let (const_tokens, next) = scan_const_item(tokens, i)?;
+                    let (const_tokens, next) = scan_const_item(tokens, i);
                     i = next;
                     output.extend(kept_attrs);
                     output.extend(vis);
@@ -1157,10 +1134,7 @@ fn detect_receiver(
 /// at `tokens[start]`, up through its top-level `;` — safe to scan flatly
 /// since every nested brace/paren/bracket in `expr` is already an atomic
 /// [`proc_macro::Group`], never a bare `;` `Punct`.
-fn scan_const_item(
-    tokens: &[TokenTree],
-    start: usize,
-) -> Result<(Vec<TokenTree>, usize), TokenStream> {
+fn scan_const_item(tokens: &[TokenTree], start: usize) -> (Vec<TokenTree>, usize) {
     let mut i = start;
     while let Some(tt) = tokens.get(i) {
         i = i.wrapping_add(1);
@@ -1168,7 +1142,7 @@ fn scan_const_item(
             break;
         }
     }
-    Ok((tokens.get(start..i).unwrap_or_default().to_vec(), i))
+    (tokens.get(start..i).unwrap_or_default().to_vec(), i)
 }
 
 // ---------------------------------------------------------------------
@@ -2055,44 +2029,24 @@ fn encode_entries_json(struct_name: &str, entries: &[EntryJson]) -> Result<Vec<u
     let mut arr = Vec::new();
     for e in entries {
         let mut obj = serde_json::Map::new();
-        obj.insert("index".into(), u64::from(e.index).into());
-        obj.insert("hook_fn".into(), e.hook_fn.clone().into());
+        obj.insert("index".to_string(), serde_json::json!(e.index));
+        obj.insert("hook_fn".to_string(), serde_json::json!(e.hook_fn));
+        obj.insert("cbak_fn".to_string(), serde_json::json!(e.cbak_fn));
+        obj.insert("HookName".to_string(), serde_json::json!(e.hook_name));
         obj.insert(
-            "cbak_fn".into(),
-            e.cbak_fn
-                .clone()
-                .map_or(serde_json::Value::Null, Into::into),
-        );
-        obj.insert(
-            "HookName".into(),
-            e.hook_name
-                .clone()
-                .map_or(serde_json::Value::Null, Into::into),
-        );
-
-        let mut on_obj = serde_json::Map::new();
-        on_obj.insert("form".into(), e.on_form.as_str().into());
-        on_obj.insert("HookOn".into(), names_or_null(e.hook_on.as_ref()));
-        on_obj.insert(
-            "HookOnIncoming".into(),
-            names_or_null(e.hook_on_incoming.as_ref()),
-        );
-        on_obj.insert(
-            "HookOnOutgoing".into(),
-            names_or_null(e.hook_on_outgoing.as_ref()),
-        );
-        obj.insert("on".into(), serde_json::Value::Object(on_obj));
-
-        obj.insert(
-            "HookCanEmit".into(),
-            names_or_null(e.hook_can_emit.as_ref()),
+            "on".to_string(),
+            serde_json::json!({
+                "form": e.on_form.as_str(),
+                "HookOn": e.hook_on,
+                "HookOnIncoming": e.hook_on_incoming,
+                "HookOnOutgoing": e.hook_on_outgoing,
+            }),
         );
         obj.insert(
-            "description".into(),
-            e.description
-                .clone()
-                .map_or(serde_json::Value::Null, Into::into),
+            "HookCanEmit".to_string(),
+            serde_json::json!(e.hook_can_emit),
         );
+        obj.insert("description".to_string(), serde_json::json!(e.description));
 
         // Only `field`/`type_byte`/`name_hex` are part of the wire carrier
         // (`docs/PARAM_SIGNATURE_DESIGN.md` §4) — `SigParamJson::type_text`
@@ -2106,30 +2060,27 @@ fn encode_entries_json(struct_name: &str, entries: &[EntryJson]) -> Result<Vec<u
                 .sig_params
                 .iter()
                 .map(|p| {
-                    let mut sp = serde_json::Map::new();
-                    sp.insert("field".into(), p.field.clone().into());
-                    sp.insert("type_byte".into(), u64::from(p.type_byte).into());
-                    sp.insert("name_hex".into(), p.name_hex.clone().into());
-                    serde_json::Value::Object(sp)
+                    serde_json::json!({
+                        "field": p.field,
+                        "type_byte": p.type_byte,
+                        "name_hex": p.name_hex,
+                    })
                 })
                 .collect();
-            obj.insert("sig_params".into(), sig_params.into());
+            obj.insert("sig_params".to_string(), sig_params.into());
         }
 
         arr.push(serde_json::Value::Object(obj));
     }
 
-    let mut object = serde_json::Map::new();
-    object.insert("schema".into(), "rshooks-hooks-v2".into());
-    object.insert("impl".into(), struct_name.into());
-    object.insert("entries".into(), arr.into());
+    let object = serde_json::json!({
+        "schema": "rshooks-hooks-v2",
+        "impl": struct_name,
+        "entries": arr,
+    });
 
-    serde_json::to_vec(&serde_json::Value::Object(object))
+    serde_json::to_vec(&object)
         .map_err(|e| format!("#[hooks]: failed to serialize entries carrier JSON: {e}"))
-}
-
-fn names_or_null(list: Option<&Vec<String>>) -> serde_json::Value {
-    list.map_or(serde_json::Value::Null, |l| l.to_vec().into())
 }
 
 #[cfg(test)]
@@ -2453,18 +2404,6 @@ mod tests {
         let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
         assert_eq!(value["entries"][0]["on"]["form"], "all");
         assert!(value["entries"][0]["on"]["HookOn"].is_null());
-    }
-
-    #[test]
-    fn not_any_list_covers_the_fixed_0_to_9_domain() {
-        let not_any_list: String = (0..=MAX_INDEX)
-            .map(|n| format!("rshooks_entry = \"{n}\""))
-            .collect::<Vec<_>>()
-            .join(", ");
-        for n in 0..=MAX_INDEX {
-            assert!(not_any_list.contains(&format!("rshooks_entry = \"{n}\"")));
-        }
-        assert_eq!(not_any_list.matches("rshooks_entry").count(), 10);
     }
 
     #[test]

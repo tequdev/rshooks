@@ -106,21 +106,12 @@ mod tests {
     #![allow(clippy::expect_used, clippy::indexing_slicing)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
 
     use super::*;
-
-    fn hex_to_bytes(hex: &str) -> [u8; 32] {
-        assert_eq!(hex.len(), 64, "test vector digest must be 64 hex chars");
-        let mut out = [0u8; 32];
-        for i in 0..32 {
-            out[i] =
-                u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).expect("valid hex in test vector");
-        }
-        out
-    }
+    use crate::test_support::hex_to_bytes;
 
     #[test]
     fn empty_input() {
         assert_eq!(
-            sha256(b""),
+            sha256(b"").as_slice(),
             hex_to_bytes("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
         );
     }
@@ -128,7 +119,7 @@ mod tests {
     #[test]
     fn single_block_input() {
         assert_eq!(
-            sha256(b"abc"),
+            sha256(b"abc").as_slice(),
             hex_to_bytes("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
         );
     }
@@ -136,7 +127,7 @@ mod tests {
     #[test]
     fn multi_round_input_needing_length_padding() {
         assert_eq!(
-            sha256(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+            sha256(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq").as_slice(),
             hex_to_bytes("248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1")
         );
     }
