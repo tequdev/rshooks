@@ -206,3 +206,19 @@ pub(crate) fn keylet_result(r: BackendResult<[u8; 34]>) -> HookResult<Keylet> {
         Err(code) => Err(HookError::from(code)),
     }
 }
+
+pub(crate) use rshooks_core::backend::KeyletArg;
+
+/// Testenv interception shared by every typed `api::keylet` helper (both
+/// the by-value and `_into` families). Neither `util_keylet_buf` nor
+/// `util_keylet` still has real slices by the time a typed helper calls
+/// it, so interception happens one level up, where `account`/`hash`/...
+/// are still real references; the wasm/no-backend fallback in every typed
+/// helper still calls `util_keylet_buf`/`util_keylet` unchanged.
+#[inline(always)]
+pub(crate) fn keylet_intercept(
+    keylet_type: u32,
+    args: [KeyletArg<'_>; 6],
+) -> Option<HookResult<Keylet>> {
+    rshooks_core::backend::with_backend(|b| b.util_keylet(keylet_type, args)).map(keylet_result)
+}

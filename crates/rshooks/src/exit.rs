@@ -14,105 +14,116 @@
 
 use crate::api::control::{accept, rollback};
 
-/// A successful exit: the message and code handed to the host `accept`
-/// call, returned from a typed entry as `Ok(Accept::new(..))`.
-///
-/// Construct with [`Accept::new`] (an explicit message) or
-/// [`Accept::from_code`] (empty message, code only).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Accept {
-    msg: &'static [u8],
-    code: i64,
+/// Declares one exit-value struct (`msg`/`code`, both `'static`/`Copy`) with
+/// its `new`/`from_code`/`msg`/`code` constructors — [`Accept`] and
+/// [`Rollback`] share this exact shape, differing only in rustdoc and which
+/// host call ultimately consumes the pair.
+macro_rules! exit_kind {
+    (
+        $(#[$doc:meta])*
+        struct $name:ident {
+            $(#[$new_doc:meta])*
+            new;
+            $(#[$from_code_doc:meta])*
+            from_code;
+            $(#[$msg_doc:meta])*
+            msg;
+            $(#[$code_doc:meta])*
+            code;
+        }
+    ) => {
+        $(#[$doc])*
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub struct $name {
+            msg: &'static [u8],
+            code: i64,
+        }
+
+        impl $name {
+            $(#[$new_doc])*
+            #[inline(always)]
+            #[must_use]
+            pub const fn new(msg: &'static [u8], code: i64) -> Self {
+                Self { msg, code }
+            }
+
+            $(#[$from_code_doc])*
+            #[inline(always)]
+            #[must_use]
+            pub const fn from_code(code: i64) -> Self {
+                Self { msg: b"", code }
+            }
+
+            $(#[$msg_doc])*
+            #[inline(always)]
+            #[must_use]
+            pub const fn msg(&self) -> &'static [u8] {
+                self.msg
+            }
+
+            $(#[$code_doc])*
+            #[inline(always)]
+            #[must_use]
+            pub const fn code(&self) -> i64 {
+                self.code
+            }
+        }
+    };
 }
 
-impl Accept {
-    /// A successful exit with an explicit message and code.
-    #[inline(always)]
-    #[must_use]
-    pub const fn new(msg: &'static [u8], code: i64) -> Self {
-        Self { msg, code }
-    }
-
-    /// A successful exit with an empty message and the given code.
-    #[inline(always)]
-    #[must_use]
-    pub const fn from_code(code: i64) -> Self {
-        Self { msg: b"", code }
-    }
-
-    /// The message this exit hands to the host `accept` call.
-    #[inline(always)]
-    #[must_use]
-    pub const fn msg(&self) -> &'static [u8] {
-        self.msg
-    }
-
-    /// The code this exit hands to the host `accept` call.
-    #[inline(always)]
-    #[must_use]
-    pub const fn code(&self) -> i64 {
-        self.code
+exit_kind! {
+    /// A successful exit: the message and code handed to the host `accept`
+    /// call, returned from a typed entry as `Ok(Accept::new(..))`.
+    ///
+    /// Construct with [`Accept::new`] (an explicit message) or
+    /// [`Accept::from_code`] (empty message, code only).
+    struct Accept {
+        /// A successful exit with an explicit message and code.
+        new;
+        /// A successful exit with an empty message and the given code.
+        from_code;
+        /// The message this exit hands to the host `accept` call.
+        msg;
+        /// The code this exit hands to the host `accept` call.
+        code;
     }
 }
 
-/// A failed exit: the message and code handed to the host `rollback` call,
-/// returned from a typed entry as `Err(Rollback::new(..))` or produced by
-/// `?` from a [`hook_errors!`] enum.
-///
-/// Construct with [`Rollback::new`] (an explicit message) or
-/// [`Rollback::from_code`] (empty message, code only). `?` converts from
-/// every [`hook_errors!`] enum (empty message, unless the enum declares a
-/// `=> b"msg"` clause on the failing variant — see [`hook_errors!`]'s doc
-/// comment). A raw code is constructed with [`Rollback::from_code`] /
-/// [`Rollback::new`] / `Err(Rollback::from_code(code))` explicitly.
-///
-/// **Deliberately no `From<HookError> for Rollback`.** A Hook API error
-/// code (`-1..=-45`, `-10024`) is not the hook's own return code; a
-/// `?`-propagated `HookError` → `Rollback` conversion would publish the
-/// host's code as the hook's verdict. Convert explicitly at the call site
-/// instead, discarding the `HookError` and keeping only "some call failed":
-///
-/// ```rust,ignore
-/// let value = some_hook_api_call().map_err(|_| MyError::SomeCallFailed)?;
-/// ```
-///
-/// — or fall back to [`crate::accept`]/[`crate::rollback`] directly when a
-/// computed (non-`'static`) message is needed.
-///
-/// [`hook_errors!`]: crate::hook_errors
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Rollback {
-    msg: &'static [u8],
-    code: i64,
-}
-
-impl Rollback {
-    /// A failed exit with an explicit message and code.
-    #[inline(always)]
-    #[must_use]
-    pub const fn new(msg: &'static [u8], code: i64) -> Self {
-        Self { msg, code }
-    }
-
-    /// A failed exit with an empty message and the given code.
-    #[inline(always)]
-    #[must_use]
-    pub const fn from_code(code: i64) -> Self {
-        Self { msg: b"", code }
-    }
-
-    /// The message this exit hands to the host `rollback` call.
-    #[inline(always)]
-    #[must_use]
-    pub const fn msg(&self) -> &'static [u8] {
-        self.msg
-    }
-
-    /// The code this exit hands to the host `rollback` call.
-    #[inline(always)]
-    #[must_use]
-    pub const fn code(&self) -> i64 {
-        self.code
+exit_kind! {
+    /// A failed exit: the message and code handed to the host `rollback` call,
+    /// returned from a typed entry as `Err(Rollback::new(..))` or produced by
+    /// `?` from a [`hook_errors!`] enum.
+    ///
+    /// Construct with [`Rollback::new`] (an explicit message) or
+    /// [`Rollback::from_code`] (empty message, code only). `?` converts from
+    /// every [`hook_errors!`] enum (empty message, unless the enum declares a
+    /// `=> b"msg"` clause on the failing variant — see [`hook_errors!`]'s doc
+    /// comment). A raw code is constructed with [`Rollback::from_code`] /
+    /// [`Rollback::new`] / `Err(Rollback::from_code(code))` explicitly.
+    ///
+    /// **Deliberately no `From<HookError> for Rollback`.** A Hook API error
+    /// code (`-1..=-45`, `-10024`) is not the hook's own return code; a
+    /// `?`-propagated `HookError` → `Rollback` conversion would publish the
+    /// host's code as the hook's verdict. Convert explicitly at the call site
+    /// instead, discarding the `HookError` and keeping only "some call failed":
+    ///
+    /// ```rust,ignore
+    /// let value = some_hook_api_call().map_err(|_| MyError::SomeCallFailed)?;
+    /// ```
+    ///
+    /// — or fall back to [`crate::accept`]/[`crate::rollback`] directly when a
+    /// computed (non-`'static`) message is needed.
+    ///
+    /// [`hook_errors!`]: crate::hook_errors
+    struct Rollback {
+        /// A failed exit with an explicit message and code.
+        new;
+        /// A failed exit with an empty message and the given code.
+        from_code;
+        /// The message this exit hands to the host `rollback` call.
+        msg;
+        /// The code this exit hands to the host `rollback` call.
+        code;
     }
 }
 
