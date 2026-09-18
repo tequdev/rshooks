@@ -9,7 +9,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::carriers::{EntryDecl, SiDecl, SigParamDecl, resolve_trigger_masks};
-use crate::metadata::{hook_mask, utf8_hex};
+use crate::metadata::{encode_upper_hex, hook_mask, utf8_hex};
 
 /// `hsfOVERRIDE` (vendor/xahaud Enum.h `HookSetFlags`): permits replacing an
 /// existing installed Hook at a declared (non-gap) position.
@@ -296,7 +296,7 @@ fn build_entry_template(
         .with_context(|| format!("entry {} (`{}`)", entry.index, entry.hook_fn))?;
 
     Ok(HookEntryTemplate {
-        create_code: wasm.iter().map(|byte| format!("{byte:02X}")).collect(),
+        create_code: encode_upper_hex(wasm),
         hook_on: masks.hook_on,
         hook_on_incoming: masks.hook_on_incoming,
         hook_on_outgoing: masks.hook_on_outgoing,

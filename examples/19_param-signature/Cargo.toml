@@ -7,11 +7,10 @@ publish.workspace = true
 
 [lib]
 crate-type = ["cdylib"]
-# no_std, no test crate for wasm32v1-none; see examples/README.md.
 test = false
 
 [dependencies]
-rshooks = { path = "../../crates/rshooks", features = [
+rshooks = { workspace = true, features = [
     "host-panic-handler",
     "unstable-param-sig-interface",
 ] }

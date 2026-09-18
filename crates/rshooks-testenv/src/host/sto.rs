@@ -83,11 +83,10 @@
 
 use std::vec::Vec;
 
+use rshooks::txn::codec::sti::STI_ARRAY;
 use rshooks_core::{DOESNT_EXIST, PARSE_ERROR, TOO_BIG, TOO_SMALL};
 
 use crate::emit_walk;
-
-const STI_ARRAY: u32 = 15;
 
 /// `SUB_OFFSET`/`SUB_LENGTH`'s packing (`macro.h`,
 /// `crates/rshooks-core/vendor/xahaud-hook/macro.h:145-146`): offset in the
@@ -233,18 +232,9 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::indexing_slicing)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
 
     use super::*;
-
-    fn sf_sequence(v: u32) -> Vec<u8> {
-        let mut out = vec![0x24]; // (type 2, field 4)
-        out.extend_from_slice(&v.to_be_bytes());
-        out
-    }
-
-    fn sf_flags(v: u32) -> Vec<u8> {
-        let mut out = vec![0x22]; // (type 2, field 2)
-        out.extend_from_slice(&v.to_be_bytes());
-        out
-    }
+    use crate::testutil::nested_object_chain;
+    use crate::testutil::sf_flags_bytes as sf_flags;
+    use crate::testutil::sf_sequence_bytes as sf_sequence;
 
     fn sf_fee(drops: u64) -> Vec<u8> {
         let mut out = vec![0x68]; // (type 6, field 8)
@@ -254,10 +244,10 @@ mod tests {
         out
     }
 
-    const SF_SEQUENCE_CODE: u32 = (2 << 16) + 4;
-    const SF_FLAGS_CODE: u32 = (2 << 16) + 2;
-    const SF_FEE_CODE: u32 = (6 << 16) + 8;
-    const SF_ACCOUNT_CODE: u32 = (8 << 16) + 1;
+    const SF_SEQUENCE_CODE: u32 = rshooks::sfield::sfSequence.code();
+    const SF_FLAGS_CODE: u32 = rshooks::sfield::sfFlags.code();
+    const SF_FEE_CODE: u32 = rshooks::sfield::sfFee.code();
+    const SF_ACCOUNT_CODE: u32 = rshooks::sfield::sfAccount.code();
 
     fn sample() -> Vec<u8> {
         // Flags(2,2) < Sequence(2,4) < Fee(6,8), in canonical order.
@@ -282,19 +272,6 @@ mod tests {
     fn sto_validate_too_short_is_too_small() {
         assert_eq!(sto_validate(&[0x01]), TOO_SMALL);
         assert_eq!(sto_validate(&[]), TOO_SMALL);
-    }
-
-    /// A single field, nested `depth` levels deep (an empty innermost
-    /// object): `depth` copies of the `(type 14, field 2)` header opening
-    /// one level each, followed by `depth` `0xE1` terminators closing them
-    /// back out. Matches real xahaud's `get_stobject_length` recursion-depth
-    /// convention (`HookAPI.cpp:2901`; see also
-    /// `crate::emit_walk::STO_MAX_RECURSION_DEPTH`'s doc comment).
-    fn nested_object_chain(depth: u32) -> Vec<u8> {
-        let depth = depth as usize;
-        let mut out = vec![0xE2u8; depth]; // (type 14, field 2), repeated
-        out.extend(vec![0xE1u8; depth]); // OBJECT_END_MARKER, repeated
-        out
     }
 
     #[test]

@@ -180,45 +180,9 @@
 //! [`crate::api::state::state_u64`] for the big-endian counterpart this
 //! module's typed layer deliberately does not use.
 
-use crate::convert::{FromBytes, ToBytes};
+use crate::convert::{FromBytes, ToBytes, uninit_slice_mut};
 use crate::error::{HookError, Result, res};
 use crate::types::{STATE_KEY_LEN, StateKey};
-
-/// Forms a `&mut [u8]` view over `buf`'s storage without requiring it to be
-/// initialized first — lets [`state_get_encoded`]/[`state_foreign_get_encoded`]
-/// hand the `state`/`state_foreign` host calls a scratch buffer without
-/// zero-initializing it, since the host always fully determines which
-/// prefix of it [`decode_read`] ever reads.
-///
-/// # Safety
-///
-/// The returned slice must only ever be read over the range a prior write
-/// into it actually covered — here, no further than [`decode_read`]'s own
-/// `n = res(code)?` prefix. `decode_read` enforces that bound itself:
-/// `raw.get(..n).ok_or(HookError::TooSmall)?` errors rather than reading
-/// past the buffer if the host ever reports a larger `n` than the buffer
-/// holds. What remains is the FFI trust boundary common to this whole
-/// crate — the host must actually have written the `n` bytes it reports,
-/// since [`crate::api::state::state_raw_code`]/
-/// [`crate::api::state::state_foreign_raw_code`] are `unsafe` `extern` calls
-/// already fully trusted by every other line here.
-///
-/// No bit pattern is invalid for `u8`, so forming the `&mut [u8]` here is
-/// the standard pre-`BorrowedBuf` I/O shape over `MaybeUninit` storage —
-/// only reading through it before it is written would be unsound, a
-/// pattern this crate relies on throughout rather than one the language
-/// unconditionally guarantees.
-#[inline(always)]
-unsafe fn uninit_slice_mut<const N: usize>(buf: &mut core::mem::MaybeUninit<[u8; N]>) -> &mut [u8] {
-    // SAFETY: `buf` is `N` bytes of live, properly aligned storage (a
-    // `MaybeUninit<[u8; N]>` has the same size and alignment as `[u8; N]`).
-    // `u8` has no invalid bit patterns and no padding, so a `&mut [u8]` over
-    // that storage is well-formed the instant it is created, whether or not
-    // the storage has been written to yet — only reading through it before
-    // it is written would be unsound, and this function's own safety
-    // contract puts that burden on the caller.
-    unsafe { core::slice::from_raw_parts_mut(buf.as_mut_ptr().cast::<u8>(), N) }
-}
 
 /// Maximum byte length of any value [`state_get`]/[`state_set_loose`]/
 /// [`state_update_loose`] (and their `_foreign` twins) read or write.
@@ -421,17 +385,11 @@ pub trait TypedStateKey: StateKeyEncode {
 ///
 /// Takes the raw `code` directly — compared against
 /// [`rshooks_core::DOESNT_EXIST`] *before* any [`HookError`] is ever
-/// constructed — rather than an already-decoded `Result<usize>`: matching
-/// one specific [`HookError`] variant out of an already-decoded value forces
-/// the compiler to keep the full ~44-arm [`HookError::from`] decode
-/// resolvable at this call site, and to fold that decode's own block nesting
-/// into the caller's once inlined into a large hook (measured: a 24→70
-/// nesting-depth blowup, over the Hook API's 32-level guard-checker limit,
-/// when tried the other way — see DESIGN.md §5.1's "no specific-variant
-/// decode inside rshooks" principle). `res(code)` is still called on the one
-/// path that needs a full [`HookError`]; its caller only ever propagates
-/// that error onward via `?`, so [`HookError::from`]'s decode optimizes away
-/// there too.
+/// constructed — rather than an already-wrapped `Result<usize>`: the raw
+/// code is already in hand at this call site, so comparing it directly
+/// skips a conversion the comparison does not need. `res(code)` is still
+/// called on the one path that needs a [`HookError`]; its caller only ever
+/// propagates that error onward via `?`.
 ///
 /// `raw` is only ever read over its `..n` prefix (`n = res(code)?`, the
 /// host's own reported write count) — so [`state_get_encoded`]/

@@ -51,7 +51,7 @@
 //! by-value API, and costs a small but measurable amount of extra
 //! worst-case instructions from the added call-graph shape — hence the
 //! two families duplicate the host-call plumbing instead of one calling
-//! the other. `testenv_keylet` (below) is the one piece actually shared
+//! the other. `keylet_intercept` (below) is the one piece actually shared
 //! between them (pure interception-side bookkeeping, no wasm-side cost).
 //! [`keylet_fn`] is the macro that emits both bodies for every type below
 //! that doesn't need type-specific branching (`keylet_skip`'s `Option`
@@ -76,44 +76,119 @@ use rshooks_core::consts::{
     KEYLET_PAYCHAN, KEYLET_QUALITY, KEYLET_SIGNERS, KEYLET_SKIP, KEYLET_TICKET, KEYLET_UNCHECKED,
 };
 
-#[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
-use rshooks_core::backend::KeyletArg;
-
-/// Testenv interception shared by every typed helper below (both families —
-/// see the module doc comment's "`_into` twins" section for why the
-/// by-value and `_into` forms don't call each other but do share this).
-/// Unlike an `_exact`/`_typed` composing helper elsewhere in this crate,
-/// neither `util_keylet_buf` nor `util_keylet` still has real slices by the
-/// time a typed helper calls it, so interception happens here, one level
-/// up, where `account`/`hash`/... are still real references (mirrors
-/// `api::state`'s private `opt_in`/`foreign_target` helpers). The
-/// wasm/no-backend fallback in every typed helper below still calls
-/// `util_keylet_buf`/`util_keylet` unchanged.
-#[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
-#[inline(always)]
-fn testenv_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Option<Result<Keylet>> {
-    rshooks_core::backend::with_backend(|b| b.util_keylet(keylet_type, args))
-        .map(crate::testenv_bridge::keylet_result)
-}
-
-/// Emits a `keylet_xxx`/`keylet_xxx_into` pair: the by-value form testenv-
-/// intercepts then falls through to [`util_keylet_buf`], the `_into` twin
-/// testenv-intercepts then falls through to [`util_keylet`] and writes
-/// through `out` — see the module doc comment's "`_into` twins" section for
-/// why the two bodies don't call each other.
+/// Emits a `keylet_xxx`/`keylet_xxx_into` pair from a bare argument list —
+/// the by-value form testenv-intercepts then falls through to
+/// [`util_keylet_buf`], the `_into` twin testenv-intercepts then falls
+/// through to [`util_keylet`] and writes through `out` (see the module doc
+/// comment's "`_into` twins" section for why the two bodies don't call each
+/// other). Each argument must be `$ident: &$ty` (a pointer/length component,
+/// contributing `KeyletArg::Bytes`/two `u32` slots) or `$ident: u32` (a raw
+/// component, contributing `KeyletArg::Value`/one `u32` slot); the muncher
+/// below pads both the `[KeyletArg; 6]` array and the six-slot call to
+/// `util_keylet`/`util_keylet_buf` out to their fixed width, one recursion
+/// step per real argument, then one step per padding slot.
 macro_rules! keylet_fn {
     (
         $(#[$doc:meta])*
-        fn $name:ident($($arg:ident: $ty:ty),* $(,)?), $into_name:ident => $konst:ident,
-        [$($targ:expr),* $(,)?],
-        ($($slot:expr),* $(,)?) $(,)?
+        fn $name:ident($($args:tt)*), $into_name:ident => $konst:ident $(,)?
     ) => {
-        $(#[$doc])*
+        // The two `[() () () () () ()]` lists are remaining-slot counters,
+        // one `()` per unfilled array slot / per unfilled call slot: `@args`
+        // consumes one from each per real argument (two from the call-slot
+        // counter for a `&$ty` argument), then `@pad_targ`/`@pad_slot`
+        // consume the rest one at a time, appending `KeyletArg::Unused`/`0`.
+        keylet_fn!(@args
+            [$(#[$doc])*] $name $into_name $konst
+            [() () () () () ()] [() () () () () ()]
+            [] [] []
+            $($args)*
+        );
+    };
+
+    // `&$ty` argument: one array slot, two call slots (ptr, len).
+    (@args [$($doc:tt)*] $name:ident $into_name:ident $konst:ident
+        [$_ta:tt $($pad_targ:tt)*] [$_sa:tt $_sb:tt $($pad_slot:tt)*]
+        [$($sig:tt)*] [$($targ:expr),*] [$($slot:expr),*]
+        $arg:ident : & $ty:ty $(, $($rest:tt)*)?
+    ) => {
+        keylet_fn!(@args [$($doc)*] $name $into_name $konst
+            [$($pad_targ)*] [$($pad_slot)*]
+            [$($sig)* $arg: &$ty,]
+            [$($targ,)* KeyletArg::Bytes($arg.as_ref())]
+            [$($slot,)* $arg.as_ptr() as u32, $arg.len() as u32]
+            $($($rest)*)?
+        );
+    };
+
+    // `u32` argument: one array slot, one call slot.
+    (@args [$($doc:tt)*] $name:ident $into_name:ident $konst:ident
+        [$_ta:tt $($pad_targ:tt)*] [$_sa:tt $($pad_slot:tt)*]
+        [$($sig:tt)*] [$($targ:expr),*] [$($slot:expr),*]
+        $arg:ident : u32 $(, $($rest:tt)*)?
+    ) => {
+        keylet_fn!(@args [$($doc)*] $name $into_name $konst
+            [$($pad_targ)*] [$($pad_slot)*]
+            [$($sig)* $arg: u32,]
+            [$($targ,)* KeyletArg::Value($arg)]
+            [$($slot,)* $arg]
+            $($($rest)*)?
+        );
+    };
+
+    // Arguments exhausted: pad the `KeyletArg` array to six.
+    (@args [$($doc:tt)*] $name:ident $into_name:ident $konst:ident
+        [$($pad_targ:tt)*] [$($pad_slot:tt)*]
+        [$($sig:tt)*] [$($targ:expr),*] [$($slot:expr),*]
+    ) => {
+        keylet_fn!(@pad_targ [$($doc)*] $name $into_name $konst
+            [$($pad_targ)*] [$($pad_slot)*]
+            [$($sig)*] [$($targ),*] [$($slot),*]
+        );
+    };
+    (@pad_targ [$($doc:tt)*] $name:ident $into_name:ident $konst:ident
+        [$_h:tt $($pad_targ:tt)*] [$($pad_slot:tt)*]
+        [$($sig:tt)*] [$($targ:expr),*] [$($slot:expr),*]
+    ) => {
+        keylet_fn!(@pad_targ [$($doc)*] $name $into_name $konst
+            [$($pad_targ)*] [$($pad_slot)*]
+            [$($sig)*] [$($targ,)* KeyletArg::Unused] [$($slot),*]
+        );
+    };
+
+    // `KeyletArg` array padded: pad the call's six `u32` slots.
+    (@pad_targ [$($doc:tt)*] $name:ident $into_name:ident $konst:ident
+        [] [$($pad_slot:tt)*]
+        [$($sig:tt)*] [$($targ:expr),*] [$($slot:expr),*]
+    ) => {
+        keylet_fn!(@pad_slot [$($doc)*] $name $into_name $konst
+            [$($pad_slot)*]
+            [$($sig)*] [$($targ),*] [$($slot),*]
+        );
+    };
+    (@pad_slot [$($doc:tt)*] $name:ident $into_name:ident $konst:ident
+        [$_h:tt $($pad_slot:tt)*]
+        [$($sig:tt)*] [$($targ:expr),*] [$($slot:expr),*]
+    ) => {
+        keylet_fn!(@pad_slot [$($doc)*] $name $into_name $konst
+            [$($pad_slot)*]
+            [$($sig)*] [$($targ),*] [$($slot,)* 0]
+        );
+    };
+
+    // Both padded: emit the by-value/`_into` pair.
+    (@pad_slot [$($doc:tt)*] $name:ident $into_name:ident $konst:ident
+        []
+        [$($sig:tt)*] [$($targ:expr),*] [$($slot:expr),*]
+    ) => {
+        $($doc)*
         #[inline(always)]
-        pub fn $name($($arg: $ty),*) -> Result<Keylet> {
+        pub fn $name($($sig)*) -> Result<Keylet> {
             #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
-            if let Some(r) = testenv_keylet($konst, [$($targ),*]) {
-                return r;
+            {
+                use crate::testenv_bridge::{KeyletArg, keylet_intercept};
+                if let Some(r) = keylet_intercept($konst, [$($targ),*]) {
+                    return r;
+                }
             }
             util_keylet_buf($konst, $($slot),*)
         }
@@ -124,10 +199,13 @@ macro_rules! keylet_fn {
             "`] — see the module doc comment's `_into` twins section."
         )]
         #[inline(always)]
-        pub fn $into_name(out: &mut Keylet, $($arg: $ty),*) -> Result<()> {
+        pub fn $into_name(out: &mut Keylet, $($sig)*) -> Result<()> {
             #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
-            if let Some(r) = testenv_keylet($konst, [$($targ),*]) {
-                return r.map(|k| *out = k);
+            {
+                use crate::testenv_bridge::{KeyletArg, keylet_intercept};
+                if let Some(r) = keylet_intercept($konst, [$($targ),*]) {
+                    return r.map(|k| *out = k);
+                }
             }
             let _ = util_keylet(out, $konst, $($slot),*)?;
             Ok(())
@@ -141,15 +219,6 @@ keylet_fn! {
     /// from [`keylet_hook_definition`], which keys a single hook's own,
     /// account-independent definition object).
     fn keylet_hook(account: &AccountId), keylet_hook_into => KEYLET_HOOK,
-    [
-        KeyletArg::Bytes(account.as_ref()),
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-    ],
-    (account.as_ptr() as u32, account.len() as u32, 0, 0, 0, 0),
 }
 
 keylet_fn! {
@@ -161,37 +230,12 @@ keylet_fn! {
     /// what's actually needed — e.g. to pass to [`crate::api::slot::slot_set`]
     /// or another Hook API that takes a keylet.
     fn keylet_hook_state(account: &AccountId, key: &StateKey, namespace: &NameSpace), keylet_hook_state_into => KEYLET_HOOK_STATE,
-    [
-        KeyletArg::Bytes(account.as_ref()),
-        KeyletArg::Bytes(key.as_ref()),
-        KeyletArg::Bytes(namespace.as_ref()),
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-    ],
-    (
-        account.as_ptr() as u32,
-        account.len() as u32,
-        key.as_ptr() as u32,
-        key.len() as u32,
-        namespace.as_ptr() as u32,
-        namespace.len() as u32,
-    ),
 }
 
 keylet_fn! {
     /// `KEYLET_ACCOUNT` (3): the keylet for `account`'s own `AccountRoot`
     /// ledger object.
     fn keylet_account(account: &AccountId), keylet_account_into => KEYLET_ACCOUNT,
-    [
-        KeyletArg::Bytes(account.as_ref()),
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-    ],
-    (account.as_ptr() as u32, account.len() as u32, 0, 0, 0, 0),
 }
 
 keylet_fn! {
@@ -199,15 +243,6 @@ keylet_fn! {
     /// `Amendments` object. Takes no arguments — every component the host
     /// call itself takes must be `0`.
     fn keylet_amendments(), keylet_amendments_into => KEYLET_AMENDMENTS,
-    [
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-    ],
-    (0, 0, 0, 0, 0, 0),
 }
 
 keylet_fn! {
@@ -216,15 +251,18 @@ keylet_fn! {
     /// pattern the protocol uses internally for a handful of derived ledger
     /// objects.
     fn keylet_child(parent: &Hash), keylet_child_into => KEYLET_CHILD,
-    [
-        KeyletArg::Bytes(parent.as_ref()),
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-    ],
-    (parent.as_ptr() as u32, parent.len() as u32, 0, 0, 0, 0),
+}
+
+/// Shared `a`/`b` component pair for `KEYLET_SKIP`: `None` for the current
+/// skip list (the common case, at its fixed well-known index) is `(0, 0)`;
+/// `Some(seq)` for the skip list as of a specific historical ledger sequence
+/// is `(seq, 1)` (the constant `1` flags "historical" to the host call).
+#[inline(always)]
+fn skip_components(ledger_index: Option<u32>) -> (u32, u32) {
+    match ledger_index {
+        Some(seq) => (seq, 1),
+        None => (0, 0),
+    }
 }
 
 /// `KEYLET_SKIP` (6): the keylet for a `SkipList` ledger object.
@@ -233,68 +271,46 @@ keylet_fn! {
 /// specific historical ledger sequence.
 #[inline(always)]
 pub fn keylet_skip(ledger_index: Option<u32>) -> Result<Keylet> {
+    let (a, b) = skip_components(ledger_index);
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
     {
-        let args = match ledger_index {
-            Some(seq) => [
-                KeyletArg::Value(seq),
-                KeyletArg::Value(1),
-                KeyletArg::Unused,
-                KeyletArg::Unused,
-                KeyletArg::Unused,
-                KeyletArg::Unused,
-            ],
-            None => [
-                KeyletArg::Value(0),
-                KeyletArg::Value(0),
-                KeyletArg::Unused,
-                KeyletArg::Unused,
-                KeyletArg::Unused,
-                KeyletArg::Unused,
-            ],
-        };
-        if let Some(r) = testenv_keylet(KEYLET_SKIP, args) {
+        use crate::testenv_bridge::{KeyletArg, keylet_intercept};
+        let args = [
+            KeyletArg::Value(a),
+            KeyletArg::Value(b),
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+        ];
+        if let Some(r) = keylet_intercept(KEYLET_SKIP, args) {
             return r;
         }
     }
-    match ledger_index {
-        Some(seq) => util_keylet_buf(KEYLET_SKIP, seq, 1, 0, 0, 0, 0),
-        None => util_keylet_buf(KEYLET_SKIP, 0, 0, 0, 0, 0, 0),
-    }
+    util_keylet_buf(KEYLET_SKIP, a, b, 0, 0, 0, 0)
 }
 
 /// Out-param twin of [`keylet_skip`] — see the module doc comment's `_into`
 /// twins section.
 #[inline(always)]
 pub fn keylet_skip_into(out: &mut Keylet, ledger_index: Option<u32>) -> Result<()> {
+    let (a, b) = skip_components(ledger_index);
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
     {
-        let args = match ledger_index {
-            Some(seq) => [
-                KeyletArg::Value(seq),
-                KeyletArg::Value(1),
-                KeyletArg::Unused,
-                KeyletArg::Unused,
-                KeyletArg::Unused,
-                KeyletArg::Unused,
-            ],
-            None => [
-                KeyletArg::Value(0),
-                KeyletArg::Value(0),
-                KeyletArg::Unused,
-                KeyletArg::Unused,
-                KeyletArg::Unused,
-                KeyletArg::Unused,
-            ],
-        };
-        if let Some(r) = testenv_keylet(KEYLET_SKIP, args) {
+        use crate::testenv_bridge::{KeyletArg, keylet_intercept};
+        let args = [
+            KeyletArg::Value(a),
+            KeyletArg::Value(b),
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+            KeyletArg::Unused,
+        ];
+        if let Some(r) = keylet_intercept(KEYLET_SKIP, args) {
             return r.map(|k| *out = k);
         }
     }
-    let _ = match ledger_index {
-        Some(seq) => util_keylet(out, KEYLET_SKIP, seq, 1, 0, 0, 0, 0),
-        None => util_keylet(out, KEYLET_SKIP, 0, 0, 0, 0, 0, 0),
-    }?;
+    let _ = util_keylet(out, KEYLET_SKIP, a, b, 0, 0, 0, 0)?;
     Ok(())
 }
 
@@ -303,15 +319,6 @@ keylet_fn! {
     /// object. Takes no arguments — every component the host call itself
     /// takes must be `0`.
     fn keylet_fees(), keylet_fees_into => KEYLET_FEES,
-    [
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-    ],
-    (0, 0, 0, 0, 0, 0),
 }
 
 keylet_fn! {
@@ -319,15 +326,6 @@ keylet_fn! {
     /// `NegativeUNL` object. Takes no arguments — every component the host
     /// call itself takes must be `0`.
     fn keylet_negative_unl(), keylet_negative_unl_into => KEYLET_NEGATIVE_UNL,
-    [
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-    ],
-    (0, 0, 0, 0, 0, 0),
 }
 
 keylet_fn! {
@@ -337,22 +335,6 @@ keylet_fn! {
     /// "side" (the protocol canonicalizes the two accounts internally when
     /// computing the index).
     fn keylet_line(account_a: &AccountId, account_b: &AccountId, currency: &CurrencyCode), keylet_line_into => KEYLET_LINE,
-    [
-        KeyletArg::Bytes(account_a.as_ref()),
-        KeyletArg::Bytes(account_b.as_ref()),
-        KeyletArg::Bytes(currency.as_ref()),
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-    ],
-    (
-        account_a.as_ptr() as u32,
-        account_a.len() as u32,
-        account_b.as_ptr() as u32,
-        account_b.len() as u32,
-        currency.as_ptr() as u32,
-        currency.len() as u32,
-    ),
 }
 
 /// [`keylet_line`] taking an [`IssuedAsset`] in place of separate
@@ -368,15 +350,6 @@ keylet_fn! {
     /// created by the transaction at sequence `seq` (an `OfferCreate`'s own
     /// `Sequence`, or the ticket sequence that authorized it).
     fn keylet_offer(account: &AccountId, seq: u32), keylet_offer_into => KEYLET_OFFER,
-    [
-        KeyletArg::Bytes(account.as_ref()),
-        KeyletArg::Value(seq),
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-    ],
-    (account.as_ptr() as u32, account.len() as u32, seq, 0, 0, 0),
 }
 
 keylet_fn! {
@@ -384,22 +357,6 @@ keylet_fn! {
     /// exchange rate `quality_high`/`quality_low` (the top and bottom 32 bits
     /// of the 64-bit quality value), rooted at the order-book directory `dir`.
     fn keylet_quality(dir: &Keylet, quality_high: u32, quality_low: u32), keylet_quality_into => KEYLET_QUALITY,
-    [
-        KeyletArg::Bytes(dir.as_ref()),
-        KeyletArg::Value(quality_high),
-        KeyletArg::Value(quality_low),
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-    ],
-    (
-        dir.as_ptr() as u32,
-        dir.len() as u32,
-        quality_high,
-        quality_low,
-        0,
-        0,
-    ),
 }
 
 keylet_fn! {
@@ -407,15 +364,6 @@ keylet_fn! {
     /// directory of currently-outstanding emitted transactions. Takes no
     /// arguments — every component the host call itself takes must be `0`.
     fn keylet_emitted_dir(), keylet_emitted_dir_into => KEYLET_EMITTED_DIR,
-    [
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-    ],
-    (0, 0, 0, 0, 0, 0),
 }
 
 keylet_fn! {
@@ -432,67 +380,24 @@ keylet_fn! {
     /// this wrapper's argument marshaling. `examples/13_keylets` does not
     /// exercise this call; see its README's "e2e verification scope" section.
     fn keylet_ticket(account: &AccountId, ticket_seq: u32), keylet_ticket_into => KEYLET_TICKET,
-    [
-        KeyletArg::Bytes(account.as_ref()),
-        KeyletArg::Value(ticket_seq),
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-    ],
-    (account.as_ptr() as u32, account.len() as u32, ticket_seq, 0, 0, 0),
 }
 
 keylet_fn! {
     /// `KEYLET_SIGNERS` (14): the keylet for `account`'s `SignerList` ledger
     /// object.
     fn keylet_signers(account: &AccountId), keylet_signers_into => KEYLET_SIGNERS,
-    [
-        KeyletArg::Bytes(account.as_ref()),
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-    ],
-    (account.as_ptr() as u32, account.len() as u32, 0, 0, 0, 0),
 }
 
 keylet_fn! {
     /// `KEYLET_CHECK` (15): the keylet for `account`'s `Check` ledger object
     /// created by the transaction at sequence `seq`.
     fn keylet_check(account: &AccountId, seq: u32), keylet_check_into => KEYLET_CHECK,
-    [
-        KeyletArg::Bytes(account.as_ref()),
-        KeyletArg::Value(seq),
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-    ],
-    (account.as_ptr() as u32, account.len() as u32, seq, 0, 0, 0),
 }
 
 keylet_fn! {
     /// `KEYLET_DEPOSIT_PREAUTH` (16): the keylet for the `DepositPreauth`
     /// ledger object recording that `owner` has preauthorized `authorized`.
     fn keylet_deposit_preauth(owner: &AccountId, authorized: &AccountId), keylet_deposit_preauth_into => KEYLET_DEPOSIT_PREAUTH,
-    [
-        KeyletArg::Bytes(owner.as_ref()),
-        KeyletArg::Bytes(authorized.as_ref()),
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-    ],
-    (
-        owner.as_ptr() as u32,
-        owner.len() as u32,
-        authorized.as_ptr() as u32,
-        authorized.len() as u32,
-        0,
-        0,
-    ),
 }
 
 keylet_fn! {
@@ -501,30 +406,12 @@ keylet_fn! {
     /// ledger index already known to be correct (e.g. one read back from
     /// another ledger object's own fields), not a *computed* keylet.
     fn keylet_unchecked(hash: &Hash), keylet_unchecked_into => KEYLET_UNCHECKED,
-    [
-        KeyletArg::Bytes(hash.as_ref()),
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-    ],
-    (hash.as_ptr() as u32, hash.len() as u32, 0, 0, 0, 0),
 }
 
 keylet_fn! {
     /// `KEYLET_OWNER_DIR` (18): the keylet for `account`'s owner directory
     /// (the root page listing every ledger object `account` owns).
     fn keylet_owner_dir(account: &AccountId), keylet_owner_dir_into => KEYLET_OWNER_DIR,
-    [
-        KeyletArg::Bytes(account.as_ref()),
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-    ],
-    (account.as_ptr() as u32, account.len() as u32, 0, 0, 0, 0),
 }
 
 keylet_fn! {
@@ -534,59 +421,18 @@ keylet_fn! {
     /// 32-byte ledger index — see [`keylet_owner_dir`]/[`keylet_quality`] for
     /// how to obtain one).
     fn keylet_page(root: &Hash, index_high: u32, index_low: u32), keylet_page_into => KEYLET_PAGE,
-    [
-        KeyletArg::Bytes(root.as_ref()),
-        KeyletArg::Value(index_high),
-        KeyletArg::Value(index_low),
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-    ],
-    (
-        root.as_ptr() as u32,
-        root.len() as u32,
-        index_high,
-        index_low,
-        0,
-        0,
-    ),
 }
 
 keylet_fn! {
     /// `KEYLET_ESCROW` (20): the keylet for `account`'s `Escrow` ledger object
     /// created by the transaction at sequence `seq`.
     fn keylet_escrow(account: &AccountId, seq: u32), keylet_escrow_into => KEYLET_ESCROW,
-    [
-        KeyletArg::Bytes(account.as_ref()),
-        KeyletArg::Value(seq),
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-    ],
-    (account.as_ptr() as u32, account.len() as u32, seq, 0, 0, 0),
 }
 
 keylet_fn! {
     /// `KEYLET_PAYCHAN` (21): the keylet for the `PayChannel` ledger object
     /// from `src` to `dst` created by the transaction at sequence `seq`.
     fn keylet_paychan(src: &AccountId, dst: &AccountId, seq: u32), keylet_paychan_into => KEYLET_PAYCHAN,
-    [
-        KeyletArg::Bytes(src.as_ref()),
-        KeyletArg::Bytes(dst.as_ref()),
-        KeyletArg::Value(seq),
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-    ],
-    (
-        src.as_ptr() as u32,
-        src.len() as u32,
-        dst.as_ptr() as u32,
-        dst.len() as u32,
-        seq,
-        0,
-    ),
 }
 
 keylet_fn! {
@@ -596,30 +442,12 @@ keylet_fn! {
     /// KEYLET_EMITTED`, not `KEYLET_EMITTED_TXN`) — see this module's doc
     /// comment.
     fn keylet_emitted(hash: &Hash), keylet_emitted_into => KEYLET_EMITTED,
-    [
-        KeyletArg::Bytes(hash.as_ref()),
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-    ],
-    (hash.as_ptr() as u32, hash.len() as u32, 0, 0, 0, 0),
 }
 
 keylet_fn! {
     /// `KEYLET_NFT_OFFER` (23): the keylet for `account`'s `NFTokenOffer`
     /// ledger object created by the transaction at sequence `seq`.
     fn keylet_nft_offer(account: &AccountId, seq: u32), keylet_nft_offer_into => KEYLET_NFT_OFFER,
-    [
-        KeyletArg::Bytes(account.as_ref()),
-        KeyletArg::Value(seq),
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-    ],
-    (account.as_ptr() as u32, account.len() as u32, seq, 0, 0, 0),
 }
 
 keylet_fn! {
@@ -629,37 +457,12 @@ keylet_fn! {
     /// distinct from [`keylet_hook`], which keys a specific *account's*
     /// installed hook chain.
     fn keylet_hook_definition(hash: &Hash), keylet_hook_definition_into => KEYLET_HOOK_DEFINITION,
-    [
-        KeyletArg::Bytes(hash.as_ref()),
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-    ],
-    (hash.as_ptr() as u32, hash.len() as u32, 0, 0, 0, 0),
 }
 
 keylet_fn! {
     /// `KEYLET_HOOK_STATE_DIR` (25): the keylet for the directory listing
     /// every hook-state entry `account` has stored under `namespace`.
     fn keylet_hook_state_dir(account: &AccountId, namespace: &NameSpace), keylet_hook_state_dir_into => KEYLET_HOOK_STATE_DIR,
-    [
-        KeyletArg::Bytes(account.as_ref()),
-        KeyletArg::Bytes(namespace.as_ref()),
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-    ],
-    (
-        account.as_ptr() as u32,
-        account.len() as u32,
-        namespace.as_ptr() as u32,
-        namespace.len() as u32,
-        0,
-        0,
-    ),
 }
 
 keylet_fn! {
@@ -668,15 +471,6 @@ keylet_fn! {
     /// indexed by *when* it next fires, not by a per-account sequence
     /// counter, unlike every other `account`-keyed type above).
     fn keylet_cron(account: &AccountId, start_time: u32), keylet_cron_into => KEYLET_CRON,
-    [
-        KeyletArg::Bytes(account.as_ref()),
-        KeyletArg::Value(start_time),
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-        KeyletArg::Unused,
-    ],
-    (account.as_ptr() as u32, account.len() as u32, start_time, 0, 0, 0),
 }
 
 #[cfg(test)]
@@ -684,94 +478,26 @@ mod tests {
     use super::*;
     use crate::error::HookError;
 
+    // One representative `keylet_fn!`-generated pair (`keylet_offer`
+    // exercises both the `&$ty` and `u32` argument kinds) plus the
+    // hand-written `keylet_skip` covers this module's two families; every
+    // other helper shares the same macro expansion and host-call shape.
     #[test]
     fn smoke_not_implemented_on_host() {
         let account = AccountId::zeroed();
-        let account_b = AccountId::zeroed();
-        let hash = Hash::zeroed();
-        let key = StateKey::zeroed();
-        let namespace = NameSpace::zeroed();
-        let currency = CurrencyCode::zeroed();
-        let dir = Keylet::zeroed();
 
-        assert_eq!(keylet_hook(&account), Err(HookError::NotImplemented));
-        assert_eq!(
-            keylet_hook_state(&account, &key, &namespace),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(keylet_account(&account), Err(HookError::NotImplemented));
-        assert_eq!(keylet_amendments(), Err(HookError::NotImplemented));
-        assert_eq!(keylet_child(&hash), Err(HookError::NotImplemented));
+        assert_eq!(keylet_offer(&account, 1), Err(HookError::NotImplemented));
         assert_eq!(keylet_skip(None), Err(HookError::NotImplemented));
         assert_eq!(keylet_skip(Some(1)), Err(HookError::NotImplemented));
-        assert_eq!(keylet_fees(), Err(HookError::NotImplemented));
-        assert_eq!(keylet_negative_unl(), Err(HookError::NotImplemented));
-        assert_eq!(
-            keylet_line(&account, &account_b, &currency),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(keylet_offer(&account, 1), Err(HookError::NotImplemented));
-        assert_eq!(keylet_quality(&dir, 1, 1), Err(HookError::NotImplemented));
-        assert_eq!(keylet_emitted_dir(), Err(HookError::NotImplemented));
-        assert_eq!(keylet_ticket(&account, 1), Err(HookError::NotImplemented));
-        assert_eq!(keylet_signers(&account), Err(HookError::NotImplemented));
-        assert_eq!(keylet_check(&account, 1), Err(HookError::NotImplemented));
-        assert_eq!(
-            keylet_deposit_preauth(&account, &account_b),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(keylet_unchecked(&hash), Err(HookError::NotImplemented));
-        assert_eq!(keylet_owner_dir(&account), Err(HookError::NotImplemented));
-        assert_eq!(keylet_page(&hash, 1, 1), Err(HookError::NotImplemented));
-        assert_eq!(keylet_escrow(&account, 1), Err(HookError::NotImplemented));
-        assert_eq!(
-            keylet_paychan(&account, &account_b, 1),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(keylet_emitted(&hash), Err(HookError::NotImplemented));
-        assert_eq!(
-            keylet_nft_offer(&account, 1),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(
-            keylet_hook_definition(&hash),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(
-            keylet_hook_state_dir(&account, &namespace),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(keylet_cron(&account, 1), Err(HookError::NotImplemented));
     }
+
     #[test]
     fn smoke_into_not_implemented_on_host() {
         let account = AccountId::zeroed();
-        let account_b = AccountId::zeroed();
-        let hash = Hash::zeroed();
-        let key = StateKey::zeroed();
-        let namespace = NameSpace::zeroed();
-        let currency = CurrencyCode::zeroed();
-        let dir = Keylet::zeroed();
         let mut out = Keylet::zeroed();
 
         assert_eq!(
-            keylet_hook_into(&mut out, &account),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(
-            keylet_hook_state_into(&mut out, &account, &key, &namespace),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(
-            keylet_account_into(&mut out, &account),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(
-            keylet_amendments_into(&mut out),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(
-            keylet_child_into(&mut out, &hash),
+            keylet_offer_into(&mut out, &account, 1),
             Err(HookError::NotImplemented)
         );
         assert_eq!(
@@ -780,83 +506,6 @@ mod tests {
         );
         assert_eq!(
             keylet_skip_into(&mut out, Some(1)),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(keylet_fees_into(&mut out), Err(HookError::NotImplemented));
-        assert_eq!(
-            keylet_negative_unl_into(&mut out),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(
-            keylet_line_into(&mut out, &account, &account_b, &currency),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(
-            keylet_offer_into(&mut out, &account, 1),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(
-            keylet_quality_into(&mut out, &dir, 1, 1),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(
-            keylet_emitted_dir_into(&mut out),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(
-            keylet_ticket_into(&mut out, &account, 1),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(
-            keylet_signers_into(&mut out, &account),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(
-            keylet_check_into(&mut out, &account, 1),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(
-            keylet_deposit_preauth_into(&mut out, &account, &account_b),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(
-            keylet_unchecked_into(&mut out, &hash),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(
-            keylet_owner_dir_into(&mut out, &account),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(
-            keylet_page_into(&mut out, &hash, 1, 1),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(
-            keylet_escrow_into(&mut out, &account, 1),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(
-            keylet_paychan_into(&mut out, &account, &account_b, 1),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(
-            keylet_emitted_into(&mut out, &hash),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(
-            keylet_nft_offer_into(&mut out, &account, 1),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(
-            keylet_hook_definition_into(&mut out, &hash),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(
-            keylet_hook_state_dir_into(&mut out, &account, &namespace),
-            Err(HookError::NotImplemented)
-        );
-        assert_eq!(
-            keylet_cron_into(&mut out, &account, 1),
             Err(HookError::NotImplemented)
         );
     }
