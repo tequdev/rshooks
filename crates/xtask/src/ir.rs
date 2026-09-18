@@ -1,17 +1,13 @@
-//! `hook_api.json` intermediate representation.
+//! Hook API intermediate representation.
 //!
 //! [`build`] parses the vendored xahaud `hook/*.h` headers (via
-//! [`crate::parse`]) exactly once into a single serializable [`HookApiSpec`]
-//! tree. `gen_core` round-trips that tree through JSON — serializing it to
-//! `crates/rshooks-core/hook_api.json`, then deserializing it back — before
-//! handing it to the per-file generators in [`crate::codegen`], which never
-//! touch header text or [`crate::parse`] types directly: `hook_api.json` is
-//! the pipeline's real intermediate artifact
-//! (`scripts/sync-vendor.sh` -> parse -> `hook_api.json` -> per-file codegen
-//! -> `rustfmt`), not a documentation side-effect of it.
+//! [`crate::parse`]) exactly once into a single [`HookApiSpec`] tree, which
+//! `gen_core` hands directly to the per-file generators in
+//! [`crate::codegen`]; those never touch header text or [`crate::parse`]
+//! types directly (`scripts/sync-vendor.sh` -> parse -> `HookApiSpec` ->
+//! per-file codegen -> `rustfmt`).
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 
 use crate::parse::{ExternFn, scan_defines, scan_enum_groups, scan_extern_fns};
 
@@ -22,18 +18,18 @@ use crate::parse::{ExternFn, scan_defines, scan_enum_groups, scan_extern_fns};
 pub use crate::parse::{Define as ConstSpec, EnumGroup as ConstGroup};
 
 /// One Hook API function parameter, in declaration order.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ParamSpec {
     /// The parameter's name, verbatim from `extern.h`.
     pub name: String,
     /// The parameter's C type token (e.g. `uint32_t`), verbatim from
-    /// `extern.h` — unmapped, so `hook_api.json` genuinely quotes the header
-    /// rather than a Rust-side reinterpretation of it.
+    /// `extern.h` — unmapped, so this genuinely quotes the header rather
+    /// than a Rust-side reinterpretation of it.
     pub c_type: String,
 }
 
 /// One Hook API host function, from `extern.h`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct FunctionSpec {
     /// The function's name, verbatim from `extern.h`.
     pub name: String,
@@ -49,8 +45,7 @@ pub struct FunctionSpec {
 
 /// The complete Hook API surface, parsed from the vendored headers: every
 /// host function plus every constant family `rshooks-core` translates.
-/// Serialized verbatim as `crates/rshooks-core/hook_api.json`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct HookApiSpec {
     /// Every `extern.h` host function (`_g` plus the 74 Hook API functions),
     /// in header order.
