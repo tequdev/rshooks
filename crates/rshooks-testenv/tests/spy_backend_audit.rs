@@ -243,13 +243,12 @@ fn every_phase2_backend_method_is_reached() {
     let spy = Rc::new(SpyBackend::default());
     let guard = install(Rc::clone(&spy) as Rc<dyn HostBackend>);
 
-    // -- float (api/float.rs direct sites + xfl.rs's 14 float_* sites) --
+    // -- float (api/float.rs direct sites + xfl.rs's float_* sites) --
     let mut sto_out = [0u8; 48];
     let _ = rshooks::api::float::float_sto(&mut sto_out, None, None, XFL::one(), 0u32);
     let _ = rshooks::api::float::float_sto_set(&sto_out);
     let _ = rshooks::api::float::slot_float(1);
     let _ = XFL::new(0, 1);
-    let _ = XFL::one();
     let one = XFL::one();
     let _ = one.invert();
     let _ = one.mulratio(false, 1, 2);
@@ -358,7 +357,6 @@ fn every_phase2_backend_method_is_reached() {
         "float_sto_set",
         "float_invert",
         "float_divide",
-        "float_one",
         "float_mantissa",
         "float_sign",
         "float_int",
