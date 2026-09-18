@@ -1,7 +1,7 @@
 //! Generates `crates/rshooks-core/src/{tts,sfcodes,error,ls_flags}.rs` from
 //! their respective headers' parsed [`ConstSpec`]/[`ConstGroup`]s
-//! (`crates/xtask/src/ir.rs`). One file: each of the four outputs is a
-//! module doc plus one const-rendering call, nothing else.
+//! (`crates/xtask/src/ir.rs`). One file: every output here is a module doc
+//! plus one const-rendering call, nothing else.
 
 use anyhow::Result;
 

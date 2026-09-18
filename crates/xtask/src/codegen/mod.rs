@@ -6,7 +6,7 @@
 pub mod api;
 /// Generates `crates/rshooks-core/src/{tts,sfcodes,error,ls_flags}.rs`: each
 /// is a module doc plus one const-rendering call over its header's parsed
-/// consts, so they share one file instead of four near-empty ones.
+/// consts, sharing one file since none has any logic of its own.
 pub mod const_tables;
 /// Generates `crates/rshooks-core/src/consts.rs` from `hookapi.h`/`macro.h`.
 pub mod consts;

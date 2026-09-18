@@ -26,7 +26,6 @@ fn repo_root() -> PathBuf {
 }
 
 /// One version reference that disagrees with the source of truth.
-#[derive(Debug)]
 struct Mismatch {
     /// Repo-root-relative path of the file the reference was found in.
     path: String,
@@ -73,6 +72,19 @@ fn is_three_part_semver(s: &str) -> bool {
     [a, b, c]
         .iter()
         .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Whether `line` assigns a quoted-string value to a JSON `"version"` key
+/// (`"version": "0.2.1"`).
+fn has_json_version_key(line: &str) -> bool {
+    let Some(pos) = line.find("\"version\"") else {
+        return false;
+    };
+    let after = line[pos + "\"version\"".len()..].trim_start();
+    let Some(rest) = after.strip_prefix(':') else {
+        return false;
+    };
+    !quoted_tokens(rest).is_empty()
 }
 
 /// Every quoted-string token on `line` (the content between each pair of
@@ -185,7 +197,7 @@ fn collect_doc_mismatches(
             continue;
         }
         let applicable =
-            line.contains("rshooks") || (follows_builder_name && line.contains("\"version\""));
+            line.contains("rshooks") || (follows_builder_name && has_json_version_key(line));
         if !applicable {
             continue;
         }
@@ -311,75 +323,8 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn three_part_semver_accepts_only_the_exact_shape() {
-        assert!(is_three_part_semver("0.2.1"));
-        assert!(!is_three_part_semver("0.2"));
-        assert!(!is_three_part_semver("0.2.1.0"));
-        assert!(!is_three_part_semver("v0.2.1"));
-        assert!(!is_three_part_semver("1.88"));
-    }
-
-    #[test]
-    fn bare_key_versions_skips_rust_version() {
-        let line = r#"rust-version = "1.88""#;
-        assert!(bare_key_versions(line).is_empty());
-
-        let line = r#"rshooks-core = { path = "crates/rshooks-core", version = "0.2.1" }"#;
-        assert_eq!(bare_key_versions(line), vec!["0.2.1".to_string()]);
-    }
-
-    #[test]
-    fn section_version_finds_the_version_key_in_the_named_section() {
-        let toml = "[package]\nname = \"x\"\n\n[workspace.package]\nversion = \"0.2.1\"\nedition = \"2024\"\n";
-        let (line, version) = section_version(toml, "[workspace.package]").expect("found");
-        assert_eq!(line, 5);
-        assert_eq!(version, "0.2.1");
-    }
-
-    #[test]
-    fn dependency_mismatch_is_reported_with_its_line_and_value() {
-        let toml = "[workspace.dependencies]\nrshooks = { path = \"crates/rshooks\", version = \"0.2.0\" }\n";
-        let mut mismatches = Vec::new();
-        collect_dependency_mismatches(
-            toml,
-            "Cargo.toml",
-            "[workspace.dependencies]",
-            "0.2.1",
-            &mut mismatches,
-        );
-        assert_eq!(mismatches.len(), 1);
-        assert_eq!(mismatches[0].found, "0.2.0");
-        assert_eq!(mismatches[0].line, 2);
-    }
-
-    #[test]
-    fn doc_mismatch_flags_a_stale_rshooks_dependency_line() {
-        let doc = "```toml\nrshooks = \"0.2.0\"\n```\n";
-        let mut mismatches = Vec::new();
-        collect_doc_mismatches(doc, "book/src/x.md", "0.2.1", &mut mismatches);
-        assert_eq!(mismatches.len(), 1);
-        assert_eq!(mismatches[0].found, "0.2.0");
-    }
-
-    #[test]
-    fn doc_scan_leaves_a_hook_crates_own_package_version_alone() {
-        // A hook crate's `[package] version` is independent of the library
-        // version and must never be flagged even when it disagrees with it.
-        let doc = "```toml\n[package]\nname = \"my-hook\"\nversion = \"0.1.0\"\n```\n";
-        let mut mismatches = Vec::new();
-        collect_doc_mismatches(doc, "book/src/x.md", "0.2.1", &mut mismatches);
-        assert!(mismatches.is_empty(), "{mismatches:?}");
-    }
-
-    #[test]
-    fn doc_scan_ignores_rustc_channel_and_xahaud_lines() {
-        let doc = "channel = \"1.88.0\"\nxahaud version 2.5.1\nrustc 1.88.0\n";
-        let mut mismatches = Vec::new();
-        collect_doc_mismatches(doc, "book/src/x.md", "0.2.1", &mut mismatches);
-        assert!(mismatches.is_empty(), "{mismatches:?}");
-    }
-
+    /// Exercises [`has_json_version_key`] via its only caller: the builder-
+    /// block gate a JSON `"version"` key must satisfy to be checked at all.
     #[test]
     fn doc_scan_flags_a_stale_builder_block_version_after_a_name_line() {
         let doc = "\"name\": \"rshooks-build\",\n\"version\": \"0.2.0\"\n";

@@ -14,8 +14,8 @@
 //! parameterized is per-type knowledge upstream's format macros do not
 //! encode, so it is not generated.
 //!
-//! Presence and value-type rules are [`crate::views::tx`]'s, unchanged. A
-//! name that is both a transaction type and a ledger entry type
+//! Presence, value-type and slot-lifetime rules are [`crate::views::tx`]'s,
+//! unchanged. A name that is both a transaction type and a ledger entry type
 //! (`DepositPreauth`) is two different structs in two different modules.
 //!
 //! The fields every ledger entry carries (`sfLedgerEntryType`, `sfFlags`, …)
