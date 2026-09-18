@@ -85,10 +85,10 @@ let tag: Option<u32> = payment.destination_tag()?;  // soeOPTIONAL -> Result<Opt
 A required field missing from a well-formed object is
 `HookError::DoesntExist`; an optional or default-valued field reads as
 `Ok(None)` when absent — never confused with a read failure, and decided on
-the host's raw return code rather than on a decoded error variant (kept off
-the inlining-heavy `HookError::from` path the same way `otxn_field_typed`
-is — see [Reading the Originating Transaction](otxn.md)'s "Decoding a raw
-field" section for the general shape of that concern). `soeDEFAULT` fields
+the host's raw return code rather than on a constructed `HookError` (the
+same shape `otxn_field_typed` uses — see
+[Reading the Originating Transaction](otxn.md)'s "Decoding a raw field"
+section for the general shape of that concern). `soeDEFAULT` fields
 read the same way as `soeOPTIONAL`: the format only records that the field
 may be omitted, never what a hook should substitute, so supplying a default
 is left to the hook.
@@ -165,9 +165,7 @@ and is measurably *not*: on this workspace's `opt-level = 3` profile,
 for `me < asset.issuer` (`buf_cmp_20`), because a host call is one
 instruction in the worst-case count while `buf_cmp_20` inlines a
 three-stage comparison ladder. "Fewer host calls" and "fewer instructions"
-are different objectives, and only the second is metered — see the
-example's README ("Fewer host calls is not the same as fewer instructions")
-for the full measurement.
+are different objectives, and only the second is metered.
 
 ## Cost
 

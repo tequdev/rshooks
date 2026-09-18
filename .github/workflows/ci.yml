@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
   # Every five days: GitHub evicts Actions caches unused for 7 days, and a
   # pull request can only restore caches saved on main, so an idle main
   # would leave every new PR rebuilding Binaryen (wasm-opt-sys) from

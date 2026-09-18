@@ -4,8 +4,7 @@
 //!
 //! Every function here is ported against `Xahau/xahaud`, branch `dev`,
 //! `src/xrpld/app/hook/detail/HookAPI.cpp`/`applyHook.cpp`; line numbers are
-//! cited per function below. One structural decision governs the whole
-//! module, stated once here rather than per function:
+//! cited per function below.
 //!
 //! # Slot content = "value payload", exactly what `slot()` itself returns
 //!

@@ -74,6 +74,19 @@ fn is_three_part_semver(s: &str) -> bool {
         .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
 }
 
+/// Whether `line` assigns a quoted-string value to a JSON `"version"` key
+/// (`"version": "0.2.1"`).
+fn has_json_version_key(line: &str) -> bool {
+    let Some(pos) = line.find("\"version\"") else {
+        return false;
+    };
+    let after = line[pos + "\"version\"".len()..].trim_start();
+    let Some(rest) = after.strip_prefix(':') else {
+        return false;
+    };
+    !quoted_tokens(rest).is_empty()
+}
+
 /// Every quoted-string token on `line` (the content between each pair of
 /// `"` characters), in order.
 fn quoted_tokens(line: &str) -> Vec<&str> {
@@ -105,24 +118,6 @@ fn bare_key_versions(line: &str) -> Vec<String> {
             {
                 out.push((*v).to_string());
             }
-        }
-        i = end;
-    }
-    out
-}
-
-/// Every value assigned to a JSON `"version": "..."` key on `line`.
-fn json_key_versions(line: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut i = 0;
-    while let Some(pos) = line[i..].find("\"version\"") {
-        let start = i + pos;
-        let end = start + "\"version\"".len();
-        let after = line[end..].trim_start();
-        if let Some(rest) = after.strip_prefix(':')
-            && let Some(v) = quoted_tokens(rest).first()
-        {
-            out.push((*v).to_string());
         }
         i = end;
     }
@@ -201,8 +196,8 @@ fn collect_doc_mismatches(
         if line.contains("rustc") || line.contains("channel") || line.contains("xahaud") {
             continue;
         }
-        let applicable = line.contains("rshooks")
-            || (follows_builder_name && !json_key_versions(line).is_empty());
+        let applicable =
+            line.contains("rshooks") || (follows_builder_name && has_json_version_key(line));
         if !applicable {
             continue;
         }
@@ -318,4 +313,24 @@ pub fn run_check() -> Result<()> {
         "check-versions: {} version reference(s) do not match {source_version}",
         mismatches.len()
     );
+}
+
+#[cfg(test)]
+mod tests {
+    //! Test code is exempt from the workspace's panic-freedom lints
+    //! (`docs/DESIGN.md` §8).
+    #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
+    use super::*;
+
+    /// Exercises [`has_json_version_key`] via its only caller: the builder-
+    /// block gate a JSON `"version"` key must satisfy to be checked at all.
+    #[test]
+    fn doc_scan_flags_a_stale_builder_block_version_after_a_name_line() {
+        let doc = "\"name\": \"rshooks-build\",\n\"version\": \"0.2.0\"\n";
+        let mut mismatches = Vec::new();
+        collect_doc_mismatches(doc, "book/src/x.md", "0.2.1", &mut mismatches);
+        assert_eq!(mismatches.len(), 1);
+        assert_eq!(mismatches[0].found, "0.2.0");
+    }
 }

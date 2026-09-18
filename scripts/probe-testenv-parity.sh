@@ -97,9 +97,8 @@ print(d["WCE"]["hook"], d["WCE"]["cbak"])
 
 nesting_of() {
   # max_nesting_depth is not in the metadata sidecar (it has no such
-  # field); it is computed by `rshooks check` at validation time, so this
-  # runs check and parses its "max nesting depth: N" line.
-  "$BIN" check "$1" | sed -n 's/^max nesting depth: //p'
+  # field); it is computed by `rshooks check` at validation time.
+  "$BIN" check --json "$1" | python3 -c 'import json, sys; print(json.load(sys.stdin)["max_nesting_depth"])'
 }
 
 FAILED=0

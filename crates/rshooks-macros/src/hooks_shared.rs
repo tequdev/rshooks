@@ -9,9 +9,95 @@
 //! and angle-bracket generics (`State<V>`), neither of which the derives
 //! ever need to recognize.
 
-use proc_macro::{Spacing, Span, TokenStream, TokenTree};
+use proc_macro::{Delimiter, Group, Spacing, Span, TokenStream, TokenTree};
 
 use crate::err;
+
+/// Scans zero or more leading `#[...]` attributes starting at
+/// `tokens[start]` — each `#` `Punct` immediately followed by its
+/// bracketed group, collected verbatim with no classification — returning
+/// their tokens and the index just past them. `malformed_msg` names the
+/// item a lone `#` not followed by a `[...]` group precedes (`#[hooks]`'s
+/// own leading attributes, on a struct or an impl).
+pub(crate) fn scan_attrs(
+    tokens: &[TokenTree],
+    start: usize,
+    malformed_msg: &str,
+) -> Result<(Vec<TokenTree>, usize), TokenStream> {
+    let mut attrs = Vec::new();
+    let mut i = start;
+    while let Some(tt) = tokens.get(i) {
+        if !is_punct(tt, '#') {
+            break;
+        }
+        attrs.push(tt.clone());
+        match tokens.get(i.wrapping_add(1)) {
+            Some(g @ TokenTree::Group(group)) if group.delimiter() == Delimiter::Bracket => {
+                attrs.push(g.clone());
+            }
+            _ => return Err(err(Span::call_site(), malformed_msg)),
+        }
+        i = i.wrapping_add(2);
+    }
+    Ok((attrs, i))
+}
+
+/// Scans an optional leading `pub`/`pub(..)` visibility starting at
+/// `tokens[start]`, returning its tokens (empty if absent) and the index
+/// just past it.
+pub(crate) fn scan_vis(tokens: &[TokenTree], start: usize) -> (Vec<TokenTree>, usize) {
+    let mut vis = Vec::new();
+    let mut i = start;
+    if let Some(tt @ TokenTree::Ident(id)) = tokens.get(i)
+        && id.to_string() == "pub"
+    {
+        vis.push(tt.clone());
+        i = i.wrapping_add(1);
+        if let Some(g @ TokenTree::Group(group)) = tokens.get(i)
+            && group.delimiter() == Delimiter::Parenthesis
+        {
+            vis.push(g.clone());
+            i = i.wrapping_add(1);
+        }
+    }
+    (vis, i)
+}
+
+/// Recursively walks `input`, trying `try_replace` at every remaining
+/// position; a `Some((replacement, consumed))` splices `replacement` in and
+/// skips `consumed` input tokens, otherwise the current token is kept
+/// (recursing into a [`proc_macro::Group`]'s own stream, with its delimiter
+/// and span preserved) and the walk advances by one. Shared by every
+/// marker-splicing macro (`paste!`'s `[< .. >]` and
+/// `__txn_template_index_elements!`'s `@ ELEMS`), which differ only in what
+/// counts as a marker and how many tokens it spans.
+pub(crate) fn map_tokens(
+    input: TokenStream,
+    try_replace: &impl Fn(&[TokenTree]) -> Option<(TokenStream, usize)>,
+) -> TokenStream {
+    let tokens: Vec<TokenTree> = input.into_iter().collect();
+    let mut out = TokenStream::new();
+    let mut i = 0usize;
+    while let Some(rest) = tokens.get(i..).filter(|rest| !rest.is_empty()) {
+        if let Some((replacement, consumed)) = try_replace(rest) {
+            out.extend(replacement);
+            i = i.wrapping_add(consumed);
+            continue;
+        }
+        match rest.first() {
+            Some(TokenTree::Group(group)) => {
+                let mut rewritten =
+                    Group::new(group.delimiter(), map_tokens(group.stream(), try_replace));
+                rewritten.set_span(group.span());
+                out.extend([TokenTree::Group(rewritten)]);
+            }
+            Some(other) => out.extend([other.clone()]),
+            None => {}
+        }
+        i = i.wrapping_add(1);
+    }
+    out
+}
 
 /// Whether `tt` is a bare `Punct` token spelled `ch`.
 pub(crate) fn is_punct(tt: &TokenTree, ch: char) -> bool {

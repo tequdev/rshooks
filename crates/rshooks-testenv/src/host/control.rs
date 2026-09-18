@@ -1,8 +1,6 @@
 //! `hook_again`/`hook_skip`/`hook_param_set` semantics (P2-E —
 //! `.claude/design/TESTENV_PHASE2_DESIGN.md` §4 "control leftovers", stage
-//! plan §7). `etxn::prepare` and `trace_float` are pure/otxn-adjacent rather
-//! than control-flow, and live in `crate::backend`'s own `impl HostBackend
-//! for Backend` block directly, not here.
+//! plan §7).
 //!
 //! Ported against `Xahau/xahaud`, branch `dev`,
 //! `src/xrpld/app/hook/detail/HookAPI.cpp` (line numbers cited per function
@@ -13,10 +11,8 @@
 //! # Commit timing: staged in [`InvocationContext`], merged into [`crate::world::World`] only on `accept!`
 //!
 //! All three functions here write into `InvocationContext` fields, never
-//! directly into `World` — `crate::env::TestEnv`'s `run_entry` helper is the
-//! only place that merges those fields into the persistent `World`, and
-//! only in the `ExitType::Accept` arm (mirroring `pending_emissions` /
-//! `committed_emissions`'s stage-then-merge pattern). This matches
+//! directly into `World` — `crate::env::TestEnv`'s `run_entry` only merges
+//! those fields into `World` in the `ExitType::Accept` arm, matching
 //! upstream's own commit gate: `Transactor::executeHookChain`
 //! (`src/xrpld/app/tx/detail/Transactor.cpp:1425-1468`) only reaches its
 //! "gather skips" / "gather overrides" step when `hookResult.exitType ==
@@ -25,12 +21,10 @@
 //! `hook_again`'s real commit path is more involved (its
 //! `executeAgainAsWeak` flag is gathered by the outer `Transactor::operator()`
 //! irrespective of the *individual* hook's own exit type — `Transactor.cpp:2020-2030`
-//! — since it drives a genuinely separate later weak re-execution this
-//! harness does not model at all); tying it to the same accept-only commit
-//! as `hook_skip`/`hook_param_set` here is a deliberate simplification for
-//! the explicit-invocation model (no chain, no weak re-execution), chosen
-//! for consistency with the other two and with `TestEnv::hook_again_requested()`'s
-//! own "accessor reads the last **committed** invocation's flag" contract.
+//! — since it drives a separate later weak re-execution this harness does
+//! not model at all); tying it to the same accept-only commit as
+//! `hook_skip`/`hook_param_set` here is a deliberate simplification for the
+//! explicit-invocation model (no chain, no weak re-execution).
 //!
 //! # No chain model
 //!

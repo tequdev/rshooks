@@ -3,65 +3,11 @@
 A behavior-equivalent Rust port of xahaud's genesis governance/reward
 chain — [`hook/genesis/govern.c`](https://raw.githubusercontent.com/Xahau/xahaud/dev/hook/genesis/govern.c)
 and [`hook/genesis/reward.c`](https://raw.githubusercontent.com/Xahau/xahaud/dev/hook/genesis/reward.c)
-— declared as **one crate, two hooks**, via the `#[hooks]` multi-hook
-chain model (`docs/MULTI_HOOK_STRUCT_DESIGN.md`). One shared state layout
-backs both hooks, so `govern` and `reward` cannot drift out of sync with
-each other.
-
-## The chain model: one crate, two artifacts
-
-On the real Xahau genesis account, `govern` and `reward` are installed
-side by side, in that order: `Hooks[0] = govern`, `Hooks[1] = reward`.
-Governance sets the reward rate/delay and the L1 seat table; reward reads
-both to compute and distribute `ClaimReward` payouts. This crate declares
-both as one `#[hooks]` struct plus one `#[hooks]` impl:
-
-```rust
-#[hooks(description = "20-seat L1/L2 governance and reward chain")]
-pub struct Governance {
-    #[state(key = b"MC")]
-    member_count: State<u8>,
-    #[state(key = b"RR")]
-    reward_rate: State<XFL>,
-    // ...
-}
-
-#[hooks]
-impl Governance {
-    #[hook(0, on = [Invoke], can_emit = [Invoke, SetHook])]
-    fn govern(&self) -> HookResult { /* ... */ }
-
-    #[hook(1, on = [Invoke, ClaimReward], can_emit = [GenesisMint])]
-    fn reward(&self) -> HookResult { /* ... */ }
-}
-```
-
-`rshooks build` compiles this crate **twice** — once per declared `#[hook]`
-index, via `--cfg rshooks_entry="<i>"` — producing one independent wasm
-binary per chain position, each containing only the code reachable from
-its own entry point (govern's code never appears in `1.reward.wasm`, and
-vice versa). A single build command therefore produces everything needed
-to install both hooks:
-
-```
-rshooks build --manifest-path examples/80_governance/Cargo.toml --out examples/80_governance/out
-```
-
-writes, under `out/current/`:
-
-| File | Contents |
-|---|---|
-| `0.govern.wasm` | governance hook, position 0 |
-| `0.govern.metadata.json` | its sidecar: HookOn/HookCanEmit masks, HookName, HookHash, WCE, and the shared `"chain"` schema |
-| `1.reward.wasm` | reward hook, position 1 |
-| `1.reward.metadata.json` | its sidecar, same shape |
-| `sethook.template.json` | a `SetHook` template covering **both** positions in one `Hooks` array (`Account`/`HookNamespace` left as placeholders) |
-| `sethook.template.meta.json` | generation info: hook hashes, declared/gap positions, required amendments |
-
-Current size, WCE, and max nesting for each artifact live in
-[`metrics.json`](./metrics.json) (refreshed by
-`mise run record-example-metrics`). Both stay well under the 65,535-byte
-SetHook `CreateCode` limit.
+— declared as one crate, two hooks, via the `#[hooks]` multi-hook chain
+model. See [Hook Chains](../../book/src/concepts/chains.md) for the model
+itself (this crate is its worked example, quoted directly there) and its
+["A real limit" section](../../book/src/concepts/chains.md#a-real-limit-typed-accessor-density-inside-one-entry)
+for the typed-accessor density constraint this crate hit and worked around.
 
 ## Shared declaration: what's actually consolidated
 
@@ -79,72 +25,52 @@ just "live on the same account":
 `"RR"`/`"RD"` (and the seat/member key shapes) are declared once, on
 `Governance`, and both `#[hook]` entries reference the same fields — so
 `govern` and `reward` cannot silently drift apart on these keys.
+`member_count` and every vote/vote-count entry remain governance-only.
+Vote/vote-count keys (`src/keys.rs`) stay outside the declarative
+`#[state(..)]` field system entirely — see that module's own doc comment
+for the mechanics.
 
-`member_count` and every vote/vote-count entry remain governance-only and
-are not part of the shared story. Vote/vote-count keys in particular
-(`src/keys.rs`) stay outside the declarative `#[state(..)]` field system
-entirely — see the next section for why, and `src/keys.rs`'s own module
-doc comment for the mechanics.
+## Typed accessors at high call-site density
 
-## A build-budget finding: typed accessors at high call-site density
+`Governance`'s fields are fully declared, but the hot, call-site-dense
+code paths (`setup`, `action_seat`, `push_l1_seat_entries`, and `govern`'s
+own top-level reads) read/write the identical key/name bytes through the
+raw `state`/`state_set`/`otxn_param`/`hook_param_exact` API instead of
+those fields' typed accessors: at this crate's call-site density, the
+typed accessors' force-inlined nesting pushed `govern`'s setup path past
+the Hook API's 32-level structural limit, and reverting just those dense
+call sites to the raw API (same declared key/name bytes, so the schema
+stays centrally documented) is what brought it back under budget. Splitting
+the same reads into separate `#[inline(never)]` helpers was tried first
+and made no difference — the nesting cost comes from call-site density in
+whichever function ends up holding them after the build pipeline's
+force-inlining, not from which function they started in. See the [book's
+"A real limit"
+section](../../book/src/concepts/chains.md#a-real-limit-typed-accessor-density-inside-one-entry)
+for the general mechanism and `metrics.json` for the current numbers.
+`reward_rate`/`reward_delay` are a partial exception: `reward` uses the
+typed accessors at its own two (read-only) call sites; governance's setup
+still writes the same keys through raw `state_set`, for the same
+call-site-density reason as `setup`'s other raw calls.
 
-`Governance`'s fields are fully declared (all five state entries, all four
-hook parameters, both otxn parameters) — the struct is a complete,
-type-checked schema of this chain's ABI, and its generated chain-carrier
-JSON records that schema for tooling. **But the hot, call-site-dense code
-paths in this crate (`setup`, `action_seat`, `push_l1_seat_entries`, and
-`govern`'s own top-level reads) do not call those fields' `.get()`/
-`.set()`/`.at()` accessors** — they read/write the identical key/name
-bytes through the raw `state`/`state_set`/`otxn_param`/`hook_param_exact`
-API instead.
-`reward_rate`/`reward_delay` are a partial exception: `reward` *does* use
-the typed `.state.reward_rate`/`.state.reward_delay` accessors, at their
-only 2 call sites — both reads, `self.state.reward_rate`/
-`self.state.reward_delay` under
-`reward`'s `&self` receiver. Governance's own setup still writes the same
-`"RR"`/`"RD"` keys through raw `state_set` (`setup_initial_reward_rate_and_delay`
-in `src/lib.rs`), for the same call-site-density reason as `setup`'s other
-raw calls above — `govern`'s dense paths have no field accesses of their
-own (see above), so its mandatory `&self` receiver goes unused there.
-
-This is a real, measured build constraint, not a style preference. Every
-layer of the typed accessor chain (`State::at` -> `StateEntry::get` ->
-`state::state_get` -> `decode_read` -> `res`, all `#[inline(always)]`) is
-zero-cost *at the Rust level*, but `rshooks-build`'s Guard-type pipeline
-force-inlines every reachable function into one `hook()` body
-regardless of Rust-level `#[inline(never)]` (`docs/DESIGN.md` §6.2b) —
-`#[inline(never)]` only isolates a function's *own* internal branch
-structure from a caller's during LLVM's stackifier pass; it does not
-exempt that function from the pipeline's later mechanical inlining, nor
-does it help when the *same* function already contains many sequential
-typed-accessor call sites (the isolation doesn't reduce nesting *within*
-that one function). Measured on this crate: with `setup`/`action_seat`/
-`push_l1_seat_entries`'s combined ~15 typed-accessor call sites, the
-`govern` entry's post-unnest nesting was **63** (limit: 32) — even after
-extracting `govern`'s own four top-level reads into separate
-`#[inline(never)]` helpers, which made no measurable difference, confirming
-the cost comes from call-site density *within* whichever function holds
-them, not cross-function fusion. Reverting those dense paths to raw calls
-(this crate's current state) brought both entries back under the 32-level
-limit — current values live in [`metrics.json`](./metrics.json).
-
-**This is flagged as a candidate `rshooks`/`decl.rs` finding** for the
-orchestrator/library maintainers: the declarative `#[state(..)]`/
-`#[hook_param(..)]`/`#[otxn_param(..)]` field API, in its current
-implementation, does not appear practical to use at high call-site density
-in a single Guard-type hook — every example migrated so
-far (`01`/`02`/`03`/`12`) has few enough declared-field accesses per hook
-to stay comfortably under budget; `governance` is the first crate dense
-enough to hit the ceiling. A hook with `governance`'s call-site density
-either needs to keep using raw calls at those sites (as this crate now
-does) or the library needs a shallower/flatter accessor implementation.
-
-## Behavior equivalence and differences from govern.c/reward.c
+## Behavior equivalence
 
 This crate's `"MC"`-state presence check precisely matches govern.c's own
 `== DOESNT_EXIST` check: `Err(_)` from `state_u64` selects the setup path,
 with no externally observable difference, since every other
 `state_u64("MC")` failure is already unreachable for a well-formed table.
+
+## Build
+
+```sh
+rshooks build --manifest-path examples/80_governance/Cargo.toml --out examples/80_governance/out
+```
+
+Produces `0.govern.wasm`/`1.reward.wasm` plus their sidecars and one
+`sethook.template.json` covering both positions — see [Hook
+Chains](../../book/src/concepts/chains.md#what-a-chain-build-produces) for
+the exact output shape. Current size, WCE, and max nesting for each
+artifact live in [`metrics.json`](./metrics.json).
 
 ## Testing
 

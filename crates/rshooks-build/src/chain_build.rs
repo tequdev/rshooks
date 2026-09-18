@@ -8,7 +8,6 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result, bail};
-use serde_json::Value;
 
 use crate::carriers::{self, EntryDecl};
 use crate::metadata::{self, hook_hash};
@@ -44,7 +43,7 @@ pub fn run(args: &ChainBuildArgs) -> Result<()> {
         optimize: !args.no_optimize,
     };
 
-    let cargo = find_cargo()?;
+    let cargo = find_cargo();
     let plan = BuildPlan::resolve(
         &cargo,
         args.manifest_path.as_deref(),
@@ -315,6 +314,55 @@ fn emit_truth_table_warnings(
     warnings
 }
 
+/// The fields of `cargo metadata --format-version 1` output that
+/// `BuildPlan::resolve` needs; everything else is ignored.
+#[derive(serde::Deserialize)]
+struct CargoMetadata {
+    workspace_root: String,
+    target_directory: String,
+    packages: Vec<CargoPackage>,
+    resolve: Option<CargoResolve>,
+}
+
+#[derive(serde::Deserialize)]
+struct CargoResolve {
+    root: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct CargoPackage {
+    id: String,
+    name: String,
+    version: String,
+    targets: Vec<CargoTarget>,
+}
+
+#[derive(serde::Deserialize)]
+struct CargoTarget {
+    name: String,
+    kind: Vec<String>,
+}
+
+/// One `cargo build --message-format=json` line. Fields are optional
+/// because they vary by `reason` (e.g. `"build-finished"` has neither);
+/// `select_wasm_artifact` only reads them after checking `reason`.
+#[derive(serde::Deserialize)]
+struct CargoMessage {
+    reason: String,
+    #[serde(default)]
+    package_id: Option<String>,
+    #[serde(default)]
+    target: Option<CargoMessageTarget>,
+    #[serde(default)]
+    filenames: Option<Vec<String>>,
+}
+
+#[derive(serde::Deserialize)]
+struct CargoMessageTarget {
+    name: String,
+    kind: Vec<String>,
+}
+
 /// The invariant inputs to every `cargo`/`rustc` invocation in one build
 /// (discovery and all per-index selected builds): resolved package
 /// identity and workspace paths.
@@ -331,36 +379,22 @@ struct BuildPlan {
 
 impl BuildPlan {
     fn resolve(cargo: &Path, manifest_path: Option<&Path>, package: Option<&str>) -> Result<Self> {
-        let metadata_json = run_cargo_metadata(cargo, manifest_path)?;
-
-        let workspace_root = metadata_json
-            .get("workspace_root")
-            .and_then(Value::as_str)
-            .context("`cargo metadata` output missing `workspace_root`")?;
-        let target_directory = metadata_json
-            .get("target_directory")
-            .and_then(Value::as_str)
-            .context("`cargo metadata` output missing `target_directory`")?;
-        let packages = metadata_json
-            .get("packages")
-            .and_then(Value::as_array)
-            .context("`cargo metadata` output missing `packages`")?;
+        let metadata = run_cargo_metadata(cargo, manifest_path)?;
 
         let package_value = if let Some(name) = package {
-            packages
+            metadata
+                .packages
                 .iter()
-                .find(|p| p.get("name").and_then(Value::as_str) == Some(name))
+                .find(|p| p.name == name)
                 .with_context(|| format!("package `{name}` not found in `cargo metadata` output"))?
         } else {
-            let root_id = metadata_json
-                .get("resolve")
-                .and_then(|r| r.get("root"))
-                .and_then(Value::as_str);
+            let root_id = metadata.resolve.as_ref().and_then(|r| r.root.as_deref());
             match root_id {
-                Some(id) => packages
-                    .iter()
-                    .find(|p| p.get("id").and_then(Value::as_str) == Some(id))
-                    .context("`cargo metadata` `resolve.root` package not found in `packages`")?,
+                Some(id) => {
+                    metadata.packages.iter().find(|p| p.id == id).context(
+                        "`cargo metadata` `resolve.root` package not found in `packages`",
+                    )?
+                }
                 None => bail!(
                     "could not determine the target package (the workspace has multiple members \
                      or a virtual manifest root); pass `-p <package>`"
@@ -368,40 +402,19 @@ impl BuildPlan {
             }
         };
 
-        let package_id = package_value
-            .get("id")
-            .and_then(Value::as_str)
-            .context("package entry missing `id`")?
-            .to_string();
-        let package_name = package_value
-            .get("name")
-            .and_then(Value::as_str)
-            .context("package entry missing `name`")?
-            .to_string();
-        let package_version = package_value
-            .get("version")
-            .and_then(Value::as_str)
-            .context("package entry missing `version`")?
-            .to_string();
+        let package_id = package_value.id.clone();
+        let package_name = package_value.name.clone();
+        let package_version = package_value.version.clone();
 
-        let targets = package_value
-            .get("targets")
-            .and_then(Value::as_array)
-            .context("package entry missing `targets`")?;
-        let cdylib_target_name = targets
+        let cdylib_target_name = package_value
+            .targets
             .iter()
-            .find(|t| {
-                t.get("kind")
-                    .and_then(Value::as_array)
-                    .is_some_and(|kinds| kinds.iter().any(|k| k.as_str() == Some("cdylib")))
-            })
-            .and_then(|t| t.get("name"))
-            .and_then(Value::as_str)
-            .with_context(|| format!("package `{package_name}` has no `cdylib` target"))?
-            .to_string();
+            .find(|t| t.kind.iter().any(|k| k == "cdylib"))
+            .map(|t| t.name.clone())
+            .with_context(|| format!("package `{package_name}` has no `cdylib` target"))?;
 
-        let workspace_root = PathBuf::from(workspace_root);
-        let target_directory = PathBuf::from(target_directory);
+        let workspace_root = PathBuf::from(metadata.workspace_root);
+        let target_directory = PathBuf::from(metadata.target_directory);
         let private_target_dir = target_directory.join("rshooks-build");
 
         let lockfile_path = workspace_root.join("Cargo.lock");
@@ -474,22 +487,28 @@ impl BuildPlan {
         cmd.stderr(Stdio::inherit());
         let mut child = cmd
             .spawn()
-            .with_context(|| format!("failed to spawn `{}`", self.cargo.display()))?;
+            .with_context(|| cargo_spawn_context(&self.cargo))?;
         let stdout = child
             .stdout
             .take()
             .context("internal error: cargo's stdout was not piped")?;
         let reader = std::io::BufReader::new(stdout);
 
-        let mut messages: Vec<Value> = Vec::new();
+        let mut messages: Vec<CargoMessage> = Vec::new();
         for line in reader.lines() {
             let line = line.context("reading cargo output")?;
             if line.trim().is_empty() {
                 continue;
             }
-            // cargo can emit non-JSON lines on some setups; ignore those.
-            if let Ok(msg) = serde_json::from_str(&line) {
-                messages.push(msg);
+            match serde_json::from_str::<CargoMessage>(&line) {
+                Ok(msg) => messages.push(msg),
+                // cargo can emit non-JSON lines on some setups; ignore
+                // those, but a line that *is* JSON and still fails to
+                // deserialize is a real schema mismatch, not noise.
+                Err(e) if e.is_syntax() || e.is_eof() => {}
+                Err(e) => {
+                    return Err(e).with_context(|| format!("parsing cargo output line: {line}"));
+                }
             }
         }
 
@@ -511,44 +530,37 @@ impl BuildPlan {
 fn select_wasm_artifact(
     package_id: &str,
     cdylib_target_name: &str,
-    messages: &[Value],
+    messages: &[CargoMessage],
 ) -> Result<PathBuf> {
     let mut artifacts: Vec<PathBuf> = Vec::new();
     for msg in messages {
-        if msg.get("reason").and_then(Value::as_str) != Some("compiler-artifact") {
+        if msg.reason != "compiler-artifact" {
             continue;
         }
-        let package_matches = msg.get("package_id").and_then(Value::as_str) == Some(package_id);
+        let package_matches = msg.package_id.as_deref() == Some(package_id);
         let is_cdylib = msg
-            .get("target")
-            .and_then(|t| t.get("kind"))
-            .and_then(Value::as_array)
-            .is_some_and(|kinds| kinds.iter().any(|k| k.as_str() == Some("cdylib")));
+            .target
+            .as_ref()
+            .is_some_and(|t| t.kind.iter().any(|k| k == "cdylib"));
         let target_name_matches = msg
-            .get("target")
-            .and_then(|t| t.get("name"))
-            .and_then(Value::as_str)
-            == Some(cdylib_target_name);
+            .target
+            .as_ref()
+            .is_some_and(|t| t.name == cdylib_target_name);
         if !(package_matches && is_cdylib && target_name_matches) {
             continue;
         }
-        if let Some(filenames) = msg.get("filenames").and_then(Value::as_array) {
+        if let Some(filenames) = &msg.filenames {
             for f in filenames {
-                if let Some(s) = f.as_str()
-                    && s.ends_with(".wasm")
-                {
-                    artifacts.push(PathBuf::from(s));
+                if f.ends_with(".wasm") {
+                    artifacts.push(PathBuf::from(f));
                 }
             }
         }
     }
 
-    let mut distinct: Vec<PathBuf> = Vec::new();
-    for path in artifacts {
-        if !distinct.contains(&path) {
-            distinct.push(path);
-        }
-    }
+    let mut distinct = artifacts;
+    distinct.sort();
+    distinct.dedup();
 
     match distinct.len() {
         0 => bail!(
@@ -574,15 +586,13 @@ fn select_wasm_artifact(
     }
 }
 
-fn run_cargo_metadata(cargo: &Path, manifest_path: Option<&Path>) -> Result<Value> {
+fn run_cargo_metadata(cargo: &Path, manifest_path: Option<&Path>) -> Result<CargoMetadata> {
     let mut cmd = Command::new(cargo);
     cmd.args(["metadata", "--format-version", "1"]);
     if let Some(mp) = manifest_path {
         cmd.arg("--manifest-path").arg(mp);
     }
-    let output = cmd
-        .output()
-        .with_context(|| format!("failed to spawn `{}`", cargo.display()))?;
+    let output = cmd.output().with_context(|| cargo_spawn_context(cargo))?;
     if !output.status.success() {
         bail!(
             "`cargo metadata` failed ({}): {}",
@@ -599,33 +609,28 @@ fn run_generate_lockfile(cargo: &Path, manifest_path: Option<&Path>) -> Result<(
     if let Some(mp) = manifest_path {
         cmd.arg("--manifest-path").arg(mp);
     }
-    let status = cmd
-        .status()
-        .with_context(|| format!("failed to spawn `{}`", cargo.display()))?;
+    let status = cmd.status().with_context(|| cargo_spawn_context(cargo))?;
     if !status.success() {
         bail!("`cargo generate-lockfile` failed ({status})");
     }
     Ok(())
 }
 
-/// Locates the `cargo` executable to invoke. The user's shell PATH is
-/// inherited verbatim, so this just needs to find *a* `cargo` on it — the
-/// same one the user's shell would run.
-fn find_cargo() -> Result<PathBuf> {
-    if let Ok(cargo) = std::env::var("CARGO") {
-        return Ok(PathBuf::from(cargo));
-    }
-    if let Ok(path) = std::env::var("PATH") {
-        for dir in std::env::split_paths(&path) {
-            let candidate = dir.join("cargo");
-            if candidate.is_file() {
-                return Ok(candidate);
-            }
-        }
-    }
-    bail!(
-        "could not find `cargo` on PATH; run `rshooks build` from a shell where `cargo build` \
-         already works"
+/// Resolves the `cargo` to invoke: the one that ran this build (`$CARGO`,
+/// set by cargo itself), or else the bare name, which `Command` resolves
+/// against `PATH` like a shell would.
+fn find_cargo() -> PathBuf {
+    std::env::var("CARGO").map_or_else(|_| PathBuf::from("cargo"), PathBuf::from)
+}
+
+/// Context for a failure to spawn `cargo`: the most actionable explanation
+/// is usually that it was never on `PATH` in the first place, since
+/// [`find_cargo`] does not check that up front.
+fn cargo_spawn_context(cargo: &Path) -> String {
+    format!(
+        "failed to spawn `{}`; run `rshooks build` from a shell where `cargo build` already \
+         works",
+        cargo.display()
     )
 }
 
@@ -677,21 +682,26 @@ fn prune_stale_staging_dirs(root: &Path) {
     let Ok(entries) = std::fs::read_dir(root) else {
         return;
     };
-    let now = SystemTime::now();
     for entry in entries.flatten() {
         let name = entry.file_name();
-        if !name.to_string_lossy().starts_with(".staging-") {
-            continue;
+        if name.to_string_lossy().starts_with(".staging-") {
+            remove_if_prune_eligible(&entry.path());
         }
-        let eligible = entry
-            .metadata()
-            .and_then(|meta| meta.modified())
-            .ok()
-            .and_then(|modified| now.duration_since(modified).ok())
-            .is_some_and(is_prune_eligible);
-        if eligible {
-            let _ = std::fs::remove_dir_all(entry.path());
-        }
+    }
+}
+
+/// Removes `path` if its mtime age is at least [`PRUNE_GRACE_PERIOD`] (see
+/// [`is_prune_eligible`]); a missing or unreadable mtime is treated as "not
+/// yet eligible" rather than removed. Best-effort: a failed removal is not
+/// fatal.
+fn remove_if_prune_eligible(path: &Path) {
+    let eligible = std::fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|modified| SystemTime::now().duration_since(modified).ok())
+        .is_some_and(is_prune_eligible);
+    if eligible {
+        let _ = std::fs::remove_dir_all(path);
     }
 }
 
@@ -708,19 +718,7 @@ impl Drop for LockGuard {
 }
 
 fn acquire_lock(root: &Path) -> Result<LockGuard> {
-    let lock_path = root.join(".lock");
-    match open_lock_file(&lock_path) {
-        Ok(file) => Ok(finish_lock(file, lock_path)),
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => bail!(
-            "could not acquire the rshooks-build publish lock at {} (another build may be in \
-             progress); if you're certain no build is running, a crashed process may have left \
-             this lock behind — remove the file and retry",
-            lock_path.display()
-        ),
-        Err(error) => {
-            Err(error).with_context(|| format!("creating lock file {}", lock_path.display()))
-        }
-    }
+    acquire_lock_with(root, None, TARGET_LOCK_POLL_INTERVAL)
 }
 
 /// Maximum time [`acquire_target_lock`] waits for a concurrent holder to
@@ -735,33 +733,47 @@ const TARGET_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(200);
 /// (different `--out` roots, or different packages in the same workspace)
 /// should serialize rather than error.
 fn acquire_target_lock(dir: &Path) -> Result<LockGuard> {
-    acquire_target_lock_with(dir, TARGET_LOCK_WAIT_TIMEOUT, TARGET_LOCK_POLL_INTERVAL)
+    acquire_lock_with(
+        dir,
+        Some(TARGET_LOCK_WAIT_TIMEOUT),
+        TARGET_LOCK_POLL_INTERVAL,
+    )
 }
 
-fn acquire_target_lock_with(
+/// Acquires an advisory lock file at `dir/.lock`. With `wait_timeout: None`
+/// (the publish lock), a concurrent holder fails the call immediately; with
+/// `Some(timeout)` (the target-directory lock), it polls every
+/// `poll_interval` for the holder to release before timing out.
+fn acquire_lock_with(
     dir: &Path,
-    wait_timeout: Duration,
+    wait_timeout: Option<Duration>,
     poll_interval: Duration,
 ) -> Result<LockGuard> {
     let lock_path = dir.join(".lock");
-    let deadline = Instant::now()
-        .checked_add(wait_timeout)
-        .unwrap_or_else(Instant::now);
+    let deadline = wait_timeout.map(|timeout| {
+        Instant::now()
+            .checked_add(timeout)
+            .unwrap_or_else(Instant::now)
+    });
     loop {
         match open_lock_file(&lock_path) {
             Ok(file) => return Ok(finish_lock(file, lock_path)),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                if Instant::now() >= deadline {
-                    bail!(
-                        "timed out waiting for the cargo target-directory build lock at {} \
-                         (another `rshooks build` sharing this target directory did not finish \
-                         in time); if you're certain no build is running, a crashed process may \
-                         have left this lock behind — remove the file and retry",
-                        lock_path.display()
-                    );
-                }
-                std::thread::sleep(poll_interval);
-            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => match deadline {
+                None => bail!(
+                    "could not acquire the rshooks-build publish lock at {} (another build may \
+                     be in progress); if you're certain no build is running, a crashed process \
+                     may have left this lock behind — remove the file and retry",
+                    lock_path.display()
+                ),
+                Some(deadline) if Instant::now() >= deadline => bail!(
+                    "timed out waiting for the cargo target-directory build lock at {} \
+                     (another `rshooks build` sharing this target directory did not finish \
+                     in time); if you're certain no build is running, a crashed process may \
+                     have left this lock behind — remove the file and retry",
+                    lock_path.display()
+                ),
+                Some(_) => std::thread::sleep(poll_interval),
+            },
             Err(error) => {
                 return Err(error)
                     .with_context(|| format!("creating lock file {}", lock_path.display()));
@@ -833,12 +845,9 @@ fn publish(
 }
 
 fn next_generation_number(root: &Path) -> Result<u64> {
-    let mut max = 0u64;
-    for (n, _) in list_generations(root)? {
-        if n > max {
-            max = n;
-        }
-    }
+    // `list_generations` returns entries sorted ascending by number, so the
+    // last one is the max (0 if there are none yet).
+    let max = list_generations(root)?.last().map_or(0, |&(n, _)| n);
     max.checked_add(1).context("generation counter overflow")
 }
 
@@ -892,16 +901,8 @@ fn retain_latest_generations(root: &Path, keep: usize) {
         return;
     }
     let remove_count = gens.len() - keep;
-    let now = SystemTime::now();
     for (_, path) in gens.iter().take(remove_count) {
-        let eligible = std::fs::metadata(path)
-            .and_then(|meta| meta.modified())
-            .ok()
-            .and_then(|modified| now.duration_since(modified).ok())
-            .is_some_and(is_prune_eligible);
-        if eligible {
-            let _ = std::fs::remove_dir_all(path);
-        }
+        remove_if_prune_eligible(path);
     }
 }
 
@@ -1340,13 +1341,16 @@ mod tests {
         target_name: &str,
         kind: &str,
         filenames: &[&str],
-    ) -> Value {
-        serde_json::json!({
-            "reason": "compiler-artifact",
-            "package_id": package_id,
-            "target": { "kind": [kind], "name": target_name },
-            "filenames": filenames,
-        })
+    ) -> CargoMessage {
+        CargoMessage {
+            reason: "compiler-artifact".to_string(),
+            package_id: Some(package_id.to_string()),
+            target: Some(CargoMessageTarget {
+                name: target_name.to_string(),
+                kind: vec![kind.to_string()],
+            }),
+            filenames: Some(filenames.iter().map(|s| (*s).to_string()).collect()),
+        }
     }
 
     #[test]
@@ -1430,9 +1434,12 @@ mod tests {
             drop(guard);
         });
 
-        let waited =
-            acquire_target_lock_with(&dir, Duration::from_secs(5), Duration::from_millis(20))
-                .expect("waits out the concurrent holder rather than failing");
+        let waited = acquire_lock_with(
+            &dir,
+            Some(Duration::from_secs(5)),
+            Duration::from_millis(20),
+        )
+        .expect("waits out the concurrent holder rather than failing");
         releaser.join().expect("releaser thread does not panic");
         drop(waited);
         std::fs::remove_dir_all(&dir).expect("cleanup");
@@ -1443,9 +1450,12 @@ mod tests {
         let dir = temp_dir("target-lock-timeout");
         let guard = acquire_lock(&dir).expect("first lock succeeds");
 
-        let err =
-            acquire_target_lock_with(&dir, Duration::from_millis(100), Duration::from_millis(20))
-                .expect_err("must time out while the lock is held");
+        let err = acquire_lock_with(
+            &dir,
+            Some(Duration::from_millis(100)),
+            Duration::from_millis(20),
+        )
+        .expect_err("must time out while the lock is held");
         assert!(format!("{err:#}").contains("timed out waiting"));
 
         drop(guard);
