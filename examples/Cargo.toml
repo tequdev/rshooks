@@ -35,6 +35,10 @@ edition = "2024"
 rust-version = "1.85"
 publish = false
 
+[workspace.dependencies]
+rshooks = { path = "../crates/rshooks" }
+rshooks-testenv = { path = "../crates/rshooks-testenv" }
+
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
 

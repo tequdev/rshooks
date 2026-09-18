@@ -7,15 +7,14 @@ publish.workspace = true
 
 [lib]
 crate-type = ["cdylib", "rlib"]
-# rlib lets tests/ link this crate; no_std has no test crate, see examples/README.md.
 test = false
 
 [dependencies]
-rshooks = { path = "../../crates/rshooks", features = ["host-panic-handler"] }
+rshooks = { workspace = true, features = ["host-panic-handler"] }
 
 [dev-dependencies]
-rshooks = { path = "../../crates/rshooks", features = ["testenv"] }
-rshooks-testenv = { path = "../../crates/rshooks-testenv" }
+rshooks = { workspace = true, features = ["testenv"] }
+rshooks-testenv.workspace = true
 # Independent expected-value recomputation in `tests/keylets.rs` (the same
 # `sha512Half(ledgerSpace ++ args)` formula `e2e/test/keylets.test.ts` uses)
 # — kept separate from this hook's own on-chain `rshooks` dependency.
