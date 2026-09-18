@@ -50,9 +50,20 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # mise-action installs mise.toml's pinned rust *version* but not the
+      # wasm32v1-none target/components rust-toolchain.toml also declares;
+      # this step covers those (and no-ops once mise-action's toolchain is
+      # already active).
+      - name: Install Rust toolchain (per rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+
       - uses: jdx/mise-action@v2
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            examples
 
       - name: Clippy (per mise.toml's lint task)
         run: mise run lint
@@ -71,6 +82,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain (per rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
 
       - uses: jdx/mise-action@v2
 
@@ -119,8 +133,9 @@ jobs:
         run: cargo check -p rshooks-core -p rshooks --target wasm32v1-none
 
   # Build & check every example (end-to-end). See build-examples.yml for
-  # the discovery/build/clippy jobs this expands into; the `e2e` job below
-  # deploys the artifacts it uploads.
+  # the discovery/build jobs this expands into (its examples-workspace
+  # clippy run is covered by the `lint` job above's `mise run lint`); the
+  # `e2e` job below deploys the artifacts it uploads.
   examples:
     name: Build & check examples (end-to-end)
     uses: ./.github/workflows/build-examples.yml
@@ -136,7 +151,7 @@ jobs:
       # build-examples.yml's "Upload hook binaries" step uploads the
       # `examples/*/out/current/...` tree itself, so downloading straight
       # into `examples/` reconstructs `rshooks build`'s own publication
-      # layout with no reassembly step: `examples/scripts/copy-wasm.mjs`
+      # layout with no reassembly step: `e2e/scripts/copy-wasm.mjs`
       # and e2e suites that read a generated `sethook.template.json`
       # directly (e.g. `e2e/test/param-signature.test.ts`) see the same
       # paths as a local `mise run build-examples` run.

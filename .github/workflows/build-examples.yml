@@ -63,33 +63,14 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  clippy:
-    name: Clippy (examples workspace, wasm32v1-none)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install Rust toolchain (per rust-toolchain.toml)
-        run: rustup show active-toolchain || rustup toolchain install
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: examples
-
-      - name: Clippy (examples, wasm32v1-none, deny warnings)
-        # --lib instead of --all-targets: wasm32v1-none has no `test` crate,
-        # so the implicit test-profile target can never build for it.
-        working-directory: examples
-        run: cargo clippy --workspace --lib --target wasm32v1-none -- -D warnings
-
   # Continuous zero-wasm-impact check (design doc
   # .claude/design/TESTENV_DESIGN.md §7): builds every example twice at
   # this same commit — as-committed vs. with all off-chain-unit-test wiring
   # mechanically stripped — and diffs every produced wasm plus its WCE/
   # size/nesting numbers. Catches any future leak of test machinery into a
-  # shipped artifact; independent of the `build`/`discover` matrix above
-  # (it drives `rshooks build` itself via scripts/probe-testenv-parity.sh,
-  # not the shared binary those jobs upload).
+  # shipped artifact; independent of the `build` job above (it drives
+  # `rshooks build` itself via scripts/probe-testenv-parity.sh, not the
+  # shared binary that job uploads).
   testenv-parity:
     name: Testenv parity probe (as-committed == test-wiring-stripped)
     runs-on: ubuntu-latest
@@ -174,7 +155,7 @@ jobs:
       - name: Build, check, and verify recorded metrics for every example
         run: |
           set -uo pipefail
-          chmod +x bin/rshooks
+          chmod +x bin/rshooks || exit 1
           failed=0
           {
             echo "| Example | Build & check | Recorded metrics |"
@@ -202,7 +183,9 @@ jobs:
               metrics_ok="skipped"
             fi
 
-            [ "$build_ok" = ":x:" ] || [ "$metrics_ok" = ":x:" ] && failed=1
+            if [ "$build_ok" = ":x:" ] || [ "$metrics_ok" = ":x:" ]; then
+              failed=1
+            fi
             echo "| $name | $build_ok | $metrics_ok |" >>"$GITHUB_STEP_SUMMARY"
           done
           exit "$failed"
@@ -216,7 +199,7 @@ jobs:
       # artifact. Uploaded even if some examples failed above, so the
       # examples that did build stay inspectable.
       - name: Upload hook binaries
-        if: always()
+        if: '!cancelled()'
         uses: actions/upload-artifact@v7
         with:
           name: example-hooks
