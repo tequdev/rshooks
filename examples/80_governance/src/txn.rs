@@ -68,9 +68,12 @@ impl TxnBuf {
     #[inline(always)]
     fn push<const N: usize>(&mut self, src: &[u8; N]) -> usize {
         let start = self.len;
-        let Some(end) = start.checked_add(N) else {
-            fail(b"govern: txn buffer overflow");
-        };
+        // `wrapping_add`, not `checked_add`, for this range's end: see
+        // `examples/80_governance/src/mint_txn.rs`'s `MintTxn::push` doc
+        // comment — the identical idiom and rationale apply here too,
+        // including this function's own force-inlining into `govern`'s
+        // guard!(10)-protected `Hooks` array loop (`emit_hookset` below).
+        let end = start.wrapping_add(N);
         let Some(dst) = self.buf.get_mut(start..end) else {
             fail(b"govern: txn buffer overflow");
         };
@@ -220,9 +223,7 @@ impl TxnBuf {
             Err(_) => fail(b"govern: could not compute emitted txn fee"),
         };
         let native = encode_native_amount(fee);
-        let Some(fee_end) = fee_offset.checked_add(8) else {
-            fail(b"govern: txn buffer overflow");
-        };
+        let fee_end = fee_offset.wrapping_add(8); // range end; see `push`'s overflow comment
         let Some(fee_dst) = self.buf.get_mut(fee_offset..fee_end) else {
             fail(b"govern: txn buffer overflow");
         };
@@ -339,9 +340,7 @@ pub fn emit_hookset(hook_accid: &AccountId, slot_index: u8, hash: Option<&[u8; 3
     // written length — see `mint_txn::MintTxn::write_emit_details`'s
     // twin logic.
     let start = txn.len;
-    let Some(end) = start.checked_add(EMIT_DETAILS_MAX_LEN) else {
-        fail(b"govern: txn buffer overflow");
-    };
+    let end = start.wrapping_add(EMIT_DETAILS_MAX_LEN); // range end; see `TxnBuf::push`'s overflow comment
     let Some(region) = txn.buf.get_mut(start..end) else {
         fail(b"govern: txn buffer overflow");
     };
@@ -349,6 +348,9 @@ pub fn emit_hookset(hook_accid: &AccountId, slot_index: u8, hash: Option<&[u8; 3
         Ok(n) => n,
         Err(_) => fail(b"govern: could not write EmitDetails"),
     };
+    // `written` is host-provided and this assignment isn't a slice-range
+    // endpoint any `get_mut` re-checks — `checked_add`, not `wrapping_add`;
+    // see `mint_txn::MintTxn::write_emit_details`'s identical case.
     let Some(new_len) = start.checked_add(written) else {
         fail(b"govern: txn buffer overflow");
     };
