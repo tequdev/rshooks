@@ -1,21 +1,8 @@
-import {
-  ExecutionUtility,
-  Xrpld,
-  clearAllHooks,
-  hexNamespace,
-  readHookBinaryHexFromNS,
-  serverUrl,
-  setHooks,
-  setupClient,
-  teardownClient,
-  type XrplIntegrationTestContext,
-  type iHook,
-} from '@xahau/hooks-toolkit'
-import { calculateHookOn, convertStringToHex, type TransactionMetadata } from 'xahau'
-import { HookFlags } from 'xahau/dist/npm/models/common/xahau'
+import { ExecutionUtility, Xrpld } from '@xahau/hooks-toolkit'
+import { convertStringToHex, type TransactionMetadata } from 'xahau'
+import { installHook, readWorstCaseHook } from './harness'
 
-const namespace = 'rshooks-e2e-hook-params'
-const WORST_CASE_INSTRUCTIONS = 172
+const WORST_CASE_INSTRUCTIONS = readWorstCaseHook('03_hook-params')
 const MIN_DROPS = 5_000_000n
 
 function u64LEHex(value: bigint): string {
@@ -25,42 +12,22 @@ function u64LEHex(value: bigint): string {
 }
 
 describe('hook-params', () => {
-  let testContext: XrplIntegrationTestContext
-
-  beforeAll(async () => {
-    testContext = await setupClient(serverUrl)
-
-    const hook: iHook = {
-      CreateCode: readHookBinaryHexFromNS('hook_params', 'wasm'),
-      Flags: HookFlags.hsfOverride,
-      HookOn: calculateHookOn(['Payment']),
-      HookNamespace: hexNamespace(namespace),
-      HookApiVersion: 0,
-      HookParameters: [
-        {
-          HookParameter: {
-            HookParameterName: convertStringToHex('MIN'),
-            HookParameterValue: u64LEHex(MIN_DROPS),
-          },
+  const getContext = installHook({
+    wasmName: 'hook_params',
+    namespace: 'rshooks-e2e-hook-params',
+    hookOn: ['Payment'],
+    hookParameters: [
+      {
+        HookParameter: {
+          HookParameterName: convertStringToHex('MIN'),
+          HookParameterValue: u64LEHex(MIN_DROPS),
         },
-      ],
-    } as iHook
-    await setHooks({
-      client: testContext.client,
-      wallet: testContext.hook1,
-      hooks: [{ Hook: hook }],
-    })
-  })
-
-  afterAll(async () => {
-    await clearAllHooks({
-      client: testContext.client,
-      wallet: testContext.hook1,
-    })
-    await teardownClient(testContext)
+      },
+    ],
   })
 
   it('rejects a Payment below the configured MIN threshold', async () => {
+    const testContext = getContext()
     const response = Xrpld.submit(testContext.client, {
       tx: {
         TransactionType: 'Payment',
@@ -76,6 +43,7 @@ describe('hook-params', () => {
   })
 
   it('accepts a Payment at or above the configured MIN threshold', async () => {
+    const testContext = getContext()
     const response = await Xrpld.submit(testContext.client, {
       tx: {
         TransactionType: 'Payment',

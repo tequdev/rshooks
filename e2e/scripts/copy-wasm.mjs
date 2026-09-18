@@ -8,7 +8,7 @@
 // Run before `vitest run` (wired as the `pretest` script). Requires
 // `examples/*/out/*.wasm` to already exist - run `mise run build-examples`
 // (or the CI `build-hooks` job) first.
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -16,51 +16,71 @@ const e2eRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 const repoRoot = dirname(e2eRoot)
 const buildDir = join(e2eRoot, 'build')
 
-// example directory name (numbered - suggested reading order, see
-// examples/README.md) -> [chain-position artifact basename produced by
-// rshooks-build under out/current/, destination wasm basename]. Every
-// single-hook example's `#[hook(0, ..)]` entry fn is named `main`, so its
-// one artifact is always `0.main` - except `19_param-signature`, whose
-// entry fn is named `increment` (the Hook Parameter Signature Interface
-// draft's own worked example, docs/PARAM_SIGNATURE_DESIGN.md); the
-// consolidated `80_governance` chain produces both `0.govern` and
-// `1.reward`.
-const examples = {
-  '01_accept-all': [['0.main', 'accept_all']],
-  '02_state-counter': [['0.main', 'state_counter']],
-  '03_hook-params': [['0.main', 'hook_params']],
-  '04_errors': [['0.main', 'errors']],
-  '05_firewall': [['0.main', 'firewall']],
-  '06_guard-patterns': [['0.main', 'guard_patterns']],
-  '07_xfl-math': [['0.main', 'xfl_math']],
-  '08_slot-ledger': [['0.main', 'slot_ledger']],
-  '09_state-foreign': [['0.main', 'state_foreign']],
-  '10_emit-txn': [['0.main', 'emit_txn']],
-  '12_typed-data': [['0.main', 'typed_data']],
-  '13_keylets': [['0.main', 'keylets']],
-  '14_account-id-macro': [['0.main', 'account_id_macro']],
-  '15_slot-objects': [['0.main', 'slot_objects']],
-  '19_param-signature': [['0.increment', 'param_signature']],
-  '20_state-interface': [['0.main', 'state_interface']],
-  '80_governance': [
-    ['0.govern', 'govern'],
-    ['1.reward', 'reward'],
-  ],
+// e2e-covered example directories (numbered - suggested reading order, see
+// examples/README.md). Destination wasm basename and source artifact
+// basename are derived below, not spelled out here.
+const exampleDirs = [
+  '01_accept-all',
+  '02_state-counter',
+  '03_hook-params',
+  '04_errors',
+  '05_firewall',
+  '06_guard-patterns',
+  '07_xfl-math',
+  '08_slot-ledger',
+  '09_state-foreign',
+  '10_emit-txn',
+  '12_typed-data',
+  '13_keylets',
+  '14_account-id-macro',
+  '15_slot-objects',
+  '19_param-signature',
+  '20_state-interface',
+]
+
+// The consolidated multi-hook chain: two artifacts in one `out/current/`,
+// not derivable from "the sole `*.wasm` in the directory".
+const GOVERNANCE_DIR = '80_governance'
+const governanceArtifacts = [
+  ['0.govern', 'govern'],
+  ['1.reward', 'reward'],
+]
+
+function wasmNameFor(exampleDir) {
+  return exampleDir.replace(/^\d+_/, '').replace(/-/g, '_')
+}
+
+function copyArtifact(exampleDir, artifact, wasmName) {
+  const src = join(repoRoot, 'examples', exampleDir, 'out', 'current', `${artifact}.wasm`)
+  if (!existsSync(src)) {
+    console.error(
+      `error: ${src} not found. Build the examples first: mise run build-examples`,
+    )
+    process.exit(1)
+  }
+  const dest = join(buildDir, `${wasmName}.wasm`)
+  copyFileSync(src, dest)
+  console.log(`copied ${src} -> ${dest}`)
 }
 
 mkdirSync(buildDir, { recursive: true })
 
-for (const [exampleDir, artifacts] of Object.entries(examples)) {
-  for (const [artifact, wasmName] of artifacts) {
-    const src = join(repoRoot, 'examples', exampleDir, 'out', 'current', `${artifact}.wasm`)
-    if (!existsSync(src)) {
-      console.error(
-        `error: ${src} not found. Build the examples first: mise run build-examples`,
-      )
-      process.exit(1)
-    }
-    const dest = join(buildDir, `${wasmName}.wasm`)
-    copyFileSync(src, dest)
-    console.log(`copied ${src} -> ${dest}`)
+for (const exampleDir of exampleDirs) {
+  const currentDir = join(repoRoot, 'examples', exampleDir, 'out', 'current')
+  const wasmFiles = existsSync(currentDir)
+    ? readdirSync(currentDir).filter((f) => f.endsWith('.wasm'))
+    : []
+  if (wasmFiles.length !== 1) {
+    console.error(
+      `error: expected exactly one *.wasm in ${currentDir}, found ${wasmFiles.length}. ` +
+        'Build the examples first: mise run build-examples',
+    )
+    process.exit(1)
   }
+  const artifact = wasmFiles[0].replace(/\.wasm$/, '')
+  copyArtifact(exampleDir, artifact, wasmNameFor(exampleDir))
+}
+
+for (const [artifact, wasmName] of governanceArtifacts) {
+  copyArtifact(GOVERNANCE_DIR, artifact, wasmName)
 }

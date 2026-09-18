@@ -1,55 +1,18 @@
-import {
-  ExecutionUtility,
-  Xrpld,
-  clearAllHooks,
-  hexNamespace,
-  readHookBinaryHexFromNS,
-  serverUrl,
-  setHooks,
-  setupClient,
-  teardownClient,
-  type XrplIntegrationTestContext,
-  type iHook,
-} from '@xahau/hooks-toolkit'
-import {
-  calculateHookOn,
-  type HookEmission,
-  type TransactionMetadata,
-} from 'xahau'
-import { HookFlags } from 'xahau/dist/npm/models/common/xahau'
+import { ExecutionUtility, Xrpld } from '@xahau/hooks-toolkit'
+import type { HookEmission, TransactionMetadata } from 'xahau'
+import { installHook, readWorstCaseHook } from './harness'
 
-const namespace = 'rshooks-e2e-emit-txn'
-const WORST_CASE_HOOK_INSTRUCTIONS = 331
+const WORST_CASE_HOOK_INSTRUCTIONS = readWorstCaseHook('10_emit-txn')
 
 describe('emit-txn', () => {
-  let testContext: XrplIntegrationTestContext
-
-  beforeAll(async () => {
-    testContext = await setupClient(serverUrl)
-
-    const hook: iHook = {
-      CreateCode: readHookBinaryHexFromNS('emit_txn', 'wasm'),
-      Flags: HookFlags.hsfOverride,
-      HookOn: calculateHookOn(['Invoke']),
-      HookNamespace: hexNamespace(namespace),
-      HookApiVersion: 0,
-    }
-    await setHooks({
-      client: testContext.client,
-      wallet: testContext.hook1,
-      hooks: [{ Hook: hook }],
-    })
-  })
-
-  afterAll(async () => {
-    await clearAllHooks({
-      client: testContext.client,
-      wallet: testContext.hook1,
-    })
-    await teardownClient(testContext)
+  const getContext = installHook({
+    wasmName: 'emit_txn',
+    namespace: 'rshooks-e2e-emit-txn',
+    hookOn: ['Invoke'],
   })
 
   it('emits a 1-drop Payment back to the otxn sender, which settles tesSUCCESS with a cbak execution', async () => {
+    const testContext = getContext()
     const response = await Xrpld.submit(testContext.client, {
       tx: {
         TransactionType: 'Invoke',

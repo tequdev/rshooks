@@ -1,51 +1,18 @@
-import {
-  ExecutionUtility,
-  Xrpld,
-  clearAllHooks,
-  hexNamespace,
-  readHookBinaryHexFromNS,
-  serverUrl,
-  setHooks,
-  setupClient,
-  teardownClient,
-  type XrplIntegrationTestContext,
-  type iHook,
-} from '@xahau/hooks-toolkit'
-import { calculateHookOn, type TransactionMetadata } from 'xahau'
-import { HookFlags } from 'xahau/dist/npm/models/common/xahau'
+import { ExecutionUtility, Xrpld } from '@xahau/hooks-toolkit'
+import type { TransactionMetadata } from 'xahau'
+import { installHook, readWorstCaseHook } from './harness'
 
-const namespace = 'rshooks-e2e-xfl-math'
-const WORST_CASE_INSTRUCTIONS = 357
+const WORST_CASE_INSTRUCTIONS = readWorstCaseHook('07_xfl-math')
 
 describe('xfl-math', () => {
-  let testContext: XrplIntegrationTestContext
-
-  beforeAll(async () => {
-    testContext = await setupClient(serverUrl)
-
-    const hook: iHook = {
-      CreateCode: readHookBinaryHexFromNS('xfl_math', 'wasm'),
-      Flags: HookFlags.hsfOverride,
-      HookOn: calculateHookOn(['Payment']),
-      HookNamespace: hexNamespace(namespace),
-      HookApiVersion: 0,
-    }
-    await setHooks({
-      client: testContext.client,
-      wallet: testContext.hook1,
-      hooks: [{ Hook: hook }],
-    })
-  })
-
-  afterAll(async () => {
-    await clearAllHooks({
-      client: testContext.client,
-      wallet: testContext.hook1,
-    })
-    await teardownClient(testContext)
+  const getContext = installHook({
+    wasmName: 'xfl_math',
+    namespace: 'rshooks-e2e-xfl-math',
+    hookOn: ['Payment'],
   })
 
   it('rejects a Payment whose computed 1% share falls below the minimum', async () => {
+    const testContext = getContext()
     const response = Xrpld.submit(testContext.client, {
       tx: {
         TransactionType: 'Payment',
@@ -59,6 +26,7 @@ describe('xfl-math', () => {
   })
 
   it('accepts a Payment whose computed 1% share meets the minimum', async () => {
+    const testContext = getContext()
     const response = await Xrpld.submit(testContext.client, {
       tx: {
         TransactionType: 'Payment',

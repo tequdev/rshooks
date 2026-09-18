@@ -1,25 +1,9 @@
-import {
-  ExecutionUtility,
-  Xrpld,
-  clearAllHooks,
-  hexNamespace,
-  readHookBinaryHexFromNS,
-  serverUrl,
-  setHooks,
-  setupClient,
-  teardownClient,
-  type XrplIntegrationTestContext,
-  type iHook,
-} from '@xahau/hooks-toolkit'
-import { calculateHookOn, convertStringToHex, decodeAccountID } from 'xahau'
-import { HookFlags } from 'xahau/dist/npm/models/common/xahau'
-
-type Wallet = XrplIntegrationTestContext['alice']
+import { ExecutionUtility, Xrpld, setHooks, type XrplIntegrationTestContext } from '@xahau/hooks-toolkit'
+import { convertStringToHex, decodeAccountID } from 'xahau'
+import { buildHook, installHook, readWorstCaseHook, type Wallet } from './harness'
 
 const namespace = 'rshooks-e2e-govern'
-// The hook's static worst case, from
-// out/current/0.govern.metadata.json (WCE.hook).
-const WORST_CASE_HOOK_INSTRUCTIONS = 27751
+const WORST_CASE_HOOK_INSTRUCTIONS = readWorstCaseHook('80_governance', 'govern')
 
 function accountIdHex(classicAddress: string): string {
   return Buffer.from(decodeAccountID(classicAddress)).toString('hex').toUpperCase()
@@ -49,22 +33,18 @@ async function installGovern(
   members: Wallet[],
   extra: ReturnType<typeof hookParam>[] = [],
 ) {
-  const hook: iHook = {
-    CreateCode: readHookBinaryHexFromNS('govern', 'wasm'),
-    Flags: HookFlags.hsfOverride,
-    HookOn: calculateHookOn(['Invoke']),
-    HookNamespace: hexNamespace(namespace),
-    HookApiVersion: 0,
-    HookParameters: [
-      hookParam('IMC', members.length.toString(16).padStart(2, '0')),
-      ...members.map((m, i) => isParam(i, m)),
-      ...extra,
-    ],
-  } as iHook
   await setHooks({
     client: testContext.client,
     wallet: table,
-    hooks: [{ Hook: hook }],
+    hooks: [
+      {
+        Hook: buildHook('govern', namespace, ['Invoke'], [
+          hookParam('IMC', members.length.toString(16).padStart(2, '0')),
+          ...members.map((m, i) => isParam(i, m)),
+          ...extra,
+        ]),
+      },
+    ],
   })
 }
 
@@ -98,21 +78,10 @@ function layerParam(layer: number) {
 }
 
 describe('govern: L2 table setup', () => {
-  let testContext: XrplIntegrationTestContext
-
-  beforeAll(async () => {
-    testContext = await setupClient(serverUrl)
-  })
-
-  afterAll(async () => {
-    await clearAllHooks({
-      client: testContext.client,
-      wallet: testContext.hook1,
-    })
-    await teardownClient(testContext)
-  })
+  const getContext = installHook({ namespace, wallet: (ctx) => ctx.hook1 })
 
   it('first Invoke on a fresh table populates the seat table and accepts', async () => {
+    const testContext = getContext()
     await installGovern(testContext, testContext.hook1, [
       testContext.alice,
       testContext.bob,
@@ -132,10 +101,10 @@ describe('govern: L2 table setup', () => {
 })
 
 describe('govern: L2 table seat voting', () => {
-  let testContext: XrplIntegrationTestContext
+  const getContext = installHook({ namespace, wallet: (ctx) => ctx.hook1 })
 
   beforeAll(async () => {
-    testContext = await setupClient(serverUrl)
+    const testContext = getContext()
     await installGovern(testContext, testContext.hook1, [
       testContext.alice,
       testContext.bob,
@@ -144,15 +113,8 @@ describe('govern: L2 table seat voting', () => {
     await invoke(testContext, testContext.alice, testContext.hook1)
   })
 
-  afterAll(async () => {
-    await clearAllHooks({
-      client: testContext.client,
-      wallet: testContext.hook1,
-    })
-    await teardownClient(testContext)
-  })
-
   it('a single vote below the 80% seat threshold (2 of 3) just records', async () => {
+    const testContext = getContext()
     const response = await invoke(testContext, testContext.alice, testContext.hook1, [
       topicParam('S', 2),
       voteParam(accountIdHex(testContext.dave.classicAddress)),
@@ -166,6 +128,7 @@ describe('govern: L2 table seat voting', () => {
   })
 
   it('a second vote reaches the threshold and actions the seat change', async () => {
+    const testContext = getContext()
     const response = await invoke(testContext, testContext.bob, testContext.hook1, [
       topicParam('S', 2),
       voteParam(accountIdHex(testContext.dave.classicAddress)),
@@ -177,6 +140,7 @@ describe('govern: L2 table seat voting', () => {
   })
 
   it('casting the identical vote again is a no-op accept', async () => {
+    const testContext = getContext()
     const response = await invoke(testContext, testContext.bob, testContext.hook1, [
       topicParam('S', 2),
       voteParam(accountIdHex(testContext.dave.classicAddress)),
@@ -191,21 +155,10 @@ describe('govern: L2 table seat voting', () => {
 })
 
 describe('govern: L1 table (real genesis account) reward-rate vote', () => {
-  let testContext: XrplIntegrationTestContext
-
-  beforeAll(async () => {
-    testContext = await setupClient(serverUrl)
-  })
-
-  afterAll(async () => {
-    await clearAllHooks({
-      client: testContext.client,
-      wallet: testContext.master,
-    })
-    await teardownClient(testContext)
-  })
+  const getContext = installHook({ namespace, wallet: (ctx) => ctx.master })
 
   it('installs on the real genesis account and completes L1 setup', async () => {
+    const testContext = getContext()
     await installGovern(
       testContext,
       testContext.master,
@@ -225,6 +178,7 @@ describe('govern: L1 table (real genesis account) reward-rate vote', () => {
   })
 
   it('a unanimous RR vote (3 of 3, 100% required at L1) actions the reward rate', async () => {
+    const testContext = getContext()
     const rrValue = '0100000000000000'
     await invoke(testContext, testContext.alice, testContext.master, [
       topicParam('R', 'R'.charCodeAt(0)),
@@ -247,21 +201,10 @@ describe('govern: L1 table (real genesis account) reward-rate vote', () => {
 })
 
 describe('govern: L1 table (real genesis account) — intentional IRR/IRD length-strictness divergence', () => {
-  let testContext: XrplIntegrationTestContext
-
-  beforeAll(async () => {
-    testContext = await setupClient(serverUrl)
-  })
-
-  afterAll(async () => {
-    await clearAllHooks({
-      client: testContext.client,
-      wallet: testContext.master,
-    })
-    await teardownClient(testContext)
-  })
+  const getContext = installHook({ namespace, wallet: (ctx) => ctx.master })
 
   it('rejects a too-short IRR value at setup instead of silently zero-padding it (govern.c would accept it)', async () => {
+    const testContext = getContext()
     await installGovern(
       testContext,
       testContext.master,

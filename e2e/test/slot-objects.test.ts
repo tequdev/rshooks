@@ -1,26 +1,9 @@
-import {
-  ExecutionUtility,
-  Xrpld,
-  clearAllHooks,
-  hexNamespace,
-  readHookBinaryHexFromNS,
-  serverUrl,
-  setHooks,
-  setupClient,
-  teardownClient,
-  type XrplIntegrationTestContext,
-  type iHook,
-} from '@xahau/hooks-toolkit'
-import {
-  calculateHookOn,
-  convertStringToHex,
-  decodeAccountID,
-  type TransactionMetadata,
-} from 'xahau'
-import { HookFlags } from 'xahau/dist/npm/models/common/xahau'
+import { ExecutionUtility, Xrpld, setHooks } from '@xahau/hooks-toolkit'
+import { convertStringToHex, decodeAccountID, type TransactionMetadata } from 'xahau'
+import { buildHook, installHook, readWorstCaseHook } from './harness'
 
 const namespace = 'rshooks-e2e-slot-objects'
-const WORST_CASE_INSTRUCTIONS = 61658
+const WORST_CASE_INSTRUCTIONS = readWorstCaseHook('15_slot-objects')
 
 const BIT_ACCOUNT_WALK = 1
 const BIT_DROPS_ROUNDTRIP = 2
@@ -57,11 +40,11 @@ const IOU_CURRENCY = 'USD'
 const IOU_AMOUNT = '100'
 
 describe('slot-objects (typed slot layer)', () => {
-  let testContext: XrplIntegrationTestContext
+  const getContext = installHook({ namespace })
   let checks = 0
 
   beforeAll(async () => {
-    testContext = await setupClient(serverUrl)
+    const testContext = getContext()
 
     // Install a SignerList so the failing path allocates intermediate slots.
     await Xrpld.submit(testContext.client, {
@@ -108,17 +91,10 @@ describe('slot-objects (typed slot layer)', () => {
       wallet: testContext.carol,
     })
 
-    const hook: iHook = {
-      CreateCode: readHookBinaryHexFromNS('slot_objects', 'wasm'),
-      Flags: HookFlags.hsfOverride,
-      HookOn: calculateHookOn(['Invoke']),
-      HookNamespace: hexNamespace(namespace),
-      HookApiVersion: 0,
-    }
     await setHooks({
       client: testContext.client,
       wallet: testContext.hook1,
-      hooks: [{ Hook: hook }],
+      hooks: [{ Hook: buildHook('slot_objects', namespace, ['Invoke']) }],
     })
 
     // Run each group separately to stay within the instruction limit.
@@ -178,14 +154,6 @@ describe('slot-objects (typed slot layer)', () => {
         WORST_CASE_INSTRUCTIONS,
       )
     }
-  })
-
-  afterAll(async () => {
-    await clearAllHooks({
-      client: testContext.client,
-      wallet: testContext.hook1,
-    })
-    await teardownClient(testContext)
   })
 
   it('walks the account root with typed reads', () => {
