@@ -23,7 +23,10 @@
 //! implemented for every view here and re-exported through
 //! `rshooks::prelude`; import either to call the common accessors.
 
-use crate::views::source::FieldSource as _;
+use crate::error::Result;
+use crate::slot_obj::SlotObject;
+use crate::types::STObject;
+use crate::views::source::FieldSource;
 
 /// Accessors shared by every generated ledger-entry view.
 ///
@@ -35,49 +38,33 @@ pub trait LedgerEntryCommonFields {
     fn field_source(&self) -> &crate::views::source::SlotSource;
 
     /// `sfLedgerIndex` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    fn ledger_index(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    fn ledger_index(&self) -> Result<Option<crate::types::Hash>> {
         self.field_source().read_opt(crate::sfield::sfLedgerIndex)
     }
 
     /// `sfLedgerEntryType` — UInt16, `soeREQUIRED`.
     #[inline(always)]
-    fn ledger_entry_type(&self) -> crate::error::Result<u16> {
+    fn ledger_entry_type(&self) -> Result<u16> {
         self.field_source().read(crate::sfield::sfLedgerEntryType)
     }
 
     /// `sfFlags` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    fn flags(&self) -> crate::error::Result<u32> {
+    fn flags(&self) -> Result<u32> {
         self.field_source().read(crate::sfield::sfFlags)
     }
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    fn remarks_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.field_source()
             .read_raw_opt(crate::sfield::sfRemarks.code(), out)
     }
 
     /// `sfRemarks` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+    fn remarks_slot(&self) -> Result<Option<SlotObject<crate::types::STArray>>> {
         self.field_source().subobject_opt(crate::sfield::sfRemarks)
     }
 }
@@ -95,16 +82,14 @@ pub struct NFTokenOffer {
 impl NFTokenOffer {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltNFTOKEN_OFFER`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -115,65 +100,61 @@ impl NFTokenOffer {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfOwner` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn owner(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfOwner)
     }
 
     /// `sfNFTokenID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn nftoken_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn nftoken_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfNFTokenID)
     }
 
     /// `sfAmount` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn amount(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfAmount)
     }
 
     /// `sfOwnerNode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner_node(&self) -> crate::error::Result<u64> {
+    pub fn owner_node(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfOwnerNode)
     }
 
     /// `sfNFTokenOfferNode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn nftoken_offer_node(&self) -> crate::error::Result<u64> {
+    pub fn nftoken_offer_node(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfNFTokenOfferNode)
     }
 
     /// `sfDestination` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn destination(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfDestination)
     }
 
     /// `sfExpiration` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn expiration(&self) -> crate::error::Result<Option<u32>> {
+    pub fn expiration(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfExpiration)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
 }
@@ -195,16 +176,14 @@ pub struct Cron {
 impl Cron {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltCRON`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -215,49 +194,49 @@ impl Cron {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfOwner` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn owner(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfOwner)
     }
 
     /// `sfStartTime` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn start_time(&self) -> crate::error::Result<u32> {
+    pub fn start_time(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfStartTime)
     }
 
     /// `sfDelaySeconds` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn delay_seconds(&self) -> crate::error::Result<u32> {
+    pub fn delay_seconds(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfDelaySeconds)
     }
 
     /// `sfRepeatCount` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn repeat_count(&self) -> crate::error::Result<u32> {
+    pub fn repeat_count(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfRepeatCount)
     }
 
     /// `sfOwnerNode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner_node(&self) -> crate::error::Result<u64> {
+    pub fn owner_node(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfOwnerNode)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
 }
@@ -278,16 +257,14 @@ pub struct Check {
 impl Check {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltCHECK`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -298,87 +275,79 @@ impl Check {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAccount)
     }
 
     /// `sfDestination` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn destination(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfDestination)
     }
 
     /// `sfSendMax` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn send_max(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn send_max(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfSendMax)
     }
 
     /// `sfSequence` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
+    pub fn sequence(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfSequence)
     }
 
     /// `sfOwnerNode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner_node(&self) -> crate::error::Result<u64> {
+    pub fn owner_node(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfOwnerNode)
     }
 
     /// `sfDestinationNode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn destination_node(&self) -> crate::error::Result<u64> {
+    pub fn destination_node(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfDestinationNode)
     }
 
     /// `sfExpiration` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn expiration(&self) -> crate::error::Result<Option<u32>> {
+    pub fn expiration(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfExpiration)
     }
 
     /// `sfInvoiceID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn invoice_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn invoice_id(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfInvoiceID)
     }
 
     /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+    pub fn source_tag(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfSourceTag)
     }
 
     /// `sfDestinationTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn destination_tag(&self) -> crate::error::Result<Option<u32>> {
+    pub fn destination_tag(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfDestinationTag)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
 }
@@ -399,16 +368,14 @@ pub struct HookDefinition {
 impl HookDefinition {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltHOOK_DEFINITION`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -419,133 +386,104 @@ impl HookDefinition {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfHookHash` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn hook_hash(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn hook_hash(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfHookHash)
     }
 
     /// `sfHookOn` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn hook_on(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn hook_on(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfHookOn)
     }
 
     /// `sfHookOnIncoming` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn hook_on_incoming(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn hook_on_incoming(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfHookOnIncoming)
     }
 
     /// `sfHookOnOutgoing` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn hook_on_outgoing(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn hook_on_outgoing(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfHookOnOutgoing)
     }
 
     /// `sfHookCanEmit` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn hook_can_emit(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn hook_can_emit(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfHookCanEmit)
     }
 
     /// `sfHookNamespace` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn hook_namespace(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn hook_namespace(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfHookNamespace)
     }
 
     /// `sfHookParameters` — STArray, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
     #[inline(always)]
-    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src
             .read_raw(crate::sfield::sfHookParameters.code(), out)
     }
 
     /// `sfHookParameters` — STArray, `soeREQUIRED`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     #[inline(always)]
-    pub fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<crate::slot_obj::SlotObject<crate::types::STArray>> {
+    pub fn hook_parameters_slot(&self) -> Result<SlotObject<crate::types::STArray>> {
         self.src.subobject(crate::sfield::sfHookParameters)
     }
 
     /// `sfHookApiVersion` — UInt16, `soeREQUIRED`.
     #[inline(always)]
-    pub fn hook_api_version(&self) -> crate::error::Result<u16> {
+    pub fn hook_api_version(&self) -> Result<u16> {
         self.src.read(crate::sfield::sfHookApiVersion)
     }
 
     /// `sfCreateCode` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn create_code_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn create_code_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfCreateCode.code(), out)
     }
 
     /// `sfHookSetTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn hook_set_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn hook_set_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfHookSetTxnID)
     }
 
     /// `sfReferenceCount` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn reference_count(&self) -> crate::error::Result<u64> {
+    pub fn reference_count(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfReferenceCount)
     }
 
     /// `sfFee` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn fee(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfFee)
     }
 
     /// `sfHookCallbackFee` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn hook_callback_fee(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn hook_callback_fee(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfHookCallbackFee)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn previous_txn_id(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<Option<u32>> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfPreviousTxnLgrSeq)
     }
 }
@@ -566,16 +504,14 @@ pub struct EmittedTxn {
 impl EmittedTxn {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltEMITTED_TXN`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -586,40 +522,26 @@ impl EmittedTxn {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfEmittedTxn` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emitted_txn_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn emitted_txn_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn emitted_txn_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfEmittedTxn.code(), out)
     }
 
     /// `sfEmittedTxn` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn emitted_txn_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+    pub fn emitted_txn_slot(&self) -> Result<Option<SlotObject<STObject>>> {
         self.src.subobject_opt(crate::sfield::sfEmittedTxn)
     }
 
     /// `sfOwnerNode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner_node(&self) -> crate::error::Result<u64> {
+    pub fn owner_node(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfOwnerNode)
     }
 }
@@ -640,16 +562,14 @@ pub struct Hook {
 impl Hook {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltHOOK`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -660,52 +580,43 @@ impl Hook {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAccount` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn account(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfAccount)
     }
 
     /// `sfOwnerNode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner_node(&self) -> crate::error::Result<u64> {
+    pub fn owner_node(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfOwnerNode)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
 
     /// `sfHooks` — STArray, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hooks_slot` on a slot-backed view to navigate the container.
     #[inline(always)]
-    pub fn hooks_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> crate::error::Result<usize> {
+    pub fn hooks_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfHooks.code(), out)
     }
 
     /// `sfHooks` — STArray, `soeREQUIRED`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     #[inline(always)]
-    pub fn hooks_slot(
-        &self,
-    ) -> crate::error::Result<crate::slot_obj::SlotObject<crate::types::STArray>> {
+    pub fn hooks_slot(&self) -> Result<SlotObject<crate::types::STArray>> {
         self.src.subobject(crate::sfield::sfHooks)
     }
 }
@@ -726,16 +637,14 @@ pub struct ImportVLSequence {
 impl ImportVLSequence {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltIMPORT_VLSEQ`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -746,40 +655,31 @@ impl ImportVLSequence {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfPublicKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfPublicKey.code(), out)
     }
 
     /// `sfImportSequence` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn import_sequence(&self) -> crate::error::Result<u32> {
+    pub fn import_sequence(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfImportSequence)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn previous_txn_id(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<Option<u32>> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfPreviousTxnLgrSeq)
     }
 }
@@ -800,16 +700,14 @@ pub struct NegativeUNL {
 impl NegativeUNL {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltNEGATIVE_UNL`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -820,78 +718,55 @@ impl NegativeUNL {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfDisabledValidators` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `disabled_validators_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
     pub fn disabled_validators_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfDisabledValidators.code(), out)
     }
 
     /// `sfDisabledValidators` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn disabled_validators_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+    pub fn disabled_validators_slot(&self) -> Result<Option<SlotObject<crate::types::STArray>>> {
         self.src.subobject_opt(crate::sfield::sfDisabledValidators)
     }
 
     /// `sfValidatorToDisable` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
     pub fn validator_to_disable_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfValidatorToDisable.code(), out)
     }
 
     /// `sfValidatorToReEnable` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
     pub fn validator_to_re_enable_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfValidatorToReEnable.code(), out)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn previous_txn_id(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<Option<u32>> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfPreviousTxnLgrSeq)
     }
 }
@@ -916,16 +791,14 @@ pub struct NFTokenPage {
 impl NFTokenPage {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltNFTOKEN_PAGE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -936,57 +809,43 @@ impl NFTokenPage {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfPreviousPageMin` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn previous_page_min(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn previous_page_min(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfPreviousPageMin)
     }
 
     /// `sfNextPageMin` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn next_page_min(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn next_page_min(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfNextPageMin)
     }
 
     /// `sfNFTokens` — STArray, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `nftokens_slot` on a slot-backed view to navigate the container.
     #[inline(always)]
-    pub fn nftokens_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn nftokens_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfNFTokens.code(), out)
     }
 
     /// `sfNFTokens` — STArray, `soeREQUIRED`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     #[inline(always)]
-    pub fn nftokens_slot(
-        &self,
-    ) -> crate::error::Result<crate::slot_obj::SlotObject<crate::types::STArray>> {
+    pub fn nftokens_slot(&self) -> Result<SlotObject<crate::types::STArray>> {
         self.src.subobject(crate::sfield::sfNFTokens)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
 }
@@ -1008,16 +867,14 @@ pub struct UNLReport {
 impl UNLReport {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltUNL_REPORT`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -1028,73 +885,51 @@ impl UNLReport {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfImportVLKeys` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `import_vl_keys_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
     pub fn import_vl_keys_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfImportVLKeys.code(), out)
     }
 
     /// `sfImportVLKeys` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn import_vl_keys_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+    pub fn import_vl_keys_slot(&self) -> Result<Option<SlotObject<crate::types::STArray>>> {
         self.src.subobject_opt(crate::sfield::sfImportVLKeys)
     }
 
     /// `sfActiveValidators` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `active_validators_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
     pub fn active_validators_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfActiveValidators.code(), out)
     }
 
     /// `sfActiveValidators` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn active_validators_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+    pub fn active_validators_slot(&self) -> Result<Option<SlotObject<crate::types::STArray>>> {
         self.src.subobject_opt(crate::sfield::sfActiveValidators)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
 }
@@ -1115,16 +950,14 @@ pub struct SignerList {
 impl SignerList {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltSIGNER_LIST`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -1135,60 +968,50 @@ impl SignerList {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfOwnerNode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner_node(&self) -> crate::error::Result<u64> {
+    pub fn owner_node(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfOwnerNode)
     }
 
     /// `sfSignerQuorum` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn signer_quorum(&self) -> crate::error::Result<u32> {
+    pub fn signer_quorum(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfSignerQuorum)
     }
 
     /// `sfSignerEntries` — STArray, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signer_entries_slot` on a slot-backed view to navigate the container.
     #[inline(always)]
-    pub fn signer_entries_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn signer_entries_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src
             .read_raw(crate::sfield::sfSignerEntries.code(), out)
     }
 
     /// `sfSignerEntries` — STArray, `soeREQUIRED`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     #[inline(always)]
-    pub fn signer_entries_slot(
-        &self,
-    ) -> crate::error::Result<crate::slot_obj::SlotObject<crate::types::STArray>> {
+    pub fn signer_entries_slot(&self) -> Result<SlotObject<crate::types::STArray>> {
         self.src.subobject(crate::sfield::sfSignerEntries)
     }
 
     /// `sfSignerListID` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn signer_list_id(&self) -> crate::error::Result<u32> {
+    pub fn signer_list_id(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfSignerListID)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
 }
@@ -1209,16 +1032,14 @@ pub struct Ticket {
 impl Ticket {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltTICKET`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -1229,37 +1050,37 @@ impl Ticket {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAccount)
     }
 
     /// `sfOwnerNode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner_node(&self) -> crate::error::Result<u64> {
+    pub fn owner_node(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfOwnerNode)
     }
 
     /// `sfTicketSequence` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn ticket_sequence(&self) -> crate::error::Result<u32> {
+    pub fn ticket_sequence(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfTicketSequence)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
 }
@@ -1280,16 +1101,14 @@ pub struct URIToken {
 impl URIToken {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltURI_TOKEN`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -1300,69 +1119,61 @@ impl URIToken {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfOwner` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn owner(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfOwner)
     }
 
     /// `sfOwnerNode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner_node(&self) -> crate::error::Result<u64> {
+    pub fn owner_node(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfOwnerNode)
     }
 
     /// `sfIssuer` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn issuer(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn issuer(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfIssuer)
     }
 
     /// `sfURI` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn uri_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> crate::error::Result<usize> {
+    pub fn uri_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfURI.code(), out)
     }
 
     /// `sfDigest` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn digest(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn digest(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfDigest)
     }
 
     /// `sfAmount` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn amount(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfAmount)
     }
 
     /// `sfDestination` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn destination(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfDestination)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
 }
@@ -1383,16 +1194,14 @@ pub struct AccountRoot {
 impl AccountRoot {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltACCOUNT_ROOT`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -1403,290 +1212,217 @@ impl AccountRoot {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAccount)
     }
 
     /// `sfSequence` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
+    pub fn sequence(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfSequence)
     }
 
     /// `sfBalance` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn balance(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn balance(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfBalance)
     }
 
     /// `sfOwnerCount` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner_count(&self) -> crate::error::Result<u32> {
+    pub fn owner_count(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfOwnerCount)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
 
     /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn account_txn_id(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfAccountTxnID)
     }
 
     /// `sfRegularKey` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn regular_key(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn regular_key(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfRegularKey)
     }
 
     /// `sfEmailHash` — Hash128, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn email_hash_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn email_hash_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfEmailHash.code(), out)
     }
 
     /// `sfWalletLocator` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn wallet_locator(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn wallet_locator(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfWalletLocator)
     }
 
     /// `sfWalletSize` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn wallet_size(&self) -> crate::error::Result<Option<u32>> {
+    pub fn wallet_size(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfWalletSize)
     }
 
     /// `sfMessageKey` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn message_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn message_key_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfMessageKey.code(), out)
     }
 
     /// `sfTransferRate` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn transfer_rate(&self) -> crate::error::Result<Option<u32>> {
+    pub fn transfer_rate(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfTransferRate)
     }
 
     /// `sfDomain` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn domain_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn domain_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src.read_raw_opt(crate::sfield::sfDomain.code(), out)
     }
 
     /// `sfTickSize` — UInt8, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn tick_size(&self) -> crate::error::Result<Option<u8>> {
+    pub fn tick_size(&self) -> Result<Option<u8>> {
         self.src.read_opt(crate::sfield::sfTickSize)
     }
 
     /// `sfTicketCount` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn ticket_count(&self) -> crate::error::Result<Option<u32>> {
+    pub fn ticket_count(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfTicketCount)
     }
 
     /// `sfNFTokenMinter` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn nftoken_minter(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn nftoken_minter(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfNFTokenMinter)
     }
 
     /// `sfMintedNFTokens` — UInt32, `soeDEFAULT`.
-    ///
-    /// `Ok(None)` when omitted; `soeDEFAULT` defines no value to substitute.
     #[inline(always)]
-    pub fn minted_nftokens(&self) -> crate::error::Result<Option<u32>> {
+    pub fn minted_nftokens(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfMintedNFTokens)
     }
 
     /// `sfBurnedNFTokens` — UInt32, `soeDEFAULT`.
-    ///
-    /// `Ok(None)` when omitted; `soeDEFAULT` defines no value to substitute.
     #[inline(always)]
-    pub fn burned_nftokens(&self) -> crate::error::Result<Option<u32>> {
+    pub fn burned_nftokens(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfBurnedNFTokens)
     }
 
     /// `sfHookStateCount` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn hook_state_count(&self) -> crate::error::Result<Option<u32>> {
+    pub fn hook_state_count(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfHookStateCount)
     }
 
     /// `sfHookNamespaces` — Vector256, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
     pub fn hook_namespaces_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfHookNamespaces.code(), out)
     }
 
     /// `sfRewardLgrFirst` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn reward_lgr_first(&self) -> crate::error::Result<Option<u32>> {
+    pub fn reward_lgr_first(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfRewardLgrFirst)
     }
 
     /// `sfRewardLgrLast` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn reward_lgr_last(&self) -> crate::error::Result<Option<u32>> {
+    pub fn reward_lgr_last(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfRewardLgrLast)
     }
 
     /// `sfRewardTime` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn reward_time(&self) -> crate::error::Result<Option<u32>> {
+    pub fn reward_time(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfRewardTime)
     }
 
     /// `sfRewardAccumulator` — UInt64, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn reward_accumulator(&self) -> crate::error::Result<Option<u64>> {
+    pub fn reward_accumulator(&self) -> Result<Option<u64>> {
         self.src.read_opt(crate::sfield::sfRewardAccumulator)
     }
 
     /// `sfFirstNFTokenSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn first_nftoken_sequence(&self) -> crate::error::Result<Option<u32>> {
+    pub fn first_nftoken_sequence(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfFirstNFTokenSequence)
     }
 
     /// `sfImportSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn import_sequence(&self) -> crate::error::Result<Option<u32>> {
+    pub fn import_sequence(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfImportSequence)
     }
 
     /// `sfGovernanceFlags` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn governance_flags(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn governance_flags(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfGovernanceFlags)
     }
 
     /// `sfGovernanceMarks` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn governance_marks(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn governance_marks(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfGovernanceMarks)
     }
 
     /// `sfAccountIndex` — UInt64, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn account_index(&self) -> crate::error::Result<Option<u64>> {
+    pub fn account_index(&self) -> Result<Option<u64>> {
         self.src.read_opt(crate::sfield::sfAccountIndex)
     }
 
     /// `sfTouchCount` — UInt64, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn touch_count(&self) -> crate::error::Result<Option<u64>> {
+    pub fn touch_count(&self) -> Result<Option<u64>> {
         self.src.read_opt(crate::sfield::sfTouchCount)
     }
 
     /// `sfHookStateScale` — UInt16, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn hook_state_scale(&self) -> crate::error::Result<Option<u16>> {
+    pub fn hook_state_scale(&self) -> Result<Option<u16>> {
         self.src.read_opt(crate::sfield::sfHookStateScale)
     }
 
     /// `sfCron` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn cron(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn cron(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfCron)
     }
 
     /// `sfAMMID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn amm_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn amm_id(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfAMMID)
     }
 }
@@ -1707,16 +1443,14 @@ pub struct DirectoryNode {
 impl DirectoryNode {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltDIR_NODE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -1727,144 +1461,107 @@ impl DirectoryNode {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfOwner` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn owner(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn owner(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfOwner)
     }
 
     /// `sfTakerPaysCurrency` — Hash160, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
     pub fn taker_pays_currency_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfTakerPaysCurrency.code(), out)
     }
 
     /// `sfTakerPaysIssuer` — Hash160, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
     pub fn taker_pays_issuer_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfTakerPaysIssuer.code(), out)
     }
 
     /// `sfTakerGetsCurrency` — Hash160, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
     pub fn taker_gets_currency_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfTakerGetsCurrency.code(), out)
     }
 
     /// `sfTakerGetsIssuer` — Hash160, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
     pub fn taker_gets_issuer_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfTakerGetsIssuer.code(), out)
     }
 
     /// `sfExchangeRate` — UInt64, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn exchange_rate(&self) -> crate::error::Result<Option<u64>> {
+    pub fn exchange_rate(&self) -> Result<Option<u64>> {
         self.src.read_opt(crate::sfield::sfExchangeRate)
     }
 
     /// `sfReferenceCount` — UInt64, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn reference_count(&self) -> crate::error::Result<Option<u64>> {
+    pub fn reference_count(&self) -> Result<Option<u64>> {
         self.src.read_opt(crate::sfield::sfReferenceCount)
     }
 
     /// `sfIndexes` — Vector256, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn indexes_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn indexes_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfIndexes.code(), out)
     }
 
     /// `sfRootIndex` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn root_index(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn root_index(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfRootIndex)
     }
 
     /// `sfIndexNext` — UInt64, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn index_next(&self) -> crate::error::Result<Option<u64>> {
+    pub fn index_next(&self) -> Result<Option<u64>> {
         self.src.read_opt(crate::sfield::sfIndexNext)
     }
 
     /// `sfIndexPrevious` — UInt64, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn index_previous(&self) -> crate::error::Result<Option<u64>> {
+    pub fn index_previous(&self) -> Result<Option<u64>> {
         self.src.read_opt(crate::sfield::sfIndexPrevious)
     }
 
     /// `sfNFTokenID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn nftoken_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn nftoken_id(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfNFTokenID)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn previous_txn_id(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<Option<u32>> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfPreviousTxnLgrSeq)
     }
 }
@@ -1885,16 +1582,14 @@ pub struct Amendments {
 impl Amendments {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltAMENDMENTS`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -1905,64 +1600,39 @@ impl Amendments {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAmendments` — Vector256, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn amendments_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn amendments_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfAmendments.code(), out)
     }
 
     /// `sfMajorities` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `majorities_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn majorities_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn majorities_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfMajorities.code(), out)
     }
 
     /// `sfMajorities` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn majorities_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+    pub fn majorities_slot(&self) -> Result<Option<SlotObject<crate::types::STArray>>> {
         self.src.subobject_opt(crate::sfield::sfMajorities)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn previous_txn_id(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<Option<u32>> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfPreviousTxnLgrSeq)
     }
 }
@@ -1983,16 +1653,14 @@ pub struct LedgerHashes {
 impl LedgerHashes {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltLEDGER_HASHES`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -2003,31 +1671,25 @@ impl LedgerHashes {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+    pub fn first_ledger_sequence(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfFirstLedgerSequence)
     }
 
     /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+    pub fn last_ledger_sequence(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfLastLedgerSequence)
     }
 
     /// `sfHashes` — Vector256, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn hashes_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> crate::error::Result<usize> {
+    pub fn hashes_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfHashes.code(), out)
     }
 }
@@ -2052,16 +1714,14 @@ pub struct Bridge {
 impl Bridge {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltBRIDGE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -2072,76 +1732,67 @@ impl Bridge {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAccount)
     }
 
     /// `sfSignatureReward` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn signature_reward(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn signature_reward(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfSignatureReward)
     }
 
     /// `sfMinAccountCreateAmount` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn min_account_create_amount(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn min_account_create_amount(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfMinAccountCreateAmount)
     }
 
     /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfXChainBridge.code(), out)
     }
 
     /// `sfXChainClaimID` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn xchain_claim_id(&self) -> crate::error::Result<u64> {
+    pub fn xchain_claim_id(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfXChainClaimID)
     }
 
     /// `sfXChainAccountCreateCount` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn xchain_account_create_count(&self) -> crate::error::Result<u64> {
+    pub fn xchain_account_create_count(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfXChainAccountCreateCount)
     }
 
     /// `sfXChainAccountClaimCount` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn xchain_account_claim_count(&self) -> crate::error::Result<u64> {
+    pub fn xchain_account_claim_count(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfXChainAccountClaimCount)
     }
 
     /// `sfOwnerNode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner_node(&self) -> crate::error::Result<u64> {
+    pub fn owner_node(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfOwnerNode)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
 }
@@ -2163,16 +1814,14 @@ pub struct Offer {
 impl Offer {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltOFFER`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -2183,69 +1832,67 @@ impl Offer {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAccount)
     }
 
     /// `sfSequence` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
+    pub fn sequence(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfSequence)
     }
 
     /// `sfTakerPays` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn taker_pays(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn taker_pays(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfTakerPays)
     }
 
     /// `sfTakerGets` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn taker_gets(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn taker_gets(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfTakerGets)
     }
 
     /// `sfBookDirectory` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn book_directory(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn book_directory(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfBookDirectory)
     }
 
     /// `sfBookNode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn book_node(&self) -> crate::error::Result<u64> {
+    pub fn book_node(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfBookNode)
     }
 
     /// `sfOwnerNode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner_node(&self) -> crate::error::Result<u64> {
+    pub fn owner_node(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfOwnerNode)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
 
     /// `sfExpiration` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn expiration(&self) -> crate::error::Result<Option<u32>> {
+    pub fn expiration(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfExpiration)
     }
 }
@@ -2266,16 +1913,14 @@ pub struct DepositPreauth {
 impl DepositPreauth {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltDEPOSIT_PREAUTH`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -2286,66 +1931,53 @@ impl DepositPreauth {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAccount)
     }
 
     /// `sfAuthorize` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn authorize(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn authorize(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfAuthorize)
     }
 
     /// `sfOwnerNode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner_node(&self) -> crate::error::Result<u64> {
+    pub fn owner_node(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfOwnerNode)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
 
     /// `sfAuthorizeCredentials` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `authorize_credentials_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
     pub fn authorize_credentials_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfAuthorizeCredentials.code(), out)
     }
 
     /// `sfAuthorizeCredentials` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn authorize_credentials_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+    pub fn authorize_credentials_slot(&self) -> Result<Option<SlotObject<crate::types::STArray>>> {
         self.src
             .subobject_opt(crate::sfield::sfAuthorizeCredentials)
     }
@@ -2371,16 +2003,14 @@ pub struct XChainOwnedClaimID {
 impl XChainOwnedClaimID {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltXCHAIN_OWNED_CLAIM_ID`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -2391,83 +2021,71 @@ impl XChainOwnedClaimID {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAccount)
     }
 
     /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfXChainBridge.code(), out)
     }
 
     /// `sfXChainClaimID` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn xchain_claim_id(&self) -> crate::error::Result<u64> {
+    pub fn xchain_claim_id(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfXChainClaimID)
     }
 
     /// `sfOtherChainSource` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn other_chain_source(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn other_chain_source(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfOtherChainSource)
     }
 
     /// `sfXChainClaimAttestations` — STArray, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `xchain_claim_attestations_slot` on a slot-backed view to navigate the container.
     #[inline(always)]
     pub fn xchain_claim_attestations_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<usize> {
+    ) -> Result<usize> {
         self.src
             .read_raw(crate::sfield::sfXChainClaimAttestations.code(), out)
     }
 
     /// `sfXChainClaimAttestations` — STArray, `soeREQUIRED`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     #[inline(always)]
-    pub fn xchain_claim_attestations_slot(
-        &self,
-    ) -> crate::error::Result<crate::slot_obj::SlotObject<crate::types::STArray>> {
+    pub fn xchain_claim_attestations_slot(&self) -> Result<SlotObject<crate::types::STArray>> {
         self.src.subobject(crate::sfield::sfXChainClaimAttestations)
     }
 
     /// `sfSignatureReward` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn signature_reward(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn signature_reward(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfSignatureReward)
     }
 
     /// `sfOwnerNode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner_node(&self) -> crate::error::Result<u64> {
+    pub fn owner_node(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfOwnerNode)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
 }
@@ -2489,16 +2107,14 @@ pub struct RippleState {
 impl RippleState {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltRIPPLE_STATE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -2509,155 +2125,111 @@ impl RippleState {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfBalance` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn balance(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn balance(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfBalance)
     }
 
     /// `sfLowLimit` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn low_limit(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn low_limit(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfLowLimit)
     }
 
     /// `sfHighLimit` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn high_limit(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn high_limit(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfHighLimit)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
 
     /// `sfLowNode` — UInt64, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn low_node(&self) -> crate::error::Result<Option<u64>> {
+    pub fn low_node(&self) -> Result<Option<u64>> {
         self.src.read_opt(crate::sfield::sfLowNode)
     }
 
     /// `sfLowQualityIn` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn low_quality_in(&self) -> crate::error::Result<Option<u32>> {
+    pub fn low_quality_in(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfLowQualityIn)
     }
 
     /// `sfLowQualityOut` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn low_quality_out(&self) -> crate::error::Result<Option<u32>> {
+    pub fn low_quality_out(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfLowQualityOut)
     }
 
     /// `sfHighNode` — UInt64, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn high_node(&self) -> crate::error::Result<Option<u64>> {
+    pub fn high_node(&self) -> Result<Option<u64>> {
         self.src.read_opt(crate::sfield::sfHighNode)
     }
 
     /// `sfHighQualityIn` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn high_quality_in(&self) -> crate::error::Result<Option<u32>> {
+    pub fn high_quality_in(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfHighQualityIn)
     }
 
     /// `sfHighQualityOut` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn high_quality_out(&self) -> crate::error::Result<Option<u32>> {
+    pub fn high_quality_out(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfHighQualityOut)
     }
 
     /// `sfLockedBalance` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn locked_balance(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn locked_balance(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfLockedBalance)
     }
 
     /// `sfLockCount` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn lock_count(&self) -> crate::error::Result<Option<u32>> {
+    pub fn lock_count(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfLockCount)
     }
 
     /// `sfHighReward` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `high_reward_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn high_reward_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn high_reward_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfHighReward.code(), out)
     }
 
     /// `sfHighReward` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn high_reward_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+    pub fn high_reward_slot(&self) -> Result<Option<SlotObject<STObject>>> {
         self.src.subobject_opt(crate::sfield::sfHighReward)
     }
 
     /// `sfLowReward` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `low_reward_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn low_reward_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn low_reward_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfLowReward.code(), out)
     }
 
     /// `sfLowReward` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn low_reward_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+    pub fn low_reward_slot(&self) -> Result<Option<SlotObject<STObject>>> {
         self.src.subobject_opt(crate::sfield::sfLowReward)
     }
 }
@@ -2678,16 +2250,14 @@ pub struct FeeSettings {
 impl FeeSettings {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltFEE_SETTINGS`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -2698,105 +2268,79 @@ impl FeeSettings {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfBaseFee` — UInt64, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn base_fee(&self) -> crate::error::Result<Option<u64>> {
+    pub fn base_fee(&self) -> Result<Option<u64>> {
         self.src.read_opt(crate::sfield::sfBaseFee)
     }
 
     /// `sfReferenceFeeUnits` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn reference_fee_units(&self) -> crate::error::Result<Option<u32>> {
+    pub fn reference_fee_units(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfReferenceFeeUnits)
     }
 
     /// `sfReserveBase` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn reserve_base(&self) -> crate::error::Result<Option<u32>> {
+    pub fn reserve_base(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfReserveBase)
     }
 
     /// `sfReserveIncrement` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn reserve_increment(&self) -> crate::error::Result<Option<u32>> {
+    pub fn reserve_increment(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfReserveIncrement)
     }
 
     /// `sfBaseFeeDrops` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn base_fee_drops(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn base_fee_drops(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfBaseFeeDrops)
     }
 
     /// `sfReserveBaseDrops` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn reserve_base_drops(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn reserve_base_drops(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfReserveBaseDrops)
     }
 
     /// `sfReserveIncrementDrops` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn reserve_increment_drops(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn reserve_increment_drops(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfReserveIncrementDrops)
     }
 
     /// `sfXahauActivationLgrSeq` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn xahau_activation_lgr_seq(&self) -> crate::error::Result<Option<u32>> {
+    pub fn xahau_activation_lgr_seq(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfXahauActivationLgrSeq)
     }
 
     /// `sfAccountCount` — UInt64, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn account_count(&self) -> crate::error::Result<Option<u64>> {
+    pub fn account_count(&self) -> Result<Option<u64>> {
         self.src.read_opt(crate::sfield::sfAccountCount)
     }
 
     /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn network_id(&self) -> crate::error::Result<Option<u32>> {
+    pub fn network_id(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfNetworkID)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn previous_txn_id(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<Option<u32>> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfPreviousTxnLgrSeq)
     }
 }
@@ -2821,16 +2365,14 @@ pub struct XChainOwnedCreateAccountClaimID {
 impl XChainOwnedCreateAccountClaimID {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltXCHAIN_OWNED_CREATE_ACCOUNT_CLAIM_ID`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -2841,72 +2383,62 @@ impl XChainOwnedCreateAccountClaimID {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAccount)
     }
 
     /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfXChainBridge.code(), out)
     }
 
     /// `sfXChainAccountCreateCount` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn xchain_account_create_count(&self) -> crate::error::Result<u64> {
+    pub fn xchain_account_create_count(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfXChainAccountCreateCount)
     }
 
     /// `sfXChainCreateAccountAttestations` — STArray, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `xchain_create_account_attestations_slot` on a slot-backed view to navigate the container.
     #[inline(always)]
     pub fn xchain_create_account_attestations_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<usize> {
+    ) -> Result<usize> {
         self.src
             .read_raw(crate::sfield::sfXChainCreateAccountAttestations.code(), out)
     }
 
     /// `sfXChainCreateAccountAttestations` — STArray, `soeREQUIRED`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     #[inline(always)]
     pub fn xchain_create_account_attestations_slot(
         &self,
-    ) -> crate::error::Result<crate::slot_obj::SlotObject<crate::types::STArray>> {
+    ) -> Result<SlotObject<crate::types::STArray>> {
         self.src
             .subobject(crate::sfield::sfXChainCreateAccountAttestations)
     }
 
     /// `sfOwnerNode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner_node(&self) -> crate::error::Result<u64> {
+    pub fn owner_node(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfOwnerNode)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
 }
@@ -2928,16 +2460,14 @@ pub struct Escrow {
 impl Escrow {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltESCROW`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -2948,105 +2478,86 @@ impl Escrow {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAccount)
     }
 
     /// `sfDestination` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn destination(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfDestination)
     }
 
     /// `sfAmount` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn amount(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfAmount)
     }
 
     /// `sfTransferRate` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn transfer_rate(&self) -> crate::error::Result<Option<u32>> {
+    pub fn transfer_rate(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfTransferRate)
     }
 
     /// `sfCondition` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn condition_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn condition_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfCondition.code(), out)
     }
 
     /// `sfCancelAfter` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn cancel_after(&self) -> crate::error::Result<Option<u32>> {
+    pub fn cancel_after(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfCancelAfter)
     }
 
     /// `sfFinishAfter` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn finish_after(&self) -> crate::error::Result<Option<u32>> {
+    pub fn finish_after(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfFinishAfter)
     }
 
     /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+    pub fn source_tag(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfSourceTag)
     }
 
     /// `sfDestinationTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn destination_tag(&self) -> crate::error::Result<Option<u32>> {
+    pub fn destination_tag(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfDestinationTag)
     }
 
     /// `sfOwnerNode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner_node(&self) -> crate::error::Result<u64> {
+    pub fn owner_node(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfOwnerNode)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
 
     /// `sfDestinationNode` — UInt64, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn destination_node(&self) -> crate::error::Result<Option<u64>> {
+    pub fn destination_node(&self) -> Result<Option<u64>> {
         self.src.read_opt(crate::sfield::sfDestinationNode)
     }
 }
@@ -3067,16 +2578,14 @@ pub struct HookState {
 impl HookState {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltHOOK_STATE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -3087,47 +2596,38 @@ impl HookState {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfOwnerNode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner_node(&self) -> crate::error::Result<u64> {
+    pub fn owner_node(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfOwnerNode)
     }
 
     /// `sfHookStateKey` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn hook_state_key(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn hook_state_key(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfHookStateKey)
     }
 
     /// `sfHookStateData` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn hook_state_data_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn hook_state_data_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src
             .read_raw(crate::sfield::sfHookStateData.code(), out)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn previous_txn_id(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<Option<u32>> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfPreviousTxnLgrSeq)
     }
 }
@@ -3148,16 +2648,14 @@ pub struct PayChannel {
 impl PayChannel {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltPAYCHAN`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -3168,114 +2666,97 @@ impl PayChannel {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAccount)
     }
 
     /// `sfDestination` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn destination(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfDestination)
     }
 
     /// `sfAmount` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn amount(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfAmount)
     }
 
     /// `sfBalance` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn balance(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn balance(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfBalance)
     }
 
     /// `sfPublicKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfPublicKey.code(), out)
     }
 
     /// `sfSettleDelay` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn settle_delay(&self) -> crate::error::Result<u32> {
+    pub fn settle_delay(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfSettleDelay)
     }
 
     /// `sfTransferRate` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn transfer_rate(&self) -> crate::error::Result<Option<u32>> {
+    pub fn transfer_rate(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfTransferRate)
     }
 
     /// `sfExpiration` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn expiration(&self) -> crate::error::Result<Option<u32>> {
+    pub fn expiration(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfExpiration)
     }
 
     /// `sfCancelAfter` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn cancel_after(&self) -> crate::error::Result<Option<u32>> {
+    pub fn cancel_after(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfCancelAfter)
     }
 
     /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+    pub fn source_tag(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfSourceTag)
     }
 
     /// `sfDestinationTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn destination_tag(&self) -> crate::error::Result<Option<u32>> {
+    pub fn destination_tag(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfDestinationTag)
     }
 
     /// `sfOwnerNode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner_node(&self) -> crate::error::Result<u64> {
+    pub fn owner_node(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfOwnerNode)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
 
     /// `sfDestinationNode` — UInt64, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn destination_node(&self) -> crate::error::Result<Option<u64>> {
+    pub fn destination_node(&self) -> Result<Option<u64>> {
         self.src.read_opt(crate::sfield::sfDestinationNode)
     }
 }
@@ -3300,16 +2781,14 @@ pub struct AMM {
 impl AMM {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltAMM`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -3320,111 +2799,81 @@ impl AMM {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAccount)
     }
 
     /// `sfTradingFee` — UInt16, `soeDEFAULT`.
-    ///
-    /// `Ok(None)` when omitted; `soeDEFAULT` defines no value to substitute.
     #[inline(always)]
-    pub fn trading_fee(&self) -> crate::error::Result<Option<u16>> {
+    pub fn trading_fee(&self) -> Result<Option<u16>> {
         self.src.read_opt(crate::sfield::sfTradingFee)
     }
 
     /// `sfVoteSlots` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `vote_slots_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn vote_slots_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn vote_slots_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfVoteSlots.code(), out)
     }
 
     /// `sfVoteSlots` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn vote_slots_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+    pub fn vote_slots_slot(&self) -> Result<Option<SlotObject<crate::types::STArray>>> {
         self.src.subobject_opt(crate::sfield::sfVoteSlots)
     }
 
     /// `sfAuctionSlot` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `auction_slot_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn auction_slot_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn auction_slot_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfAuctionSlot.code(), out)
     }
 
     /// `sfAuctionSlot` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn auction_slot_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+    pub fn auction_slot_slot(&self) -> Result<Option<SlotObject<STObject>>> {
         self.src.subobject_opt(crate::sfield::sfAuctionSlot)
     }
 
     /// `sfLPTokenBalance` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn lp_token_balance(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn lp_token_balance(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfLPTokenBalance)
     }
 
     /// `sfAsset` — Issue, `soeREQUIRED`.
     #[inline(always)]
-    pub fn asset(&self) -> crate::error::Result<crate::slot_obj::IssueData> {
+    pub fn asset(&self) -> Result<crate::slot_obj::IssueData> {
         self.src.read(crate::sfield::sfAsset)
     }
 
     /// `sfAsset2` — Issue, `soeREQUIRED`.
     #[inline(always)]
-    pub fn asset2(&self) -> crate::error::Result<crate::slot_obj::IssueData> {
+    pub fn asset2(&self) -> Result<crate::slot_obj::IssueData> {
         self.src.read(crate::sfield::sfAsset2)
     }
 
     /// `sfOwnerNode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner_node(&self) -> crate::error::Result<u64> {
+    pub fn owner_node(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfOwnerNode)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
 }
@@ -3446,16 +2895,14 @@ pub struct Oracle {
 impl Oracle {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltORACLE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -3466,95 +2913,68 @@ impl Oracle {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfOwner` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn owner(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfOwner)
     }
 
     /// `sfProvider` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn provider_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn provider_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfProvider.code(), out)
     }
 
     /// `sfPriceDataSeries` — STArray, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `price_data_series_slot` on a slot-backed view to navigate the container.
     #[inline(always)]
-    pub fn price_data_series_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn price_data_series_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src
             .read_raw(crate::sfield::sfPriceDataSeries.code(), out)
     }
 
     /// `sfPriceDataSeries` — STArray, `soeREQUIRED`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     #[inline(always)]
-    pub fn price_data_series_slot(
-        &self,
-    ) -> crate::error::Result<crate::slot_obj::SlotObject<crate::types::STArray>> {
+    pub fn price_data_series_slot(&self) -> Result<SlotObject<crate::types::STArray>> {
         self.src.subobject(crate::sfield::sfPriceDataSeries)
     }
 
     /// `sfAssetClass` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn asset_class_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn asset_class_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfAssetClass.code(), out)
     }
 
     /// `sfLastUpdateTime` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn last_update_time(&self) -> crate::error::Result<u32> {
+    pub fn last_update_time(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfLastUpdateTime)
     }
 
     /// `sfURI` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn uri_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn uri_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src.read_raw_opt(crate::sfield::sfURI.code(), out)
     }
 
     /// `sfOwnerNode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner_node(&self) -> crate::error::Result<u64> {
+    pub fn owner_node(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfOwnerNode)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
 }
@@ -3579,16 +2999,14 @@ pub struct MPTokenIssuance {
 impl MPTokenIssuance {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltMPTOKEN_ISSUANCE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -3599,81 +3017,71 @@ impl MPTokenIssuance {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfIssuer` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn issuer(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn issuer(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfIssuer)
     }
 
     /// `sfSequence` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
+    pub fn sequence(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfSequence)
     }
 
     /// `sfTransferFee` — UInt16, `soeDEFAULT`.
-    ///
-    /// `Ok(None)` when omitted; `soeDEFAULT` defines no value to substitute.
     #[inline(always)]
-    pub fn transfer_fee(&self) -> crate::error::Result<Option<u16>> {
+    pub fn transfer_fee(&self) -> Result<Option<u16>> {
         self.src.read_opt(crate::sfield::sfTransferFee)
     }
 
     /// `sfOwnerNode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner_node(&self) -> crate::error::Result<u64> {
+    pub fn owner_node(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfOwnerNode)
     }
 
     /// `sfAssetScale` — UInt8, `soeDEFAULT`.
-    ///
-    /// `Ok(None)` when omitted; `soeDEFAULT` defines no value to substitute.
     #[inline(always)]
-    pub fn asset_scale(&self) -> crate::error::Result<Option<u8>> {
+    pub fn asset_scale(&self) -> Result<Option<u8>> {
         self.src.read_opt(crate::sfield::sfAssetScale)
     }
 
     /// `sfMaximumAmount` — UInt64, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn maximum_amount(&self) -> crate::error::Result<Option<u64>> {
+    pub fn maximum_amount(&self) -> Result<Option<u64>> {
         self.src.read_opt(crate::sfield::sfMaximumAmount)
     }
 
     /// `sfOutstandingAmount` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn outstanding_amount(&self) -> crate::error::Result<u64> {
+    pub fn outstanding_amount(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfOutstandingAmount)
     }
 
     /// `sfMPTokenMetadata` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
     pub fn mptoken_metadata_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfMPTokenMetadata.code(), out)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
 }
@@ -3699,16 +3107,14 @@ pub struct MPToken {
 impl MPToken {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltMPTOKEN`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -3719,51 +3125,44 @@ impl MPToken {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAccount)
     }
 
     /// `sfMPTokenIssuanceID` — UInt192, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn mptoken_issuance_id_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn mptoken_issuance_id_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src
             .read_raw(crate::sfield::sfMPTokenIssuanceID.code(), out)
     }
 
     /// `sfMPTAmount` — UInt64, `soeDEFAULT`.
-    ///
-    /// `Ok(None)` when omitted; `soeDEFAULT` defines no value to substitute.
     #[inline(always)]
-    pub fn mpt_amount(&self) -> crate::error::Result<Option<u64>> {
+    pub fn mpt_amount(&self) -> Result<Option<u64>> {
         self.src.read_opt(crate::sfield::sfMPTAmount)
     }
 
     /// `sfOwnerNode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner_node(&self) -> crate::error::Result<u64> {
+    pub fn owner_node(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfOwnerNode)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
 }
@@ -3789,16 +3188,14 @@ pub struct Credential {
 impl Credential {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltCREDENTIAL`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -3809,76 +3206,62 @@ impl Credential {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfSubject` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn subject(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn subject(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfSubject)
     }
 
     /// `sfIssuer` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn issuer(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn issuer(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfIssuer)
     }
 
     /// `sfCredentialType` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn credential_type_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn credential_type_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src
             .read_raw(crate::sfield::sfCredentialType.code(), out)
     }
 
     /// `sfExpiration` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn expiration(&self) -> crate::error::Result<Option<u32>> {
+    pub fn expiration(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfExpiration)
     }
 
     /// `sfURI` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn uri_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn uri_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src.read_raw_opt(crate::sfield::sfURI.code(), out)
     }
 
     /// `sfIssuerNode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn issuer_node(&self) -> crate::error::Result<u64> {
+    pub fn issuer_node(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfIssuerNode)
     }
 
     /// `sfSubjectNode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn subject_node(&self) -> crate::error::Result<u64> {
+    pub fn subject_node(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfSubjectNode)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
 }
@@ -3904,16 +3287,14 @@ pub struct PermissionedDomain {
 impl PermissionedDomain {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltPERMISSIONED_DOMAIN`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -3924,60 +3305,50 @@ impl PermissionedDomain {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfOwner` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn owner(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfOwner)
     }
 
     /// `sfSequence` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn sequence(&self) -> crate::error::Result<u32> {
+    pub fn sequence(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfSequence)
     }
 
     /// `sfAcceptedCredentials` — STArray, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `accepted_credentials_slot` on a slot-backed view to navigate the container.
     #[inline(always)]
-    pub fn accepted_credentials_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn accepted_credentials_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src
             .read_raw(crate::sfield::sfAcceptedCredentials.code(), out)
     }
 
     /// `sfAcceptedCredentials` — STArray, `soeREQUIRED`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     #[inline(always)]
-    pub fn accepted_credentials_slot(
-        &self,
-    ) -> crate::error::Result<crate::slot_obj::SlotObject<crate::types::STArray>> {
+    pub fn accepted_credentials_slot(&self) -> Result<SlotObject<crate::types::STArray>> {
         self.src.subobject(crate::sfield::sfAcceptedCredentials)
     }
 
     /// `sfOwnerNode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner_node(&self) -> crate::error::Result<u64> {
+    pub fn owner_node(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfOwnerNode)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
 }
@@ -4003,16 +3374,14 @@ pub struct DID {
 impl DID {
     /// Loads and type-checks the ledger object identified by `keylet`.
     #[inline(always)]
-    pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {
-        Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
     }
 
     /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltDID`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfLedgerEntryType,
@@ -4023,71 +3392,50 @@ impl DID {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAccount)
     }
 
     /// `sfDIDDocument` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn did_document_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn did_document_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfDIDDocument.code(), out)
     }
 
     /// `sfURI` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn uri_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn uri_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src.read_raw_opt(crate::sfield::sfURI.code(), out)
     }
 
     /// `sfData` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn data_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn data_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src.read_raw_opt(crate::sfield::sfData.code(), out)
     }
 
     /// `sfOwnerNode` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner_node(&self) -> crate::error::Result<u64> {
+    pub fn owner_node(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfOwnerNode)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn previous_txn_lgr_seq(&self) -> crate::error::Result<u32> {
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
     }
 }
