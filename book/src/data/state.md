@@ -135,10 +135,10 @@ generates a `static` value named after the struct (`StateCounter`, same
 name, different namespace — see [Anatomy of a Hook](../concepts/anatomy.md#the-struct-has-no-runtime-instance-but-every-entry-borrows-it)).
 An entry (or a helper inside the same `#[hooks] impl`) declares `&self` to
 receive that static and calls the field's accessors as
-`self.counter.get()`; code outside the impl reaches the identical static by
-the struct's own name instead: `StateCounter.counter.get()`. `key` also
-accepts a `const` reference to something more structured than a literal, as
-long as it encodes:
+`self.state.counter.get()`; code outside the impl reaches the identical
+static by the struct's own name instead: `StateCounter.state.counter.get()`.
+`key` also accepts a `const` reference to something more structured than a
+literal, as long as it encodes:
 
 ```rust,ignore
 const ENABLED_KEY: StateKey = StateKey(pad!(b"enabled"));
@@ -172,12 +172,12 @@ pub struct TypedData {
 `deposits` on its own is the *field*, not yet addressed to a specific
 entry — call `.at(args)` to bind the key's runtime arguments and get a
 handle with the same accessor set. Inside the `#[hooks] impl`, an entry
-reaches it as `self.deposits`:
+reaches it as `self.state.deposits`:
 
 ```rust,ignore
 #[hook(0, on = [Invoke])]
 fn main(&self) -> HookResult {
-    let deposit = self.deposits.at(DepositKey { tag: DEPOSIT_TAG, owner });
+    let deposit = self.state.deposits.at(DepositKey { tag: DEPOSIT_TAG, owner });
     let current = match deposit.get() {
         Ok(existing) => existing.unwrap_or(EMPTY_DEPOSIT),
         Err(_) => rollback!(
@@ -243,10 +243,10 @@ pub struct StateCounter {
 impl StateCounter {
     #[hook(0, on = [Invoke])]
     fn main(&self) -> HookResult {
-        let count = self.counter.get().unwrap_or(Some(0)).unwrap_or(0);
+        let count = self.state.counter.get().unwrap_or(Some(0)).unwrap_or(0);
 
         let next = count.wrapping_add(1);
-        if self.counter.set(&next).is_err() {
+        if self.state.counter.set(&next).is_err() {
             rollback!(
                 b"state-counter: state_set failed",
                 StateCounterError::StateSetFailed
@@ -258,7 +258,7 @@ impl StateCounter {
 }
 ```
 
-`main` declares a `&self` receiver, so `self.counter.get()` returns
+`main` declares a `&self` receiver, so `self.state.counter.get()` returns
 `Result<Option<u64>>`: `Ok(None)` means "no entry yet" (see below), so the
 double `unwrap_or` handles both "never written" and "an unexpected read
 error" the same way, defaulting to zero either way.
@@ -321,7 +321,7 @@ pub struct StateForeign {
 impl StateForeign {
     #[hook(0, on = [Invoke])]
     fn main(&self) -> HookResult {
-        let Ok(target) = self.acct.get_required() else {
+        let Ok(target) = self.hook_param.acct.get_required() else {
             rollback!(
                 b"state-foreign: ACCT parameter not configured",
                 StateForeignError::AcctNotConfigured
@@ -329,6 +329,7 @@ impl StateForeign {
         };
 
         let flag = match self
+            .state
             .enabled
             .get_foreign(None, Some(target.as_ref()))
         {
@@ -364,6 +365,135 @@ Transaction Parameters](parameters.md)) is this example's way of turning a
 missing `ACCT` parameter into an immediate, distinct rollback reason,
 distinct from `ACCT` being present but the target having no matching state
 entry (`Ok(None)` from `get_foreign`).
+
+## State interface (typed on-ledger schema)
+
+> This section's surface requires the `unstable-state-interface` feature:
+> `rshooks = { version = "…", features = ["unstable-state-interface"] }`.
+> `unstable-*` features track draft specs and are exempt from semver —
+> breaking changes may land in a minor release while the spec is a draft.
+
+Every tier above pairs a key with a value type entirely inside `rshooks` —
+nothing about that pairing is visible on-ledger. The **Hook State
+Interface** is a different, protocol-level convention: a `HookParameters`
+convention that exposes a Hook's state layout as a machine-readable, typed
+key/value schema, so an external, schema-aware client can decode a Hook's
+state without knowing anything about the hook's own source. The normative
+rules live in `docs/STATE_INTERFACE_DESIGN.md`; this section covers the
+day-to-day surface built on it.
+
+```rust,ignore
+#[hooks]
+pub struct Treasury {
+    #[state_interface(id = 0, key(account: AccountId, token: u32),
+                      value(amount: u64, updated: u32))]
+    balances: State<Balance>,
+
+    #[state_interface(id = 1, value(paused: u8))]
+    paused: State<Config>,
+}
+```
+
+(the design doc's own worked example, also `examples/20_state-interface`.)
+`#[state_interface(..)]` lives in the same `State` namespace as an ordinary
+`#[state(..)]` field — `self.state.balances`/`self.state.paused` — and the
+field still works through the same `.at(..)`/`.get()`/`.set()`/`.update()`/
+`.delete()` accessors this whole page covers. What's different: `Balance`/
+`Config` are not written by hand — the macro generates them from the
+`value(..)` schema — and the struct's `#[hooks]` carrier gains a
+machine-readable description of both entries' on-ledger layout, which
+`rshooks-build` turns into `HookParameters` declaration entries in
+`sethook.template.json` (see [Metadata and the SetHook
+Template](../build/metadata.md)).
+
+### Declaration grammar
+
+- `id = <0..=255>` — the State ID, required, unique across every
+  `#[state_interface]` field on the struct (identifiers, not positional
+  indexes — contiguity isn't required).
+- `key(name: Type, ..)` — ordered key fields, optional; omitted means a
+  singleton (no key at all, direct `.get()`/`.set()` with no `.at(..)`).
+- `value(name: Type, ..)` — ordered value fields, required, at least one.
+- The field's own type must be `State<VName>`, where `VName` is a bare
+  identifier the macro generates a `struct` from — not an existing type.
+- Every field name is `[A-Za-z][A-Za-z0-9]*`, 1 to 16 bytes (no `_` — same
+  rule the [signature parameter](parameters.md#signature-parameters-fn-arguments)
+  interface's argument names follow).
+
+### Supported types
+
+Version 0 of the interface supports only fixed-width types — the rows the
+signature-parameter interface's own table draws from, minus the
+variable-width ones (`AmountBytes`, `Blob<N>`, `IssueBytes`) that interface
+supports and this one does not:
+
+| Rust type | type code | width |
+|---|---|---|
+| `u8` | `0x10` (`STI_UINT8`) | 1 |
+| `u16` | `0x01` (`STI_UINT16`) | 2 |
+| `u32` | `0x02` (`STI_UINT32`) | 4 |
+| `u64` | `0x03` (`STI_UINT64`) | 8 |
+| `[u8; 16]` | `0x04` (`STI_UINT128`) | 16 |
+| `[u8; 32]` / `Hash` | `0x05` (`STI_UINT256`) | 32 |
+| `AccountId` | `0x08` (`STI_ACCOUNT`) | 20 |
+| `[u8; 20]` | `0x11` (`STI_UINT160`) | 20 |
+| `CurrencyCode` | `0x1A` (`STI_CURRENCY`) | 20 |
+| `XFL` | `0x80` (`XFL`) | 8 |
+
+`XFL`'s value is the Hook API's `int64_t` XFL bit pattern, big-endian —
+`XFL::raw_bits()` — decoded via `XFL::from_raw_bits` with no validity
+check; the type codes themselves come from XAS-010d (Hook Type Codes),
+which both this interface and the Hook Parameter Signature Interface
+reference for their type codes. `XFL` is fixed-width, so it is usable as
+a key field as well as a value field.
+
+Every key/value field's type is pinned against alias drift by a
+monomorphized `const` assert on `rshooks::si::SiFieldType::TYPE_BYTE`
+(token-level type checks are alias-forgeable) — the same defense
+`SigParamType::TYPE_BYTE` provides for signature parameters.
+
+### The generated key and value bytes
+
+Unlike the rest of this page, a `#[state_interface]` key is exactly 32
+bytes, always: `StateID || Encode(K0) || Encode(K1) || .. || zero padding`
+— the interface fixes the *physical* key layout as part of its wire
+contract, so rshooks builds the full 32-byte key locally and sends all 32
+bytes, rather than relying on the host's own left-pad convention this
+page's other tiers use. A singleton's key is `StateID || 31 zero bytes`,
+promoted to a `'static` compile-time constant the same way a literal
+`#[state(key = b"...")]` is.
+
+The generated value struct's fields are encoded **big-endian** (not this
+crate's ordinary little-endian `HookData` convention) and concatenated
+directly — no field IDs, separators, or length prefixes — because a state
+interface value is protocol-facing, schema-aware-client-readable data, the
+same rationale [signature parameters](parameters.md#signature-parameters-fn-arguments)'
+big-endian convention follows. There's no compile-time cap on a value
+schema's total encoded length (unlike the key, or the declaration's own
+`HookParameterName`/`HookParameterValue` bounds) — it must fit the
+installing account's own Hook State data size limit, an account-dependent
+write-time constraint the interface itself leaves for the host to enforce.
+
+The design doc's own worked spec vector, for `account =
+4B4E9C06F24296074F7BC48F92A97916C6DC5EA9, token = 42, amount = 1000,
+updated = 12345`:
+
+- `HookStateKey`: `004B4E9C06F24296074F7BC48F92A97916C6DC5EA90000002A00000000000000`
+- `HookStateData`: `00000000000003E800003039`
+
+See `crates/rshooks-testenv/tests/state_interface.rs` for this vector
+driven end-to-end through `TestEnv::invoke`, asserted against the raw
+stored bytes.
+
+### Declarations are advisory metadata
+
+Nothing about `#[state_interface]` changes what the host enforces: a
+declared field still goes through the same accessors as an ordinary
+`#[state(..)]` field, which the host accepts unconditionally. The wire
+format only shapes what a schema-aware client can expect a *conforming*
+hook to have written — nothing stops a hook from advertising a schema and
+then writing something else, same as any machine-readable interface layered
+on top of an otherwise-untyped protocol.
 
 ## Where to go next
 

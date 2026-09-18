@@ -1,6 +1,6 @@
 //! Boundary tests for the design §4 `InvocationContext` limits table and
 //! the §5 fidelity rules, driven through a real `#[hooks]` chain and
-//! `TestEnv::invoke` (not through the crate's private internals).
+//! `TestEnv::invoke`.
 
 #![allow(
     clippy::unwrap_used,
@@ -20,13 +20,14 @@ txn_template! {
     /// reserve/emit-count boundary tests.
     pub struct Probe {
         transaction_type = ttPAYMENT,
-        sequence: u32_field(sfSequence) = 0,
-        first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
-        last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
-        amount: native_amount(sfAmount) = 0,
-        fee: native_amount(sfFee) = 0,
-        signing_pub_key: empty_vl(sfSigningPubKey),
-        account: account_id(sfAccount),
+        sequence: sfSequence = 0,
+        first_ledger_sequence: sfFirstLedgerSequence = 0,
+        last_ledger_sequence: sfLastLedgerSequence = 0,
+        amount: sfAmount = NativeAmount(0),
+        fee: sfFee = NativeAmount(0),
+        signing_pub_key: sfSigningPubKey = [],
+        account: sfAccount,
+        destination: sfDestination,
         emit_details: emit_details,
     }
 }
@@ -83,6 +84,7 @@ impl Limits {
             rollback!(b"reserve", 1);
         }
         let mut tpl = Probe::new();
+        tpl.set_destination(&AccountId::default());
         let prepared = match tpl.prepare_for_emit() {
             Ok(p) => p,
             Err(_) => rollback!(b"prepare", 2),
@@ -127,7 +129,7 @@ impl Limits {
         match hook_hash_buf(0) {
             Ok(h) => {
                 let n = u64::from(h[0]);
-                if self.scratch.set(&n).is_err() {
+                if self.state.scratch.set(&n).is_err() {
                     rollback!(b"store failed", 1);
                 }
                 accept!(b"", 0)
@@ -193,10 +195,9 @@ fn emit_beyond_reserve_is_too_many_emitted_txn() {
 
 #[test]
 fn burden_overflow_is_fee_too_large() {
-    // `otxn_emitted` validates its burden fits in an i64 (the Hook API's
-    // `otxn_burden` return type), so the largest legal seed is `i64::MAX` —
-    // reserved(2) still multiplies it past `i64::MAX`, so `etxn_burden()`
-    // must still report `FEE_TOO_LARGE`.
+    // `otxn_emitted` validates its burden fits in an i64, so the largest
+    // legal seed is `i64::MAX` — `reserve(2)` still multiplies it past
+    // `i64::MAX`, so `etxn_burden()` must report `FEE_TOO_LARGE`.
     let env = TestEnv::new().otxn_emitted(i64::MAX as u64, 0);
     let exit = env.invoke::<Limits>(5);
     assert_eq!(exit.code, rshooks_core::FEE_TOO_LARGE);

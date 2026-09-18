@@ -1,0 +1,19 @@
+[package]
+name = "state-interface"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+test = false
+
+[dependencies]
+rshooks = { workspace = true, features = [
+    "host-panic-handler",
+    "unstable-state-interface",
+] }
+
+[lints]
+workspace = true

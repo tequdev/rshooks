@@ -26,9 +26,11 @@ use std::collections::BTreeSet;
 use proc_macro::{Delimiter, Group, Ident, Punct, Spacing, Span, TokenStream, TokenTree};
 
 use crate::hooks_shared::{
-    AttrEntry, is_punct, parse_attr_entries, parse_balanced_angle, parse_string_value,
-    split_top_level_commas,
+    AttrEntry, classify_fixed_sti_type_text, hex_lower, hex_upper, is_punct,
+    is_valid_interface_name, parse_attr_entries, parse_balanced_angle, parse_string_value,
+    render_carrier_export, scan_attrs, scan_vis, split_top_level_commas,
 };
+use crate::shape::tokens_to_string;
 use crate::{err, sha256};
 
 /// Wasm export-name prefix for the entries carrier — contract §B2.
@@ -58,11 +60,10 @@ const ENTRY_MISSING_SELF_MSG: &str = "hook entry functions take `&self` — the 
                                        declaration is passed by shared reference (it is \
                                        zero-sized)";
 /// HOOKS_SELF_RECEIVER_DESIGN.md §3.3 diagnostic for `#[cfg]`/`#[cfg_attr]`
-/// on a `self` receiver — same rationale as the entry-level cfg ban in
-/// [`parse_impl_body`] (a conditional shape would diverge from what
-/// actually compiles), applied here because the receiver's class (and, for
-/// an entry, the has_self-driven discovery/selected wrapper it feeds) is
-/// decided once at macro-expansion time, before `cfg` resolves.
+/// on a `self` receiver — the receiver's class is decided once at
+/// macro-expansion time, before `cfg` resolves, so a conditional shape
+/// would diverge from what actually compiles (same rationale as the
+/// entry-level cfg ban in [`parse_impl_body`]).
 const RECEIVER_CFG_MSG: &str =
     "#[hooks]: `#[cfg]`/`#[cfg_attr]` are not allowed on a `self` receiver";
 
@@ -110,20 +111,8 @@ fn parse_impl_item(item: TokenStream) -> Result<ParsedImpl, TokenStream> {
     let tokens: Vec<TokenTree> = item.into_iter().collect();
     let mut i = 0usize;
 
-    let mut leading_attrs = Vec::new();
-    while let Some(tt) = tokens.get(i) {
-        if !is_punct(tt, '#') {
-            break;
-        }
-        leading_attrs.push(tt.clone());
-        match tokens.get(i.wrapping_add(1)) {
-            Some(g @ TokenTree::Group(group)) if group.delimiter() == Delimiter::Bracket => {
-                leading_attrs.push(g.clone());
-            }
-            _ => return Err(err(Span::call_site(), "malformed attribute before `impl`")),
-        }
-        i = i.wrapping_add(2);
-    }
+    let (leading_attrs, next) = scan_attrs(&tokens, i, "malformed attribute before `impl`")?;
+    i = next;
 
     let impl_kw = match tokens.get(i) {
         Some(tt @ TokenTree::Ident(id)) if id.to_string() == "impl" => tt.clone(),
@@ -138,13 +127,13 @@ fn parse_impl_item(item: TokenStream) -> Result<ParsedImpl, TokenStream> {
     };
     i = i.wrapping_add(1);
 
-    if let Some(tt) = tokens.get(i) {
-        if is_punct(tt, '<') {
-            return Err(err(
-                tt.span(),
-                "#[hooks]: the chain entry impl cannot be generic",
-            ));
-        }
+    if let Some(tt) = tokens.get(i)
+        && is_punct(tt, '<')
+    {
+        return Err(err(
+            tt.span(),
+            "#[hooks]: the chain entry impl cannot be generic",
+        ));
     }
 
     let struct_name = match tokens.get(i) {
@@ -237,6 +226,10 @@ struct HookEntry {
     /// Fallback span for an implicit `-> ()` (`return_tokens` empty): the
     /// fn's own name, so the diagnostic still names the function.
     return_span: Span,
+    /// Extra `ident: Type` arguments after `&self` — declared signature
+    /// parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §1), in declaration
+    /// (= wire index) order. Empty for an ordinary no-arg entry.
+    sig_args: Vec<SigArg>,
 }
 
 struct CbakEntry {
@@ -269,6 +262,180 @@ struct ParsedBody {
     tokens: Vec<TokenTree>,
     hooks: Vec<HookEntry>,
     cbaks: Vec<CbakEntry>,
+}
+
+// ---------------------------------------------------------------------
+// Signature parameters — `docs/PARAM_SIGNATURE_DESIGN.md` §1: extra
+// `ident: Type` arguments on a `#[hook(..)]` entry fn declare Hook
+// Parameter Signature Interface parameters.
+// ---------------------------------------------------------------------
+
+/// The diagnostic listing every supported signature-parameter type token —
+/// shared by [`classify_sig_type`]'s only call site so the list can't drift
+/// out of sync with the match arms below it.
+const SIG_TYPE_MSG: &str = "#[hooks]: unsupported signature parameter type — supported types are \
+                             u8, u16, u32, u64, [u8; 16], [u8; 32], Hash, AccountId, [u8; 20], \
+                             CurrencyCode, XFL, AmountBytes, IssueBytes, Blob<N> (write the type \
+                             as a bare name — a path-qualified or aliased spelling is not \
+                             resolved)";
+
+/// The interface draft's display-name diagnostic — shared by every
+/// rejection [`is_valid_interface_name`] backs.
+const SIG_NAME_MSG: &str = "#[hooks]: a signature parameter name must be 1..=16 ASCII bytes \
+                             matching [A-Za-z][A-Za-z0-9]* (the Hook Parameter Signature \
+                             Interface's display-name rule) — rename the argument";
+
+/// Diagnostic for an extra argument on a `#[hook(..)]` fn when the
+/// `unstable-param-sig-interface` feature is off — the interface's whole
+/// surface (this module's [`parse_sig_args`] and downstream codegen) stays
+/// compiled but unreachable in that configuration, so an extra argument is
+/// rejected here instead. A `#[cbak(..)]` extra argument never reaches this
+/// diagnostic: the callback-specific rejection above it is unconditional.
+#[cfg(not(feature = "unstable-param-sig-interface"))]
+const SIG_FEATURE_GATE_MSG: &str = "#[hooks]: extra arguments after `&self` declare Hook \
+                                     Parameter Signature Interface parameters (draft spec) — \
+                                     enable rshooks's `unstable-param-sig-interface` feature to \
+                                     use them (only #[hook(..)] entry fns may declare them; the \
+                                     interface may change while the spec is a draft)";
+
+/// One parsed `ident: Type` signature-parameter argument (`docs/PARAM_SIGNATURE_DESIGN.md`
+/// §1) — a `#[hook(..)]` entry fn's extra argument after `&self`. Wire
+/// index is this entry's position in [`HookEntry::sig_args`], not stored
+/// here.
+struct SigArg {
+    /// The argument's identifier, already validated against the
+    /// interface's display-name charset/length rule — usable verbatim as
+    /// both the declared name's bytes and the generated local's suffix.
+    name: String,
+    /// The argument's type, reconstructed as source text (see
+    /// [`tokens_to_string`]) — spliced verbatim into the generated
+    /// prologue so an aliased type is decoded, and const-asserted, exactly
+    /// as written (never re-derived from `type_byte`).
+    type_text: String,
+    /// The XAS-010d type code [`classify_sig_type`] derived from the type
+    /// token's own shape — see `docs/PARAM_SIGNATURE_DESIGN.md` §1's type
+    /// table.
+    type_byte: u8,
+}
+
+/// Classifies a signature-parameter argument's type tokens into its
+/// XAS-010d type code (`docs/PARAM_SIGNATURE_DESIGN.md` §1's table),
+/// matching on the token *shape* (a whitespace-normalized textual
+/// comparison, plus a structural check for `Blob<N>` since angle brackets
+/// never arrive as a single token — see [`crate::hooks_shared::AngleTok`]'s
+/// doc comment). Does not resolve type aliases: an aliased type is caught
+/// later by the monomorphized `const` assert the caller emits alongside
+/// this byte (`docs/PARAM_SIGNATURE_DESIGN.md` §1).
+fn classify_sig_type(tokens: &[TokenTree]) -> Option<u8> {
+    if let [TokenTree::Ident(id), TokenTree::Punct(lt), rest @ ..] = tokens
+        && id.to_string() == "Blob"
+        && lt.as_char() == '<'
+        && rest.len() >= 2
+        && let Some(TokenTree::Punct(gt)) = rest.last()
+        && gt.as_char() == '>'
+    {
+        return Some(0x07); // STI_VL
+    }
+    classify_sig_type_text(&tokens_to_string(tokens).replace(' ', ""))
+}
+
+/// The non-`Blob<N>` half of [`classify_sig_type`]'s table, over an already
+/// whitespace-stripped flattened type string — `TokenTree`-free purely for
+/// unit-testability, following this crate's standard "kind tag" boundary
+/// pattern (see [`qualifier_token_kind`]'s doc comment). Checks this
+/// interface's two variable-width extra rows first, then falls back to
+/// [`classify_fixed_sti_type_text`]'s fixed-width table shared with
+/// `#[state_interface]`.
+fn classify_sig_type_text(flat: &str) -> Option<u8> {
+    match flat {
+        "AmountBytes" => Some(0x06), // STI_AMOUNT
+        "IssueBytes" => Some(0x18),  // STI_ISSUE
+        _ => classify_fixed_sti_type_text(flat).map(|(byte, _width)| byte),
+    }
+}
+
+/// Parses a `#[hook(..)]` entry fn's extra arguments (everything
+/// [`scan_fn_item`] captured in [`ScannedFn::extra_args`] past the `&self`
+/// receiver) into signature parameters, in declaration order. `entry_span`
+/// anchors diagnostics that have no more specific token to point at (an
+/// empty argument list past a trailing comma never reaches here — the
+/// caller only calls this when `extra_args` is non-empty).
+///
+/// At most 16 arguments are accepted (`0x00..=0x0F` — the interface's
+/// index range); a 17th is a macro-time error at its own first token's
+/// span.
+fn parse_sig_args(extra_args: &[TokenTree], entry_span: Span) -> Result<Vec<SigArg>, TokenStream> {
+    // `extra_args` starts with the comma separating `&self` from the first
+    // real argument (see `scan_fn_item`'s doc comment) unless it is the
+    // single-trailing-comma case, which is already cleared to empty by the
+    // caller before this function is ever invoked.
+    let rest = match extra_args.first() {
+        Some(tt) if is_punct(tt, ',') => extra_args.get(1..).unwrap_or_default(),
+        _ => extra_args,
+    };
+    let groups = split_top_level_commas(rest);
+
+    if let Some(seventeenth) = groups.get(16) {
+        let span = seventeenth.first().map_or(entry_span, TokenTree::span);
+        return Err(err(
+            span,
+            "#[hooks]: a hook entry function may declare at most 16 signature parameters \
+             (index 0x00..=0x0F)",
+        ));
+    }
+
+    let mut out = Vec::with_capacity(groups.len());
+    for group in &groups {
+        let (name_id, after_name) = match group.split_first() {
+            Some((TokenTree::Ident(id), rest)) => (id.clone(), rest),
+            Some((other, _)) => {
+                return Err(err(
+                    other.span(),
+                    "#[hooks]: expected a signature parameter here, e.g. `count: u16`",
+                ));
+            }
+            None => return Err(err(entry_span, "#[hooks]: expected a signature parameter")),
+        };
+        let after_colon = match after_name.split_first() {
+            Some((tt, after)) if is_punct(tt, ':') => after,
+            _ => {
+                return Err(err(
+                    name_id.span(),
+                    "#[hooks]: expected `: Type` after the signature parameter's name",
+                ));
+            }
+        };
+        if after_colon.is_empty() {
+            return Err(err(name_id.span(), "#[hooks]: expected a type after `:`"));
+        }
+
+        let name = name_id.to_string();
+        if !is_valid_interface_name(&name) {
+            return Err(err(name_id.span(), SIG_NAME_MSG));
+        }
+
+        let Some(type_byte) = classify_sig_type(after_colon) else {
+            let span = after_colon.first().map_or(name_id.span(), TokenTree::span);
+            return Err(err(span, SIG_TYPE_MSG));
+        };
+
+        out.push(SigArg {
+            name,
+            type_text: tokens_to_string(after_colon),
+            type_byte,
+        });
+    }
+    Ok(out)
+}
+
+/// Builds one declared `HookParameterName`'s wire bytes, as uppercase hex —
+/// the carrier's `name_hex` field (`docs/PARAM_SIGNATURE_DESIGN.md` §4).
+/// Mirrors [`crate::sig::sig_param_name`] (the rshooks crate's runtime/const
+/// builder) exactly, over plain bytes instead of a `const`-generic array.
+fn sig_param_name_hex(index: u8, type_byte: u8, name: &str) -> String {
+    let mut bytes = vec![0x5Fu8, 0x50, 0x53, 0x00, index, type_byte, name.len() as u8];
+    bytes.extend_from_slice(name.as_bytes());
+    hex_upper(&bytes)
 }
 
 /// Walks the impl body's flat token list item by item, stripping consumed
@@ -343,19 +510,8 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
             break;
         }
 
-        let mut vis: Vec<TokenTree> = Vec::new();
-        if let Some(tt @ TokenTree::Ident(id)) = tokens.get(i) {
-            if id.to_string() == "pub" {
-                vis.push(tt.clone());
-                i = i.wrapping_add(1);
-                if let Some(g @ TokenTree::Group(group)) = tokens.get(i) {
-                    if group.delimiter() == Delimiter::Parenthesis {
-                        vis.push(g.clone());
-                        i = i.wrapping_add(1);
-                    }
-                }
-            }
-        }
+        let (vis, next) = scan_vis(tokens, i);
+        i = next;
 
         let is_entry = hook_attr.is_some() || cbak_attr.is_some();
         if is_entry && cfg_span.is_some() {
@@ -403,28 +559,40 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
                         "#[hooks]: an entry function cannot be generic",
                     ));
                 }
-                if !scanned.extra_args.is_empty() {
+                // Extra arguments after `&self` declare signature
+                // parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §1), but
+                // only on `#[hook(..)]`: a `#[cbak(..)]`'s originating
+                // transaction is the emitted transaction, not the
+                // invocation, so the interface doesn't apply there.
+                if !scanned.extra_args.is_empty() && cbak_attr.is_some() {
                     let bad_span = scanned
                         .extra_args
                         .first()
                         .map_or_else(|| scanned.args_group.span(), TokenTree::span);
                     return Err(err(
                         bad_span,
-                        "#[hooks]: entry functions must take no arguments other than `&self`",
+                        "#[hooks]: #[cbak] entry functions must take no arguments other than \
+                         `&self` — a callback's originating transaction is the emitted \
+                         transaction, not the invocation, so the signature parameter interface \
+                         does not apply",
                     ));
+                }
+                #[cfg(not(feature = "unstable-param-sig-interface"))]
+                if !scanned.extra_args.is_empty() {
+                    let bad_span = scanned
+                        .extra_args
+                        .first()
+                        .map_or_else(|| scanned.args_group.span(), TokenTree::span);
+                    return Err(err(bad_span, SIG_FEATURE_GATE_MSG));
                 }
                 // The return type itself is deliberately unchecked here: an
                 // entry must return a type implementing
-                // `::rshooks::exit::EntryReturn` (currently sealed to
-                // `HookResult` only — see
+                // `::rshooks::exit::EntryReturn` (sealed to `HookResult` —
                 // `.claude/design/TYPED_ENTRY_RESULTS_DESIGN.md` §1.3/§3/§7).
                 // The generated body wraps the call in
-                // `EntryReturn::finish(..)` (see
-                // `render_entry_body_and_wrappers`), so a return type that
-                // implements neither fails to compile there with an
-                // ordinary trait-bound diagnostic naming `EntryReturn` —
-                // there is no separate check to keep in sync with that
-                // trait's impl set.
+                // `EntryReturn::finish(..)` (`render_entry_body_and_wrappers`),
+                // so a non-implementing type fails to compile there with an
+                // ordinary trait-bound diagnostic — no separate check needed.
             } else {
                 // Non-attributed helper (§3.3): `&self` passes through
                 // untouched, `&mut self`/other self shapes are rejected with
@@ -442,6 +610,11 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
 
             let fn_name = scanned.name.to_string();
             if let Some((data, index, index_span)) = hook_attr {
+                let sig_args = if scanned.extra_args.is_empty() {
+                    Vec::new()
+                } else {
+                    parse_sig_args(&scanned.extra_args, scanned.args_group.span())?
+                };
                 hooks.push(HookEntry {
                     index,
                     index_span,
@@ -449,6 +622,7 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
                     attr: data,
                     return_tokens: scanned.return_tokens.clone(),
                     return_span: scanned.return_span,
+                    sig_args,
                 });
             } else if let Some((index, index_span)) = cbak_attr {
                 cbaks.push(CbakEntry {
@@ -474,7 +648,7 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
                              associated function",
                         ));
                     }
-                    let (const_tokens, next) = scan_const_item(tokens, i)?;
+                    let (const_tokens, next) = scan_const_item(tokens, i);
                     i = next;
                     output.extend(kept_attrs);
                     output.extend(vis);
@@ -576,11 +750,9 @@ fn qualifier_token_kind(tt: &TokenTree) -> &'static str {
 /// `fn`).
 ///
 /// Delegates the actual decision to [`classify_fn_qualifiers`], which is
-/// `TokenTree`-free purely for unit-testability — see
-/// [`crate::hooks_struct::ChainFieldJson`]'s doc comment for why this
-/// boundary pattern is used throughout this crate (every `proc_macro` type,
+/// `TokenTree`-free purely for unit-testability: every `proc_macro` type,
 /// `Span` included, panics outside a live macro invocation, so the tested
-/// core here works over plain `&str` "kind" tags instead).
+/// core works over plain `&str` "kind" tags instead.
 fn scan_fn_qualifiers(tokens: &[TokenTree], start: usize) -> Option<FnQualifiers> {
     // At most 5 tokens are ever consulted: `const`/`async`, `unsafe`,
     // `extern`, its optional ABI literal, `fn`.
@@ -717,22 +889,18 @@ fn scan_fn_item(tokens: &[TokenTree], start: usize) -> Result<ScannedFn, TokenSt
         .get(receiver_consumed..)
         .unwrap_or_default()
         .to_vec();
-    if let [tt] = extra_args.as_slice() {
-        if is_punct(tt, ',') {
-            extra_args.clear();
-        }
+    if let [tt] = extra_args.as_slice()
+        && is_punct(tt, ',')
+    {
+        extra_args.clear();
     }
 
-    // The return type's own tokens are re-emitted verbatim but otherwise
-    // unexamined here — see the entry-fn shape check's comment in
-    // `parse_impl_body` for why: only a type implementing
-    // `::rshooks::exit::EntryReturn` (sealed to `HookResult`) is accepted,
-    // and the macro leaves enforcing that to the generated body's own trait
-    // bound. They are
-    // *captured* (`return_tokens`/`return_span` below), though — not to
-    // examine, but so [`build_entry_return_assertion`] can re-emit them
-    // with their original spans intact, for a diagnostic that lands on the
-    // caller's own `-> Ty` instead of the `#[hooks]` attribute.
+    // Return-type tokens are re-emitted verbatim but otherwise unexamined:
+    // only a type implementing `::rshooks::exit::EntryReturn` (sealed to
+    // `HookResult`) is accepted, enforced by the generated body's own trait
+    // bound. They're captured (`return_tokens`/`return_span` below) so
+    // `build_entry_return_assertion` can re-emit them with original spans,
+    // landing a diagnostic on the caller's `-> Ty` instead of `#[hooks]`.
     let mut return_tokens: Vec<TokenTree> = Vec::new();
     let mut return_span = name.span();
     if matches!(tokens.get(i), Some(tt) if is_punct(tt, '-'))
@@ -805,10 +973,9 @@ enum ReceiverClass {
 }
 
 /// Classifies one token relevant to receiver-shape detection, for
-/// [`classify_receiver_kinds`]'s `TokenTree`-free pure core — see
-/// [`qualifier_token_kind`]'s doc comment for the rationale (this crate's
-/// standard "kind tag" boundary pattern for unit-testability without a live
-/// `proc_macro` context).
+/// [`classify_receiver_kinds`]'s `TokenTree`-free pure core — the same
+/// "kind tag" pattern as [`qualifier_token_kind`], for unit-testability
+/// without a live `proc_macro` context.
 fn receiver_token_kind(tt: &TokenTree) -> &'static str {
     match tt {
         TokenTree::Ident(id) => match id.to_string().as_str() {
@@ -871,11 +1038,8 @@ fn classify_receiver_kinds(kinds: &[&str]) -> Option<(usize, ReceiverClass)> {
 /// attribute "kinds" — one `"attr"` or `"cfg_attr"` tag per `#[...]` pair,
 /// as built by [`detect_receiver`] — before classifying the self-shape
 /// that follows. HOOKS_SELF_RECEIVER_DESIGN.md §3.3: `#[allow(unused)]
-/// &self` must classify exactly like bare `&self` (R1 of the self-receiver
-/// review — the old code classified from token 0 unconditionally, so an
-/// attributed receiver on an entry read as "no receiver" at all, and on a
-/// helper it silently bypassed the `&mut self` rejection). Returns the
-/// number of leading attribute kinds skipped, whether any of them was
+/// &self` must classify exactly like bare `&self`. Returns the number of
+/// leading attribute kinds skipped, whether any of them was
 /// `"cfg_attr"`, and the self-shape classification of what followed —
 /// `None` in the third slot means no receiver shape follows the attributes
 /// (including the no-attributes case, which behaves exactly like
@@ -924,8 +1088,7 @@ fn detect_receiver(
         let group = match tokens.get(raw.wrapping_add(1)) {
             Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Bracket => g,
             // Not a well-formed `#[...]` attribute — leave it for the
-            // ordinary parameter/receiver classification below to report,
-            // exactly as before this attribute-skipping lookahead existed.
+            // ordinary parameter/receiver classification below to report.
             _ => break,
         };
         let inner: Vec<TokenTree> = group.stream().into_iter().collect();
@@ -971,10 +1134,7 @@ fn detect_receiver(
 /// at `tokens[start]`, up through its top-level `;` — safe to scan flatly
 /// since every nested brace/paren/bracket in `expr` is already an atomic
 /// [`proc_macro::Group`], never a bare `;` `Punct`.
-fn scan_const_item(
-    tokens: &[TokenTree],
-    start: usize,
-) -> Result<(Vec<TokenTree>, usize), TokenStream> {
+fn scan_const_item(tokens: &[TokenTree], start: usize) -> (Vec<TokenTree>, usize) {
     let mut i = start;
     while let Some(tt) = tokens.get(i) {
         i = i.wrapping_add(1);
@@ -982,7 +1142,7 @@ fn scan_const_item(
             break;
         }
     }
-    Ok((tokens.get(start..i).unwrap_or_default().to_vec(), i))
+    (tokens.get(start..i).unwrap_or_default().to_vec(), i)
 }
 
 // ---------------------------------------------------------------------
@@ -1107,11 +1267,11 @@ fn parse_hook_attr(
                         "#[hook]: expected `on = all` or `on = [Tx, ..]`",
                     ));
                 };
-                if let [TokenTree::Ident(id)] = toks.as_slice() {
-                    if id.to_string() == "all" {
-                        on_all_span = Some(key_span);
-                        continue;
-                    }
+                if let [TokenTree::Ident(id)] = toks.as_slice()
+                    && id.to_string() == "all"
+                {
+                    on_all_span = Some(key_span);
+                    continue;
                 }
                 on_list = Some(parse_tx_list(&toks, key_span, "#[hook]", "on")?);
             }
@@ -1216,9 +1376,8 @@ fn parse_hook_attr(
 /// `None` when the list has no such violation, `[]` included.
 ///
 /// Operates on a plain "is this position a comma" view rather than
-/// `&[TokenTree]` purely for unit-testability — see
-/// [`crate::hooks_struct::ChainFieldJson`]'s doc comment for why this
-/// boundary pattern is used throughout this crate.
+/// `&[TokenTree]` purely for unit-testability (this crate's standard
+/// `TokenTree`-free boundary pattern).
 fn first_empty_tx_entry(is_comma: &[bool]) -> Option<usize> {
     if is_comma.first().copied() == Some(true) {
         return Some(0);
@@ -1368,6 +1527,7 @@ fn generate(
                 hook_fn: h.fn_name.as_str(),
                 cbak_fn: cbak.map(|c| c.fn_name.as_str()),
                 hook: &h.attr,
+                sig_args: &h.sig_args,
             }
         })
         .collect();
@@ -1385,6 +1545,7 @@ fn generate(
         Ok(src) => src,
         Err(message) => return err(parsed.struct_name.span(), &message),
     };
+    let mod_src = crate::krate::rewrite(mod_src);
     let mod_ts = match mod_src.parse::<TokenStream>() {
         Ok(ts) => ts,
         Err(_) => {
@@ -1396,14 +1557,12 @@ fn generate(
     };
     out.extend(mod_ts);
 
-    // Span-carrying `EntryReturn` diagnostic assertions (TYPED_ENTRY_RESULTS
-    // follow-up): one per declared entry fn, built directly from the
-    // captured `-> Ty` tokens and spliced into `out` as real `TokenTree`s.
-    // They must land here, in the macro's *token* output, rather than in
-    // `mod_src` above — that string is `format!`-assembled and reparsed via
-    // `TokenStream::parse`, which only ever produces call-site spans, so
-    // anything built from it can't point a diagnostic at the caller's own
-    // source line. See `build_entry_return_assertion`'s doc comment.
+    // Span-carrying `EntryReturn` diagnostic assertions: one per declared
+    // entry fn, built from the captured `-> Ty` tokens and spliced into
+    // `out` as real `TokenTree`s. They must land here, not in `mod_src`
+    // above — that string is reparsed via `TokenStream::parse`, which only
+    // ever produces call-site spans, so anything built from it can't point
+    // a diagnostic at the caller's own source line.
     for h in &hooks {
         out.extend(build_entry_return_assertion(
             &h.return_tokens,
@@ -1475,9 +1634,7 @@ fn build_entry_return_assertion(ret_tokens: &[TokenTree], fallback_span: Span) -
     out.push(alone('<'));
     out.extend(ret_ty.iter().cloned());
     out.push(ident("as"));
-    path_sep(&mut out);
-    out.push(ident("rshooks"));
-    path_sep(&mut out);
+    crate::krate::extend_path_tokens(&mut out, glue);
     out.push(ident("exit"));
     path_sep(&mut out);
     out.push(ident("EntryReturn"));
@@ -1496,6 +1653,7 @@ struct EntrySource<'a> {
     hook_fn: &'a str,
     cbak_fn: Option<&'a str>,
     hook: &'a HookAttrData,
+    sig_args: &'a [SigArg],
 }
 
 impl EntrySource<'_> {
@@ -1531,14 +1689,26 @@ impl EntrySource<'_> {
                 .as_ref()
                 .map(|list| list.iter().map(|(n, _)| n.clone()).collect()),
             description: self.hook.description.clone(),
+            sig_params: self
+                .sig_args
+                .iter()
+                .enumerate()
+                .map(|(idx, a)| {
+                    let idx = u8::try_from(idx).unwrap_or(u8::MAX);
+                    SigParamJson {
+                        field: a.name.clone(),
+                        type_text: a.type_text.clone(),
+                        type_byte: a.type_byte,
+                        name_hex: sig_param_name_hex(idx, a.type_byte, &a.name),
+                    }
+                })
+                .collect(),
         }
     }
 }
 
 /// A `proc_macro`-free (plain-`String`) view of one entry's carrier JSON
-/// entry — see [`crate::hooks_struct::ChainFieldJson`]'s doc comment for why
-/// this boundary exists (unit-testability without a live `proc_macro`
-/// context).
+/// entry — unit-testable without a live `proc_macro` context.
 struct EntryJson {
     index: u8,
     hook_fn: String,
@@ -1550,6 +1720,26 @@ struct EntryJson {
     hook_on_outgoing: Option<Vec<String>>,
     hook_can_emit: Option<Vec<String>>,
     description: Option<String>,
+    /// Declared signature parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §1),
+    /// in wire-index order. Empty for an ordinary entry.
+    sig_params: Vec<SigParamJson>,
+}
+
+/// One declared signature parameter, as carried by [`EntryJson`]. Only
+/// `field`/`type_byte`/`name_hex` are part of the wire carrier
+/// (`docs/PARAM_SIGNATURE_DESIGN.md` §4) — `type_text` is codegen-only (the
+/// exact type token text spliced into the generated prologue) and never
+/// serialized into the carrier JSON.
+struct SigParamJson {
+    /// The declared name — the argument's own identifier.
+    field: String,
+    /// The argument's type, as source text (see [`tokens_to_string`]) —
+    /// codegen-only, not part of the wire carrier.
+    type_text: String,
+    /// The XAS-010d type code.
+    type_byte: u8,
+    /// The full declared `HookParameterName`, uppercase hex.
+    name_hex: String,
 }
 
 #[derive(Clone, Copy)]
@@ -1627,11 +1817,10 @@ fn render_entries_module(
     let payload_hex = hex_upper(&payload);
     let digest = sha256::sha256(&payload);
     let carrier_ident = format!("__rshooks_hooks_{}", hex_lower(&digest));
-    mod_body.push_str(&format!(
-        "#[cfg(target_arch = \"wasm32\")]\n\
-         #[doc(hidden)]\n\
-         #[unsafe(export_name = \"{ENTRIES_EXPORT_PREFIX}{payload_hex}\")]\n\
-         pub extern \"C\" fn {carrier_ident}(_reserved: u32) -> i64 {{ 0 }}\n"
+    mod_body.push_str(&render_carrier_export(
+        ENTRIES_EXPORT_PREFIX,
+        &payload_hex,
+        &carrier_ident,
     ));
 
     mod_body.push_str(&format!(
@@ -1661,9 +1850,7 @@ fn render_entries_module(
 /// (`export_name = "__rshooks_hook_{i}"`/`"__rshooks_cbak_{i}"`) wrappers
 /// are one-line forwards to it. Operates on the Span-free [`EntryJson`]
 /// view (plain strings only), so unit tests can pin the exact generated
-/// text without a live macro invocation — see
-/// [`crate::hooks_struct::ChainFieldJson`]'s doc comment for why this
-/// boundary pattern is used throughout this crate.
+/// text without a live macro invocation.
 fn render_entry_body_and_wrappers(
     struct_name: &str,
     entry: &EntryJson,
@@ -1672,22 +1859,37 @@ fn render_entry_body_and_wrappers(
     let i = entry.index;
     // `&{struct_name}` works identically for both struct forms
     // (HOOKS_SELF_RECEIVER_DESIGN.md §3.2): a named-field struct's
-    // generated same-named static, or a unit struct's constructor value —
-    // no extra static is ever needed.
+    // generated same-named static, or a unit struct's constructor value.
     //
-    // The call is wrapped in `EntryReturn::finish` unconditionally
-    // (TYPED_ENTRY_RESULTS_DESIGN.md §1.3/§7): it is what makes a
-    // `HookResult` return type legal here at all, and a diverging body
-    // (every call ends in `accept!`/`rollback!`) makes the match dead code
-    // once inlined (this body fn is itself `#[inline(always)]`).
+    // Declared signature parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §1)
+    // decode into locals before the call, one `otxn_sig_param` read per
+    // argument, passed through in declaration order; empty `sig_params`
+    // makes `prologue` empty and `call_args` exactly `&{struct_name}`.
+    //
+    // The call is always wrapped in `EntryReturn::finish`
+    // (TYPED_ENTRY_RESULTS_DESIGN.md §1.3/§7), itself `#[inline(always)]`
+    // — it's what makes a `HookResult` return type legal here. When the
+    // entry body itself diverges (`accept!`/`rollback!` return `!`), that
+    // divergence makes `finish`'s `Ok`/`Err` match dead code once inlined,
+    // rather than leaving it as an unreachable-but-compiled match arm.
+    let prologue = render_sig_param_prologue(&entry.sig_params);
+    let call_args: String = std::iter::once(format!("&{struct_name}"))
+        .chain(
+            entry
+                .sig_params
+                .iter()
+                .map(|p| format!("__rshooks_sig_{}", p.field)),
+        )
+        .collect::<Vec<_>>()
+        .join(", ");
     let hook_call = format!(
-        "::rshooks::exit::EntryReturn::finish({struct_name}::{}(&{struct_name}))",
+        "::rshooks::exit::EntryReturn::finish({struct_name}::{}({call_args}))",
         entry.hook_fn
     );
     let mut out = format!(
         "#[inline(always)]\n\
          #[doc(hidden)]\n\
-         pub fn __rshooks_entry_body_{i}(_reserved: u32) -> i64 {{ {hook_call} }}\n\
+         pub fn __rshooks_entry_body_{i}(_reserved: u32) -> i64 {{ {prologue}{hook_call} }}\n\
          #[cfg(rshooks_entry = \"{i}\")]\n\
          #[unsafe(export_name = \"hook\")]\n\
          pub extern \"C\" fn __rshooks_hook_sel_{i}(_reserved: u32) -> i64 {{ \
@@ -1713,6 +1915,51 @@ fn render_entry_body_and_wrappers(
              #[unsafe(export_name = \"__rshooks_cbak_{i}\")]\n\
              pub extern \"C\" fn __rshooks_cbak_disc_{i}(_reserved: u32) -> i64 {{ \
                  __rshooks_cbak_body_{i}(_reserved) }}\n"
+        ));
+    }
+    out
+}
+
+/// Renders the per-argument decode prologue for one entry's declared
+/// signature parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §1), in
+/// declaration (= wire index) order. Empty input yields the empty string.
+///
+/// Per argument:
+///
+/// 1. A monomorphized `const` assert that the type token's own `type_byte`
+///    (decided at macro time, purely from the token's shape — see
+///    [`classify_sig_type`]) matches `<Ty as SigParamType>::TYPE_BYTE` —
+///    catches a type alias resolving to a different wire type.
+/// 2. Builds the declared name inside a `const { .. }` block (per
+///    `docs/PARAM_SIGNATURE_DESIGN.md` §1's "Generated prologue": every MUST
+///    of the wire format is `const`-evaluable, so a malformed name — dead
+///    code here, since [`parse_sig_args`] already validated it — would be a
+///    compile error, never a runtime panic) and reads it via
+///    `otxn_sig_param`.
+/// 3. On `Err`, rolls back with `b"rshooks: bad sig param '<name>'"` and the
+///    argument's own 0-based index as the rollback code — `rollback!`
+///    diverges (`!`), so it coerces to the match's `Ty` arm directly, no
+///    separate early-return plumbing needed.
+fn render_sig_param_prologue(sig_params: &[SigParamJson]) -> String {
+    let mut out = String::new();
+    for (idx, p) in sig_params.iter().enumerate() {
+        let total_len = 7usize.wrapping_add(p.field.len());
+        out.push_str(&format!(
+            "const _: () = {{ assert!(<{ty} as ::rshooks::sig::SigParamType>::TYPE_BYTE == \
+             {type_byte}u8, \"rshooks: signature parameter '{field}' resolves to a different \
+             wire type than its declared type token (check for a type alias mismatch)\"); }};\n\
+             let __rshooks_sig_{field}: {ty} = match ::rshooks::sig::otxn_sig_param::<{ty}>(&const {{ \
+             ::rshooks::sig::sig_param_name::<{total_len}>({idx}, {type_byte}u8, b\"{field}\") \
+             }}) {{\n\
+             ::core::result::Result::Ok(__v) => __v,\n\
+             ::core::result::Result::Err(_) => ::rshooks::rollback!(\
+             b\"rshooks: bad sig param '{field}'\", {idx}i64),\n\
+             }};\n",
+            ty = p.type_text,
+            type_byte = p.type_byte,
+            field = p.field,
+            total_len = total_len,
+            idx = idx,
         ));
     }
     out
@@ -1782,67 +2029,58 @@ fn encode_entries_json(struct_name: &str, entries: &[EntryJson]) -> Result<Vec<u
     let mut arr = Vec::new();
     for e in entries {
         let mut obj = serde_json::Map::new();
-        obj.insert("index".into(), u64::from(e.index).into());
-        obj.insert("hook_fn".into(), e.hook_fn.clone().into());
+        obj.insert("index".to_string(), serde_json::json!(e.index));
+        obj.insert("hook_fn".to_string(), serde_json::json!(e.hook_fn));
+        obj.insert("cbak_fn".to_string(), serde_json::json!(e.cbak_fn));
+        obj.insert("HookName".to_string(), serde_json::json!(e.hook_name));
         obj.insert(
-            "cbak_fn".into(),
-            e.cbak_fn
-                .clone()
-                .map_or(serde_json::Value::Null, Into::into),
+            "on".to_string(),
+            serde_json::json!({
+                "form": e.on_form.as_str(),
+                "HookOn": e.hook_on,
+                "HookOnIncoming": e.hook_on_incoming,
+                "HookOnOutgoing": e.hook_on_outgoing,
+            }),
         );
         obj.insert(
-            "HookName".into(),
-            e.hook_name
-                .clone()
-                .map_or(serde_json::Value::Null, Into::into),
+            "HookCanEmit".to_string(),
+            serde_json::json!(e.hook_can_emit),
         );
+        obj.insert("description".to_string(), serde_json::json!(e.description));
 
-        let mut on_obj = serde_json::Map::new();
-        on_obj.insert("form".into(), e.on_form.as_str().into());
-        on_obj.insert("HookOn".into(), names_or_null(e.hook_on.as_ref()));
-        on_obj.insert(
-            "HookOnIncoming".into(),
-            names_or_null(e.hook_on_incoming.as_ref()),
-        );
-        on_obj.insert(
-            "HookOnOutgoing".into(),
-            names_or_null(e.hook_on_outgoing.as_ref()),
-        );
-        obj.insert("on".into(), serde_json::Value::Object(on_obj));
-
-        obj.insert(
-            "HookCanEmit".into(),
-            names_or_null(e.hook_can_emit.as_ref()),
-        );
-        obj.insert(
-            "description".into(),
-            e.description
-                .clone()
-                .map_or(serde_json::Value::Null, Into::into),
-        );
+        // Only `field`/`type_byte`/`name_hex` are part of the wire carrier
+        // (`docs/PARAM_SIGNATURE_DESIGN.md` §4) — `SigParamJson::type_text`
+        // is codegen-only and deliberately not serialized here. The
+        // `sig_params` key itself is emitted only when this macro crate is
+        // built with `unstable-param-sig-interface`; its presence in the
+        // carrier is what signals to `rshooks-build` that the interface was
+        // compiled in.
+        if cfg!(feature = "unstable-param-sig-interface") {
+            let sig_params: Vec<serde_json::Value> = e
+                .sig_params
+                .iter()
+                .map(|p| {
+                    serde_json::json!({
+                        "field": p.field,
+                        "type_byte": p.type_byte,
+                        "name_hex": p.name_hex,
+                    })
+                })
+                .collect();
+            obj.insert("sig_params".to_string(), sig_params.into());
+        }
 
         arr.push(serde_json::Value::Object(obj));
     }
 
-    let mut object = serde_json::Map::new();
-    object.insert("schema".into(), "rshooks-hooks-v2".into());
-    object.insert("impl".into(), struct_name.into());
-    object.insert("entries".into(), arr.into());
+    let object = serde_json::json!({
+        "schema": "rshooks-hooks-v2",
+        "impl": struct_name,
+        "entries": arr,
+    });
 
-    serde_json::to_vec(&serde_json::Value::Object(object))
+    serde_json::to_vec(&object)
         .map_err(|e| format!("#[hooks]: failed to serialize entries carrier JSON: {e}"))
-}
-
-fn names_or_null(list: Option<&Vec<String>>) -> serde_json::Value {
-    list.map_or(serde_json::Value::Null, |l| l.to_vec().into())
-}
-
-fn hex_upper(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02X}")).collect()
-}
-
-fn hex_lower(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 #[cfg(test)]
@@ -2118,6 +2356,7 @@ mod tests {
             hook_on_outgoing: None,
             hook_can_emit: Some(Vec::new()),
             description: Some("a \"quoted\" desc".to_string()),
+            sig_params: Vec::new(),
         }
     }
 
@@ -2165,18 +2404,6 @@ mod tests {
         let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
         assert_eq!(value["entries"][0]["on"]["form"], "all");
         assert!(value["entries"][0]["on"]["HookOn"].is_null());
-    }
-
-    #[test]
-    fn not_any_list_covers_the_fixed_0_to_9_domain() {
-        let not_any_list: String = (0..=MAX_INDEX)
-            .map(|n| format!("rshooks_entry = \"{n}\""))
-            .collect::<Vec<_>>()
-            .join(", ");
-        for n in 0..=MAX_INDEX {
-            assert!(not_any_list.contains(&format!("rshooks_entry = \"{n}\"")));
-        }
-        assert_eq!(not_any_list.matches("rshooks_entry").count(), 10);
     }
 
     #[test]
@@ -2326,5 +2553,186 @@ mod tests {
         assert!(table.contains("name: \"withdraw\","));
         assert!(table.contains("cbak: Some(__rshooks_cbak_body_0),"));
         assert!(table.contains("cbak: None,"));
+    }
+
+    // --- Signature parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §1) ---
+
+    #[test]
+    fn sig_arg_name_accepts_the_interface_charset() {
+        assert!(is_valid_interface_name("account"));
+        assert!(is_valid_interface_name("count"));
+        assert!(is_valid_interface_name("a"));
+        assert!(is_valid_interface_name("abcdefghijklmnop")); // exactly 16
+        assert!(is_valid_interface_name("A1"));
+    }
+
+    #[test]
+    fn sig_arg_name_rejects_underscore_digit_start_and_overlength() {
+        assert!(!is_valid_interface_name("my_count")); // underscore
+        assert!(!is_valid_interface_name("_count")); // leading underscore
+        assert!(!is_valid_interface_name("1count")); // leading digit
+        assert!(!is_valid_interface_name("")); // empty
+        assert!(!is_valid_interface_name("abcdefghijklmnopq")); // 17 bytes
+    }
+
+    #[test]
+    fn sig_type_text_covers_every_declared_table_entry() {
+        // docs/PARAM_SIGNATURE_DESIGN.md §2's table, minus `Blob<N>` (needs
+        // real tokens — see `classify_sig_type`, exercised via the trybuild
+        // pass fixture instead).
+        assert_eq!(classify_sig_type_text("u8"), Some(0x10));
+        assert_eq!(classify_sig_type_text("u16"), Some(0x01));
+        assert_eq!(classify_sig_type_text("u32"), Some(0x02));
+        assert_eq!(classify_sig_type_text("u64"), Some(0x03));
+        assert_eq!(classify_sig_type_text("[u8;16]"), Some(0x04));
+        assert_eq!(classify_sig_type_text("[u8;32]"), Some(0x05));
+        assert_eq!(classify_sig_type_text("Hash"), Some(0x05));
+        assert_eq!(classify_sig_type_text("AmountBytes"), Some(0x06));
+        assert_eq!(classify_sig_type_text("AccountId"), Some(0x08));
+        assert_eq!(classify_sig_type_text("[u8;20]"), Some(0x11));
+        assert_eq!(classify_sig_type_text("IssueBytes"), Some(0x18));
+        assert_eq!(classify_sig_type_text("CurrencyCode"), Some(0x1A));
+        assert_eq!(classify_sig_type_text("XFL"), Some(0x80));
+    }
+
+    #[test]
+    fn sig_type_text_rejects_unsupported_type() {
+        assert_eq!(classify_sig_type_text("i64"), None);
+        assert_eq!(classify_sig_type_text("String"), None);
+        assert_eq!(classify_sig_type_text("Blob<32>"), None); // Blob needs real tokens
+    }
+
+    #[test]
+    fn sig_param_name_hex_matches_the_wire_vector() {
+        // Same vector as `rshooks::sig::sig_param_name`'s own doctest:
+        // account(0), STI_ACCOUNT (0x08), 7-byte name.
+        assert_eq!(
+            sig_param_name_hex(0, 0x08, "account"),
+            "5F5053000008076163636F756E74"
+        );
+        // count(1), STI_UINT16 (0x01), 5-byte name.
+        assert_eq!(
+            sig_param_name_hex(1, 0x01, "count"),
+            "5F505300010105636F756E74"
+        );
+    }
+
+    #[test]
+    fn sig_param_name_hex_covers_the_xfl_type_code() {
+        // rate(0), XFL (0x80, XAS-010d), 4-byte name.
+        assert_eq!(
+            sig_param_name_hex(0, 0x80, "rate"),
+            "5F50530000800472617465"
+        );
+    }
+
+    fn sig_param(field: &str, type_text: &str, type_byte: u8, index: u8) -> SigParamJson {
+        SigParamJson {
+            field: field.to_string(),
+            type_text: type_text.to_string(),
+            type_byte,
+            name_hex: sig_param_name_hex(index, type_byte, field),
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "unstable-param-sig-interface")]
+    fn entries_json_includes_sig_params_field_type_byte_and_name_hex_only() {
+        let mut entry = sample();
+        entry.sig_params = vec![
+            sig_param("account", "AccountId", 0x08, 0),
+            sig_param("count", "u16", 0x01, 1),
+        ];
+        let bytes = encode_entries_json("Vault", &[entry]).expect("json");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
+        let sig_params = value["entries"][0]["sig_params"]
+            .as_array()
+            .expect("sig_params array");
+        assert_eq!(sig_params.len(), 2);
+        assert_eq!(sig_params[0]["field"], "account");
+        assert_eq!(sig_params[0]["type_byte"], 0x08);
+        assert_eq!(sig_params[0]["name_hex"], "5F5053000008076163636F756E74");
+        assert_eq!(sig_params[1]["field"], "count");
+        assert_eq!(sig_params[1]["type_byte"], 0x01);
+        // `type_text` is codegen-only and must never leak into the carrier.
+        assert!(sig_params[0].get("type_text").is_none());
+    }
+
+    #[test]
+    #[cfg(feature = "unstable-param-sig-interface")]
+    fn entries_json_sig_params_empty_by_default() {
+        let bytes = encode_entries_json("Vault", &[sample()]).expect("json");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
+        assert_eq!(value["entries"][0]["sig_params"], serde_json::json!([]));
+    }
+
+    #[test]
+    #[cfg(not(feature = "unstable-param-sig-interface"))]
+    fn entries_json_omits_sig_params_key_when_feature_is_off() {
+        let mut entry = sample();
+        entry.sig_params = vec![
+            sig_param("account", "AccountId", 0x08, 0),
+            sig_param("count", "u16", 0x01, 1),
+        ];
+        let bytes = encode_entries_json("Vault", &[entry]).expect("json");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
+        assert!(value["entries"][0].get("sig_params").is_none());
+    }
+
+    #[test]
+    fn no_sig_params_prologue_is_empty() {
+        assert_eq!(render_sig_param_prologue(&[]), "");
+    }
+
+    #[test]
+    fn entry_body_with_sig_params_decodes_before_the_call_in_declaration_order() {
+        let mut entry = sample(); // index 0, hook_fn "deposit"
+        entry.sig_params = vec![
+            sig_param("account", "AccountId", 0x08, 0),
+            sig_param("count", "u16", 0x01, 1),
+        ];
+        let out = render_entry_body_and_wrappers("Vault", &entry, &not_any_list());
+
+        // The call passes decoded locals through, in declaration order,
+        // after `&Vault`.
+        assert!(out.contains(
+            "::rshooks::exit::EntryReturn::finish(Vault::deposit(&Vault, __rshooks_sig_account, \
+             __rshooks_sig_count))"
+        ));
+
+        // Each argument's prologue: the type-byte const assert, the
+        // `const { sig_param_name::<N>(..) }` name build, and the
+        // documented rollback message/code on `Err`.
+        assert!(out.contains("<AccountId as ::rshooks::sig::SigParamType>::TYPE_BYTE == 8u8"));
+        assert!(out.contains("::rshooks::sig::sig_param_name::<14>(0, 8u8, b\"account\")"));
+        assert!(out.contains("b\"rshooks: bad sig param 'account'\", 0i64"));
+
+        assert!(out.contains("<u16 as ::rshooks::sig::SigParamType>::TYPE_BYTE == 1u8"));
+        assert!(out.contains("::rshooks::sig::sig_param_name::<12>(1, 1u8, b\"count\")"));
+        assert!(out.contains("b\"rshooks: bad sig param 'count'\", 1i64"));
+
+        // The account decode's prologue textually precedes count's, which
+        // in turn precedes the call — declaration order is preserved.
+        let account_pos = out
+            .find("__rshooks_sig_account:")
+            .expect("account decode present");
+        let count_pos = out
+            .find("__rshooks_sig_count:")
+            .expect("count decode present");
+        let call_pos = out
+            .find("EntryReturn::finish(Vault::deposit")
+            .expect("call present");
+        assert!(account_pos < count_pos);
+        assert!(count_pos < call_pos);
+    }
+
+    #[test]
+    fn entry_body_without_sig_params_is_byte_identical_to_legacy_call_shape() {
+        // Parity requirement (PARAM_SIGNATURE_DESIGN.md §1): a no-arg entry
+        // must generate exactly the pre-signature-params call shape.
+        let out = render_entry_body_and_wrappers("Vault", &sample(), &not_any_list());
+        assert!(out.contains("::rshooks::exit::EntryReturn::finish(Vault::deposit(&Vault))"));
+        assert!(!out.contains("__rshooks_sig_"));
+        assert!(!out.contains("otxn_sig_param"));
     }
 }

@@ -5,12 +5,11 @@
 //! Field layout (canonical `(type, field)` order, mirroring xahaud's real
 //! `HookAPI::etxn_details`): `EmitGeneration` (UInt32), `EmitBurden`
 //! (UInt64), `EmitParentTxnID`/`EmitNonce`/`EmitHookHash` (Hash256, in that
-//! field order), and — only when this hook exports a `cbak` — `EmitCallback`
-//! (AccountID). Every header is derived from the real, generated `sfXxx`
-//! constants via [`rshooks::txn::codec::field_header`] rather than
-//! hand-transcribed, so this stays correct if those codes ever change.
-//! Total length matches [`rshooks::types::EMIT_DETAILS_MAX_LEN`]'s own
-//! documented 116/138-byte split (see this module's tests).
+//! order), and — only when this hook exports a `cbak` — `EmitCallback`
+//! (AccountID). Headers come from the real, generated `sfXxx` constants via
+//! [`rshooks::txn::codec::field_header`], not hand-transcribed. Total length
+//! matches [`rshooks::types::EMIT_DETAILS_MAX_LEN`]'s 116/138-byte split
+//! (see this module's tests).
 
 use std::vec::Vec;
 
@@ -18,13 +17,8 @@ use rshooks::sfield::{
     sfEmitBurden, sfEmitCallback, sfEmitDetails, sfEmitGeneration, sfEmitHookHash, sfEmitNonce,
     sfEmitParentTxnID,
 };
-use rshooks::txn::codec::field_header;
+use rshooks::txn::codec::{OBJECT_END_MARKER, field_header};
 use rshooks::types::SField;
-
-/// The STObject terminator every nested object's serialization ends with
-/// (`sfObjectEndMarker`'s wire byte: type 14, field 1, both `< 16` → a
-/// single byte `(14 << 4) | 1`).
-pub(crate) const OBJECT_END_MARKER: u8 = 0xE1;
 
 /// The inputs this invocation's `etxn_details()` computes from — see
 /// [`crate::backend::Backend::etxn_details`].
@@ -65,8 +59,7 @@ pub(crate) fn build_etxn_details(inputs: &EmitDetailsInputs) -> Vec<u8> {
 
     if let Some(callback) = inputs.callback {
         push_field_header(&mut inner, sfEmitCallback);
-        // AccountID is VL-encoded: a 1-byte canonical length prefix (20 fits
-        // the single-byte form) followed by the 20-byte payload.
+        // AccountID is VL-encoded: 1-byte length prefix, then payload.
         inner.push(20u8);
         inner.extend_from_slice(&callback);
     }

@@ -1,52 +1,18 @@
-import {
-  ExecutionUtility,
-  Xrpld,
-  clearAllHooksV3,
-  hexNamespace,
-  readHookBinaryHexFromNS,
-  serverUrl,
-  setHooksV3,
-  setupClient,
-  teardownClient,
-  type SetHookParams,
-  type XrplIntegrationTestContext,
-  type iHook,
-} from '@transia/hooks-toolkit'
-import { calculateHookOn, type TransactionMetadata } from 'xahau'
-import { HookFlags } from 'xahau/dist/npm/models/common/xahau'
+import { ExecutionUtility, Xrpld } from '@xahau/hooks-toolkit'
+import type { TransactionMetadata } from 'xahau'
+import { installHook } from './harness'
 
-const namespace = 'rshooks-e2e-xfl-math'
 const WORST_CASE_INSTRUCTIONS = 357
 
 describe('xfl-math', () => {
-  let testContext: XrplIntegrationTestContext
-
-  beforeAll(async () => {
-    testContext = await setupClient(serverUrl)
-
-    const hook: iHook = {
-      CreateCode: readHookBinaryHexFromNS('xfl_math', 'wasm'),
-      Flags: HookFlags.hsfOverride,
-      HookOn: calculateHookOn(['Payment']),
-      HookNamespace: hexNamespace(namespace),
-      HookApiVersion: 0,
-    }
-    await setHooksV3({
-      client: testContext.client,
-      seed: testContext.hook1.seed,
-      hooks: [{ Hook: hook }],
-    } as unknown as SetHookParams)
-  })
-
-  afterAll(async () => {
-    await clearAllHooksV3({
-      client: testContext.client,
-      seed: testContext.hook1.seed,
-    } as unknown as SetHookParams)
-    await teardownClient(testContext)
+  const getContext = installHook({
+    wasmName: 'xfl_math',
+    namespace: 'rshooks-e2e-xfl-math',
+    hookOn: ['Payment'],
   })
 
   it('rejects a Payment whose computed 1% share falls below the minimum', async () => {
+    const testContext = getContext()
     const response = Xrpld.submit(testContext.client, {
       tx: {
         TransactionType: 'Payment',
@@ -60,6 +26,7 @@ describe('xfl-math', () => {
   })
 
   it('accepts a Payment whose computed 1% share meets the minimum', async () => {
+    const testContext = getContext()
     const response = await Xrpld.submit(testContext.client, {
       tx: {
         TransactionType: 'Payment',

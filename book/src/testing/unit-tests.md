@@ -35,11 +35,11 @@ neither of them linked into its wasm artifact.
 crate-type = ["cdylib", "rlib"]   # rlib only needed for tests/ integration tests
 
 [dependencies]
-rshooks = { version = "0.1.0", features = ["host-panic-handler"] }
+rshooks = { version = "0.2.1", features = ["host-panic-handler"] }
 
 [dev-dependencies]
-rshooks = { version = "0.1.0", features = ["testenv"] }
-rshooks-testenv = "0.1.0"
+rshooks = { version = "0.2.1", features = ["testenv"] }
+rshooks-testenv = "0.2.1"
 ```
 
 Declaring `rshooks` twice — once in `[dependencies]`, once in
@@ -99,9 +99,9 @@ pub struct StateCounter {
 impl StateCounter {
     #[hook(0, on = [Invoke])]
     fn main(&self) -> HookResult {
-        let count = self.counter.get().unwrap_or(Some(0)).unwrap_or(0);
+        let count = self.state.counter.get().unwrap_or(Some(0)).unwrap_or(0);
         let next = count.wrapping_add(1);
-        if self.counter.set(&next).is_err() {
+        if self.state.counter.set(&next).is_err() {
             rollback!(b"state-counter: state_set failed", StateCounterError::StateSetFailed);
         }
         Ok(Accept::new(b"state-counter: incremented", next as i64))
@@ -295,13 +295,16 @@ count, emit reserve, nonce budget, and so on) resets per call.
   `meta_slot`.
 - **`xpop(tx, meta)`** — seeds an XPOP's `(transaction, metadata)` byte pair
   — backs `xpop_slot`.
-- **`strict_can_emit(true)`** — opt-in (default off): after `invoke`,
-  asserts every transaction type this invocation committed to `emitted()`
-  is one the invoked entry's `#[hook(.., can_emit = [..])]` list declares.
-  A violation panics — a test-author assertion, not a Hook API error path.
-  An entry with **no** `can_emit` declaration is unrestricted (no check),
-  while a declared-empty `can_emit = []` rejects every emission — the same
-  three-state distinction the SetHook metadata carries on-chain.
+- **`strict_can_emit(bool)`** — **on by default**: after `invoke`, asserts
+  every transaction type this invocation committed to `emitted()` is one
+  the invoked entry's `#[hook(.., can_emit = [..])]` list declares,
+  matching the real host's `HookCanEmit` enforcement. A violation panics —
+  a test-author assertion, not a Hook API error path. An entry with **no**
+  `can_emit` declaration is unrestricted (no check), while a
+  declared-empty `can_emit = []` rejects every emission — the same
+  three-state distinction the SetHook metadata carries on-chain. Pass
+  `strict_can_emit(false)` to opt out for a lower-fidelity test that
+  deliberately emits outside the declaration.
 
 ## Direct-entry invocation: no `HookOn` filtering
 
@@ -341,7 +344,16 @@ let cbak_exit = env.invoke_cbak::<EmitTxn>(0, CbakOutcome::Success(txn));
 assert!(cbak_exit.is_success());
 ```
 
-Panics if the entry at `index` declares no `#[cbak]` body at all.
+`etxn_details` (and therefore `prepare`) writes an `EmitDetails.EmitCallback`
+field, holding this hook's own `hook_account`, exactly when the entry that
+performs the emit declares a `#[cbak]` body — matching xahaud's own
+`hookCtx.result.hasCallback` check. `invoke_cbak` panics if the transaction
+in `outcome` has no `EmitCallback` at all (most commonly: it was emitted by
+an entry with no `#[cbak]`), or if `EmitCallback`'s account or the
+transaction's `EmitHookHash` don't match this `TestEnv`'s own
+`hook_account`/seeded hash — either way, no genuine on-chain callback could
+ever be dispatched for that transaction against the entry being invoked.
+Also panics if the entry at `index` declares no `#[cbak]` body at all.
 
 ## Hook API coverage
 
@@ -363,7 +375,7 @@ call, `_g` (guard enforcement) excepted:
 | Float (XFL) | the full `float_*` family (`float_set`, arithmetic, comparison, `float_sto`/`float_sto_set`, `float_int`, `float_log`, `float_root`, ...) — see [XFL: Decimal Floating Point](../data/xfl.md) |
 | Slot | the full `slot_*` family plus `otxn_slot`/`meta_slot`/`xpop_slot` — see [Slots and Ledger Objects](../data/slots.md) |
 | STO | `sto_subfield`, `sto_subarray`, `sto_validate`, `sto_emplace`, `sto_erase` |
-| Util / Keylets | `util_sha512h`, `util_accid`, `util_raddr`, `util_verify`, `util_keylet`, and all 26 typed `keylet_*` helpers — see [Keylets](../data/keylets.md) |
+| Util / Keylets | `util_sha512h`, `util_accid`, `util_raddr`, `util_verify`, `util_keylet`/`util_keylet_buf`, and all 26 typed `keylet_*` helpers plus their `keylet_*_into` out-param twins — see [Keylets](../data/keylets.md) |
 | Callbacks | `invoke_cbak::<C>(index, outcome)` runs a declared `#[cbak(index)]` body directly — see [Callback invocation](#callback-cbak-invocation) above |
 
 `hook_param`'s override precedence (`hook_param_set`, P2-E) reduces
@@ -424,13 +436,6 @@ stage (P2-E):
   accepts a bare 32-byte transaction hash for some slot operations; this
   harness treats that shape as `DOESNT_EXIST` rather than modeling a
   separate transaction-hash lookup table.
-- **Emitted blobs never carry `EmitCallback`.** `etxn_details` (and
-  therefore `prepare`) always builds `EmitDetails` with `callback: None`,
-  regardless of whether the currently invoked entry declares a `#[cbak]`
-  body. A later `invoke_cbak` call built from such a blob therefore differs
-  from a genuine on-chain callback invocation in that one `EmitDetails`
-  field — a permanent simplification, not a gap that later Phase 2 work
-  closes.
 - **Amendment gates are assumed active.** Every Hook API function behaves
   as if every amendment it depends on is already enabled — there is no
   per-amendment feature-flag model.

@@ -63,6 +63,15 @@ pub fn float_sto<B: AsMut<[u8]> + ?Sized>(
 }
 
 /// Decode a serialized Amount (`buf`) into an [`XFL`].
+///
+/// `buf` must be only the 8-byte value component of an IOU `Amount`
+/// (bytes 0..8 of its 48-byte wire layout), never the full 48 bytes: the
+/// host strips an STObject field header only when `length > 8`, so a
+/// 48-byte slice makes it misparse the currency's leading byte as a
+/// nonexistent field header. The value component is also **not** itself a
+/// valid `XFL` bit pattern to bit-reinterpret locally — it carries an
+/// always-on "not native" flag bit a real host-produced `XFL` never sets —
+/// so always decode through this call rather than reinterpreting the bytes.
 #[inline(always)]
 pub fn float_sto_set(buf: &[u8]) -> Result<XFL> {
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]

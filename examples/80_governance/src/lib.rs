@@ -88,10 +88,10 @@ const UNLREPORT_KEYLET: [u8; 34] = [
 ];
 
 hook_errors! {
-    /// `govern`'s rollback reasons. See [`RewardError`]'s doc comment for
-    /// why these codes (not govern.c's `__LINE__`) are the stable ones,
-    /// and why only `accept`/`rollback` outcome + message are the
-    /// behavior-equivalence target.
+    /// `govern`'s rollback reasons. Stable codes assigned here, not
+    /// govern.c's `__LINE__`-based ones — behavior equivalence targets
+    /// each path's `accept`/`rollback` outcome and message, not its
+    /// numeric code.
     pub enum GovernError {
         /// A hook parameter or otxn parameter required by the current
         /// step was missing or malformed.
@@ -259,15 +259,9 @@ impl Governance {
 
         let is_l1_table = buf_eq_20(&hook_accid, &GENESIS_ACCOUNT);
 
-        // `member_count_or_setup`/`member_seat_of`/`read_topic`/
-        // `read_layer_required` read `"MC"`/member-reverse/`T`/`L`
-        // through the raw `state`/`otxn_param` API using
-        // [`Governance::member_count`]/[`Governance::member_reverse`]/
-        // [`Governance::topic`]/[`Governance::layer`]'s own declared key/
-        // name bytes, rather than those fields' typed accessors — see
-        // [`keys`]'s module doc comment for why (`action_seat`/`setup`/
-        // `push_l1_seat_entries`'s combined call-site density would push
-        // this entry's nesting from 22 to 63, over the 32-level limit).
+        // The next four reads (member count, seat, topic, layer) go
+        // through the raw state/otxn_param API rather than typed field
+        // accessors — see [`keys`]'s module doc comment for why.
         let member_count = member_count_or_setup(is_l1_table);
         let member_id = member_seat_of(&sender);
         if member_id < 0 {
@@ -473,11 +467,13 @@ impl Governance {
         }
 
         let rr = self
+            .state
             .reward_rate
             .get()
             .unwrap_or(None)
             .unwrap_or(DEFAULT_REWARD_RATE);
         let rd = self
+            .state
             .reward_delay
             .get()
             .unwrap_or(None)
@@ -625,7 +621,7 @@ impl Governance {
 
 /// Reads `"MC"` state, or runs [`setup`] if it doesn't exist yet.
 ///
-/// Raw `state_u64` read, not [`Governance::member_count`]'s typed
+/// Raw `state_u64` read, not [`GovernanceState::member_count`]'s typed
 /// accessor — see [`keys`]'s module doc comment. `Err(_)`, not
 /// `Err(HookError::DoesntExist)`: `state_u64`, not `state_i64` (the host
 /// packs whatever bytes *are* stored into the return value, regardless of
@@ -651,8 +647,8 @@ fn member_seat_of(sender: &AccountId) -> i64 {
 
 /// Reads the `T` otxn parameter: `(was it present and well-formed, the
 /// value or `[0, 0]` on failure)`. Raw `otxn_param` read, not
-/// [`Governance::topic`]'s typed accessor — see [`keys`]'s module doc
-/// comment.
+/// [`GovernanceOtxnParams::topic`]'s typed accessor — see [`keys`]'s module
+/// doc comment.
 fn read_topic() -> (bool, [u8; 2]) {
     let mut buf = [0u8; 2];
     let ok = otxn_param(&mut buf, b"T") == Ok(2);
@@ -660,8 +656,8 @@ fn read_topic() -> (bool, [u8; 2]) {
 }
 
 /// Reads the `L` otxn parameter (L2 tables only). Raw `otxn_param` read,
-/// not [`Governance::layer`]'s typed accessor — see [`keys`]'s module doc
-/// comment.
+/// not [`GovernanceOtxnParams::layer`]'s typed accessor — see [`keys`]'s
+/// module doc comment.
 fn read_layer_required() -> core::result::Result<[u8; 1], ()> {
     let mut buf = [0u8; 1];
     if otxn_param(&mut buf, b"L") == Ok(1) {
@@ -671,22 +667,18 @@ fn read_layer_required() -> core::result::Result<[u8; 1], ()> {
     }
 }
 
-// The setup-only hook parameters below are read through the raw
-// `hook_param_exact` API — the same bytes `Governance`'s own declared
-// fields (`initial_member`/`initial_member_count`/`initial_reward_rate`/
-// `initial_reward_delay`) use — instead of those fields' typed accessors:
-// see [`keys`]'s module doc comment. Going through the typed accessors here
-// was measured to push `setup`'s compiled nesting from 22 to 63 of the Hook
-// API's 32-level guard-checker limit, so this stays on the raw API exactly
-// like the rest of the setup path.
+// The setup-only hook parameters below use the raw `hook_param_exact`
+// API instead of `GovernanceHookParams`'s typed accessors, for the same
+// nesting-budget reason as the rest of the setup path — see [`keys`]'s
+// module doc comment.
 
 /// Reads `IRR`/`IRD` (L1-table-only setup) and writes `"RR"`/`"RD"` state.
 /// Kept in its own `#[inline(never)]` function: reading both inline inside
 /// `setup` pushes `setup`'s own compiled nesting close to the 32-level
 /// limit — this function boundary keeps it well under. Raw `state_set`
-/// writes, not [`Governance::reward_rate`]/
-/// [`Governance::reward_delay`]'s typed `.set()` — see [`keys`]'s module
-/// doc comment.
+/// writes, not [`GovernanceState::reward_rate`]/
+/// [`GovernanceState::reward_delay`]'s typed `.set()` — see [`keys`]'s
+/// module doc comment.
 #[inline(never)]
 fn setup_initial_reward_rate_and_delay() {
     let Ok(irr) = hook_param_exact::<XFL>(b"IRR") else {
@@ -755,16 +747,12 @@ fn setup(is_l1_table: bool) -> ! {
 /// Actions a reward-rate/delay topic (`t == 'R'`): writes the voted value
 /// directly under the `"RR"`/`"RD"` key. Diverges.
 ///
-/// Deliberately bypasses [`Governance::reward_rate`]/
-/// [`Governance::reward_delay`]'s typed `.set()` and writes the raw voted
-/// bytes straight through [`rshooks::api::state::state_set`] instead: the
-/// voted value is arbitrary member-supplied bytes with no format check
-/// anywhere in this path (matching govern.c exactly — it never validates a
-/// voted reward-rate/delay value either), and this call site should not
-/// pick up a dependency on `XFL`'s decode step just because it happens not
-/// to validate today. The key bytes (`b"RR"`/`b"RD"`) are exactly
-/// [`Governance::reward_rate`]/[`Governance::reward_delay`]'s own declared
-/// keys, so this hits the identical ledger slot either way.
+/// Bypasses [`GovernanceState::reward_rate`]/[`GovernanceState::reward_delay`]'s
+/// typed `.set()` and writes through raw `state_set`: the voted value is
+/// arbitrary member-supplied bytes with no format check (matching
+/// govern.c, which never validates it either), so this must not pick up
+/// a dependency on `XFL`'s decode step. `b"RR"`/`b"RD"` are the same keys
+/// those typed fields declare, so it's the same ledger slot either way.
 #[inline(never)]
 fn action_reward(_t: u8, n: u8, padding: usize, topic_data: &[u8; 32]) -> ! {
     let Some(value) = topic_data.get(padding..) else {
@@ -841,10 +829,9 @@ fn action_seat(n: u8, topic_data_zero: bool, topic_data: &[u8; 32]) -> ! {
         GovernError::AssertionFailed.nope(b"govern: bad topic data");
     };
 
-    // `Governance.seat_forward`/`member_reverse`'s own declared key bytes
-    // (`keys::seat_forward_key`/`keys::member_reverse_key`), read/written
-    // through the raw `state`/`state_set` API rather than those fields'
-    // typed accessors — see [`keys`]'s module doc comment.
+    // Reads/writes go through the raw state/state_set API using
+    // `keys::seat_forward_key`/`member_reverse_key` rather than the typed
+    // field accessors — see [`keys`]'s module doc comment for why.
     let previous_member = take_scratch(&PREVIOUS_MEMBER);
     let previous_present = {
         let Some(dst) = previous_member.get_mut(12..32) else {
@@ -904,7 +891,12 @@ fn action_seat(n: u8, topic_data_zero: bool, topic_data: &[u8; 32]) -> ! {
         previous_member[0] = b'V';
         let vote_value = take_scratch(&VOTE_VALUE);
         let mut tbl = 1u8;
-        while tbl <= 2 {
+        // `no_unroll`: without it, `opt-level = 3` fully unrolls this
+        // 2-iteration loop, physically duplicating
+        // `garbage_collect_votes`'s `guard!(66)` scan and multiplying
+        // (rather than amortizing) its worst-case instruction count — see
+        // `no_unroll`'s own doc comment for the full mechanism.
+        while no_unroll(tbl) <= 2 {
             guard!(2);
             let this_tbl = tbl;
             tbl = tbl.wrapping_add(1);
@@ -1105,11 +1097,9 @@ fn read_reward_fields(keylet: &Keylet) -> RewardFieldRead {
 /// which treats the whole `UNLReport`-driven L1 distribution as
 /// best-effort and always proceeds to emit at least the rewardee entry).
 ///
-/// Reads the seat/member state [`Governance::member_reverse`]/
-/// [`Governance::seat_forward`] declare — the two fields governance
-/// itself writes — through the raw `state` API rather than those fields'
-/// typed accessors; see [`keys`]'s module doc comment and the crate
-/// module doc comment.
+/// Reads the seat/member state through the raw `state` API rather than
+/// [`GovernanceState::member_reverse`]/[`GovernanceState::seat_forward`]'s
+/// typed accessors — see [`keys`]'s module doc comment for why.
 fn push_l1_seat_entries(txn: &mut MintTxn, l1_drops: u64) {
     let Ok(unl_report) = SlotObject::from_keylet(&Keylet(UNLREPORT_KEYLET)) else {
         return;

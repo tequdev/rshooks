@@ -4,105 +4,18 @@
 //! migration hint (see `docs/MULTI_HOOK_STRUCT_DESIGN.md` §7).
 
 use std::collections::BTreeSet;
-use std::fmt::Write as _;
 
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use sha2::{Digest, Sha512};
+
+use crate::tx_type_table::{TRANSACTION_TYPE_CODES, TRANSACTION_TYPES};
 
 /// Prefix used by `metadata!` (v1) carrier exports in raw Hook wasm
 /// artifacts. Detected — never parsed — so a crate that has not migrated to
 /// `#[hooks]` gets a migration hint instead of a generic "no chain found"
 /// error.
 pub const METADATA_EXPORT_PREFIX: &str = "__rshooks_metadata_v1_";
-
-/// Canonical Xahau JSON spellings for every known `TxType` variant
-/// (excluding the data-carrying `Unknown`), used to validate `#[hooks]`
-/// entries' `on`/`can_emit` transaction-type lists.
-pub(crate) const TRANSACTION_TYPES: &[&str] = &[
-    "Payment",
-    "EscrowCreate",
-    "EscrowFinish",
-    "AccountSet",
-    "EscrowCancel",
-    "SetRegularKey",
-    "OfferCreate",
-    "OfferCancel",
-    "TicketCreate",
-    "SignerListSet",
-    "PaymentChannelCreate",
-    "PaymentChannelFund",
-    "PaymentChannelClaim",
-    "CheckCreate",
-    "CheckCash",
-    "CheckCancel",
-    "DepositPreauth",
-    "TrustSet",
-    "AccountDelete",
-    "SetHook",
-    "NFTokenMint",
-    "NFTokenBurn",
-    "NFTokenCreateOffer",
-    "NFTokenCancelOffer",
-    "NFTokenAcceptOffer",
-    "Clawback",
-    "AMMClawback",
-    "AMMCreate",
-    "AMMDeposit",
-    "AMMWithdraw",
-    "AMMVote",
-    "AMMBid",
-    "AMMDelete",
-    "URITokenMint",
-    "URITokenBurn",
-    "URITokenBuy",
-    "URITokenCreateSellOffer",
-    "URITokenCancelSellOffer",
-    "XChainCreateClaimID",
-    "XChainCommit",
-    "XChainClaim",
-    "XChainAccountCreateCommit",
-    "XChainAddClaimAttestation",
-    "XChainAddAccountCreateAttestation",
-    "XChainModifyBridge",
-    "XChainCreateBridge",
-    "DIDSet",
-    "DIDDelete",
-    "OracleSet",
-    "OracleDelete",
-    "LedgerStateFix",
-    "MPTokenIssuanceCreate",
-    "MPTokenIssuanceDestroy",
-    "MPTokenIssuanceSet",
-    "MPTokenAuthorize",
-    "CredentialCreate",
-    "CredentialAccept",
-    "CredentialDelete",
-    "NFTokenModify",
-    "PermissionedDomainSet",
-    "PermissionedDomainDelete",
-    "Cron",
-    "CronSet",
-    "SetRemarks",
-    "Remit",
-    "GenesisMint",
-    "Import",
-    "ClaimReward",
-    "Invoke",
-    "EnableAmendment",
-    "SetFee",
-    "UNLModify",
-    "EmitFailure",
-    "UNLReport",
-];
-
-/// `tt*` codes corresponding position-for-position to [`TRANSACTION_TYPES`].
-pub(crate) const TRANSACTION_TYPE_CODES: &[u8] = &[
-    0, 1, 2, 3, 4, 5, 7, 8, 10, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 25, 26, 27, 28, 29, 30,
-    31, 35, 36, 37, 38, 39, 40, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61,
-    62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103,
-    104,
-];
 
 pub(crate) fn validate_transaction_types(field: &str, values: Option<&[String]>) -> Result<()> {
     let Some(values) = values else {
@@ -126,9 +39,9 @@ pub(crate) fn validate_transaction_types(field: &str, values: Option<&[String]>)
 /// Worst-case instruction counts for the Hook entry points.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct WorstCaseExecution {
-    /// Static WCE for `hook`, or `null` for gas-type Hooks.
+    /// Static WCE for `hook`.
     pub hook: Option<u64>,
-    /// Static WCE for `cbak`, or `null` for gas-type Hooks.
+    /// Static WCE for `cbak`.
     pub cbak: Option<u64>,
 }
 
@@ -190,34 +103,29 @@ pub(crate) fn hook_mask(values: Option<&[String]>) -> Result<Option<String>> {
     if bytes.iter().all(|byte| *byte == 0) {
         return Ok(None);
     }
-    Ok(Some(
-        bytes.iter().map(|byte| format!("{byte:02X}")).collect(),
-    ))
+    Ok(Some(encode_upper_hex(&bytes)))
 }
 
 pub(crate) fn utf8_hex(value: &str) -> String {
-    value
-        .as_bytes()
-        .iter()
-        .map(|byte| format!("{byte:02X}"))
-        .collect()
+    encode_upper_hex(value.as_bytes())
 }
 
 /// Computes Xahau's HookHash: the uppercase first 32 bytes of SHA-512.
 #[must_use]
 pub fn hook_hash(wasm: &[u8]) -> String {
     let digest = Sha512::digest(wasm);
-    let mut out = String::with_capacity(64);
-    for byte in digest.iter().take(32) {
-        // Writing to a String cannot fail.
-        let _ = write!(out, "{byte:02X}");
-    }
-    out
+    let bytes: Vec<u8> = digest.iter().take(32).copied().collect();
+    encode_upper_hex(&bytes)
 }
 
 pub(crate) fn uses_reachable_emit(wasm: &[u8]) -> Result<bool> {
     let module = crate::ir::parse(wasm).context("parsing final wasm for `emit` usage")?;
     Ok(module.find_func_import("env", "emit").is_some())
+}
+
+/// Encodes `bytes` as an uppercase hex string, two digits per byte.
+pub(crate) fn encode_upper_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02X}")).collect()
 }
 
 pub(crate) fn decode_upper_hex(encoded: &str) -> Result<Vec<u8>> {
@@ -227,29 +135,23 @@ pub(crate) fn decode_upper_hex(encoded: &str) -> Result<Vec<u8>> {
     if encoded.len() % 2 != 0 {
         bail!("metadata carrier payload has an odd number of hex digits");
     }
-
-    let bytes = encoded.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len() / 2);
-    for pair in bytes.chunks_exact(2) {
-        let high = pair
-            .first()
-            .copied()
-            .context("metadata carrier hex pair is missing its first digit")?;
-        let low = pair
-            .get(1)
-            .copied()
-            .context("metadata carrier hex pair is missing its second digit")?;
-        decoded.push((upper_hex_value(high)? << 4) | upper_hex_value(low)?);
+    if let Some(bad) = encoded
+        .bytes()
+        .find(|b| !matches!(b, b'0'..=b'9' | b'A'..=b'F'))
+    {
+        bail!("metadata carrier contains non-uppercase-hex byte 0x{bad:02X}");
     }
-    Ok(decoded)
-}
 
-fn upper_hex_value(byte: u8) -> Result<u8> {
-    match byte {
-        b'0'..=b'9' => Ok(byte - b'0'),
-        b'A'..=b'F' => Ok(byte - b'A' + 10),
-        _ => bail!("metadata carrier contains non-uppercase-hex byte 0x{byte:02X}"),
-    }
+    encoded
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            // Every byte was already verified ASCII uppercase-hex above.
+            let pair = str::from_utf8(pair).context("internal error: hex pair is not ASCII")?;
+            u8::from_str_radix(pair, 16)
+                .context("internal error: verified hex pair failed to parse")
+        })
+        .collect()
 }
 
 #[cfg(test)]

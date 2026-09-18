@@ -5,7 +5,8 @@ the 32-byte hash-derived index the protocol uses to find that object in the
 ledger's state map. Almost every ledger read that isn't the originating
 transaction itself starts by computing a keylet, then loading the object it
 points at into a slot. This page covers `rshooks`'s 26 typed `keylet_xxx`
-helpers, a worked example that computes and stores them, and
+helpers (each with a `keylet_xxx_into` out-param twin — see "Why typed
+helpers" below), a worked example that computes and stores them, and
 `account_id!`, the companion macro for building compile-time r-address
 constants.
 
@@ -25,9 +26,26 @@ object.
 each taking exactly the arguments its own type needs as the real
 `rshooks::types` newtypes — `keylet_account` takes only an `&AccountId`,
 `keylet_line` takes two `&AccountId`s and a `&CurrencyCode`, `keylet_offer`
-takes an `&AccountId` and a `u32` sequence. Every one is a thin
-`#[inline(always)]` pass-through to the same underlying host call, so this
-costs nothing beyond the raw call itself.
+takes an `&AccountId` and a `u32` sequence. Each also has a
+`keylet_xxx_into(out: &mut Keylet, ...) -> Result<()>` out-param twin —
+writing straight into caller-supplied storage instead of returning a value
+— for a caller about to borrow the result into another buffer-taking call
+right away:
+
+```rust,ignore
+let mut keylet = Keylet::default();
+keylet_account_into(&mut keylet, &owner)?;
+state_set(keylet.as_ref(), &key.encode())?;
+```
+
+The by-value form's own scratch buffer has its address taken by the host
+call, which stops the optimizer from eliding the copy into the caller's
+actual destination on return; writing straight into the caller's own
+buffer has no such intermediate to copy from. The two forms are
+independent implementations rather than one delegating to the other —
+delegating measurably cost extra worst-case instructions at a call site
+that only used the by-value form, so `keylet_xxx` and `keylet_xxx_into`
+each call the host directly.
 
 ## The 26 typed helpers
 
@@ -59,6 +77,12 @@ costs nothing beyond the raw call itself.
 | `keylet_hook_definition(hash)` | `KEYLET_HOOK_DEFINITION` (24) | the account-independent `HookDefinition` for wasm hash `hash` |
 | `keylet_hook_state_dir(account, namespace)` | `KEYLET_HOOK_STATE_DIR` (25) | the directory of `account`'s hook-state entries under `namespace` |
 | `keylet_cron(account, start_time)` | `KEYLET_CRON` (26) | `account`'s `Cron` entry firing at `start_time` |
+
+`keylet_line_for_asset(account, &asset)` is a convenience wrapper over
+`keylet_line` for when the currency/issuer pair is already an `IssuedAsset`
+(the type `IouAmount::asset()` produces — see [Slots and Ledger
+Objects](slots.md)) rather than two separate arguments: the trust line
+between `account` and `asset.issuer` in `asset.currency`.
 
 Every function returns `Result<Keylet>`. `keylet_hook` addresses the
 *account's* installed hook chain; `keylet_hook_definition` addresses a
@@ -144,3 +168,21 @@ rshooks::account_id!("rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTH");
 Reach for `account_id!` whenever a keylet argument, a hard-coded genesis
 account, or any other fixed r-address needs to become an `AccountId` — it
 replaces hand-computing or hex-pasting the 20 bytes yourself.
+
+## `CurrencyCode::from_iso` for 3-character currencies
+
+`keylet_line` takes a `&CurrencyCode`. Standard ISO-style codes (`USD`,
+`EUR`, ...) are only 3 ASCII bytes, but the on-ledger encoding is always
+20 bytes: twelve zeros, the three characters, five more zeros. A
+160-bit non-standard currency still uses the 20-byte tuple constructor;
+the 3-character form is `from_iso`, usable in `const`/`static` position:
+
+```rust,ignore
+use rshooks::prelude::*;
+
+const USD: CurrencyCode = CurrencyCode::from_iso(b"USD");
+```
+
+The argument is `&[u8; 3]`, so `b"US"` or `b"USDT"` is a type error
+rather than a silently-wrong encoding. Native XRP/XAH is a native amount,
+not `from_iso(b"XRP")`.

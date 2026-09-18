@@ -17,7 +17,7 @@ out/
 # OS / editor noise
 .DS_Store
 
-# e2e: xrpld-netgen's standalone-node runtime state (db, docker-compose,
-# downloaded xahaud binary), dropped in the cwd `up:standalone` is run from
-/xahau/
+# e2e: xrpld-lab's standalone-node workspace (config, docker-compose, db),
+# dropped in the cwd `up:standalone` is run from
+/workspace/
 __pycache__/

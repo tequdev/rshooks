@@ -1,26 +1,7 @@
-import {
-  ExecutionUtility,
-  Xrpld,
-  clearAllHooksV3,
-  hexNamespace,
-  readHookBinaryHexFromNS,
-  serverUrl,
-  setHooksV3,
-  setupClient,
-  teardownClient,
-  type SetHookParams,
-  type XrplIntegrationTestContext,
-  type iHook,
-} from '@transia/hooks-toolkit'
-import {
-  calculateHookOn,
-  convertStringToHex,
-  decodeAccountID,
-  type TransactionMetadata,
-} from 'xahau'
-import { HookFlags } from 'xahau/dist/npm/models/common/xahau'
+import { ExecutionUtility, Xrpld } from '@xahau/hooks-toolkit'
+import { convertStringToHex, decodeAccountID, type TransactionMetadata } from 'xahau'
+import { installHook } from './harness'
 
-const namespace = 'rshooks-e2e-guard-patterns'
 const WORST_CASE_INSTRUCTIONS = 615
 
 function accountIdHex(classicAddress: string): string {
@@ -28,42 +9,22 @@ function accountIdHex(classicAddress: string): string {
 }
 
 describe('guard-patterns', () => {
-  let testContext: XrplIntegrationTestContext
-
-  beforeAll(async () => {
-    testContext = await setupClient(serverUrl)
-
-    const hook = {
-      CreateCode: readHookBinaryHexFromNS('guard_patterns', 'wasm'),
-      Flags: HookFlags.hsfOverride,
-      HookOn: calculateHookOn(['Invoke']),
-      HookNamespace: hexNamespace(namespace),
-      HookApiVersion: 0,
-      HookParameters: [
-        {
-          HookParameter: {
-            HookParameterName: convertStringToHex('BL'),
-            HookParameterValue: accountIdHex(testContext.bob.classicAddress),
-          },
+  const getContext = installHook({
+    wasmName: 'guard_patterns',
+    namespace: 'rshooks-e2e-guard-patterns',
+    hookOn: ['Invoke'],
+    hookParameters: (ctx) => [
+      {
+        HookParameter: {
+          HookParameterName: convertStringToHex('BL'),
+          HookParameterValue: accountIdHex(ctx.bob.classicAddress),
         },
-      ],
-    } as iHook
-    await setHooksV3({
-      client: testContext.client,
-      seed: testContext.hook1.seed,
-      hooks: [{ Hook: hook }],
-    } as unknown as SetHookParams)
-  })
-
-  afterAll(async () => {
-    await clearAllHooksV3({
-      client: testContext.client,
-      seed: testContext.hook1.seed,
-    } as unknown as SetHookParams)
-    await teardownClient(testContext)
+      },
+    ],
   })
 
   it('rejects an Invoke from the blocked account', async () => {
+    const testContext = getContext()
     const response = Xrpld.submit(testContext.client, {
       tx: {
         TransactionType: 'Invoke',
@@ -76,6 +37,7 @@ describe('guard-patterns', () => {
   })
 
   it('accepts an Invoke from a non-blocked account', async () => {
+    const testContext = getContext()
     const response = await Xrpld.submit(testContext.client, {
       tx: {
         TransactionType: 'Invoke',

@@ -6,6 +6,7 @@ use std::vec::Vec;
 
 use rshooks::tx_type::TxType;
 use rshooks::txn::codec::encode_native_amount_const;
+use rshooks::txn::codec::sti::{STI_ACCOUNT, STI_VL};
 
 /// The originating transaction a [`crate::TestEnv`] seeds its invocations
 /// with — backs `otxn_field`/`otxn_type`/`otxn_id`/`otxn_param`. Every field
@@ -91,23 +92,14 @@ impl Otxn {
     }
 }
 
-/// The `STI_VL`/`STI_ACCOUNT` type codes — [`serialize`]'s VL length-prefix
-/// insertion cases, matching `crate::emit_walk::field_value_payload`'s own
-/// stripping rule in reverse.
-const STI_VL: u32 = 7;
-const STI_ACCOUNT: u32 = 8;
-
 /// Builds the canonical serialized field sequence [`crate::host::slots::otxn_slot`]
-/// loads into a root slot (P2-D — `.claude/design/TESTENV_PHASE2_DESIGN.md`
+/// loads into a root slot (P2-D, `.claude/design/TESTENV_PHASE2_DESIGN.md`
 /// §4 "slot family"): every seeded field in `otxn.fields`, plus a
-/// synthesized `sfTransactionType` derived from `otxn.tx_type` (unless the
-/// field map already has an explicit override — the `field_raw` escape
-/// hatch can set one directly), in canonical `(type, field)` order with
-/// correct wire framing — a VL length-prefix is added for `STI_VL`(7)/
-/// `STI_ACCOUNT`(8) fields, since [`Otxn::fields`] stores value-only bytes
-/// (this struct's own doc comment); every other type is written as-is
-/// (self-describing `Amount`, or a plain fixed-width value). No wrapping
-/// header or terminator — a root object's own shape (see
+/// synthesized `sfTransactionType` from `otxn.tx_type` unless `field_raw`
+/// already set an override, in canonical `(type, field)` order. A VL
+/// length-prefix is added for `STI_VL`(7)/`STI_ACCOUNT`(8) fields since
+/// [`Otxn::fields`] stores value-only bytes; every other type is written
+/// as-is. No wrapping header or terminator (a root object's own shape, see
 /// `crate::host::slots`' module doc comment). [`deserialize`] is the
 /// inverse.
 pub(crate) fn serialize(otxn: &Otxn) -> Vec<u8> {
@@ -125,17 +117,13 @@ pub(crate) fn serialize(otxn: &Otxn) -> Vec<u8> {
     out
 }
 
-/// Writes one field's header (see `rshooks::txn::codec::field_header`'s
-/// documented 4-case grammar, duplicated here since that function requires
-/// a typed `SField<T>` and this serializer works from raw stored codes)
-/// plus its wire value. `pub(crate)`: also reused by
-/// `crate::backend::Backend::prepare` (P2-D) to build the fully-formed
-/// field bytes `crate::host::sto::sto_emplace` needs for `Sequence`/
-/// `SigningPubKey`/`Account`/`FirstLedgerSequence`/`LastLedgerSequence`/
-/// `Fee`.
-pub(crate) fn write_field(out: &mut Vec<u8>, code: u32, value: &[u8]) {
-    let ty = code >> 16;
-    let field = code & 0xFFFF;
+/// Writes the 1/2/3-byte STObject field header for `(type, field)`
+/// (mirrors `rshooks::txn::codec::field_header`'s 4-case grammar;
+/// duplicated here because that function needs a typed `SField<T>` and this
+/// serializer works from raw stored codes) — also the header-only case
+/// `crate::host::float::write_field_header` wraps for `HookAPI::float_sto`'s
+/// identical layout, adding only its native/"short" no-header sentinels.
+pub(crate) fn write_field_header(out: &mut Vec<u8>, ty: u32, field: u32) {
     if ty < 16 && field < 16 {
         out.push(((ty << 4) | field) as u8);
     } else if ty < 16 {
@@ -149,6 +137,16 @@ pub(crate) fn write_field(out: &mut Vec<u8>, code: u32, value: &[u8]) {
         out.push(ty as u8);
         out.push(field as u8);
     }
+}
+
+/// Writes one field's header plus its wire value. Also reused by
+/// `crate::backend::Backend::prepare` (P2-D) to build field bytes
+/// `crate::host::sto::sto_emplace` needs for `Sequence`/`SigningPubKey`/
+/// `Account`/`FirstLedgerSequence`/`LastLedgerSequence`/`Fee`.
+pub(crate) fn write_field(out: &mut Vec<u8>, code: u32, value: &[u8]) {
+    let ty = code >> 16;
+    let field = code & 0xFFFF;
+    write_field_header(out, ty, field);
     if ty == STI_VL || ty == STI_ACCOUNT {
         write_vl_len(out, value.len());
     }
@@ -172,54 +170,82 @@ fn write_vl_len(out: &mut Vec<u8>, len: usize) {
     }
 }
 
-/// Parses a canonical root field sequence (as [`serialize`] produces, or
-/// any other well-formed root slot's content) back into a field map — the
-/// inverse of [`serialize`]. `None` on any parse failure. `pub(crate)`
-/// rather than a `crate::otxn::Otxn` constructor: P2-E's `cbak` harness
-/// (design §4 "cbak execution") is this function's only planned caller,
-/// reconstructing an `Otxn`-shaped field map for the emitted transaction
+/// Parses a root field sequence (as [`serialize`] produces, any other
+/// well-formed root slot's content, or a raw NOP-padded blob a test
+/// supplies directly) back into a field map — the inverse of [`serialize`].
+/// `None` on any parse failure. `pub(crate)` rather than an `Otxn`
+/// constructor: P2-E's `cbak` harness (design §4 "cbak execution")
+/// reconstructs an `Otxn`-shaped field map for the emitted transaction
 /// passed into a callback.
+///
+/// [`crate::emit_walk::canonicalize`]s `bytes` first, so every stored
+/// field value — including a nested `STI_OBJECT`(14)/`STI_ARRAY`(15)
+/// field's own bytes, e.g. an incoming `Remit`'s `sfAmounts` array — is
+/// NOP-free at every depth by the time it lands in the returned map. This
+/// matters even when [`bytes`] itself already came from a NOP-free
+/// [`crate::world::EmittedTxn::blob`] (`crate::backend::Backend::emit`
+/// stores canonically too): keeping the canonicalization here as well
+/// means this function's own contract — "the returned field values are
+/// always safe to feed to the strict `sto_*`/`slot_*` family" — does not
+/// silently depend on every caller already having canonicalized upstream.
 pub(crate) fn deserialize(bytes: &[u8]) -> Option<std::collections::HashMap<u32, Vec<u8>>> {
-    let fields = crate::emit_walk::walk_top_level_fields(bytes).ok()?;
+    let canonical = crate::emit_walk::canonicalize(bytes).ok()?;
+    let fields =
+        crate::emit_walk::walk_top_level_fields(&canonical, crate::emit_walk::NopMode::Strict)
+            .ok()?;
     let mut map = std::collections::HashMap::new();
     for f in &fields {
-        let (start, end) = crate::emit_walk::field_value_payload(bytes, f).ok()?;
-        let value = bytes.get(start..end)?.to_vec();
+        let (start, end) = crate::emit_walk::field_value_payload(&canonical, f).ok()?;
+        let value = canonical.get(start..end)?.to_vec();
         map.insert(f.code as u32, value);
     }
     Some(map)
 }
 
 /// Reconstructs the originating-transaction view a `#[cbak]` execution sees
-/// (P2-E — design §4 "cbak execution"): `blob` (an emitted transaction —
-/// already validated by the emission walker before it ever became an
+/// (P2-E, design §4 "cbak execution"): `blob` (an emitted transaction,
+/// already validated by the emission walker before becoming an
 /// [`crate::world::EmittedTxn`]) becomes the callback's otxn, and its
 /// `EmitDetails.EmitGeneration`/`EmitBurden` fields become the
 /// `(burden, generation)` pair `crate::env::TestEnv::invoke_cbak` seeds
-/// `World::otxn_emitted` with — matching `HookAPI::otxn_burden`/
-/// `HookAPI::otxn_generation` (`Xahau/xahaud`, branch `dev`,
-/// `src/xrpld/app/hook/detail/HookAPI.cpp:1465-1520`, fetched for this
-/// stage), which read those two `EmitDetails` fields directly off
-/// `hookCtx.applyCtx.tx` — the transaction currently being applied, which
-/// during `Transactor::doHookCallback` (`src/xrpld/app/tx/detail/Transactor.cpp:1483-1614`)
+/// `World::otxn_emitted` with. This matches `HookAPI::otxn_burden`/
+/// `HookAPI::otxn_generation` (`Xahau/xahaud` `dev`,
+/// `src/xrpld/app/hook/detail/HookAPI.cpp:1465-1520`), which read those two
+/// `EmitDetails` fields directly off `hookCtx.applyCtx.tx` — during
+/// `Transactor::doHookCallback` (`src/xrpld/app/tx/detail/Transactor.cpp:1483-1614`)
 /// *is* the emitted transaction itself — rather than incrementing anything,
 /// unlike `etxn_burden`/`etxn_generation`'s own `× reserved`/`+ 1`
 /// derivation for the *next* emission (`crate::backend::Backend::compute_etxn_burden`/
 /// `compute_etxn_generation`, unchanged by this function).
 ///
-/// `id(hash)` is set to `hash` (the emit-returned hash) — `otxn_id` during a
-/// real callback returns `getTransactionID()` by default (`HookAPI.cpp:1545-1551`),
-/// i.e. the emitted transaction's own real hash, exactly what `emit`
-/// returned for it.
+/// `id(hash)` is set to `hash` (the emit-returned hash): a real callback's
+/// `otxn_id` returns `getTransactionID()` by default (`HookAPI.cpp:1545-1551`)
+/// — the emitted transaction's own hash, exactly what `emit` returned.
 ///
 /// `None` on any parse failure (malformed field sequence, missing
 /// `TransactionType`, missing/malformed `EmitDetails` or its
-/// `EmitGeneration`/`EmitBurden` sub-fields) — a caller maps that to a clear
-/// panic; it should not occur for any blob obtained from
-/// `crate::TestEnv::emitted()`, since every one of those already passed the
-/// emission walker's own `EmitDetails` well-formedness checks
+/// `EmitGeneration`/`EmitBurden`/`EmitHookHash` sub-fields); a caller maps
+/// that to a clear panic. Should not occur for any blob from
+/// `crate::TestEnv::emitted()`, since those already passed the emission
+/// walker's own `EmitDetails` well-formedness checks
 /// ([`crate::emit_walk::validate_emit_blob`]).
-pub(crate) fn from_emitted(blob: &[u8], hash: [u8; 32]) -> Option<(Otxn, u64, u32)> {
+pub(crate) struct EmittedOtxn {
+    pub(crate) otxn: Otxn,
+    pub(crate) burden: u64,
+    pub(crate) generation: u32,
+    /// `EmitDetails.EmitHookHash` — the hash of the hook that performed the
+    /// emit.
+    pub(crate) hook_hash: [u8; 32],
+    /// `EmitDetails.EmitCallback`, if present — the account
+    /// `Transactor::doHookCallback` (`Xahau/xahaud` `dev`,
+    /// `src/xrpld/app/tx/detail/Transactor.cpp:1483-1614`) looks up a
+    /// callback hook on. `None` means the emitting hook declared no
+    /// `#[cbak]` body, so on-chain this transaction never triggers a
+    /// callback at all.
+    pub(crate) callback_account: Option<[u8; 20]>,
+}
+
+pub(crate) fn from_emitted(blob: &[u8], hash: [u8; 32]) -> Option<EmittedOtxn> {
     let map = deserialize(blob)?;
 
     let tt_bytes = map.get(&rshooks::sfield::sfTransactionType.code())?;
@@ -230,23 +256,53 @@ pub(crate) fn from_emitted(blob: &[u8], hash: [u8; 32]) -> Option<(Otxn, u64, u3
     }
 
     let ed_bytes = map.get(&rshooks::sfield::sfEmitDetails.code())?;
-    let ed_fields = crate::emit_walk::walk_top_level_fields_or_object(ed_bytes, true).ok()?;
+    // `ed_bytes` came out of `deserialize`'s canonicalized map, so it is
+    // already NOP-free — `Strict` here is both correct and a defensive
+    // assertion of that invariant (see `crate::emit_walk::NopMode::Strict`'s
+    // doc comment).
+    let ed_fields = crate::emit_walk::walk_top_level_fields_or_object(
+        ed_bytes,
+        true,
+        crate::emit_walk::NopMode::Strict,
+    )
+    .ok()?;
 
     let generation_code = u64::from(rshooks::sfield::sfEmitGeneration.code());
     let burden_code = u64::from(rshooks::sfield::sfEmitBurden.code());
+    let hook_hash_code = u64::from(rshooks::sfield::sfEmitHookHash.code());
+    let callback_code = u64::from(rshooks::sfield::sfEmitCallback.code());
+
     let generation_field = ed_fields.iter().find(|f| f.code == generation_code)?;
     let burden_field = ed_fields.iter().find(|f| f.code == burden_code)?;
+    let hook_hash_field = ed_fields.iter().find(|f| f.code == hook_hash_code)?;
     let (gs, ge) = crate::emit_walk::field_value_payload(ed_bytes, generation_field).ok()?;
     let (bs, be) = crate::emit_walk::field_value_payload(ed_bytes, burden_field).ok()?;
+    let (hs, he) = crate::emit_walk::field_value_payload(ed_bytes, hook_hash_field).ok()?;
     let generation = u32::from_be_bytes(ed_bytes.get(gs..ge)?.try_into().ok()?);
     let burden = u64::from_be_bytes(ed_bytes.get(bs..be)?.try_into().ok()?);
+    let hook_hash: [u8; 32] = ed_bytes.get(hs..he)?.try_into().ok()?;
 
-    Some((otxn, burden, generation))
+    let callback_account = match ed_fields.iter().find(|f| f.code == callback_code) {
+        Some(callback_field) => {
+            let (cs, ce) = crate::emit_walk::field_value_payload(ed_bytes, callback_field).ok()?;
+            let acc: [u8; 20] = ed_bytes.get(cs..ce)?.try_into().ok()?;
+            Some(acc)
+        }
+        None => None,
+    };
+
+    Some(EmittedOtxn {
+        otxn,
+        burden,
+        generation,
+        hook_hash,
+        callback_account,
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
+    #![allow(clippy::unwrap_used, clippy::expect_used)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
 
     use super::*;
 
@@ -300,7 +356,9 @@ mod tests {
         let bytes = serialize(&otxn);
         // No wrapping header/terminator: walkable as a top-level field
         // sequence, and the walk must consume every byte.
-        let fields = crate::emit_walk::walk_top_level_fields(&bytes).unwrap();
+        let fields =
+            crate::emit_walk::walk_top_level_fields(&bytes, crate::emit_walk::NopMode::Tolerant)
+                .unwrap();
         // TransactionType (synthesized) + Amount + Account + Destination.
         assert_eq!(fields.len(), 4);
         // Canonical (type, field) order: TransactionType(1,2) < Amount(6,1)
@@ -363,7 +421,9 @@ mod tests {
             .field_raw(rshooks::sfield::sfSigningPubKey.code(), &[9, 9, 9]);
         let bytes = serialize(&otxn);
         // The field's own value bytes on the wire are `<len=3><9,9,9>`.
-        let fields = crate::emit_walk::walk_top_level_fields(&bytes).unwrap();
+        let fields =
+            crate::emit_walk::walk_top_level_fields(&bytes, crate::emit_walk::NopMode::Tolerant)
+                .unwrap();
         let spk = fields
             .iter()
             .find(|f| f.code == u64::from(rshooks::sfield::sfSigningPubKey.code()))
@@ -382,5 +442,31 @@ mod tests {
     #[test]
     fn deserialize_rejects_malformed_bytes() {
         assert_eq!(deserialize(&[0xE2]), None); // truncated
+    }
+
+    #[test]
+    fn deserialize_canonicalizes_a_nested_nop_supplied_directly() {
+        // A top-level field sequence — sfTransactionType(0), then a
+        // nested STObject field (type 14, field 2) whose own body is one
+        // scalar field followed by a NOP, before its own `0xE1` — built
+        // by hand rather than through `serialize`/`Backend::emit`: exactly
+        // the "raw NOP-padded blob a test supplies directly" case
+        // `deserialize`'s own canonicalization (independent of
+        // `Backend::emit`'s) exists for.
+        let mut bytes = vec![0x12, 0x00, 0x00]; // sfTransactionType = 0
+        bytes.push(0xE2); // (type 14, field 2) nested object header
+        bytes.extend_from_slice(&[0x24, 0, 0, 0, 7]); // sfSequence = 7
+        bytes.push(0x99); // NOP inside the nested object, before its own 0xE1
+        bytes.push(0xE1); // nested object terminator
+
+        let map = deserialize(&bytes).expect("tolerant parse of a NOP-padded blob");
+        let nested_code = (14u32 << 16) | 2;
+        let nested_value = map.get(&nested_code).expect("nested field present");
+        // The map's entry is the nested field's *value* (payload,
+        // terminator included — `field_value_payload`'s STI_OBJECT
+        // convention): it must be exactly the NOP-free bytes, proving the
+        // NOP genuinely present in `bytes` did not survive into the map
+        // `deserialize` returns.
+        assert_eq!(nested_value, &vec![0x24, 0, 0, 0, 7, 0xE1]);
     }
 }

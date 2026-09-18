@@ -1,0 +1,45 @@
+error: txn_template!: `bad: emit_details` must be the last top-level field — it cannot be declared inside a nested `object`/`array`
+  --> tests/ui/fail/txn_template_elem_emit_details.rs:8:1
+   |
+8  | / txn_template! {
+9  | |     struct Remit {
+10 | |         transaction_type = ttREMIT,
+11 | |         sequence: u32_field(sfSequence) = 0,
+...  |
+24 | | }
+   | |_^
+   |
+   = note: this error originates in the macro `$crate::__txn_template_step` which comes from the expansion of the macro `txn_template` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0433]: failed to resolve: use of undeclared type `AmountEntry`
+  --> tests/ui/fail/txn_template_elem_emit_details.rs:18:13
+   |
+18 |             AmountEntry: object(sfAmountEntry) {
+   |             ^^^^^^^^^^^ use of undeclared type `AmountEntry`
+   |
+help: consider importing this struct
+   |
+5  + use rshooks::views::inner::AmountEntry;
+   |
+
+error[E0412]: cannot find type `AmountEntry` in this scope
+  --> tests/ui/fail/txn_template_elem_emit_details.rs:18:13
+   |
+18 |             AmountEntry: object(sfAmountEntry) {
+   |             ^^^^^^^^^^^ not found in this scope
+   |
+help: consider importing this struct
+   |
+5  + use rshooks::views::inner::AmountEntry;
+   |
+
+error[E0422]: cannot find struct, variant or union type `AmountEntry` in this scope
+  --> tests/ui/fail/txn_template_elem_emit_details.rs:18:13
+   |
+18 |             AmountEntry: object(sfAmountEntry) {
+   |             ^^^^^^^^^^^ not found in this scope
+   |
+help: consider importing this struct
+   |
+5  + use rshooks::views::inner::AmountEntry;
+   |

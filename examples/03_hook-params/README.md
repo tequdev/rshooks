@@ -2,65 +2,36 @@
 
 ## What you'll learn
 
-How to make a Hook's behavior configurable at install time via a **Hook
-parameter** (`hook_param`), with a sensible compiled-in default when the
-operator doesn't set one.
+Making a hook's behavior configurable at install time via a **Hook
+parameter** (`#[hook_param(...)]`), with a compiled-in default when the
+operator doesn't set one. See [Hook and Transaction
+Parameters](../../book/src/data/parameters.md) ("`default`: a compiled-in
+fallback") for the field-attribute grammar and what "absent" vs.
+"present-but-malformed" each resolve to.
 
 ## The hook
 
 Rolls back the originating transaction if its native (XRP/XAH) `Amount` is
 below a minimum threshold; accepts otherwise. The threshold comes from a
-Hook parameter named `MIN` — 8 raw bytes, a big-endian `u64` drops value —
-falling back to a baked-in default (`1,000,000` drops = 1 XAH) if `MIN`
-isn't configured.
+Hook parameter named `MIN` (a little-endian `u64` drops value, wrapped in a
+one-field `MinDrops` via `#[derive(ParamValue)]` so its meaning travels
+with its type), falling back to a baked-in default (1 XAH) via `MinDrops`'s
+own `Default` impl when `MIN` isn't configured.
 
-## Code walkthrough
-
-```rust
-fn min_drops() -> u64 {
-    hook_param_exact(MIN_PARAM)
-        .map(u64::from_be_bytes)
-        .unwrap_or(DEFAULT_MIN_DROPS)
-}
-```
-
-`hook_param_exact` (`rshooks::api::hook_ctx::hook_param_exact`) wraps the
-caller-buffer `hook_param` call and requires the result to be exactly as
-long as its return type — here inferred as `[u8; 8]` from
-`.map(u64::from_be_bytes)`, no turbofish needed (`hook_param_exact`'s
-return type is generic over any `rshooks::convert::FixedRead` type, most
-commonly a `rshooks::types` newtype or a raw `[u8; N]`; see that
-function's doc comment) — collapsing "not configured at all"
-(`Err(HookError::DoesntExist)`) and "configured with a value of the wrong
-size" into the same `Err`. Both fall back to the default via
-`.unwrap_or(DEFAULT_MIN_DROPS)`, without treating a malformed parameter as a
-hard error. This mirrors `firewall`'s `hook_param` pattern for its `BL`
-parameter, but reads a threshold instead of an `AccountId`.
-
-The originating transaction's `Amount` is read via
-`otxn_field_typed(sfAmount)`, which classifies the field by its wire length
-and hands back an `AmountBytes` — `Native([u8; 8])` for an 8-byte native
-amount, `Iou(_)` for a 48-byte IOU amount — so only the `Native` arm is
-accepted; `Iou` (and any read error) falls to the same "unsupported" arm.
-The top two bits of a serialized native amount are format flags, not
-part of the drops value (`0x80` = "not an IOU", `0xC0`'s low bit = sign,
-always set since XRP/XAH amounts are never negative) — see
-`rshooks::txn::codec::encode_native_amount_const`'s doc comment for the
-same bit layout used in the other direction (encoding a drops value for an
-emitted transaction). Masking `NATIVE_AMOUNT_FLAG_BITS` off recovers the
-plain drops magnitude.
-
-This example intentionally only supports native amounts — reading *any*
-`Amount` kind (native or IOU) uniformly is what `examples/07_xfl-math` is for.
+This example intentionally only supports native amounts — rejecting an IOU
+`Amount` outright — using the same `otxn_field_typed`/`AmountBytes` match
+[Reading the Originating Transaction](../../book/src/data/otxn.md) covers.
+Reading *any* `Amount` kind uniformly is what `examples/07_xfl-math` is
+for.
 
 ## Hook parameter hex encoding
 
-`MIN` must be exactly 8 bytes, big-endian. For a threshold of `5,000,000`
-drops (5 XAH):
+`MIN` must be exactly 8 bytes, little-endian. For a threshold of
+`5,000,000` drops (5 XAH):
 
 ```
 decimal:  5000000
-hex (u64, big-endian): 00 00 00 00 00 4C 4B 40
+hex (u64, little-endian): 40 4B 4C 00 00 00 00 00
 ```
 
 In a `SetHook` transaction's `HookParameters` array, this becomes one
@@ -70,7 +41,7 @@ In a `SetHook` transaction's `HookParameters` array, this becomes one
 {
   "HookParameter": {
     "HookParameterName": "4D494E",
-    "HookParameterValue": "00000000004C4B40"
+    "HookParameterValue": "404B4C0000000000"
   }
 }
 ```
@@ -89,24 +60,15 @@ cargo run -p rshooks-build -- build --manifest-path examples/03_hook-params/Carg
 No extra flags needed: every comparison here is between plain integers
 (`u64`), not fixed-size arrays, so there's no compiler-generated
 `bcmp`-style loop to worry about (contrast with `firewall`, which compares
-two `[u8; 20]`s and needs `--auto-guard`).
+two `[u8; 20]`s and avoids that loop with `buf_eq_20`).
 
 ## Expected behavior
 
 - `MIN` unset, `Amount` = 1 XAH or more → accept.
-- `MIN` unset, `Amount` below 1 XAH → rollback (`"hook-params: amount below
-  configured minimum"`, code `2`).
-- `MIN` set to some threshold, `Amount` at or above it → accept.
-- `MIN` set, `Amount` below it → rollback, code `2`.
-- `Amount` is an IOU (not native XRP/XAH) → rollback (`"hook-params:
-  unsupported (non-native) Amount"`, code `1`), regardless of `MIN`.
+- `MIN` unset, `Amount` below 1 XAH → rollback.
+- `MIN` set, `Amount` at or above it → accept.
+- `MIN` set, `Amount` below it → rollback.
+- `MIN` present but not exactly 8 bytes → rollback, regardless of `Amount`.
+- `Amount` is an IOU (not native XRP/XAH) → rollback, regardless of `MIN`.
 
-## Error codes
-
-`HookParamsError` (`rshooks::hook_errors!`, see `src/lib.rs`) is the
-`rollback!` code for each failure this hook can exit with:
-
-| variant | code | meaning |
-|---|---|---|
-| `UnsupportedAmount` | 1 | the originating transaction's `Amount` isn't an 8-byte native (XRP/XAH) amount |
-| `BelowMinimum` | 2 | the native `Amount` fell below the configured (or default) minimum |
+Failure/rollback codes are declared on `HookParamsError` in `src/lib.rs`.

@@ -1,6 +1,6 @@
 # Multi-Hook Struct API Design Document (v0.2.0)
 
-Status: design draft (no implementation yet — design only)
+Status: current specification for the shipped `#[hooks]` chain declaration model
 
 Target: rshooks v0.2.0 (breaking changes permitted)
 
@@ -74,7 +74,7 @@ represents the on-ledger `HookName`.
 | 7 | Build strategy | Adopt **Approach A (discovery + per-index `--cfg` recompilation)** first. Approach B (compile once + split the wasm) is the ideal form and will replace A as a future optimization (§7) |
 | 8 | Gas Hook (HookApiVersion 1) | **Out of scope.** v0.2 covers only the Guard type (api_version 0) |
 | 9 | Relationship to the manifest | The manifest (docs/spec.md etc.) is still under discussion, so **this design does not take it into account** |
-| 10 | Parameter defaults | The attribute's `default` is **a runtime fallback expression only**. Embedding the installed value into the SetHook template is not done in v0.2 (§5.6, §9.2) |
+| 10 | Parameter defaults | The attribute's `default` is **a runtime fallback expression only**. Embedding the installed value into the SetHook template is not done in v0.2 (§5.6, §9.2). **Scoped exception:** the Hook Parameter Signature Interface's declared signature parameters (extra `#[hook(..)]` fn arguments, `docs/PARAM_SIGNATURE_DESIGN.md` §1) are a distinct declaration mechanism from `#[hook_param]`/`#[otxn_param]` fields and their `default` — for those, `HookParameters` declaration entries (`HookParameterValue = "00"`) ARE emitted (§9.2, realizing §10 D5). Ordinary `#[hook_param]`/`#[otxn_param]` fields are still never emitted |
 | 11 | Template semantics | A SetHook template is an **owned-position patch**, not a declarative realization of the whole chain. Default is fail-closed (no override) (§9) |
 | 12 | Trigger omission | Omitting the trigger entirely is legal and means "**do not place an installation override**" (for a new HookDefinition, the protocol default fires on every type except `SetHook`; reusing an existing definition inherits its value). **Guaranteed all-type firing is written explicitly as `on = all`** (§5.3) |
 | 13 | Descriptive names | No descriptive `name` on the struct attribute (crate identity comes from the Cargo package name). The entry attribute's `name` is reserved for the on-ledger `HookName` |
@@ -101,10 +101,11 @@ represents the on-ledger `HookName`.
 ### 2.2 Current pain points
 
 1. **A chain (multiple hooks) has no project-level representation.**
-   Related hook groups on the same account, like `80_reward` and
-   `81_govern`, end up as separate crates and **duplicate** the state layout
-   they share (seat/member keys, `V*` voting keys). Duplicated declarations
-   silently drift apart.
+   Related hook groups on the same account, like the `reward` and `govern`
+   genesis hooks (later consolidated as `examples/80_governance`), end up
+   as separate crates and **duplicate** the state layout they share
+   (seat/member keys, `V*` voting keys). Duplicated declarations silently
+   drift apart.
 2. **Metadata is separated from the entry point.**
 3. **The hook/cbak pairing is implicit.**
 4. **Chain position isn't managed.** Which position in the `Hooks` array a
@@ -490,10 +491,13 @@ span-preservation contract.
 
 - For a **struct with named fields**, the macro generates
   `static Vault: Vault` (a static with the same name as the struct), and
-  it's accessed as a value, e.g. `Vault.deposits.get(&acct)`. Type names and
-  value names live in separate namespaces, so there's no collision. Since
-  every field is a ZST that is `Sync` and const-constructible, the static's
-  requirements are trivially satisfied.
+  it's accessed as a value, e.g. `Vault.state.deposits.get(&acct)` — `Vault`
+  holds one field per declared kind (`state`, `hook_param`, `otxn_param`,
+  each present only if at least one field of that kind was declared), and
+  each of those in turn holds the fields declared under that attribute.
+  Type names and value names live in separate namespaces, so there's no
+  collision. Since every field is a ZST that is `Sync` and
+  const-constructible, the statics' requirements are trivially satisfied.
 - A **unit struct** has no fields, so **no static is generated** (it would
   collide with the unit constructor of the same name, `E0428`). An empty
   named-field struct (`struct X {}`) may generate a static, but since
@@ -541,21 +545,15 @@ absence from bad data**:
 
 ### 5.7 Entry function signatures
 
-Entries inside the impl are **associated functions that take no `self`**,
-with the same signature as today, `fn() -> i64` (likewise for `cbak`).
-Writing `self` by mistake produces a dedicated "Hook entrypoints are
-stateless associated functions" diagnostic (§4.4).
-
-> **r5 revision**: the paragraph above reflects the original (r4) text. r5
-> revised this so that a `&self` receiver (`fn(&self) -> i64`) is also
-> accepted — see [HOOKS_SELF_RECEIVER_DESIGN.md](./HOOKS_SELF_RECEIVER_DESIGN.md)
-> for the details, semantics, and diagnostic wording.
->
-> **r6 revision**: `&self` is now REQUIRED on every entry (and every
-> `#[cbak]`); the no-receiver form is an error. This is a breaking change
-> that was folded into this feature branch before its merge into v0.2.0 —
-> see [HOOKS_SELF_RECEIVER_DESIGN.md](./HOOKS_SELF_RECEIVER_DESIGN.md) §1,
-> §3.1, §6.4, §7, and §8 for the final decision and its rationale.
+Entries inside the impl require a `&self` receiver: `fn(&self) -> i64`
+(likewise for `cbak`). No receiver, `self`/`mut self`/`&'a self`/type-ascribed
+`self: T`, and `&mut self` are all rejected — chain handles are zero-sized
+and immutable; ledger state is accessed through the handle, not by mutating
+the struct. Helpers (unattributed associated functions in the same impl)
+accept either no receiver or `&self`; the rejected forms above are errors
+there too. See
+[HOOKS_SELF_RECEIVER_DESIGN.md](./HOOKS_SELF_RECEIVER_DESIGN.md) for the
+receiver-classification table and diagnostic wording.
 
 ## 6. Implementation-level technical considerations
 
@@ -824,7 +822,7 @@ impl Vault {
     #[hook(0, name = "deposit", on_incoming = [Payment], on_outgoing = [], can_emit = [])]
     fn deposit(&self) -> i64 {
         // On absence, the default expression's value; a decode failure is Err (§5.6)
-        let Ok(cfg) = self.config.get_or_default() else {
+        let Ok(cfg) = self.hook_param.config.get_or_default() else {
             rollback!(b"vault: bad CFG", 1);
         };
         // ...
@@ -946,12 +944,21 @@ existing implementation). **All generated hex is normalized to uppercase**
   interpreted and rejected as a different operation — so **gap objects
   always stay strictly empty** (gapped-layout + `--override` verification
   cases are included in Phase 3).
-- **`HookParameters` is never generated** (settled point #10). To set an
-  installed parameter, add it to the template by hand. On the wire, the
-  three states are "omission = inherit the HookDefinition default," "name
-  only = clear the inherited value," and "name+value = set explicitly";
-  omission does not guarantee "no parameter." This caveat is documented in
-  the template's own documentation.
+- **`HookParameters` is never generated for ordinary `#[hook_param]`/
+  `#[otxn_param]` fields** (settled point #10). To set an installed
+  parameter for one of those, add it to the template by hand. On the wire,
+  the three states are "omission = inherit the HookDefinition default,"
+  "name only = clear the inherited value," and "name+value = set
+  explicitly"; omission does not guarantee "no parameter." This caveat is
+  documented in the template's own documentation. **Scoped exception,
+  realizing §10 D5:** an entry with declared signature parameters
+  (`docs/PARAM_SIGNATURE_DESIGN.md` §1/§4 — extra `#[hook(..)]` fn
+  arguments) DOES get a `HookParameters` array, one declaration entry per
+  argument in wire-index order (`HookParameterValue` always the literal
+  `"00"` placeholder — a signature parameter is always REQUIRED, so there is
+  no default to embed and no "omission means inherit" ambiguity to
+  preserve). An entry with no declared signature parameters still emits no
+  `HookParameters` key at all.
 - **Generation info goes in a separate sidecar**
   (`sethook.template.meta.json`); the template body itself stays
   protocol-shaped JSON. The sidecar includes an RFC 3339 `generated_at`,
@@ -1001,7 +1008,7 @@ position.
 | D2 | Per-hook state/param usage declarations (`uses = [...]`) | Not included in v0.2 (every declaration = the shared schema) | The sidecar's declarations are labeled "a transcription of the shared schema" (§5.4). Detection-based narrowing is a future concern |
 | D3 | Execution-mode attributes like weak/collect/again | Not included in v0.2 | Add the attribute once it's needed |
 | D4 | The switchover condition from build strategy A to B | Once measurement shows build time is a real problem | The equivalence definition is already fixed in §7 (byte identity is not required) |
-| D5 | Carrying the encoded default into the artifact | Future concern | Either a const-evaluable encoding, or extraction via the wasm carrier. If realized, revisit emitting `HookParameters` into the template |
+| D5 | Carrying the encoded default into the artifact | **Realized for declared signature parameters** (`docs/PARAM_SIGNATURE_DESIGN.md` §1/§4): the name/type-byte encoding is resolved at macro time and extracted via the `#[hooks] impl` wasm carrier (`EntryDecl::sig_params`, §4 of that doc), and `sethook_template.rs` emits a `HookParameters` declaration entry per argument (§9.2's scoped exception to settled point #10). Still open for ordinary `#[hook_param]`/`#[otxn_param]` fields' `default` — those have no wire-format REQUIRED-ness guarantee backing a fixed placeholder value the way a signature parameter does, so this remains a future concern for them | Either a const-evaluable encoding, or extraction via the wasm carrier — the signature-parameter case took the latter route |
 | D6 | Conditional-compilation (`#[cfg]`) support | Forbidden in v0.2 (§5.1) | Define the consistency semantics with discovery once needed, then lift the ban |
 
 ## 11. Overall developer-experience assessment
@@ -1046,8 +1053,9 @@ rewritability as the acceptance criterion:
 
 - Examples 01–15: stay single-hook, mechanically rewritten into the new
   form (subject to the migration table's acceptance criteria).
-- **`80_reward` + `81_govern` are consolidated into a single chain example
-  crate** (this consolidation is itself the proof of this proposal, so it's
+- **The `reward` and `govern` genesis hooks are consolidated into a single
+  chain example crate (`examples/80_governance`)** (this consolidation is
+  itself the proof of this proposal, so it's
   treated as a design task, not a mechanical rewrite). This unifies the
   shared key-layout types into the struct declaration and assigns indices
   (matching the genesis account's chain layout). **Phase allocation**:

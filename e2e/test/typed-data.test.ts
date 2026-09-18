@@ -1,25 +1,6 @@
-import {
-  ExecutionUtility,
-  StateUtility,
-  Xrpld,
-  clearAllHooksV3,
-  hexNamespace,
-  readHookBinaryHexFromNS,
-  serverUrl,
-  setHooksV3,
-  setupClient,
-  teardownClient,
-  type SetHookParams,
-  type XrplIntegrationTestContext,
-  type iHook,
-} from '@transia/hooks-toolkit'
-import {
-  calculateHookOn,
-  convertStringToHex,
-  decodeAccountID,
-  type TransactionMetadata,
-} from 'xahau'
-import { HookFlags } from 'xahau/dist/npm/models/common/xahau'
+import { ExecutionUtility, StateUtility, Xrpld, hexNamespace, setHooks, type XrplIntegrationTestContext } from '@xahau/hooks-toolkit'
+import { convertStringToHex, decodeAccountID, type TransactionMetadata } from 'xahau'
+import { buildHook, installHook } from './harness'
 
 const namespace = 'rshooks-e2e-typed-data'
 const WORST_CASE_INSTRUCTIONS = 504
@@ -109,35 +90,15 @@ async function invoke(
 }
 
 describe('typed-data', () => {
-  let testContext: XrplIntegrationTestContext
-
-  beforeAll(async () => {
-    testContext = await setupClient(serverUrl)
-
-    const hook: iHook = {
-      CreateCode: readHookBinaryHexFromNS('typed_data', 'wasm'),
-      Flags: HookFlags.hsfOverride,
-      HookOn: calculateHookOn(['Invoke']),
-      HookNamespace: hexNamespace(namespace),
-      HookApiVersion: 0,
-      HookParameters: [hookParam('CFG', cfgHex(MIN_DROPS, LOCK_LEDGERS))],
-    }
-    await setHooksV3({
-      client: testContext.client,
-      seed: testContext.hook1.seed,
-      hooks: [{ Hook: hook }],
-    } as unknown as SetHookParams)
-  })
-
-  afterAll(async () => {
-    await clearAllHooksV3({
-      client: testContext.client,
-      seed: testContext.hook1.seed,
-    } as unknown as SetHookParams)
-    await teardownClient(testContext)
+  const getContext = installHook({
+    wasmName: 'typed_data',
+    namespace,
+    hookOn: ['Invoke'],
+    hookParameters: [hookParam('CFG', cfgHex(MIN_DROPS, LOCK_LEDGERS))],
   })
 
   it('rejects an Invoke with no INS parameter', async () => {
+    const testContext = getContext()
     const response = Xrpld.submit(testContext.client, {
       tx: {
         TransactionType: 'Invoke',
@@ -155,6 +116,7 @@ describe('typed-data', () => {
     // bob has never deposited, so `DepositState { tag: 1, owner: bob }` has no
     // state entry - `state_get` returns `None`, decoded as `EMPTY_DEPOSIT`
     // (`flags == 0`).
+    const testContext = getContext()
     const response = invoke(
       testContext,
       testContext.bob,
@@ -164,6 +126,7 @@ describe('typed-data', () => {
   })
 
   it('rejects a deposit below the configured minimum', async () => {
+    const testContext = getContext()
     const response = invoke(
       testContext,
       testContext.alice,
@@ -175,6 +138,7 @@ describe('typed-data', () => {
   })
 
   it('accepts a deposit at the configured minimum', async () => {
+    const testContext = getContext()
     const response = await invoke(
       testContext,
       testContext.alice,
@@ -204,11 +168,12 @@ describe('typed-data', () => {
     // "entry is absent after withdraw" test would also pass if the key were
     // computed wrongly and never matched anything in the first place.
     await expect(
-      depositEntryExists(testContext, testContext.alice.classicAddress),
+      depositEntryExists(getContext(), getContext().alice.classicAddress),
     ).resolves.toBe(true)
   })
 
   it('rejects a withdraw before the lock window elapses', async () => {
+    const testContext = getContext()
     const response = invoke(
       testContext,
       testContext.alice,
@@ -223,6 +188,7 @@ describe('typed-data', () => {
     // node's `ledger_accept` admin RPC - the same mechanism
     // emit-txn.test.ts uses to satisfy an emitted transaction's
     // `FirstLedgerSequence`.
+    const testContext = getContext()
     for (let i = 0; i < 35; i += 1) {
       await testContext.client.request({ command: 'ledger_accept' } as any)
     }
@@ -256,11 +222,12 @@ describe('typed-data', () => {
     // Nothing on a host build can demonstrate this - every Hook API call
     // there is a stub that returns `NotImplemented` without touching state.
     await expect(
-      depositEntryExists(testContext, testContext.alice.classicAddress),
+      depositEntryExists(getContext(), getContext().alice.classicAddress),
     ).resolves.toBe(false)
   })
 
   it('rejects a second withdraw now that the deposit is gone', async () => {
+    const testContext = getContext()
     const response = invoke(
       testContext,
       testContext.alice,
@@ -270,6 +237,7 @@ describe('typed-data', () => {
   })
 
   it('rejects an unknown INS action', async () => {
+    const testContext = getContext()
     const response = invoke(
       testContext,
       testContext.bob,
@@ -290,52 +258,40 @@ describe('typed-data', () => {
       // deposits without touching any existing `DepositValue` state (the
       // HookNamespace, and so every account's state entry, is unchanged by
       // a SetHook that only replaces the hook definition/parameters).
-      const hook: iHook = {
-        CreateCode: readHookBinaryHexFromNS('typed_data', 'wasm'),
-        Flags: HookFlags.hsfOverride,
-        HookOn: calculateHookOn(['Invoke']),
-        HookNamespace: hexNamespace(namespace),
-        HookApiVersion: 0,
-        HookParameters: [
-          hookParam('CFG', cfgHex(MIN_DROPS, LOCK_LEDGERS)),
+      const testContext = getContext()
+      await setHooks({
+        client: testContext.client,
+        wallet: testContext.hook1,
+        hooks: [
           {
-            HookParameter: {
-              HookParameterName: ADMIN_NAME_HEX,
-              HookParameterValue: '01',
-            },
+            Hook: buildHook('typed_data', namespace, ['Invoke'], [
+              hookParam('CFG', cfgHex(MIN_DROPS, LOCK_LEDGERS)),
+              { HookParameter: { HookParameterName: ADMIN_NAME_HEX, HookParameterValue: '01' } },
+            ]),
           },
         ],
-      }
-      await setHooksV3({
-        client: testContext.client,
-        seed: testContext.hook1.seed,
-        hooks: [{ Hook: hook }],
-      } as unknown as SetHookParams)
+      })
     })
 
     afterAll(async () => {
       // Restore the unpaused hook (no `AdminName` parameter at all - absent
       // is treated the same as `paused: 0`, per `deposits_paused`'s doc
       // comment) so nothing after this block observes deposits paused.
-      const hook: iHook = {
-        CreateCode: readHookBinaryHexFromNS('typed_data', 'wasm'),
-        Flags: HookFlags.hsfOverride,
-        HookOn: calculateHookOn(['Invoke']),
-        HookNamespace: hexNamespace(namespace),
-        HookApiVersion: 0,
-        HookParameters: [hookParam('CFG', cfgHex(MIN_DROPS, LOCK_LEDGERS))],
-      }
-      await setHooksV3({
+      const testContext = getContext()
+      await setHooks({
         client: testContext.client,
-        seed: testContext.hook1.seed,
-        hooks: [{ Hook: hook }],
-      } as unknown as SetHookParams)
+        wallet: testContext.hook1,
+        hooks: [
+          { Hook: buildHook('typed_data', namespace, ['Invoke'], [hookParam('CFG', cfgHex(MIN_DROPS, LOCK_LEDGERS))]) },
+        ],
+      })
     })
 
     it('rejects a deposit while the AdminName pause switch is set', async () => {
       // bob has no outstanding deposit at this point in the suite (his two
       // earlier invokes both rolled back, so no state was ever written) -
       // a deposit here exercises the pause check regardless.
+      const testContext = getContext()
       const response = invoke(
         testContext,
         testContext.bob,
@@ -352,6 +308,7 @@ describe('typed-data', () => {
       // reaching that check at all (instead of `DepositsPaused`) proves
       // `deposits_paused()` is only ever consulted on the deposit branch,
       // exactly as documented.
+      const testContext = getContext()
       const response = invoke(
         testContext,
         testContext.bob,

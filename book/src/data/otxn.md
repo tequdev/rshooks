@@ -188,7 +188,8 @@ impl Firewall {
             accept!()
         };
 
-        // Avoid `==`, which can compile to an unguarded loop.
+        // `AccountId`'s `==` is loop-free too, but spelling this as
+        // `buf_eq_20` makes the loop-free mechanism explicit.
         if buf_eq_20(&sender, &blocked) {
             rollback!(b"firewall: blocked account", FirewallError::BlockedAccount);
         }
@@ -199,13 +200,41 @@ impl Firewall {
 ```
 
 `otxn_field_typed(sfAccount)` reads back an `AccountId` directly — no
-turbofish, no manual length check. Note the comparison: `sender ==
-blocked` would compile to a byte-compare loop the Hook API's guard checker
-would need a `guard!` for (see [Guards and Loops](../concepts/guards.md));
-`buf_eq_20` is loop-free by construction (every byte index is a
-source-level literal) and sidesteps the issue entirely. `blocked_account()`
-reads a Hook parameter declared on the `Firewall` struct — see [Hook and
-Transaction Parameters](parameters.md).
+turbofish, no manual length check. Note the comparison: `AccountId`'s `==`
+is itself loop-free (it delegates to `buf_eq_20` internally), so `sender ==
+blocked` would work here too; the example spells it as `buf_eq_20(&sender,
+&blocked)` to make that loop-free-by-construction property explicit at the
+call site rather than relying on a type's `PartialEq` impl. On a bare `[u8;
+20]` buffer (not one of these typed newtypes), `==` would compile to a
+byte-compare loop the Hook API's guard checker would need a `guard!` for
+(see [Guards and Loops](../concepts/guards.md)); `buf_eq_20` is loop-free by
+construction (every byte index is a source-level literal) and sidesteps the
+issue entirely regardless of type. `blocked_account()` reads a Hook
+parameter declared on the `Firewall` struct — see [Hook and Transaction
+Parameters](parameters.md).
+
+## Reading several fields of a known format: views
+
+Once the transaction's type is established (by `otxn_type()`, or by the
+hook's own `on`/`on_incoming`+`on_outgoing` list), `rshooks::views::tx` gives
+named accessors for every field the protocol declares on that format instead
+of one `otxn_field_typed(sfXxx)` call per field:
+
+```rust,ignore
+use rshooks::views::tx;
+
+let Ok(payment) = tx::Payment::otxn() else {
+    rollback!(b"not a Payment", ...)
+};
+let dest = payment.destination()?;   // sfDestination
+let amount = payment.amount()?;      // sfAmount, as AmountBytes
+```
+
+`Payment::otxn()` itself is one `otxn_type` call plus an integer compare, and
+every accessor after it is exactly the `otxn_field_typed` call it would
+otherwise take by hand — the view adds named fields, not a different read
+path. See [Typed Views](views.md) for the full picture, including which
+formats need the `active-amendments`/`all-amendments` feature.
 
 ## Nested fields: slots
 

@@ -1,7 +1,7 @@
 //! Address conversion, hashing, signature verification, and keylet
 //! computation utilities.
 
-use crate::error::{Result, res};
+use crate::error::{HookError, Result, res};
 use crate::types::{AccountId, Hash, Keylet};
 
 /// Convert an AccountID (`accid`) to its base58 r-address text form,
@@ -121,19 +121,14 @@ pub fn util_keylet<B: AsMut<[u8]> + ?Sized>(
     f: u32,
 ) -> Result<usize> {
     let out = out.as_mut();
-    // Untyped escape hatch: by the time a caller reaches this function,
-    // any pointer-shaped component has already been `.as_ptr() as u32`-cast
-    // away by the *caller* (see `crate::api::keylet`'s 26 typed helpers,
-    // each of which intercepts with its own real slices *before* calling
-    // `util_keylet_buf`/`util_keylet` — `KeyletArg`'s doc comment and
-    // `crates/rshooks/testenv-call-sites.txt`'s header explain why this
-    // function cannot itself recover real bytes from `a..f`). This
-    // interception block can therefore only forward `a..f` as opaque
-    // `KeyletArg::Value`s — correct for a value-only keylet type called
-    // through this untyped path, but unable to resolve a pointer-bearing
-    // type's real bytes; a hook calling `util_keylet`/`util_keylet_buf`
-    // directly for a pointer-bearing type should expect e2e-only fidelity
-    // under `testenv` until a typed helper exists for it.
+    // Untyped escape hatch: by the time a caller reaches this function, any
+    // pointer-shaped component has already been `.as_ptr() as u32`-cast away
+    // by the caller (typed callers go through `crate::api::keylet`'s 26
+    // helpers instead, which intercept with real slices first). This block
+    // can therefore only forward `a..f` as opaque `KeyletArg::Value`s —
+    // correct for a value-only keylet type, but unable to resolve real bytes
+    // for a pointer-bearing type; calling this function directly for one
+    // gets only e2e-fidelity under `testenv` until a typed helper exists.
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
     if let Some(r) = rshooks_core::backend::with_backend(|backend| {
         backend.util_keylet(
@@ -172,24 +167,12 @@ pub fn util_keylet<B: AsMut<[u8]> + ?Sized>(
 /// typed per-`KEYLET_*`-type signature instead of six same-typed `u32`
 /// slots, [`crate::api::keylet`]).
 ///
-/// # Toolchain note: `Keylet` is 34 bytes
-///
-/// This function's own `Keylet::default()` scratch buffer is 34 bytes.
-/// `wasm32v1-none` codegen only inlines a local zero-init as plain stores
-/// up to a fixed byte threshold — **32 bytes** at `opt-level = "z"`/`"s"`,
-/// **64 bytes** at `opt-level = 1`/`2`/`3` — past which it instead emits a
-/// call to the shared `memset` builtin, an unguarded wasm `loop` the Hook
-/// API's guard checker rejects (see `docs/DESIGN.md`'s §2 C6 for the full
-/// measurement). At 34 bytes, `Keylet` sits *above* the `"z"`/`"s"`
-/// threshold but *below* the `opt-level = 1`/`2`/`3` one: a hook crate
-/// built at `opt-level = "z"`/`"s"` (this crate's own recommended default
-/// for a Hook binary — see [`crate::state`]'s `MAX_TYPED_STATE_LEN` doc
-/// comment) needs `rshooks build --auto-guard --default-maxiter 34`
-/// (sized to this exact buffer) for any hook that calls this function
-/// (directly, or via any [`crate::api::keylet`] helper) to pass the guard
-/// checker; a hook crate built at `opt-level = 1`/`2`/`3` needs neither —
-/// `examples/13_keylets` (this repo's own examples workspace defaults to
-/// `opt-level = 3`) needs no extra build flags at all.
+/// This function's own scratch buffer is uninitialized (`MaybeUninit`,
+/// materialized only once the host reports writing all 34 bytes), never a
+/// local zero-init — so no `wasm32v1-none` `memset`-lowering threshold
+/// applies here at any `opt-level` (see `docs/DESIGN.md`'s §2 C6 for that
+/// threshold in general, for hook-author-owned zero-init buffers it does
+/// still apply to).
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
 pub fn util_keylet_buf(
@@ -201,9 +184,17 @@ pub fn util_keylet_buf(
     e: u32,
     f: u32,
 ) -> Result<Keylet> {
-    let mut buf = Keylet::default();
-    let _ = util_keylet(buf.as_mut(), keylet_type, a, b, c, d, e, f)?;
-    Ok(buf)
+    let mut storage = core::mem::MaybeUninit::<[u8; crate::types::KEYLET_LEN]>::uninit();
+    // SAFETY: only read via `assume_init` below, once `written == KEYLET_LEN`
+    // proves the host wrote every byte.
+    let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
+    let written = util_keylet(buf, keylet_type, a, b, c, d, e, f)?;
+    if written == crate::types::KEYLET_LEN {
+        // SAFETY: `written == KEYLET_LEN` proves the host wrote every byte.
+        Ok(Keylet(unsafe { storage.assume_init() }))
+    } else {
+        Err(HookError::TooSmall)
+    }
 }
 
 #[cfg(test)]

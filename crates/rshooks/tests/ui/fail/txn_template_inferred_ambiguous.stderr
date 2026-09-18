@@ -1,0 +1,52 @@
+error[E0080]: evaluation panicked: txn_template!: `fee`: the kind of `sfFee` cannot be inferred from its serialized type — declare it explicitly (`native_amount`/`amount`, `empty_vl`/`fixed_vl`, `native_issue`/`issue`, or a `{ .. }`/`[ .. ]` body for an object/array); serialized types with no `txn_template!` kind need `StoWriter`
+  --> tests/ui/fail/txn_template_inferred_ambiguous.rs:9:1
+   |
+9  | / txn_template! {
+10 | |     struct BadFee {
+11 | |         transaction_type = ttPAYMENT,
+12 | |         sequence: u32_field(sfSequence) = 0,
+...  |
+20 | | }
+   | |_^ evaluation of `_` failed here
+   |
+   = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `txn_template` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+  --> tests/ui/fail/txn_template_inferred_ambiguous.rs:15:22
+   |
+9  | / txn_template! {
+10 | |     struct BadFee {
+11 | |         transaction_type = ttPAYMENT,
+12 | |         sequence: u32_field(sfSequence) = 0,
+...  |
+15 | |         fee: sfFee = 0,
+   | |                      ^ expected `ExplicitKindRequired`, found integer
+...  |
+20 | | }
+   | |_- expected due to this
+
+error[E0605]: non-primitive cast: `ExplicitKindRequired` as `u64`
+  --> tests/ui/fail/txn_template_inferred_ambiguous.rs:9:1
+   |
+9  | / txn_template! {
+10 | |     struct BadFee {
+11 | |         transaction_type = ttPAYMENT,
+12 | |         sequence: u32_field(sfSequence) = 0,
+...  |
+20 | | }
+   | |_^ an `as` expression can only be used to convert between primitive types or to coerce to a specific trait object
+   |
+   = note: this error originates in the macro `$crate::__txn_template_step` which comes from the expansion of the macro `txn_template` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0080]: evaluation panicked: txn_template!: `sfFee` must be declared as `native_amount(sfFee)` — prepare_for_emit would corrupt the template with any other kind (it writes an 8-byte native amount)
+  --> tests/ui/fail/txn_template_inferred_ambiguous.rs:9:1
+   |
+9  | / txn_template! {
+10 | |     struct BadFee {
+11 | |         transaction_type = ttPAYMENT,
+12 | |         sequence: u32_field(sfSequence) = 0,
+...  |
+20 | | }
+   | |_^ evaluation of `_` failed here
+   |
+   = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `txn_template` (in Nightly builds, run with -Z macro-backtrace for more info)

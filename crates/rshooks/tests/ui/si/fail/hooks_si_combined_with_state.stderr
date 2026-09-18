@@ -1,0 +1,15 @@
+error: #[hooks]: a field must carry exactly one of `#[state]`, `#[hook_param]`, `#[otxn_param]`, `#[state_interface]`
+ --> tests/ui/si/fail/hooks_si_combined_with_state.rs:7:1
+  |
+7 | #[hooks]
+  | ^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unused import: `rshooks::decl::State`
+ --> tests/ui/si/fail/hooks_si_combined_with_state.rs:4:5
+  |
+4 | use rshooks::decl::State;
+  |     ^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default

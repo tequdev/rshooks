@@ -26,15 +26,13 @@ use crate::error::NOT_IMPLEMENTED;
 /// same six `u32` "slots" depending on `keylet_type`: a bare scalar (a
 /// sequence number, a quality component, a ledger-time value, ...) or one
 /// half of a `(ptr, len)` pair into the caller's own linear memory. On a
-/// native, non-wasm backend a `ptr as u32` value is meaningless (see
-/// `.claude/design/TESTENV_DESIGN.md` §1's rejection of `HookHost`/`Guest`
-/// for exactly this reason), so `util_keylet` cannot be bridged as six bare
-/// `u32`s the way every other Hook API call's pointer arguments are
-/// resolved to real slices before the backend ever sees them. `KeyletArg`
-/// is that resolution already done: `Value` for a genuine scalar, `Bytes`
-/// for whatever a `(ptr, len)` pair would have pointed at. See
-/// `crates/rshooks/testenv-call-sites.txt`'s header for exactly which call
-/// sites construct which variant.
+/// native, non-wasm backend a `ptr as u32` value is meaningless, so
+/// `util_keylet` cannot be bridged as six bare `u32`s the way every other
+/// Hook API call's pointer arguments are resolved to real slices before the
+/// backend ever sees them. `KeyletArg` is that resolution already done:
+/// `Value` for a genuine scalar, `Bytes` for whatever a `(ptr, len)` pair
+/// would have pointed at. See `crates/rshooks/testenv-call-sites.txt`'s
+/// header for which call sites construct which variant.
 #[doc(hidden)]
 #[derive(Debug, Clone, Copy)]
 pub enum KeyletArg<'a> {
@@ -51,10 +49,9 @@ pub enum KeyletArg<'a> {
 /// values, not `u32` pointers.
 ///
 /// Every non-control method has a default body returning `NOT_IMPLEMENTED`
-/// (or the API's natural `Err` variant of it), so adding a method here in a
-/// later phase does not break existing implementors. `accept`/`rollback` are
-/// `-> !` and have no default: an implementor must define how execution
-/// terminates.
+/// (or the API's natural `Err` variant of it), so adding a method here does
+/// not break existing implementors. `accept`/`rollback` are `-> !` and have
+/// no default: an implementor must define how execution terminates.
 ///
 /// No `Send`/`Sync` bound: the registry below is thread-local, and a
 /// backend only ever runs on the thread that installed it.
@@ -188,16 +185,6 @@ pub trait HostBackend {
     fn trace_num(&self, _msg: &[u8], _num: i64) -> i64 {
         NOT_IMPLEMENTED
     }
-
-    // -- Phase 2 (`.claude/design/TESTENV_PHASE2_DESIGN.md`) --------------
-    //
-    // Every method below mirrors one `extern.h` Hook API function not
-    // covered by Phase 1. As with every method above, the default body is
-    // `NOT_IMPLEMENTED` (or its natural `Err`/decoded-`i64` shape), so
-    // adding these does not break an existing implementor. P2-A wires the
-    // trait + wrapper interception only — no `rshooks-testenv::Backend`
-    // override exists yet for any of these (see `host/` in that crate);
-    // semantics land in later stages (P2-B..P2-E).
 
     // -- float_* (pure arithmetic over the XFL `i64` bit pattern; no
     // world state). `float_exponent` has no entry here: xahaud's `XFL`

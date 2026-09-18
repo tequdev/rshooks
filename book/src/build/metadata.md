@@ -140,10 +140,10 @@ For `Governance`'s `govern` entry (index `0`, `on = [Invoke]`,
   "HookCanEmit": "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF7FFFFFFFFFFFFFFFFFF9FFFFD",
   "HookName": "676F7665726E",
   "HookHash": "…64 hex chars…",
-  "WCE": { "hook": 43082, "cbak": 0 },
+  "WCE": { "hook": 27751, "cbak": 0 },
   "builder": {
     "name": "rshooks-build",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "rustc": "rustc 1.89.0 (29483883e 2025-08-04)"
   },
   "human": {
@@ -182,6 +182,16 @@ Fields not covered already on this page:
 - **`human`** — the readable, source-level form of every masked/hex field
   above. Use `human` to review what an entry declares; use the top-level
   fields when constructing an actual `SetHook` transaction.
+- **`sig_params`** — this entry's declared signature parameters ([Hook and
+  Transaction Parameters](../data/parameters.md#signature-parameters-fn-arguments)),
+  in wire-index order. Present only when the hook crate is built with the
+  `unstable-param-sig-interface` feature — absent otherwise (as for
+  `govern` here). When present, it is a `null`-free array, empty for an
+  entry with no signature-parameter fn arguments. Each element is
+  `{ "field", "type_byte", "name_hex" }` — the argument's own identifier,
+  its type code (an XAS-010d type code), and the full declared
+  `HookParameterName` as uppercase hex, the same value the generated
+  `HookParameters` declaration entries below use verbatim.
 - **`chain`** — this crate's **shared** schema, transcribed identically
   into every entry's sidecar (not filtered down to what this one entry
   actually uses — see [Hook Chains](../concepts/chains.md#the-shared-schema-why-this-is-the-models-biggest-win)
@@ -228,7 +238,7 @@ and `sethook.template.meta.json`:
 ```json
 {
   "crate": "governance",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "generated_at": "2026-08-18T09:00:00Z",
   "hook_hashes": { "0": "…", "1": "…" },
   "positions": { "declared": [0, 1], "gaps": [], "untouched_beyond": 2 },
@@ -243,8 +253,9 @@ Generation rules, precisely:
   entry declared, omitted entirely if this entry omitted its trigger),
   `HookCanEmit` (omitted if this entry omitted `can_emit`; present,
   possibly deny-all, otherwise), `HookNamespace`, `HookApiVersion` (always
-  `0` — chains are Guard-type only), `HookName` (only if this entry
-  declared one), and `Flags` (only under `--override`, value `1`
+  `0` — chains are Guard-type only), `HookParameters` (only if this entry
+  declares signature parameters — see below), `HookName` (only if this
+  entry declared one), and `Flags` (only under `--override`, value `1`
   (`hsfOVERRIDE`), and only on declared, non-gap entries).
 - A gap position is written as exactly `{"Hook": {}}` — no keys at all,
   ever, since adding any (including `Flags`) turns the no-op into a real
@@ -253,12 +264,76 @@ Generation rules, precisely:
 - `Account`/`HookNamespace` are the literal placeholder strings shown
   above unless `--account <r...>`/`--namespace <64hex>` were passed at
   build time.
-- `HookParameters` (installed parameter values) are **never** generated —
-  a hook parameter's install-time value has no fixed representation in
-  source (`default = ...` is a runtime fallback expression, not an
-  encodable constant; see [Hook and Transaction
+- `HookParameters` (installed parameter values) are **never** generated for
+  an ordinary `#[hook_param(...)]`/`#[otxn_param(...)]` field — a hook
+  parameter's install-time value has no fixed representation in source
+  (`default = ...` is a runtime fallback expression, not an encodable
+  constant; see [Hook and Transaction
   Parameters](../data/parameters.md)). Add a `HookParameters` entry to the
-  template by hand if a position needs one installed.
+  template by hand if a position needs one of those installed.
+- The one exception: an entry with **signature-parameter fn arguments**
+  (the Hook Parameter Signature Interface, [Hook and Transaction
+  Parameters](../data/parameters.md#signature-parameters-fn-arguments) —
+  requires the `unstable-param-sig-interface` feature)
+  *does* get a generated `HookParameters` block — one *declaration* entry
+  per declared argument, in index order, each with
+  `HookParameterValue = "00"` (the interface's own placeholder for "this
+  parameter exists, at this index, with this type" — not an installed
+  value). For `examples/19_param-signature`'s `increment(account:
+  AccountID, count: UInt16)`:
+
+  ```json
+  "HookParameters": [
+    {
+      "HookParameter": {
+        "HookParameterName": "5F5053000008076163636F756E74",
+        "HookParameterValue": "00"
+      }
+    },
+    {
+      "HookParameter": {
+        "HookParameterName": "5F505300010105636F756E74",
+        "HookParameterValue": "00"
+      }
+    }
+  ]
+  ```
+
+  An entry with no signature-parameter arguments omits the key entirely,
+  exactly like before this feature — this is additive, not a change to the
+  general rule above.
+- A second, independent exception: a chain declaring **state interface
+  fields** (the Hook State Interface,
+  [Hook State](../data/state.md#state-interface-typed-on-ledger-schema) —
+  requires the `unstable-state-interface` feature) gets one declaration
+  entry per `#[state_interface(..)]` field on **every** non-gap entry —
+  state is chain-level, shared by every entry, so the declarations aren't
+  tied to one particular entry the way signature parameters are. They're
+  appended after that entry's own signature-parameter declarations, if any.
+  Unlike a signature-parameter declaration, `HookParameterValue` here
+  carries the real **value schema**, not a `"00"` placeholder — see the
+  book section linked above for the exact wire format. For
+  `examples/20_state-interface`'s `balances(id=0)`/`config(id=1)`:
+
+  ```json
+  "HookParameters": [
+    {
+      "HookParameter": {
+        "HookParameterName": "5F534900000208076163636F756E740205746F6B656E",
+        "HookParameterValue": "020306616D6F756E74020775706461746564"
+      }
+    },
+    {
+      "HookParameter": {
+        "HookParameterName": "5F5349000100",
+        "HookParameterValue": "011006706175736564"
+      }
+    }
+  ]
+  ```
+
+  A chain with no `#[state_interface(..)]` fields at all gets none of
+  this — again additive, never a change to the general rule.
 - `sethook.template.meta.json` is generation provenance, **not** part of
   the transaction to submit: `hook_hashes` map index to `HookHash`;
   `positions` records which indices are declared, which are gaps within

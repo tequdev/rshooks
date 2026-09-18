@@ -1,9 +1,9 @@
 //! Integration tests for the rshooks-build pipeline (`docs/DESIGN.md` §8),
 //! using `wat`-authored fixtures.
 //!
-//! Test code is exempt from the workspace's panic-freedom lints (per
-//! `docs/DESIGN.md` §8): `unwrap`/`expect`/`panic!`/indexing on a known-good
-//! fixture is the normal, idiomatic way to assert behavior in a test.
+//! Test code is exempt from the workspace's panic-freedom lints (`docs/DESIGN.md`
+//! §8): `unwrap`/`expect`/`panic!`/indexing on a known-good fixture is
+//! idiomatic here.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -13,37 +13,15 @@
 
 use rshooks_build::Options;
 
+mod common;
+use common::{append_custom_section, strip_custom_sections, target_features_payload};
+
 fn wasm(src: &str) -> Vec<u8> {
     wat::parse_str(src).expect("fixture is valid wat")
 }
 
 fn opts() -> Options {
     Options::default()
-}
-
-/// Appends a raw custom section (id 0) to an existing wasm binary.
-fn append_custom_section(wasm: &[u8], name: &str, payload: &[u8]) -> Vec<u8> {
-    fn write_leb128(mut n: u64, out: &mut Vec<u8>) {
-        loop {
-            let byte = (n & 0x7f) as u8;
-            n >>= 7;
-            if n == 0 {
-                out.push(byte);
-                break;
-            }
-            out.push(byte | 0x80);
-        }
-    }
-    let mut content = Vec::new();
-    write_leb128(name.len() as u64, &mut content);
-    content.extend_from_slice(name.as_bytes());
-    content.extend_from_slice(payload);
-
-    let mut out = wasm.to_vec();
-    out.push(0x00);
-    write_leb128(content.len() as u64, &mut out);
-    out.extend_from_slice(&content);
-    out
 }
 
 /// Returns every `wasmparser::Payload` variant name found in `wasm`, for
@@ -99,9 +77,7 @@ fn data_segments(wasm: &[u8]) -> Vec<(i32, Vec<u8>)> {
     out
 }
 
-// ---------------------------------------------------------------------
 // Cleaner
-// ---------------------------------------------------------------------
 
 const MINIMAL_HOOK: &str = r#"
 (module
@@ -179,9 +155,8 @@ fn gc_drops_unreachable_function_and_remaps_calls() {
     "#;
     let cleaned = rshooks_build::clean(&wasm(src), &opts()).expect("clean succeeds");
 
-    // Re-parse: there should be exactly 2 defined functions left (helper,
-    // hook) — `dead` was dropped — and hook's call to helper must have been
-    // remapped from its original index (2) to its new one (1).
+    // Exactly 2 defined functions should remain (helper, hook) — `dead`
+    // dropped — and hook's call to helper remapped from index 2 to 1.
     let mut new_func_count = 0u32;
     let mut hook_new_idx = None;
     for payload in wasmparser::Parser::new(0).parse_all(&cleaned) {
@@ -208,8 +183,8 @@ fn gc_drops_unreachable_function_and_remaps_calls() {
         "hook should now be function index 2 (import 0, helper 1, hook 2)"
     );
 
-    // Find hook's function body (defined function local index 1, i.e. the
-    // second entry in the code section) and check its `call` immediate.
+    // hook's body is defined-function local index 1 (second code-section
+    // entry); check its `call` immediate.
     let mut code_bodies = Vec::new();
     for payload in wasmparser::Parser::new(0).parse_all(&cleaned) {
         if let wasmparser::Payload::CodeSectionEntry(body) = payload.expect("valid wasm") {
@@ -232,8 +207,8 @@ fn gc_drops_unreachable_function_and_remaps_calls() {
         "hook should call helper (remapped 2->1) then accept (unchanged 0)"
     );
 
-    // Byte-level: the re-encoded body must contain `call 1` (0x10 0x01) and
-    // must not contain the old target `call 2` (0x10 0x02).
+    // Byte-level: re-encoded body must contain `call 1` (0x10 0x01), not
+    // `call 2` (0x10 0x02).
     assert!(
         contains_bytes(&hook_body, &[0x10, 0x01]),
         "expected `call 1` in re-encoded body"
@@ -248,9 +223,7 @@ fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|w| w == needle)
 }
 
-// ---------------------------------------------------------------------
 // Cleaner: trailing-zero data-segment trim (`docs/DESIGN.md` §6.2 step 3)
-// ---------------------------------------------------------------------
 
 #[test]
 fn cleaner_trims_trailing_zeros_from_active_data_segment() {
@@ -274,93 +247,7 @@ fn cleaner_trims_trailing_zeros_from_active_data_segment() {
     );
 }
 
-#[test]
-fn cleaner_skips_trim_when_data_segments_overlap() {
-    // Active segments apply in declaration order and may legally overlap:
-    // here the second segment's trailing zero deliberately overwrites the
-    // first segment's non-zero byte at address 6. Trimming that zero would
-    // leave 0x43 ('C') in memory instead of 0x00 — so the trim must be
-    // skipped wholesale and both payloads pass through byte-identical.
-    let src = r#"
-    (module
-      (import "env" "accept" (func $accept (param i32 i32 i64) (result i64)))
-      (memory 1)
-      (data (i32.const 4) "ABC")
-      (data (i32.const 5) "X\00")
-      (func $hook (param i32) (result i64)
-        (call $accept (i32.const 0) (i32.const 0) (i64.const 0)))
-      (export "hook" (func $hook)))
-    "#;
-    let cleaned = rshooks_build::clean(&wasm(src), &opts()).expect("clean succeeds");
-    let segs = data_segments(&cleaned);
-    assert_eq!(
-        segs,
-        vec![(4, b"ABC".to_vec()), (5, b"X\x00".to_vec())],
-        "overlapping segments must disable the trailing-zero trim entirely"
-    );
-}
-
-#[test]
-fn cleaner_drops_all_zero_active_data_segment() {
-    let src = r#"
-    (module
-      (import "env" "accept" (func $accept (param i32 i32 i64) (result i64)))
-      (memory 1)
-      (data (i32.const 0) "\00\00\00\00\00")
-      (func $hook (param i32) (result i64)
-        (call $accept (i32.const 0) (i32.const 0) (i64.const 0)))
-      (export "hook" (func $hook)))
-    "#;
-    let cleaned = rshooks_build::clean(&wasm(src), &opts()).expect("clean succeeds");
-    assert!(
-        data_segments(&cleaned).is_empty(),
-        "an all-zero segment should be dropped entirely, not emitted empty"
-    );
-}
-
-#[test]
-fn cleaner_leaves_data_segment_with_nonzero_tail_untouched() {
-    let src = r#"
-    (module
-      (import "env" "accept" (func $accept (param i32 i32 i64) (result i64)))
-      (memory 1)
-      (data (i32.const 0) "ABCD")
-      (func $hook (param i32) (result i64)
-        (call $accept (i32.const 0) (i32.const 0) (i64.const 0)))
-      (export "hook" (func $hook)))
-    "#;
-    let cleaned = rshooks_build::clean(&wasm(src), &opts()).expect("clean succeeds");
-    assert_eq!(
-        data_segments(&cleaned),
-        vec![(0, b"ABCD".to_vec())],
-        "a segment with no trailing zero byte must be left byte-for-byte alone"
-    );
-}
-
-#[test]
-fn cleaner_data_segment_trim_is_idempotent() {
-    let src = r#"
-    (module
-      (import "env" "accept" (func $accept (param i32 i32 i64) (result i64)))
-      (memory 1)
-      (data (i32.const 0) "AB\00\00\00\00\00")
-      (data (i32.const 16) "\00\00\00\00")
-      (data (i32.const 32) "CD")
-      (func $hook (param i32) (result i64)
-        (call $accept (i32.const 0) (i32.const 0) (i64.const 0)))
-      (export "hook" (func $hook)))
-    "#;
-    let once = rshooks_build::clean(&wasm(src), &opts()).expect("clean succeeds");
-    let twice = rshooks_build::clean(&once, &opts()).expect("re-clean succeeds");
-    assert_eq!(
-        once, twice,
-        "re-cleaning an already-trimmed module must be byte-identical (no re-trimming, no drift)"
-    );
-}
-
-// ---------------------------------------------------------------------
 // Guard pass
-// ---------------------------------------------------------------------
 
 const GUARDED_LOOP_HOOK: &str = r#"
 (module
@@ -414,9 +301,7 @@ fn validator_rejects_unguarded_loop_with_location() {
     );
 }
 
-// ---------------------------------------------------------------------
 // Guard pass: actionable hints for compiler-generated loop shapes
-// ---------------------------------------------------------------------
 
 const COMPARE_LIKE_LOOP_HOOK: &str = r#"
 (module
@@ -461,9 +346,9 @@ const ZERO_INIT_LIKE_LOOP_HOOK: &str = r#"
 
 // A loop that loads memory (like `COMPARE_LIKE_LOOP_HOOK`) but also calls an
 // imported Hook API function — the shape a real business-logic loop over
-// hook state would have. The heuristic must stay conservative here: a `call`
-// anywhere in the loop body should suppress the hint entirely, even though
-// loads are present.
+// hook state would have. The heuristic must stay conservative: a `call`
+// anywhere in the loop body suppresses the hint entirely, even with loads
+// present.
 const CALLING_LOOP_HOOK: &str = r#"
 (module
   (import "env" "state" (func $state (param i32 i32 i32 i32) (result i64)))
@@ -531,107 +416,14 @@ fn validator_suppresses_hint_when_loop_calls_an_import() {
     );
 }
 
-#[test]
-fn auto_guard_inserts_exact_pattern_and_passes_revalidation() {
-    let input = wasm(UNGUARDED_LOOP_HOOK);
-    let o = Options {
-        auto_guard: true,
-        default_maxiter: 16,
-        ..Options::default()
-    };
-    let out = rshooks_build::auto_guard(&input, &o).expect("auto-guard succeeds");
-
-    // `_g` must have been added as the first (only) import, shifting
-    // `hook` from function index 0 to 1.
-    let mut g_index = None;
-    let mut hook_index = None;
-    let mut n_func_imports = 0u32;
-    for payload in wasmparser::Parser::new(0).parse_all(&out) {
-        match payload.expect("valid wasm") {
-            wasmparser::Payload::ImportSection(r) => {
-                for imp in r.into_imports() {
-                    let imp = imp.expect("import");
-                    if let wasmparser::TypeRef::Func(_) = imp.ty {
-                        if imp.module == "env" && imp.name == "_g" {
-                            g_index = Some(n_func_imports);
-                        }
-                        n_func_imports += 1;
-                    }
-                }
-            }
-            wasmparser::Payload::ExportSection(r) => {
-                for e in r {
-                    let e = e.expect("export");
-                    if e.name == "hook" {
-                        hook_index = Some(e.index);
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    let g_index = g_index.expect("_g should have been added as an import");
-    assert_eq!(g_index, 0);
-    let hook_index = hook_index.expect("hook export present");
-    assert_eq!(
-        hook_index, 1,
-        "hook should have shifted from 0 to 1 once `_g` was inserted"
-    );
-
-    // Locate hook's body and check the exact inserted instruction sequence
-    // immediately follows the loop header.
-    let mut bodies = Vec::new();
-    for payload in wasmparser::Parser::new(0).parse_all(&out) {
-        if let wasmparser::Payload::CodeSectionEntry(body) = payload.expect("valid wasm") {
-            bodies.push(body.as_bytes().to_vec());
-        }
-    }
-    let hook_body = &bodies[(hook_index - n_func_imports) as usize];
-    let reader = wasmparser::FunctionBody::new(wasmparser::BinaryReader::new(hook_body, 0));
-    let mut ops = reader.get_operators_reader().expect("operators");
-    let mut found_loop = false;
-    while !ops.eof() {
-        let op = ops.read().expect("op");
-        if let wasmparser::Operator::Loop { .. } = op {
-            found_loop = true;
-            let a = ops.read().expect("i32.const id");
-            let b = ops.read().expect("i32.const maxiter");
-            let c = ops.read().expect("call _g");
-            let d = ops.read().expect("drop");
-            assert!(matches!(a, wasmparser::Operator::I32Const { .. }));
-            assert!(matches!(b, wasmparser::Operator::I32Const { value: 16 }));
-            match c {
-                wasmparser::Operator::Call { function_index } => {
-                    assert_eq!(function_index, g_index)
-                }
-                other => panic!("expected `call $_g`, got {other:?}"),
-            }
-            assert!(matches!(d, wasmparser::Operator::Drop));
-            break;
-        }
-    }
-    assert!(found_loop, "fixture should contain a loop");
-
-    // Byte-level: the tail of the inserted sequence (`call <g_index>`
-    // followed by `drop`) must appear verbatim.
-    assert!(
-        contains_bytes(hook_body, &[0x10, g_index as u8, 0x1A]),
-        "expected `call {g_index}; drop` (0x10 {g_index:#x} 0x1A) in the rebuilt body"
-    );
-
-    rshooks_build::validate(&out, &opts()).expect("auto-guarded module should re-validate cleanly");
-}
-
-// ---------------------------------------------------------------------
 // Validator hard-error rules
-// ---------------------------------------------------------------------
 
-// `_g` is imported (but never called — there are no loops here) purely to
-// satisfy R1 (`docs/DESIGN.md` §6.2b/§6.4): every api-version-0 module must
-// import `_g`, even without a single loop. This is a real, vendored-checker-
-// discovered rule, not a pipeline artifact of the `build`/`clean` commands
-// (which now guarantee it via the flatten pass) — `validate()` is exercised
-// directly here, bypassing that pass, so the fixture must supply it itself.
+// `_g` is imported (never called — no loops here) purely to satisfy R1
+// (`docs/DESIGN.md` §6.2b/§6.4): every module must import `_g`, even
+// without a single loop. This is a real, vendored-checker-
+// discovered rule, not a pipeline artifact — `build`/`clean` guarantee it
+// via the flatten pass, but `validate()` is exercised directly here,
+// bypassing that pass, so the fixture must supply it itself.
 const MINIMAL_HOOK_ALREADY_CLEAN: &str = r#"
 (module
   (import "env" "_g" (func $g (param i32 i32) (result i32)))
@@ -710,6 +502,156 @@ fn validator_rejects_float_opcode() {
     assert!(
         err.to_string().to_lowercase().contains("float") || err.to_string().contains("MVP"),
         "{err}"
+    );
+}
+
+/// A guard-clean fixture (properly imports and calls `_g` in a correctly
+/// guarded loop, per `VALID_GUARDED_HOOK`-style construction in
+/// `guard_native.rs`) plus one non-guard hard error. The native upstream
+/// guard checker only evaluates guard shape (`docs/DESIGN.md` §6.5); it
+/// silently skips over any export other than `hook`/`cbak` and any opcode
+/// it recognizes byte-for-byte (including `f32.const`/`f64.const`), so it
+/// accepts both fixtures below. `verify()` (not just `validate()`) must
+/// still hard-fail: the native checker's acceptance may only downgrade
+/// guard/WCE findings, never these.
+fn guard_clean_prologue() -> &'static str {
+    r#"
+      (import "env" "_g" (func $g (param i32 i32) (result i32)))
+      (import "env" "accept" (func $accept (param i32 i32 i64) (result i64)))
+      (memory 1)
+    "#
+}
+
+/// A guard-clean fixture (an extra `evil` export alongside `hook`) that the
+/// native guard checker accepts: it silently skips over any export other
+/// than `hook`/`cbak`.
+fn guard_clean_extra_export_hook_bytes() -> Vec<u8> {
+    let src = format!(
+        r#"
+        (module
+          {prologue}
+          (func $hook (param i32) (result i64)
+            (local $i i32)
+            (loop $l
+              (call $g (i32.const 1) (i32.const 10))
+              drop
+              (local.set $i (i32.add (local.get $i) (i32.const 1)))
+              (br_if $l (i32.lt_u (local.get $i) (i32.const 10))))
+            (call $accept (i32.const 0) (i32.const 0) (i64.const 0)))
+          (export "hook" (func $hook))
+          (export "evil" (func $hook))
+          (data (i32.const 0) "0123456789012345678901234567890123456789012345678901234567890123456789"))
+        "#,
+        prologue = guard_clean_prologue()
+    );
+    strip_custom_sections(&wasm(&src))
+}
+
+/// A guard-clean fixture (a floating-point local and a `f32.const` opcode)
+/// that the native guard checker accepts: it recognizes and skips over
+/// `f32.const`/`f64.const` byte-for-byte, having no opinion on float types.
+fn guard_clean_float_opcode_hook_bytes() -> Vec<u8> {
+    let src = format!(
+        r#"
+        (module
+          {prologue}
+          (func $hook (param i32) (result i64)
+            (local $i i32)
+            (local $f f32)
+            (local.set $f (f32.const 1.0))
+            (loop $l
+              (call $g (i32.const 1) (i32.const 10))
+              drop
+              (local.set $i (i32.add (local.get $i) (i32.const 1)))
+              (br_if $l (i32.lt_u (local.get $i) (i32.const 10))))
+            (call $accept (i32.const 0) (i32.const 0) (i64.const 0)))
+          (export "hook" (func $hook))
+          (data (i32.const 0) "0123456789012345678901234567890123456789012345678901234567890123456789"))
+        "#,
+        prologue = guard_clean_prologue()
+    );
+    strip_custom_sections(&wasm(&src))
+}
+
+/// The native upstream guard checker only evaluates guard shape
+/// (`docs/DESIGN.md` §6.5). `verify()` (not just `validate()`) must still
+/// hard-fail on the extra export above: the native checker's acceptance
+/// may only downgrade guard/WCE findings, never these.
+#[test]
+fn verify_rejects_extra_export_even_when_native_guard_checker_accepts() {
+    let bytes = guard_clean_extra_export_hook_bytes();
+
+    rshooks_build::validate_guards_native(&bytes).expect("native checker ignores the extra export");
+
+    let err = rshooks_build::verify(&bytes, &opts()).unwrap_err();
+    assert!(
+        err.to_string().contains("evil"),
+        "verify() must still reject the extra export: {err}"
+    );
+}
+
+#[test]
+fn verify_rejects_float_opcode_even_when_native_guard_checker_accepts() {
+    let bytes = guard_clean_float_opcode_hook_bytes();
+
+    rshooks_build::validate_guards_native(&bytes)
+        .expect("native checker skips over float opcodes byte-for-byte");
+
+    let err = rshooks_build::verify(&bytes, &opts()).unwrap_err();
+    assert!(
+        err.to_string().to_lowercase().contains("float") || err.to_string().contains("MVP"),
+        "verify() must still reject the floating-point local/opcode: {err}"
+    );
+}
+
+/// Same as [`verify_rejects_extra_export_even_when_native_guard_checker_accepts`]
+/// but through the `rshooks check` CLI entry point, which calls `verify()`
+/// directly on arbitrary external wasm with no cleaning step — the exact
+/// path a hand-crafted or third-party `.wasm` file takes.
+#[test]
+fn check_cli_exits_nonzero_on_extra_export_even_when_native_guard_checker_accepts() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("extra_export.wasm");
+    std::fs::write(&path, guard_clean_extra_export_hook_bytes()).expect("write fixture");
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_rshooks"))
+        .arg("check")
+        .arg(&path)
+        .output()
+        .expect("running the rshooks binary");
+
+    assert!(
+        !output.status.success(),
+        "check must exit non-zero on an extra export: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("evil"), "{stderr}");
+}
+
+#[test]
+fn check_cli_exits_nonzero_on_float_opcode_even_when_native_guard_checker_accepts() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("float_opcode.wasm");
+    std::fs::write(&path, guard_clean_float_opcode_hook_bytes()).expect("write fixture");
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_rshooks"))
+        .arg("check")
+        .arg(&path)
+        .output()
+        .expect("running the rshooks binary");
+
+    assert!(
+        !output.status.success(),
+        "check must exit non-zero on a floating-point opcode: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
+    assert!(
+        stderr.contains("float") || stderr.contains("mvp"),
+        "{stderr}"
     );
 }
 
@@ -805,9 +747,9 @@ fn validator_rejects_oversized_module() {
 #[test]
 fn validator_allow_oversize_downgrades_to_warning() {
     let big = "x".repeat(70_000);
-    // `_g` import: R1 (`docs/DESIGN.md` §6.2b/§6.4) — see the comment on
-    // `MINIMAL_HOOK_ALREADY_CLEAN` above; this test also calls `validate()`
-    // directly, so the fixture must satisfy R1 itself.
+    // `_g` import: R1 (`docs/DESIGN.md` §6.2b/§6.4, see
+    // `MINIMAL_HOOK_ALREADY_CLEAN` above) — `validate()` is called directly
+    // here too, so the fixture must satisfy R1 itself.
     let src = format!(
         r#"(module (import "env" "_g" (func $g (param i32 i32) (result i32))) (memory 2) (data (i32.const 0) "{big}") (func $hook (param i32) (result i64) (i64.const 0)) (export "hook" (func $hook)))"#
     );
@@ -822,9 +764,7 @@ fn validator_allow_oversize_downgrades_to_warning() {
     assert!(report.warnings.iter().any(|w| w.contains("INVALID")));
 }
 
-// ---------------------------------------------------------------------
 // End-to-end: clean + check is idempotent
-// ---------------------------------------------------------------------
 
 #[test]
 fn end_to_end_clean_and_check_is_idempotent() {
@@ -858,22 +798,138 @@ fn end_to_end_clean_and_check_is_idempotent() {
 
 #[test]
 fn run_pipeline_reports_fee_relevant_size() {
-    // `MINIMAL_HOOK` has no loop and never calls `_g`, so it does not
-    // survive the pipeline's final gate any more: the vendored upstream
-    // guard checker (`docs/DESIGN.md` §6.5) unconditionally requires every
-    // API-version-0 module to import `_g`, regardless of whether it has any
-    // loops at all — a real divergence from the old Rust-only pipeline (see
-    // the end-to-end report). `GUARDED_LOOP_HOOK` calls `_g` in a properly
-    // guarded loop, so it clears that gate and exercises the same
-    // fee-reporting behavior this test is actually about.
+    // `MINIMAL_HOOK` has no loop and never calls `_g`, so it doesn't survive
+    // the pipeline's final gate: the vendored upstream guard checker
+    // (`docs/DESIGN.md` §6.5) unconditionally requires every module to
+    // import `_g`, regardless of loops. `GUARDED_LOOP_HOOK` calls
+    // `_g` in a properly guarded loop, so it clears that gate and exercises
+    // the fee-reporting behavior this test is actually about.
     let (out, report) =
         rshooks_build::run_pipeline(&wasm(GUARDED_LOOP_HOOK), &opts()).expect("pipeline succeeds");
     assert!(!out.is_empty());
     assert!(report.warnings.is_empty() || report.warnings.iter().all(|w| !w.contains("INVALID")));
     assert!(
         report.guard_verdict.is_some(),
-        "api-version-0 success should carry the native checker's instruction counts"
+        "success should carry the native checker's instruction counts"
     );
     let fee = rshooks_build::estimate_fee(out.len());
     assert_eq!(fee.drops, fee.bytes * 5000);
+}
+
+// End-to-end: `run_pipeline` post-processes clang-shaped wasm
+
+#[test]
+fn clang_shaped_module_with_helpers_flattens_to_valid_hook() {
+    // Mimics the shape of `clang --target=wasm32 -O0 -nostdlib
+    // -Wl,--no-entry -Wl,--allow-undefined -Wl,--export=hook
+    // -Wl,--export=cbak` output: non-inline helper functions (each called
+    // from both `hook` and `cbak`, so their bodies are duplicated across 2
+    // call sites), a guarded loop in one helper, a clang-style stack
+    // pointer global, an active data segment, and `producers`/
+    // `target_features` custom sections declaring post-MVP features clang
+    // emits for a non-`mvp` target CPU.
+    let src = r#"
+    (module
+      (import "env" "_g" (func $g (param i32 i32) (result i32)))
+      (import "env" "accept" (func $accept (param i32 i32 i64) (result i64)))
+      (import "env" "state" (func $state (param i32 i32 i32 i32) (result i64)))
+      (memory (export "memory") 2)
+      (global $__stack_pointer (mut i32) (i32.const 66592))
+      (data (i32.const 1024) "hello")
+
+      (func $sum (param i32 i32) (result i32)
+        (local $i i32)
+        (local $acc i32)
+        (loop $l
+          (call $g (i32.const 1) (i32.const 100))
+          drop
+          (local.set $acc
+            (i32.add (local.get $acc)
+              (i32.shr_s
+                (i32.shl
+                  (i32.load8_u (i32.add (local.get 0) (local.get $i)))
+                  (i32.const 24))
+                (i32.const 24))))
+          (local.set $i (i32.add (local.get $i) (i32.const 1)))
+          (br_if $l (i32.lt_u (local.get $i) (local.get 1))))
+        (local.get $acc))
+
+      (func $read_counter (result i64)
+        (call $state (i32.const 2048) (i32.const 8) (i32.const 1024) (i32.const 5)))
+
+      (func $bump (param i32) (result i32)
+        (local $sp i32)
+        (global.set $__stack_pointer
+          (i32.sub (global.get $__stack_pointer) (i32.const 16)))
+        (drop (call $read_counter))
+        (local.set $sp (global.get $__stack_pointer))
+        (global.set $__stack_pointer
+          (i32.add (global.get $__stack_pointer) (i32.const 16)))
+        (local.get $sp))
+
+      (func $hook (param i32) (result i64)
+        (drop (call $sum (i32.const 1024) (i32.const 5)))
+        (drop (call $bump (i32.const 0)))
+        (call $accept (i32.const 0) (i32.const 0) (i64.const 0)))
+
+      (func $cbak (param i32) (result i64)
+        (drop (call $sum (i32.const 1024) (i32.const 5)))
+        (drop (call $bump (i32.const 0)))
+        (i64.const 0))
+
+      (export "hook" (func $hook))
+      (export "cbak" (func $cbak)))
+    "#;
+    let input = wasm(src);
+    let input = append_custom_section(&input, "producers", b"whatever clang puts here");
+    let input = append_custom_section(
+        &input,
+        "target_features",
+        &target_features_payload(&["sign-ext", "mutable-globals"]),
+    );
+
+    let (out, report) = rshooks_build::run_pipeline(&input, &opts())
+        .expect("pipeline succeeds on clang-shaped input");
+
+    let mut exports = export_names(&out);
+    exports.sort();
+    assert_eq!(
+        exports,
+        vec!["cbak".to_string(), "hook".to_string()],
+        "only hook and cbak should remain exported (no memory export)"
+    );
+
+    let mut func_count = 0u32;
+    for payload in wasmparser::Parser::new(0).parse_all(&out) {
+        if let wasmparser::Payload::FunctionSection(r) = payload.expect("valid wasm") {
+            func_count = r.count();
+        }
+    }
+    assert_eq!(
+        func_count, 2,
+        "flatten should inline every helper into hook/cbak, leaving exactly 2 defined functions"
+    );
+
+    assert!(
+        !payload_kinds(&out).contains(&"custom"),
+        "no custom sections should survive the pipeline"
+    );
+
+    assert!(
+        report.guard_verdict.is_some(),
+        "a valid module should carry the native checker's verdict"
+    );
+    assert!(
+        report.warnings.is_empty(),
+        "no warnings expected (a DIVERGENCE warning would indicate a sign-extension leak): {:?}",
+        report.warnings
+    );
+
+    let segs = data_segments(&out);
+    assert!(
+        !segs.is_empty(),
+        "the active data segment must survive the pipeline"
+    );
+
+    rshooks_build::verify(&out, &opts()).expect("pipeline output should re-verify cleanly");
 }

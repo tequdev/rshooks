@@ -1,19 +1,15 @@
 //! Shared parsing/evaluation helpers for rshooks-core's vendored-header parity
-//! tests (`docs/DESIGN.md` §4). Each test binary that needs this pulls it in
-//! with `mod common;`; it holds no `#[test]`s of its own.
+//! tests (`docs/DESIGN.md` §4). Pulled in via `mod common;`; holds no
+//! `#[test]`s of its own.
 //!
-//! Deliberately minimal: these headers use a small, fixed vocabulary of
-//! numeric-literal and declaration shapes (verified by hand against the
-//! vendored files before writing this), so hand-rolled string scanning is
-//! simpler and more auditable here than pulling in a C parser or a `regex`
-//! dependency.
+//! These headers use a small, fixed vocabulary of numeric-literal and
+//! declaration shapes, so hand-rolled string scanning is simpler and more
+//! auditable here than a C parser or a `regex` dependency.
 //!
 //! Test code is exempt from the workspace's panic-freedom lints (per
-//! `docs/DESIGN.md` §8); this module additionally allows
-//! `clippy::arithmetic_side_effects`, in the same spirit as `rshooks-build`
-//! (`docs/DESIGN.md` §8, `crates/rshooks-build/src/lib.rs`) — byte-offset
-//! arithmetic is the normal shape of a hand-rolled parser, not a panic risk
-//! here (`usize` overflow on these tiny inputs is not a realistic concern).
+//! `docs/DESIGN.md` §8); this module also allows
+//! `clippy::arithmetic_side_effects` — byte-offset arithmetic is the normal
+//! shape of a hand-rolled parser, not a panic risk on these tiny inputs.
 #![allow(
     dead_code,
     clippy::unwrap_used,
@@ -29,14 +25,14 @@ use std::collections::BTreeMap;
 // Expression evaluator
 // ---------------------------------------------------------------------
 
-/// A tiny expression evaluator, just capable enough for the numeric-literal
-/// shapes actually used in the vendored Hook API headers and their Rust
-/// translation: decimal and hex integer literals (with `U`/`UL`/`ULL`
-/// suffixes on the C side, `_`-separated digit groups on the Rust side),
-/// parenthesized groups, unary `-`, and binary `<<` / `+`, plus bare
-/// identifier (or `mod::path` on the Rust side) references resolved against
-/// `env` — used by `tx_flags.h`'s `tfMPTCanLock = lsfMPTCanLock` style
-/// aliases and their `ls_flags::lsfMPTCanLock` Rust equivalents.
+/// A tiny expression evaluator covering the numeric-literal shapes used in
+/// the vendored Hook API headers and their Rust translation: decimal and hex
+/// integer literals (`U`/`UL`/`ULL` suffixes on the C side, `_`-separated
+/// digit groups on the Rust side), parenthesized groups, unary `-`, and
+/// binary `<<` / `+`, plus bare identifier (or `mod::path` on the Rust side)
+/// references resolved against `env` — used by `tx_flags.h`'s
+/// `tfMPTCanLock = lsfMPTCanLock` style aliases and their
+/// `ls_flags::lsfMPTCanLock` Rust equivalents.
 pub fn eval_expr(expr: &str, env: &BTreeMap<String, i64>) -> i64 {
     let mut p = ExprParser {
         s: expr.as_bytes(),

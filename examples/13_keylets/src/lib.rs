@@ -63,9 +63,7 @@ const TEST_STATE_KEY: StateKey = StateKey([0xCD; 32]);
 const TEST_NAMESPACE: NameSpace = NameSpace([0xEF; 32]);
 
 /// `USD` in the standard 20-byte currency encoding.
-const TEST_CURRENCY: CurrencyCode = CurrencyCode([
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, b'U', b'S', b'D', 0, 0, 0, 0, 0,
-]);
+const TEST_CURRENCY: CurrencyCode = CurrencyCode::from_iso(b"USD");
 
 /// Directory-node keylet input for `keylet_quality`.
 const TEST_DIR: Keylet = Keylet([

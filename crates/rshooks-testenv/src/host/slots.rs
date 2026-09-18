@@ -3,32 +3,30 @@
 //! §7).
 //!
 //! Every function here is ported against `Xahau/xahaud`, branch `dev`,
-//! `src/xrpld/app/hook/detail/HookAPI.cpp`/`applyHook.cpp` (fetched and read
-//! directly for this stage; exact line numbers are cited per function
-//! below). One structural decision governs the whole module and is stated
-//! once here rather than repeated per function:
+//! `src/xrpld/app/hook/detail/HookAPI.cpp`/`applyHook.cpp`; line numbers are
+//! cited per function below.
 //!
 //! # Slot content = "value payload", exactly what `slot()` itself returns
 //!
 //! Upstream's `HookAPI::slot(slot_no)` returns the stored `STBase const*`
 //! (`hookCtx.slot[slot_no].entry`), and the wasm-facing wrapper serializes
 //! it with a bare `entry->add(s)` call (`applyHook.cpp:1946-1958`) — the
-//! *value's own* serialization, never including the field header that
-//! names it within its parent (that header is written by the parent
-//! object's own field-walk, not by the value's `add()`). This is the exact
-//! same code path `otxn_field` uses (`applyHook.cpp:1908-1916`), which is
-//! why `otxn_field`'s documented "fixed-width `sfAccount`, VL-prefixed
-//! `sfBlob`" trap (`~/.claude/skills/hook-api/references/otxn.md`) applies
-//! here too: an `AccountID` field's slot content is its raw 20 bytes, *not*
-//! the wire-framed `<0x14><20 bytes>` a full-object parse would show for
-//! that same field. `crate::emit_walk::field_value_payload` is exactly this
-//! convention (VL length-prefix stripped for `STI_VL`(7)/`STI_ACCOUNT`(8),
-//! value bytes as-is otherwise — including the trailing `0xE1`/`0xF1`
-//! terminator for a nested `STI_OBJECT`(14)/`STI_ARRAY`(15) field, since
-//! that terminator genuinely is part of *that* value's own self-contained
-//! serialization). `examples/15_slot-objects`' e2e-pinned
+//! *value's own* serialization, never the field header that names it
+//! within its parent (that header is written by the parent's own
+//! field-walk, not the value's `add()`). Same code path `otxn_field` uses
+//! (`applyHook.cpp:1908-1916`), so `otxn_field`'s documented "fixed-width
+//! `sfAccount`, VL-prefixed `sfBlob`" trap
+//! (`~/.claude/skills/hook-api/references/otxn.md`) applies here too: an
+//! `AccountID` field's slot content is its raw 20 bytes, *not* the
+//! wire-framed `<0x14><20 bytes>` a full-object parse would show for that
+//! same field. `crate::emit_walk::field_value_payload` implements exactly
+//! this convention: VL length-prefix stripped for `STI_VL`(7)/
+//! `STI_ACCOUNT`(8), value bytes as-is otherwise — including the trailing
+//! `0xE1`/`0xF1` terminator for a nested `STI_OBJECT`(14)/`STI_ARRAY`(15)
+//! field, since that terminator is part of *that* value's own
+//! serialization. `examples/15_slot-objects`' e2e-pinned
 //! `check_account_walk` (exactly 20 bytes for `sfAccount`) is the fidelity
-//! anchor this convention exists to satisfy.
+//! anchor for this convention.
 //!
 //! A **root** slot (`otxn_slot`/`meta_slot`/`xpop_slot`/`slot_set`) has no
 //! enclosing object at all, so its content is a bare canonical field
@@ -55,7 +53,7 @@
 //! upstream's actual root `SField`s (`sfLedgerEntry`/`sfTransaction`/
 //! `sfMetadata`, all field number `257`: `XRPLF/rippled`,
 //! `include/xrpl/protocol/detail/sfields.macro`), pinned by this module's
-//! own tests (not an arbitrary placeholder).
+//! own tests.
 //!
 //! # Slot allocation
 //!
@@ -103,11 +101,10 @@ pub(crate) fn slot(ctx: &InvocationContext, slot_no: u32) -> Result<Vec<u8>, i64
         .ok_or(DOESNT_EXIST)
 }
 
-/// `HookAPI::slot_clear` (`HookAPI.cpp:2054-2063`): existence check only
-/// (no `INTERNAL_ERROR` path, unlike the other `slot_*` functions — this
-/// harness never constructs a `SlotEntry` with a null/absent payload, so
-/// that branch has no reachable counterpart here anyway); frees the slot
-/// number for reuse.
+/// `HookAPI::slot_clear` (`HookAPI.cpp:2054-2063`): existence check only, no
+/// `INTERNAL_ERROR` path — this harness never constructs a `SlotEntry` with
+/// a null/absent payload, so that branch is unreachable here. Frees the
+/// slot number for reuse.
 pub(crate) fn slot_clear(ctx: &mut InvocationContext, slot_no: u32) -> i64 {
     match ctx.slots.get_mut(slot_no as usize) {
         Some(entry @ Some(_)) => {
@@ -127,13 +124,12 @@ pub(crate) fn slot_count(ctx: &InvocationContext, slot_no: u32) -> i64 {
     if entry.kind != SlotKind::Array {
         return NOT_AN_ARRAY;
     }
-    match emit_walk::walk_array_elements(&entry.bytes) {
+    match emit_walk::walk_array_elements(&entry.bytes, emit_walk::NopMode::Strict) {
         Ok(elements) => elements.len() as i64,
-        // Defensive: every `SlotKind::Array` entry this module constructs
-        // was itself produced by a successful `walk_array_elements`/
-        // `walk_object_body` call, so a parse failure here would mean a
-        // bug elsewhere in this module, not a reachable hook-observable
-        // error path.
+        // Defensive: every `SlotKind::Array` entry here comes from a
+        // successful `walk_array_elements`/`walk_object_body` call, so a
+        // parse failure here means a bug in this module, not a reachable
+        // hook-observable error.
         Err(()) => PARSE_ERROR,
     }
 }
@@ -168,22 +164,19 @@ pub(crate) fn slot_type(ctx: &InvocationContext, slot_no: u32, flags: u32) -> i6
     }
 }
 
-/// `HookAPI::slot_float` (`HookAPI.cpp:2315-2368`). Native: the *full*
-/// 62-bit drops magnitude (bits 0..=61 of the 8-byte value, i.e. byte 0's
-/// low 6 bits included) becomes the mantissa at exponent `-6`, then
-/// normalized — mirroring `st_amt.xrp().drops()` →
-/// `hook_float::normalize_xfl(drops, -6, neg)` exactly
-/// (`HookAPI.cpp:2326-2338`). This is deliberately **not**
-/// `crate::host::float::float_sto_set`'s decode, which documents its own
-/// byte-0-skipping quirk for the native case — `slot_float` and
-/// `float_sto_set` are two distinct upstream functions with two distinct
-/// (and, for large drops values, disagreeing) native-amount decodes; only
-/// `slot_float`'s is ported here. IOU: the wire mantissa/exponent of a
-/// well-formed ledger amount are already in canonical XFL range, so no
-/// renormalization is applied — mirrors `st_amt.iou()` → the `IOUAmount`
-/// overload of `make_float` (`HookAPI.cpp:2342-2351`), distinct from the
-/// byte-triple `make_float` this module calls directly since no
-/// renormalizing pass is needed.
+/// `HookAPI::slot_float` (`HookAPI.cpp:2315-2368`). Native: the full 62-bit
+/// drops magnitude (bits 0..=61 of the 8-byte value, byte 0's low 6 bits
+/// included) becomes the mantissa at exponent `-6`, then normalized —
+/// mirrors `st_amt.xrp().drops()` → `hook_float::normalize_xfl(drops, -6,
+/// neg)` (`HookAPI.cpp:2326-2338`). Deliberately **not**
+/// `crate::host::float::float_sto_set`'s decode: the two are distinct
+/// upstream functions with distinct (and, for large drops values,
+/// disagreeing) native-amount decodes; only `slot_float`'s is ported here.
+/// IOU: the wire mantissa/exponent of a well-formed ledger amount are
+/// already in canonical XFL range, so no renormalization applies — mirrors
+/// `st_amt.iou()` → the `IOUAmount` overload of `make_float`
+/// (`HookAPI.cpp:2342-2351`), not the byte-triple `make_float` this module
+/// calls directly.
 pub(crate) fn slot_float(ctx: &InvocationContext, slot_no: u32) -> i64 {
     let Some(entry) = ctx.slot_entry(slot_no) else {
         return DOESNT_EXIST;
@@ -215,10 +208,10 @@ pub(crate) fn slot_set(
     // ever attempting the keylet/tx-hash lookup: `slot_into == 0`
     // (auto-assign) with every slot already occupied fails `NO_FREE_SLOTS`
     // even for input that would otherwise resolve to `DOESNT_EXIST`.
-    if slot_into == 0 {
-        if let Err(e) = ctx.resolve_slot(0) {
-            return e;
-        }
+    if slot_into == 0
+        && let Err(e) = ctx.resolve_slot(0)
+    {
+        return e;
     }
     if data.len() == 32 {
         return DOESNT_EXIST;
@@ -245,16 +238,15 @@ pub(crate) fn slot_set(
 
 /// `HookAPI::otxn_slot` (`HookAPI.cpp:1565-1593`): loads the canonical
 /// serialization of the seeded originating transaction
-/// (`crate::otxn::serialize`) as a root slot. Upstream also special-cases
+/// (`crate::otxn::serialize`) as a root slot. Upstream special-cases
 /// `hookCtx.emitFailure` (a `cbak`-failure context loading the emitted tx's
 /// real fields instead of the synthetic `ttEMIT_FAILURE`-rewritten applying
-/// tx). This function needs no separate case for that: `crate::env::TestEnv::invoke_cbak`
-/// already swaps `World::otxn` to the emitted transaction's own fields for
-/// the whole call, for both `CbakOutcome::Success`/`CbakOutcome::Failure`
-/// alike (this harness never models the `ttEMIT_FAILURE` rewrite at all) —
-/// so reading `world.otxn` here, exactly like every other call, already
-/// reports the same real emitted-tx fields upstream's `emitFailure` special
-/// case exists to preserve.
+/// tx); no separate case is needed here because
+/// `crate::env::TestEnv::invoke_cbak` already swaps `World::otxn` to the
+/// emitted transaction's own fields for the whole call (both
+/// `CbakOutcome::Success`/`CbakOutcome::Failure`; this harness never models
+/// the `ttEMIT_FAILURE` rewrite), so reading `world.otxn` here already
+/// matches upstream's `emitFailure` behavior.
 pub(crate) fn otxn_slot(ctx: &mut InvocationContext, world: &World, slot_into: u32) -> i64 {
     if slot_into > 255 {
         return INVALID_ARGUMENT;
@@ -302,14 +294,14 @@ pub(crate) fn meta_slot(ctx: &mut InvocationContext, world: &World, slot_into: u
 
 /// `HookAPI::xpop_slot` (`HookAPI.cpp:2404-2468`) + the wrapper's
 /// return-value packing (`applyHook.cpp:3942`:
-/// `std::get<0>(result) << 16U | std::get<1>(result)` — the tx slot number
-/// in the upper 16 bits, the meta slot number in the low 16 bits). Loads
-/// both halves of the seeded `world.xpop` pair; absent → `DOESNT_EXIST`
-/// (design §4, rather than upstream's `ttIMPORT`-only `PREREQUISITE_NOT_MET`
-/// gate — this harness has no `ttIMPORT`/`Import::getInnerTxn` model, so
-/// "was an xpop seeded" is the only precondition worth checking).
-/// Rejects `slot_no_tx == slot_no_meta` when both are explicit and equal,
-/// mirroring upstream's collision guard (`HookAPI.cpp:2419-2421`).
+/// `std::get<0>(result) << 16U | std::get<1>(result)` — tx slot number in
+/// the upper 16 bits, meta slot number in the low 16 bits). Loads both
+/// halves of the seeded `world.xpop` pair; absent → `DOESNT_EXIST` (design
+/// §4, not upstream's `ttIMPORT`-only `PREREQUISITE_NOT_MET` gate — this
+/// harness has no `ttIMPORT`/`Import::getInnerTxn` model, so "was an xpop
+/// seeded" is the only precondition). Rejects `slot_no_tx == slot_no_meta`
+/// when both are explicit and equal, mirroring upstream's collision guard
+/// (`HookAPI.cpp:2419-2421`).
 pub(crate) fn xpop_slot(
     ctx: &mut InvocationContext,
     world: &World,
@@ -389,7 +381,11 @@ pub(crate) fn slot_subfield(
         return NOT_AN_OBJECT;
     }
     let in_object = parent.kind == SlotKind::Object;
-    let fields = match emit_walk::walk_top_level_fields_or_object(&parent.bytes, in_object) {
+    let fields = match emit_walk::walk_top_level_fields_or_object(
+        &parent.bytes,
+        in_object,
+        emit_walk::NopMode::Strict,
+    ) {
         Ok(f) => f,
         Err(()) => return NOT_AN_OBJECT, // defensive — see this module's doc comment
     };
@@ -435,7 +431,7 @@ pub(crate) fn slot_subarray(
     if parent.kind != SlotKind::Array {
         return NOT_AN_ARRAY;
     }
-    let elements = match emit_walk::walk_array_elements(&parent.bytes) {
+    let elements = match emit_walk::walk_array_elements(&parent.bytes, emit_walk::NopMode::Strict) {
         Ok(e) => e,
         Err(()) => return NOT_AN_ARRAY, // defensive — see this module's doc comment
     };
@@ -602,7 +598,7 @@ mod tests {
         for n in 1..=255u32 {
             assert_eq!(slot_set(&mut ctx, &world, &kl, n), n as i64);
         }
-        let missing_kl = keylet(9); // not seeded in `world`
+        let missing_kl = keylet(9);
         assert_eq!(
             slot_set(&mut ctx, &world, &missing_kl, 0),
             rshooks_core::NO_FREE_SLOTS
@@ -701,6 +697,44 @@ mod tests {
         assert_eq!(slot_subfield(&mut ctx, 9, SF_SEQUENCE, 0), DOESNT_EXIST);
     }
 
+    /// A single field, nested `depth` levels deep (an empty innermost
+    /// object): `depth` copies of the `(type 14, field 2)` header opening
+    /// one level each, followed by `depth` `0xE1` terminators closing them
+    /// back out. Matches real xahaud's `get_stobject_length`
+    /// recursion-depth convention (`HookAPI.cpp:2901`; see also
+    /// `crate::emit_walk::STO_MAX_RECURSION_DEPTH`'s doc comment).
+    fn nested_object_chain(depth: u32) -> Vec<u8> {
+        let depth = depth as usize;
+        let mut out = vec![0xE2u8; depth]; // (type 14, field 2), repeated
+        out.extend(vec![0xE1u8; depth]); // OBJECT_END_MARKER, repeated
+        out
+    }
+
+    const SF_NESTED_OBJECT: u32 = (14 << 16) + 2;
+
+    #[test]
+    fn slot_subfield_root_accepts_nesting_up_to_the_real_hosts_limit() {
+        let mut ctx = fresh_ctx();
+        let kl = keylet(1);
+        let world = seeded_world(kl, &nested_object_chain(10));
+        let root = slot_set(&mut ctx, &world, &kl, 0) as u32;
+        let child = slot_subfield(&mut ctx, root, SF_NESTED_OBJECT, 0);
+        assert!(child > 0);
+        assert_eq!(ctx.slot_entry(child as u32).unwrap().kind, SlotKind::Object);
+    }
+
+    #[test]
+    fn slot_subfield_root_rejects_nesting_beyond_the_real_hosts_limit() {
+        let mut ctx = fresh_ctx();
+        let kl = keylet(1);
+        let world = seeded_world(kl, &[0xE2u8; 11]);
+        let root = slot_set(&mut ctx, &world, &kl, 0) as u32;
+        assert_eq!(
+            slot_subfield(&mut ctx, root, SF_NESTED_OBJECT, 0),
+            NOT_AN_OBJECT
+        );
+    }
+
     // -- slot_subarray / slot_count / array navigation --
 
     #[test]
@@ -734,8 +768,8 @@ mod tests {
         assert_eq!(slot_subarray(&mut ctx, root, 0, 0), NOT_AN_ARRAY);
     }
 
-    // -- PR #27 read-contract anchor (design §4 "slot family", 2b):
-    // clearing a parent must not invalidate a child slot's bytes.
+    // -- Read-contract anchor (design §4 "slot family", 2b): clearing a
+    // parent must not invalidate a child slot's bytes.
 
     #[test]
     fn clearing_the_parent_does_not_invalidate_a_previously_derived_child() {
@@ -747,8 +781,7 @@ mod tests {
 
         assert_eq!(slot_clear(&mut ctx, root), 1);
 
-        // The child is unaffected: still present, still reads the same
-        // bytes, unaware its parent is gone.
+        // Child still present, still reads the same bytes.
         assert_eq!(slot(&ctx, child), Ok(7u32.to_be_bytes().to_vec()));
         assert_eq!(slot_clear(&mut ctx, child), 1);
     }
@@ -778,11 +811,8 @@ mod tests {
         let root = slot_set(&mut ctx, &world, &kl, 0) as u32;
         let bal = slot_subfield(&mut ctx, root, SF_BALANCE, 0) as u32;
 
-        // Cross-checked against `crate::host::float::float_set`: both paths
-        // funnel through the same `normalize_xfl(drops, -6, neg)` — see
-        // `slot_float`'s own doc comment for why this is the correct
-        // oracle (not `float_sto_set`, which has a documented, distinct
-        // native-amount quirk).
+        // Cross-checked against `float_set`: both funnel through the same
+        // `normalize_xfl(drops, -6, neg)` (see `slot_float`'s doc comment).
         let expected = crate::host::float::float_set(-6, 1_000_000);
         assert_eq!(slot_float(&ctx, bal), expected);
     }
@@ -795,21 +825,19 @@ mod tests {
         let root = slot_set(&mut ctx, &world, &kl, 0) as u32;
         let bal = slot_subfield(&mut ctx, root, SF_BALANCE, 0) as u32;
         // `float_set(-6, 0)` would report `INVALID_FLOAT` (mantissa == 0
-        // is special-cased as an error there); `slot_float` instead
-        // returns plain `0`, matching upstream's own `EXPONENT_UNDERSIZED`
-        // /zero-mantissa remap — the exact divergence `slot_float`'s doc
-        // comment calls out.
+        // is special-cased as an error there); `slot_float` instead returns
+        // plain `0`, matching upstream's own `EXPONENT_UNDERSIZED`/
+        // zero-mantissa remap.
         assert_eq!(slot_float(&ctx, bal), 0);
     }
 
     #[test]
     fn slot_float_iou_round_trips_through_float_sto() {
         let mut ctx = fresh_ctx();
-        // `float_sto` with a real (currency, issuer) pair and an ordinary
-        // field code emits `<header><8-byte amount><20 currency><20
-        // issuer>` — the full 48-byte payload after the 1-byte `sfBalance`
-        // header is exactly the value-payload shape a `slot_subfield`-
-        // derived Amount child stores.
+        // `float_sto` with a (currency, issuer) pair emits `<header><8-byte
+        // amount><20 currency><20 issuer>` — the 48 bytes after the 1-byte
+        // `sfBalance` header are exactly the value-payload shape a
+        // `slot_subfield`-derived Amount child stores.
         let xfl = crate::host::float::float_one();
         let currency = [1u8; 20];
         let issuer = [2u8; 20];
@@ -848,11 +876,8 @@ mod tests {
 
     #[test]
     fn otxn_slot_root_type_matches_upstream_sftransaction_field_code() {
-        // Pins the literal upstream value directly (not via the
-        // `ROOT_TRANSACTION` constant under test): `STI_TRANSACTION`(10001)
-        // `<< 16` `| 257`, `sfTransaction`'s real field number
-        // (`XRPLF/rippled`, `include/xrpl/protocol/detail/sfields.macro`) —
-        // see this module's doc comment.
+        // Pins the literal upstream value (not the `ROOT_TRANSACTION`
+        // constant under test) — see this module's doc comment.
         let mut ctx = fresh_ctx();
         let world = World::new();
         let no = otxn_slot(&mut ctx, &world, 0) as u32;

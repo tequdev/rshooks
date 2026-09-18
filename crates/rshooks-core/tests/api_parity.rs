@@ -13,25 +13,13 @@ const RUST: &str = include_str!("../src/api.rs");
 #[test]
 fn extern_h_matches_api_rs() {
     let c_protos = extract_c_prototypes(HEADER);
-    assert_eq!(
-        c_protos.len(),
-        75,
-        "expected 75 prototypes (incl. _g) in extern.h, found {}",
-        c_protos.len()
-    );
-
     let block = extract_wasm_extern_block(RUST);
     let rust_fns = extract_rust_fn_signatures(block);
-    assert_eq!(
-        rust_fns.len(),
-        75,
-        "expected 75 pub fn declarations (incl. _g) in api.rs's wasm extern block, found {}",
-        rust_fns.len()
-    );
+    assert!(!c_protos.is_empty(), "extern.h: no prototypes extracted");
+    assert!(!rust_fns.is_empty(), "api.rs: no fn signatures extracted");
 
-    // Name sets, in order — a plain index-by-index walk reports both
-    // "missing on either side" (as an out-of-order/renamed neighbor) and
-    // ordering drift precisely.
+    // Index-by-index comparison reports both missing entries and ordering
+    // drift precisely.
     let c_names: Vec<&str> = c_protos.iter().map(|p| p.name.as_str()).collect();
     let rust_names: Vec<&str> = rust_fns.iter().map(|f| f.name.as_str()).collect();
     assert_eq!(

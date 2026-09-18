@@ -20,15 +20,19 @@ pub(crate) const MAX_PARAM_OVERRIDES: u32 = 16;
 const MAX_RESERVE: u32 = 255;
 /// `max_state_modifications` (vendored `Enum.h:397`).
 const MAX_STATE_MODIFICATIONS: u32 = 256;
-/// `maxNamespaces()` (vendored `Enum.h`).
-const MAX_NAMESPACES: usize = 256;
 /// One past `max_nonce` (vendored `Enum.h:399`, `max_nonce = 255`): the
-/// 256th nonce call this invocation (`nonce_count == 256`) is refused.
+/// 256th call to a given nonce family this invocation is refused. xahaud
+/// tracks `ledger_nonce`'s and the emit-nonce family's (`etxn_nonce`,
+/// `etxn_details`) counters separately (`HookAPI.cpp`'s
+/// `hookCtx.ledger_nonce_counter` vs. `hookCtx.emit_nonce_counter`, each
+/// checked against `max_nonce` independently), so each family gets its own
+/// 256-call budget rather than sharing one.
 const MAX_NONCES: u32 = 256;
 // `max_slots` (xahau `Enum.h`) = 255: numbered slots `1..=255` — index `0`
 // of `InvocationContext::slots` is never assigned (slot number `0` means
-// "auto-assign" to the Hook API, not a real slot). No named constant yet:
-// nothing enforces this budget until `slot_*` semantics land in P2-D.
+// "auto-assign" to the Hook API, not a real slot). No named constant: the
+// `1..=255` range is enforced directly in `resolve_slot`
+// (`NO_FREE_SLOTS`/`INVALID_ARGUMENT`).
 
 /// The kind of content held in a numbered slot (design §3/§4 "slot
 /// family", landed P2-D). Governs which `slot_*` operations a slot accepts:
@@ -37,12 +41,11 @@ const MAX_NONCES: u32 = 256;
 /// `slot_float`/`slot_type(no, 1)` need [`Amount`](SlotKind::Amount).
 /// `slot`/`slot_size`/`slot_type(no, 0)`/`slot_clear` work on every kind.
 ///
-/// This mirrors xahaud's own distinction between the STBase entry a slot
-/// points at (whose runtime `getSType()` decides `slot_type`/`slot_count`/
-/// `slot_subarray`/`slot_subfield`'s behavior, per `HookAPI.cpp`'s
-/// `slot_type`/`slot_count`/`slot_subarray`/`slot_subfield`/`slot_float`
-/// implementations — see `crate::host::slots`' module doc comment) and a
-/// synthesized root/field code for `slot_type(no, 0)`, tracked here as
+/// Mirrors xahaud's own distinction between the STBase entry a slot points
+/// at (whose runtime `getSType()` decides `slot_type`/`slot_count`/
+/// `slot_subarray`/`slot_subfield`'s behavior — see `HookAPI.cpp`'s
+/// implementations, and `crate::host::slots`' module doc) and a synthesized
+/// root/field code for `slot_type(no, 0)`, tracked as
 /// [`SlotEntry::reported_code`] rather than recomputed from the bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SlotKind {
@@ -69,27 +72,26 @@ pub(crate) enum SlotKind {
 
 /// One numbered slot's content: the serialized field/object bytes the
 /// numbered slot APIs (`slot`, `slot_subfield`, `slot_subarray`, ...) read
-/// (design §3), an owned, independent copy — deriving a child slot via
+/// (design §3), an owned, independent copy. Deriving a child slot via
 /// `slot_subfield`/`slot_subarray` copies bytes out of the parent rather
-/// than aliasing it, so clearing the parent afterward cannot affect a child
-/// (the PR #27 read-contract fact `examples/15_slot-objects`' `check_parent_clear`
-/// pins, and `rshooks::slot_path!`'s own doc comment relies on: "the host
-/// copies the parent's storage into the child slot").
+/// than aliasing it, so clearing the parent afterward cannot affect a
+/// child — the read contract `examples/15_slot-objects`' `check_parent_clear`
+/// pins, and `rshooks::slot_path!`'s doc comment relies on: "the host
+/// copies the parent's storage into the child slot".
 #[derive(Debug, Clone)]
 pub(crate) struct SlotEntry {
     pub(crate) bytes: Vec<u8>,
     pub(crate) kind: SlotKind,
     /// The value `slot_type(no, 0)` reports: an ordinary field code
     /// (`(sti << 16) | field`, matching `rshooks::sfield::sfXxx.code()`'s
-    /// own encoding) for anything from `slot_subfield`/`slot_subarray`, or
-    /// a synthesized root object code for a root slot — `crate::host::slots`'
+    /// encoding) for anything from `slot_subfield`/`slot_subarray`, or a
+    /// synthesized root object code for a root slot — `crate::host::slots`'
     /// `ROOT_TRANSACTION`/`ROOT_LEDGER_ENTRY`/`ROOT_METADATA` constants,
     /// whose high 16 bits are rippled's real `STI_TRANSACTION`(10001)/
     /// `STI_LEDGERENTRY`(10002)/`STI_METADATA`(10004) (`XRPLF/rippled`,
-    /// `include/xrpl/protocol/SField.h`), matching
-    /// `rshooks::slot_obj`'s `ROOT_OBJECT_CODE_MIN..=ROOT_OBJECT_CODE_MAX`
-    /// (10001..=10004) contract that `examples/15_slot-objects`'
-    /// `check_root_cast` pins.
+    /// `include/xrpl/protocol/SField.h`), matching `rshooks::slot_obj`'s
+    /// `ROOT_OBJECT_CODE_MIN..=ROOT_OBJECT_CODE_MAX` (10001..=10004)
+    /// contract `examples/15_slot-objects`' `check_root_cast` pins.
     pub(crate) reported_code: u32,
 }
 
@@ -103,10 +105,24 @@ pub(crate) struct InvocationContext {
     reserve: Option<u32>,
     emit_count: u32,
     state_mod_count: u32,
-    namespaces_touched: HashSet<([u8; 20], [u8; 32])>,
-    nonce_count: u32,
+    /// `ledger_nonce`'s own budget counter (`hookCtx.ledger_nonce_counter`
+    /// in xahaud), independent of [`Self::emit_nonce_count`].
+    ledger_nonce_count: u32,
+    /// The emit-nonce family's budget counter, shared by `etxn_nonce` and
+    /// `etxn_details` (xahaud's `hookCtx.emit_nonce_counter`:
+    /// `HookAPI::etxn_details` calls `HookAPI::etxn_nonce()` directly, so
+    /// both draw from the same counter and budget).
+    emit_nonce_count: u32,
     retry_blocked: bool,
     static_take_set: HashSet<usize>,
+    /// Whether the entry this invocation is running declares a `#[cbak]`
+    /// body — set once by `crate::env::TestEnv::run_entry` before the
+    /// backend runs, mirroring `hookDef->isFieldPresent(sfHookCallbackFee)`
+    /// (`Xahau/xahaud` `dev`, `src/xrpld/app/tx/detail/Transactor.cpp:1408`),
+    /// the on-chain source of `HookAPI::etxn_details`'s own
+    /// `hookCtx.result.hasCallback` check (`HookAPI.cpp:914`) for whether
+    /// `EmitDetails` gets an `EmitCallback` field.
+    pub(crate) has_callback: bool,
     /// Bytes returned by the most recent `etxn_details()` call this
     /// invocation — the emission walker requires an `EmitDetails` field to
     /// match these exactly (design §5.6).
@@ -122,40 +138,39 @@ pub(crate) struct InvocationContext {
 
     // -- Phase 2 (`.claude/design/TESTENV_PHASE2_DESIGN.md` §3) --
     //
-    // Plain data plumbing as of P2-A — see `world.rs`'s matching Phase 2
-    // block for why nothing here is populated or read yet.
-    /// Numbered slots `1..=255` (index `0` unused — slot number `0` means
-    /// "auto-assign" to the Hook API, not a real slot; xahau's `max_slots`
-    /// is 255). Invocation-scoped: a fresh, all-`None` array every `invoke` call,
+    // Populated and read by `crate::host::slots`'s `slot_*` functions via
+    // `resolve_slot`/`set_slot`/`clear_slot` below.
+    /// Numbered slots `1..=255` (index `0` unused — slot `0` means
+    /// "auto-assign", not a real slot; xahau's `max_slots` is 255).
+    /// Invocation-scoped: a fresh, all-`None` array every `invoke` call,
     /// matching a fresh wasm instance on-chain (design §3). Boxed so a
-    /// 256-element array of `Option<SlotEntry>` doesn't bloat every
+    /// 256-element `Option<SlotEntry>` array doesn't bloat every
     /// `InvocationContext` (most invocations use zero or a handful of
     /// slots).
     pub(crate) slots: std::boxed::Box<[Option<SlotEntry>; 256]>,
     /// Whether `hook_again` was called this invocation (design §4:
-    /// `ALREADY_SET` on a second call within the same invocation). Merged
-    /// into [`crate::world::World::hook_again_requested`] by
-    /// `crate::env::TestEnv`'s `run_entry` helper only on `accept!` (P2-E —
-    /// mirrors `pending_emissions`/`committed_emissions`'s stage-then-merge
-    /// pattern, not a live world write).
+    /// `ALREADY_SET` on a second call in the same invocation). Merged into
+    /// [`crate::world::World::hook_again_requested`] by
+    /// `crate::env::TestEnv::run_entry` only on `accept!` (P2-E — same
+    /// stage-then-merge pattern as `pending_emissions`/`committed_emissions`,
+    /// not a live world write).
     pub(crate) hook_again_called: bool,
     /// `hook_skip` directives recorded this invocation, in call order,
     /// **only the ones that succeeded** (upstream never records a rejected
-    /// call — `HookAPI::hook_skip`, `Xahau/xahaud` branch `dev`,
+    /// call — `HookAPI::hook_skip`, `Xahau/xahaud` `dev`,
     /// `src/xrpld/app/hook/detail/HookAPI.cpp:1745-1782`, only mutates
-    /// `hookCtx.result.hookSkips` on a code path that returns success).
-    /// Extended onto [`crate::world::World::skip_directives`] on `accept!`
-    /// (P2-E — same stage-then-merge pattern as `hook_again_called` above).
+    /// `hookCtx.result.hookSkips` on success). Extended onto
+    /// [`crate::world::World::skip_directives`] on `accept!` (P2-E, same
+    /// stage-then-merge pattern as `hook_again_called`).
     pub(crate) skip_directives: Vec<([u8; 32], u32)>,
     /// This invocation's own `hook_param_set` writes — `(hook_hash, name)
     /// -> value` — merged into
     /// [`crate::world::World::hook_param_overrides`] on `accept!` (P2-E;
     /// design §4 "control leftovers": "committed only on accept, like
-    /// state"). A `HashMap`, not a `Vec` of calls: later calls in the same
-    /// invocation overwrite earlier ones for the same `(hash, name)` key,
-    /// matching upstream's own `overrides[hash][name] = value` assignment
-    /// (`HookAPI.cpp:1713-1744`) — there is no "undo" of an in-invocation
-    /// overwrite, only the final value per key survives to merge.
+    /// state"). A `HashMap`, not a `Vec`: later calls overwrite earlier
+    /// ones for the same `(hash, name)` key, matching upstream's
+    /// `overrides[hash][name] = value` assignment (`HookAPI.cpp:1713-1744`)
+    /// — only the final value per key survives to merge.
     pub(crate) pending_param_overrides: HashMap<([u8; 32], Vec<u8>), Vec<u8>>,
     /// `hook_param_set`'s own per-invocation call budget (`overrideCount`,
     /// `HookAPI.cpp:1727-1728`) — counts every *call* (not distinct keys),
@@ -171,10 +186,11 @@ impl InvocationContext {
             reserve: None,
             emit_count: 0,
             state_mod_count: 0,
-            namespaces_touched: HashSet::new(),
-            nonce_count: 0,
+            ledger_nonce_count: 0,
+            emit_nonce_count: 0,
             retry_blocked: false,
             static_take_set: HashSet::new(),
+            has_callback: false,
             last_etxn_details: None,
             pending_emissions: Vec::new(),
             emit_attempts: Vec::new(),
@@ -255,55 +271,39 @@ impl InvocationContext {
         Ok(())
     }
 
-    /// Records one successful modifying write (set or delete), and — if
-    /// `addr` (the written `(account, namespace)`) is new this invocation —
-    /// counts it against the namespace budget. Design §4: `> 256` distinct
-    /// namespaces → `TOO_MANY_NAMESPACES`. Callers must have already
-    /// checked [`Self::check_namespace_budget`] for a genuinely new `addr`
-    /// before performing the write, mirroring
-    /// [`Self::check_state_modification_budget`]'s contract.
-    pub(crate) fn record_state_modification(&mut self, addr: ([u8; 20], [u8; 32])) {
+    /// Records one successful modifying write (set or delete) against
+    /// `max_state_modifications`. The namespace budget
+    /// (`TOO_MANY_NAMESPACES`) is a separate, per-account, cross-invocation
+    /// concern tracked in [`crate::world::World::check_namespace_budget`],
+    /// not here.
+    pub(crate) fn record_state_modification(&mut self) {
         self.state_mod_count = self.state_mod_count.saturating_add(1);
-        self.namespaces_touched.insert(addr);
     }
 
-    /// Checks (without mutating) whether writing into a *new* `addr` is
-    /// within the namespace budget. Returns `Ok(())` unconditionally if
-    /// `addr` was already touched this invocation (re-writing an existing
-    /// namespace never costs budget).
-    pub(crate) fn check_namespace_budget(&self, addr: &([u8; 20], [u8; 32])) -> Result<(), i64> {
-        if self.namespaces_touched.contains(addr) {
-            return Ok(());
-        }
-        if self.namespaces_touched.len() >= MAX_NAMESPACES {
-            return Err(rshooks_core::TOO_MANY_NAMESPACES);
-        }
-        Ok(())
+    /// Draws the next deterministic `ledger_nonce` (design §4:
+    /// `H(invocation_counter ‖ call_counter)`). `> 256` `ledger_nonce` calls
+    /// this invocation → `TOO_MANY_NONCES`; independent of
+    /// [`Self::next_emit_nonce`]'s budget.
+    pub(crate) fn next_ledger_nonce(&mut self) -> Result<[u8; 32], i64> {
+        draw_nonce(
+            self.invocation_id,
+            &mut self.call_counter,
+            &mut self.ledger_nonce_count,
+        )
     }
 
-    /// Draws the next deterministic nonce (design §4: `H(invocation_counter
-    /// ‖ call_counter)`, shared by `etxn_nonce`/`ledger_nonce`). `> 256`
-    /// nonce calls this invocation → `TOO_MANY_NONCES`.
-    pub(crate) fn next_nonce(&mut self) -> Result<[u8; 32], i64> {
-        if self.nonce_count >= MAX_NONCES {
-            return Err(rshooks_core::TOO_MANY_NONCES);
-        }
-        let call = self.call_counter;
-        self.nonce_count = self.nonce_count.saturating_add(1);
-        self.call_counter = self.call_counter.saturating_add(1);
-        Ok(hash_counters(self.invocation_id, call))
-    }
-
-    /// A nonce for a purpose that must not consume the shared
-    /// `etxn_nonce`/`ledger_nonce` budget above — used for `EmitDetails`'s
-    /// `EmitNonce` field, which xahaud derives independently (see
-    /// `crates/rshooks-testenv/src/details.rs`'s module doc comment for why
-    /// this is a documented simplification rather than a pinned protocol
-    /// derivation).
-    pub(crate) fn next_details_nonce(&mut self) -> [u8; 32] {
-        let call = self.call_counter;
-        self.call_counter = self.call_counter.saturating_add(1);
-        hash_counters(self.invocation_id, call.wrapping_add(1u64 << 32))
+    /// Draws the next deterministic emit nonce, shared by `etxn_nonce` and
+    /// `etxn_details` (xahaud's `HookAPI::etxn_details` calls
+    /// `HookAPI::etxn_nonce()` directly, so both draw from the same
+    /// `emit_nonce_counter`/budget). `> 256` combined `etxn_nonce`/
+    /// `etxn_details` calls this invocation → `TOO_MANY_NONCES`; independent
+    /// of [`Self::next_ledger_nonce`]'s budget.
+    pub(crate) fn next_emit_nonce(&mut self) -> Result<[u8; 32], i64> {
+        draw_nonce(
+            self.invocation_id,
+            &mut self.call_counter,
+            &mut self.emit_nonce_count,
+        )
     }
 
     /// Whether a foreign write is blocked by an earlier authorization
@@ -334,10 +334,9 @@ impl InvocationContext {
 
     /// Occupies slot `no` with `entry`. A no-op if `no` is out of range —
     /// unreachable via any real caller, since every `host::slots` call site
-    /// only ever passes a number [`Self::resolve_slot`] itself returned
-    /// (`.get_mut`, not direct indexing, so that invariant doesn't have to
-    /// be re-proven to the panic-freedom lints at each of the eight write
-    /// sites).
+    /// only passes a number [`Self::resolve_slot`] returned (`.get_mut`,
+    /// not direct indexing, so panic-freedom holds without re-proving it
+    /// at each write site).
     pub(crate) fn set_slot(&mut self, no: usize, entry: SlotEntry) {
         if let Some(slot) = self.slots.get_mut(no) {
             *slot = Some(entry);
@@ -345,9 +344,9 @@ impl InvocationContext {
     }
 
     /// Frees slot `no` unconditionally (no `DOESNT_EXIST` reporting — that
-    /// belongs to `host::slots::slot_clear`, the hook-facing entry point;
-    /// this is the same `.get_mut`-based write [`Self::set_slot`] uses,
-    /// for a cleanup path that doesn't care whether the slot was occupied).
+    /// belongs to `host::slots::slot_clear`, the hook-facing entry point).
+    /// Same `.get_mut`-based write as [`Self::set_slot`], for a cleanup
+    /// path that doesn't care whether the slot was occupied.
     pub(crate) fn clear_slot(&mut self, no: usize) {
         if let Some(slot) = self.slots.get_mut(no) {
             *slot = None;
@@ -357,10 +356,10 @@ impl InvocationContext {
     /// Resolves a `slot_into`/`new_slot` argument to a concrete slot
     /// number: the design's own simplification of xahaud's FIFO-then-
     /// monotonic-counter allocator (`.claude/design/TESTENV_PHASE2_DESIGN.md`
-    /// §4 "slot family"; upstream's actual `HookAPI::get_free_slot`
-    /// algorithm — a freed-slot FIFO queue, falling back to a
-    /// never-rewinding counter that permanently exhausts once it passes
-    /// `max_slots` — is ported nowhere in this harness): `0` picks the
+    /// §4 "slot family"; upstream's `HookAPI::get_free_slot` — a freed-slot
+    /// FIFO queue falling back to a never-rewinding counter that
+    /// permanently exhausts past `max_slots` — is ported nowhere in this
+    /// harness): `0` picks the
     /// lowest-numbered free slot in `1..=255` (`NO_FREE_SLOTS` if none are
     /// free); an explicit `1..=255` is returned as-is, silently overwriting
     /// whatever previously occupied it (matching xahaud's own unconditional
@@ -380,6 +379,23 @@ impl InvocationContext {
         }
         Ok(requested as usize)
     }
+}
+
+/// Shared draw for `next_ledger_nonce`/`next_emit_nonce`: budget-checks the
+/// caller's own counter (`ledger_nonce_count`/`emit_nonce_count`), then
+/// advances the `call_counter` shared by both nonce kinds.
+fn draw_nonce(
+    invocation_id: u64,
+    call_counter: &mut u64,
+    budget_count: &mut u32,
+) -> Result<[u8; 32], i64> {
+    if *budget_count >= MAX_NONCES {
+        return Err(rshooks_core::TOO_MANY_NONCES);
+    }
+    let call = *call_counter;
+    *budget_count = budget_count.saturating_add(1);
+    *call_counter = call_counter.saturating_add(1);
+    Ok(hash_counters(invocation_id, call))
 }
 
 /// Deterministic per-invocation nonce derivation: SHA-256 of the two
@@ -436,7 +452,7 @@ mod tests {
         let mut ctx = InvocationContext::new(0);
         for _ in 0..256 {
             assert_eq!(ctx.check_state_modification_budget(), Ok(()));
-            ctx.record_state_modification(([0u8; 20], [0u8; 32]));
+            ctx.record_state_modification();
         }
         assert_eq!(
             ctx.check_state_modification_budget(),
@@ -444,44 +460,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn namespace_budget_only_costs_for_genuinely_new_namespaces() {
-        let mut ctx = InvocationContext::new(0);
-        let addr = ([1u8; 20], [2u8; 32]);
-        for _ in 0..1000 {
-            assert_eq!(ctx.check_namespace_budget(&addr), Ok(()));
-            ctx.record_state_modification(addr);
-        }
-        // Still only one distinct namespace touched.
-        assert_eq!(ctx.namespaces_touched.len(), 1);
-    }
-
-    #[test]
-    fn namespace_budget_rejects_the_257th_distinct_namespace() {
-        let mut ctx = InvocationContext::new(0);
-        for i in 0..256u16 {
-            let mut ns = [0u8; 32];
-            ns[0] = (i >> 8) as u8;
-            ns[1] = (i & 0xFF) as u8;
-            let addr = ([0u8; 20], ns);
-            assert_eq!(ctx.check_namespace_budget(&addr), Ok(()));
-            ctx.record_state_modification(addr);
-        }
-        let overflow_addr = ([0u8; 20], [0xFFu8; 32]);
-        assert_eq!(
-            ctx.check_namespace_budget(&overflow_addr),
-            Err(rshooks_core::TOO_MANY_NAMESPACES)
-        );
-    }
-
-    #[test]
-    fn nonce_budget_rejects_at_256() {
-        let mut ctx = InvocationContext::new(0);
-        for _ in 0..256 {
-            assert!(ctx.next_nonce().is_ok());
-        }
-        assert_eq!(ctx.next_nonce(), Err(rshooks_core::TOO_MANY_NONCES));
-    }
+    // Nonce-budget rejection and cross-family independence are covered
+    // end-to-end at the backend layer (`backend.rs`:
+    // `ledger_and_etxn_nonce_budgets_are_independent_at_the_backend`,
+    // `etxn_details_consumes_the_etxn_nonce_budget`).
 
     #[test]
     fn nonces_are_deterministic_given_the_same_counters() {

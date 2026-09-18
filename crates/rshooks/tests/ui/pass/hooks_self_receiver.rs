@@ -1,6 +1,6 @@
 //! A chain mixing the accepted entry/cbak/helper receiver forms
 //! (HOOKS_SELF_RECEIVER_DESIGN.md §3): a `&self` hook entry that reads a
-//! declared field through `self.<field>` and calls a `&self` helper via
+//! declared field through `self.state.<field>` and calls a `&self` helper via
 //! `self.helper()`, a second plain `&self` entry, a `&self` cbak, and a
 //! `&self` entry/helper pair each carrying a leading attribute on the
 //! receiver itself — a legal receiver attribute must not make the receiver
@@ -21,14 +21,14 @@ impl Vault {
     /// `&self` helper.
     #[hook(0, on = [Invoke])]
     fn main(&self) -> HookResult {
-        let _ = self.counter.get();
+        let _ = self.state.counter.get();
         Ok(Accept::from_code(self.helper()))
     }
 
     /// `&self` cbak, also using `self.`.
     #[cbak(0)]
     fn main_cbak(&self) -> HookResult {
-        Ok(Accept::from_code(i64::from(self.counter.get().is_err())))
+        Ok(Accept::from_code(i64::from(self.state.counter.get().is_err())))
     }
 
     /// A second plain `&self` entry.
@@ -47,7 +47,7 @@ impl Vault {
 
     /// `&self` helper (non-attributed), called via `self.helper()`.
     fn helper(&self) -> i64 {
-        i64::from(self.counter.get().is_err())
+        i64::from(self.state.counter.get().is_err())
     }
 
     /// `&self` helper with a leading attribute on the receiver itself.
@@ -57,7 +57,7 @@ impl Vault {
 }
 
 fn main() {
-    assert!(Vault.counter.get().is_err());
+    assert!(Vault.state.counter.get().is_err());
     assert_eq!(Vault.attributed(), Ok(Accept::from_code(0)));
     assert_eq!(Vault.attributed_helper(), 0);
 }

@@ -62,8 +62,7 @@ const fn unpack_sub(packed: i64) -> (i32, i32) {
 
 /// Turn a raw packed `sto_subfield`/`sto_subarray` result into a
 /// `(offset, length)` pair of plain `usize`s, rejecting a negative
-/// component (which the packed encoding can in principle represent, though
-/// no real STO ever produces one) as
+/// component as
 /// [`HookError::ParseError`](crate::error::HookError::ParseError) — a
 /// malformed field pointer rather than a valid offset/length.
 #[inline(always)]

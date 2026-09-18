@@ -1,52 +1,18 @@
-import {
-  ExecutionUtility,
-  Xrpld,
-  clearAllHooksV3,
-  hexNamespace,
-  readHookBinaryHexFromNS,
-  serverUrl,
-  setHooksV3,
-  setupClient,
-  teardownClient,
-  type SetHookParams,
-  type XrplIntegrationTestContext,
-  type iHook,
-} from '@transia/hooks-toolkit'
-import { calculateHookOn, type TransactionMetadata } from 'xahau'
-import { HookFlags } from 'xahau/dist/npm/models/common/xahau'
+import { ExecutionUtility, Xrpld } from '@xahau/hooks-toolkit'
+import type { TransactionMetadata } from 'xahau'
+import { installHook } from './harness'
 
-const namespace = 'rshooks-e2e-accept-all'
 const WORST_CASE_INSTRUCTIONS = 15
 
 describe('accept-all', () => {
-  let testContext: XrplIntegrationTestContext
-
-  beforeAll(async () => {
-    testContext = await setupClient(serverUrl)
-
-    const hook: iHook = {
-      CreateCode: readHookBinaryHexFromNS('accept_all', 'wasm'),
-      Flags: HookFlags.hsfOverride,
-      HookOn: calculateHookOn(['Invoke']),
-      HookNamespace: hexNamespace(namespace),
-      HookApiVersion: 0,
-    }
-    await setHooksV3({
-      client: testContext.client,
-      seed: testContext.hook1.seed,
-      hooks: [{ Hook: hook }],
-    } as unknown as SetHookParams)
-  })
-
-  afterAll(async () => {
-    await clearAllHooksV3({
-      client: testContext.client,
-      seed: testContext.hook1.seed,
-    } as unknown as SetHookParams)
-    await teardownClient(testContext)
+  const getContext = installHook({
+    wasmName: 'accept_all',
+    namespace: 'rshooks-e2e-accept-all',
+    hookOn: ['Invoke'],
   })
 
   it('accepts an Invoke with an empty return string and code 0', async () => {
+    const testContext = getContext()
     const response = await Xrpld.submit(testContext.client, {
       tx: {
         TransactionType: 'Invoke',

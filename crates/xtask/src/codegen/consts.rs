@@ -1,6 +1,5 @@
 //! Generates `crates/rshooks-core/src/consts.rs` from `hookapi.h`'s and
-//! `macro.h`'s parsed [`ConstSpec`] families (`crates/xtask/src/ir.rs`,
-//! `hook_api.json`).
+//! `macro.h`'s parsed [`ConstSpec`] families (`crates/xtask/src/ir.rs`).
 
 use anyhow::Result;
 
@@ -32,7 +31,7 @@ fn push_section(
     body.push_str(comment);
     body.push_str("\n\n");
     for d in defines {
-        let value = value_of(&d.name, &d.c_expr)?;
+        let value = value_of(&d.name, &d.value)?;
         let doc = vec![format!("C: `{}` ({doc_file})", d.name)];
         push_const(body, &doc, &d.name, "u32", &value);
     }

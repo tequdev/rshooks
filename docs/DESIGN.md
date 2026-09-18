@@ -36,9 +36,8 @@ contracts) end to end:
 ### Non-goals (v1)
 
 - Publishing to crates.io (names/ownership decided later; `publish = false`).
-- Gas-type hook (HookApiVersion 1) *ergonomics*. The pipeline accepts
-  `--api-version 1` (skips guard handling) but rshooks v1 targets
-  Guard-type hooks.
+- Gas-type hooks (HookApiVersion 1). The toolchain targets Guard-type
+  hooks only.
 - Deployment tooling (SetHook submission, faucet, networks). Out of scope;
   rshooks-build stops at a valid `.wasm` plus a fee estimate.
 - WAT round-tripping, debugger, simulator.
@@ -51,7 +50,7 @@ These come from xahaud's SetHook validation (`SetHook.cpp`,
 - **C1. Export set**: the WASM may export only `hook` (and optionally
   `cbak`), both `(func (param i32) (result i64))`. Rust `cdylib` output also
   exports `memory` — it must be stripped, or SetHook fails `temMALFORMED`.
-- **C2. Guards**: for API version 0, every `loop` must begin with the exact
+- **C2. Guards**: every `loop` must begin with the exact
   instruction sequence `i32.const <id>; i32.const <maxiter>; call $_g`
   (result dropped). xahaud statically computes a worst-case instruction
   count from these; missing guards ⇒ rejection.
@@ -78,8 +77,8 @@ These come from xahaud's SetHook validation (`SetHook.cpp`,
     pinned toolchain by bisecting the exact byte boundary in both
     directions). Any local zero-init scratch buffer in the 33..=64 byte
     range — e.g. a 34-byte `Keylet` — becomes safe by construction at
-    `opt-level = 3` with no `--auto-guard`, no hand-sized `maxiter`, and
-    no `static`-buffer workaround needed. This — not raw execution speed,
+    `opt-level = 3` with no hand-sized `maxiter` and no `static`-buffer
+    workaround needed. This — not raw execution speed,
     which the Hook API's static WCE metering does not reward — is why
     `opt-level = 3` is the workspace default: it removes an entire class
     of "clean Rust source, unguarded-loop build failure" surprises for
@@ -87,15 +86,17 @@ These come from xahaud's SetHook validation (`SetHook.cpp`,
   - **(b) Measured net effect, across all 13 examples** (rebuilt on the
     exact toolchain this repo pins): worst-case instruction count (WCE)
     improved in 6, stayed byte-for-byte unchanged in 3 (`02_state-counter`,
-    `07_xfl-math`, `81_govern` — their compiled output didn't move at all),
-    and increased only slightly (at most +12 instructions / +7%) in the
+    `07_xfl-math`, `80_governance`'s `govern` entry — their compiled
+    output didn't move at all), and increased only slightly (at most +12
+    instructions / +7%) in the
     remaining 4 (`01_accept-all`, `05_firewall`, `08_slot-ledger`,
     `10_emit-txn`) — no example regressed by more than a low double-digit
     instruction count. One example stands out as a large outlier
     (`06_guard-patterns`, whose whole point is demonstrating small
     `guard!`-bounded loops: `opt-level = 3` unrolls them, so WCE dropped
-    ~54% while size grew ~109% — see that example's own README for the
-    exact before/after table). Every example stayed comfortably under the
+    ~54% while size grew ~109% — see `book/src/concepts/guards.md`'s
+    `guard!`/`guard_m!` section for that example's own loops). Every
+    example stayed comfortably under the
     65,535-byte limit and `rshooks check` (no unguarded loops, no
     nesting-limit violations) passed for all of them. The one-time
     `SetHook` fee delta (`bytes × 5000` drops) this causes per example is
@@ -109,10 +110,7 @@ These come from xahaud's SetHook validation (`SetHook.cpp`,
     unguarded-loop `memset` call regardless of this setting, and still
     needs the `static`/`HookStatic` idiom (§6.3's "static-buffer idiom",
     `examples/README.md`'s "Statics for templates and large buffers")
-    rather than relying on `opt-level` alone. `rshooks-build`'s
-    `--auto-guard` escape hatch (§6.3) remains available, and remains the
-    wrong default for the reasons given there, independent of this
-    setting.
+    rather than relying on `opt-level` alone.
   - Raising `-C llvm-args`-level memset/memcpy/memmove store thresholds
     directly (rather than the whole crate's `opt-level`) was investigated
     and found to have **no effect at all** on `wasm32v1-none`:
@@ -139,8 +137,8 @@ These come from xahaud's SetHook validation (`SetHook.cpp`,
     | `09_state-foreign` | 152 → 145 | 707 → 689 |
     | `10_emit-txn` | 322 → 331 | 1253 → 1272 |
     | `14_account-id-macro` | 365 → 294 | 1512 → 1391 |
-    | `80_reward` | 13698 → 13680 | 7205 → 7175 |
-    | `81_govern` | 44560 → 44560 | 14373 → 14373 |
+    | `80_governance` (`reward`) | 13698 → 13680 | 7205 → 7175 |
+    | `80_governance` (`govern`) | 44560 → 44560 | 14373 → 14373 |
 
     Every row's "after" build also passed `rshooks check` (no
     unguarded loops, nesting depth within the 32-level limit) and the full
@@ -192,12 +190,13 @@ rshooks/
 - Root workspace members: `crates/*` only. `examples/` is its own workspace:
   its crates are `no_std` cdylibs with hook-specific release profiles that
   must not leak into host crates, and they don't build for host targets.
-- Edition 2024, `rust-version = "1.85"` (wasm32v1-none is stable ≥ 1.84). A
-  stable toolchain is pinned via `rust-toolchain.toml` (currently `1.89.0`,
-  matching `mise.toml`'s `[tools] rust` pin — see §5.5 for why no nightly
-  feature is needed: `rshooks-macros`, a small hand-rolled `proc_macro` crate,
-  covers what `${concat(...)}` used to); `rust-version` still tracks the
-  language edition floor, not the exact pinned toolchain.
+- Edition 2024, `rust-version = "1.88"` (let-chains, used by `rshooks-build`'s
+  wasm passes and `xtask`, stabilized in 1.88; wasm32v1-none is stable ≥
+  1.84). A stable toolchain is pinned via `rust-toolchain.toml` (currently
+  `1.89.0`, matching `mise.toml`'s `[tools] rust` pin — see §5.5 for why no
+  nightly feature is needed: `rshooks-macros`, a small hand-rolled
+  `proc_macro` crate, covers what `${concat(...)}` used to); `rust-version`
+  still tracks the language edition floor, not the exact pinned toolchain.
 - All crates `publish = false` for now.
 - All comments, docs, and identifiers in English.
 
@@ -284,6 +283,22 @@ unsafe extern "C" {
   gen-core` → tests → commit. The xtask parser is deliberately independent
   from the parity tests' parser — the parity tests are the generator's
   correctness oracle, so they must not share code.
+- **A second vendor group carries the protocol *formats***: xahaud's
+  `sfields.macro`, `transactions.macro`, `ledger_entries.macro` and the
+  three `*Formats.cpp` files live verbatim in
+  `crates/rshooks-core/vendor/xahaud-protocol/` (own `VENDOR.md` +
+  `SHA256SUMS`, same sync script and drift workflow). The same `gen-core`
+  run parses them into a checked-in, versioned
+  `crates/rshooks-core/protocol_formats.json` — the declared shape of every
+  transaction, ledger entry and inner object, with each field's presence and
+  wire code — under `--check` like every other generated file, and with its
+  own parity test. The parse is cross-validated against the vendored
+  `sfcodes.h`: a field the two groups disagree about fails generation
+  naming the field, so the groups cannot drift apart silently. Three
+  generators consume it: `rshooks-core`'s raw `lt*` codes, `rshooks`'
+  `LedgerEntryType` enum, and the typed read views of §5.9 — whose three
+  `rshooks/src/views/*.rs` modules `gen-core` renders from this artifact
+  rather than from a second parse of the vendored files.
 
 ## 5. rshooks
 
@@ -318,21 +333,35 @@ src/
     ├── sto.rs     # sto_subfield, sto_subarray, sto_emplace, sto_erase, sto_validate
     ├── float.rs   # thin fns backing XFL (float_sto, float_sto_set, slot_float)
     ├── util.rs    # util_accid, util_raddr, util_sha512h, util_verify, util_keylet(_buf)
-    ├── keylet.rs  # one typed keylet_xxx() per KEYLET_* constant, built on util_keylet_buf
+    ├── keylet.rs  # one typed keylet_xxx() + keylet_xxx_into() per KEYLET_* constant, each independently built on util_keylet_buf/util_keylet
     └── trace.rs   # trace, trace_num, trace_float
 ```
 
 ### 5.1 Error model
 
+See `docs/HOOK_ERROR_DESIGN.md` for the full design; the shape:
+
 ```rust
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HookError {
-    OutOfBounds,          // -1
-    InternalError,        // -2
-    TooBig,               // -3
-    /* ... every code from error.h ... */
-    Unknown(i64),         // forward-compat for codes we don't know
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct HookError(i64);
+
+impl HookError {
+    pub const OutOfBounds: HookError = /* -1 */;
+    pub const InternalError: HookError = /* -2 */;
+    /* ... one associated const per code from error.h ... */
+
+    pub const fn code(self) -> i64;       // identity: the raw code
+    pub fn kind(self) -> HookErrorKind;   // the one decode, on demand
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum HookErrorKind {
+    OutOfBounds, InternalError, /* … declaration order … */,
+    Unknown, // any code without a named constant
+}
+
 pub type Result<T> = core::result::Result<T, HookError>;
 
 #[inline(always)]
@@ -341,72 +370,60 @@ fn res(code: i64) -> Result<i64> { if code < 0 { Err(HookError::from(code)) } el
 
 Non-negative returns are payload (usually "bytes written"); negative maps to
 `HookError`. Functions whose success value is meaningful keep it
-(`Ok(len)`, `Ok(slot_no)`, …).
+(`Ok(len)`, `Ok(slot_no)`, …). `HookError` is a transparent wrapper over the
+raw code, not a decoding enum: constructing one and reading the code back
+out (`res`, `HookError::code`) are both the identity, and comparing against
+a named error (`err == HookError::DoesntExist`) is one `i64` equality — no
+decode, no nesting cost, at any call density.
 
-**Nesting-depth rule: at most one specific-`HookError`-variant match site per
-function.** `res`'s `HookError::from(i64)` decode compiles to a wasm
-`br_table` needing roughly one nested `block` per known error code (~40 at
-the time of writing) — but only at a call site that actually inspects
-*which* specific `HookError` variant a failure was (`match ... {
-Err(HookError::Xxx) => ..., ... }`). A call site that only asks "did this
-fail" (`.is_err()`, `Err(_) => ...`, comparing the whole `Result` against
-one `Ok` value) never forces the decode, and the optimizer discards it
-entirely, keeping just the "is the raw code negative" branch. `rshooks-build`'s
-Guard-type pipeline inlines every function in a crate into `hook()`/`cbak()`
-(§6.2c) and then must keep the merged function's block/loop/if nesting under
-the vendored guard checker's 32-level limit (§6.3) — a crate with more than
-one specific-variant match site pays that ~40-block decode's nesting cost
-*at every one of them*, since each is inlined into the same function body.
-In practice this means: default to `Err(_) => ...`/`.is_err()` at every Hook
-API call site, and reserve `Err(HookError::SpecificVariant) => ...` for the
-rare case that genuinely needs to distinguish one failure from another —
-budget for at most one such site per crate before nesting depth becomes a
-build-time concern. See `examples/80_reward` and `examples/81_govern`'s
-READMEs for concrete before/after nesting-depth numbers from real crates,
-each of which needs exactly one specific-variant match site.
+**Nesting-depth rule (for decode-into-enum functions other than
+`HookError`): at most one specific-variant match site per function.**
+`TxType::from(u16)` (§5, `tx_type.rs`) and `LedgerEntryType::from(u16)`
+compile to wide matches that need roughly one nested `block` per known code
+— but only at a call site that actually inspects *which* specific variant a
+value was (`match ... { TxType::Xxx => ..., ... }`). A call site that only
+asks "is this one specific type" (`otxn_type() == TxType::ClaimReward`, as
+`examples/80_governance`'s `govern`/`reward` entries do) never forces the
+full decode. `rshooks-build`'s Guard-type pipeline inlines every function in
+a crate into `hook()`/`cbak()` (§6.2c) and then must keep the merged
+function's block/loop/if nesting under the vendored guard checker's
+32-level limit (§6.3) — a crate with more than one specific-variant match
+site against the same enum pays that decode's nesting cost *at every one of
+them*, since each is inlined into the same function body. In practice this
+means: default to comparing against one named variant, and budget for at
+most one genuinely exhaustive match site per crate before nesting depth
+becomes a build-time concern. See `examples/80_governance`'s README for
+concrete before/after nesting-depth numbers from a real crate.
 
-The same mechanism applies to any large generated decode-into-enum
-function, not just `HookError::from`: `TxType::from(u16)` (§5, `tx_type.rs`)
-is a ~74-arm match with the identical shape, so comparing `otxn_type()`
-against one specific named `TxType` variant (`otxn_type() == TxType::
-ClaimReward`, as `examples/80_reward`/`examples/81_govern` both do) is the
-`TxType` analogue of a specific-`HookError`-variant match site, subject to
-the same one-per-crate budgeting logic — both examples still build within
-the nesting limit with one of each (one `TxType`-specific comparison, plus
-whatever `HookError`-specific handling each already had), but a crate
-piling up several specific-variant comparisons against *either* enum adds
-up against the same 32-level ceiling.
+`HookError::kind()` is the exception this rule does not apply to: it is a
+code-to-kind table lookup (nesting depth 1, not a match arm per code), paid
+only at the call site that asks for it, and safe to call from any number of
+places in the same function.
 
-**rshooks's own internal paths must not use this pattern at all.** The
-budget above ("at most one specific-variant match site per crate") is a
-concession for *hook authors*, who have no cheaper alternative once they
-need to branch on a particular `HookError`. `rshooks` itself is not in
-that position: every one of its host-call wrappers already has the raw,
-undecoded `i64` return code in hand *before* it ever calls `res`/
+**rshooks's own internal raw-code compares are a convention, not a nesting
+necessity.** Every one of `rshooks`'s host-call wrappers already has the
+raw, undecoded `i64` return code in hand *before* it ever calls `res`/
 `HookError::from`, so comparing that code directly against a raw constant
-(`rshooks_core::DOESNT_EXIST`, `rshooks_core::NOT_IMPLEMENTED`, …) needs no
-enum-decode machinery at all — zero specific-variant-match sites, not one.
-`crate::state::decode_read` (shared by `state_get`/`state_foreign_get`)
-and `crate::api::state::value_or_absent` (shared by every
-`state_update_*`) both compare the raw `code` against `rshooks_core::
-DOESNT_EXIST` before any `HookError` is decoded, for exactly this reason —
-the `Err(HookError::from(code))` fallback path is unaffected, since every
-call site still only matches it as a bare `Err(_)`. Concretely: migrating
-`examples/80_reward`'s `"RR"`/`"RD"` state reads to `hook_state!` +
-`state_get_typed` needs this — without it, that migration pushes nesting
-from 24 to 70 (over the limit); with it, nesting stays at 24 — see
-`examples/80_reward/src/lib.rs` for the migrated call site. (One further
-wrinkle: the raw-code helpers this needs — `state_raw_code`,
-`state_u64_raw_code`, `state_foreign_raw_code` in
-`crates/rshooks/src/api/state.rs` — are
-*not* called by the existing `state`/`state_u64`/`state_foreign` public
-wrappers, even though the logic is identical; routing those wrappers
-through the new helpers, even with both sides `#[inline(always)]`,
-measurably changed `rshooks-build`'s unnest-pass output for an unrelated
-hook that never touches the new path at all. Each raw-code helper is
-instead an independent duplicate of its wrapper's body — a small amount of
-source duplication traded for a call-graph shape provably identical to
-before the helper existed. See the doc comments on those functions.)
+(`rshooks_core::DOESNT_EXIST`, `rshooks_core::NOT_IMPLEMENTED`, …) skips a
+conversion the comparison does not need — the same one `i64.eq` a
+`HookError` comparison would cost, just without constructing the
+`HookError` first. `crate::state::decode_read` (shared by
+`state_get`/`state_foreign_get`), `crate::api::state::value_or_absent`
+(shared by every `state_update_*`), and every generated view's
+optional-field read all compare the raw `code` against
+`rshooks_core::DOESNT_EXIST` before any `HookError` is constructed, for
+this reason; the `Err(HookError::from(code))` fallback path is unaffected.
+(One further wrinkle, about call-graph shape rather than nesting: the
+raw-code helpers this needs — `state_raw_code`, `state_u64_raw_code`,
+`state_foreign_raw_code` in `crates/rshooks/src/api/state.rs` — are *not*
+called by the existing `state`/`state_u64`/`state_foreign` public wrappers,
+even though the logic is identical; routing those wrappers through the new
+helpers, even with both sides `#[inline(always)]`, measurably changed
+`rshooks-build`'s unnest-pass output for an unrelated hook that never
+touches the new path at all. Each raw-code helper is instead an independent
+duplicate of its wrapper's body — a small amount of source duplication
+traded for a call-graph shape provably identical to before the helper
+existed. See the doc comments on those functions.)
 
 ### 5.2 API wrapper conventions
 
@@ -470,6 +487,24 @@ pub fn hook_account_buf() -> Result<AccountId>;   // fixed-size convenience
   TOO_SMALL/OUT_OF_BOUNDS handling applies to whatever slice is passed. The
   `_buf` form delegates to the standard form so each raw call site exists
   once.
+- **Deviation: `api/keylet.rs`'s 26 typed `keylet_xxx` helpers use `_into`,
+  not `_buf`, for their caller-buffer twin** (`keylet_xxx_into(out: &mut
+  Keylet, ...) -> Result<()>`), and — unlike the `_buf` rule above, where
+  the caller-buffer form is the primitive the value-returning convenience
+  delegates to — **neither form delegates to the other here**: each
+  independently calls the host (`keylet_xxx` through `util_keylet_buf`,
+  `keylet_xxx_into` through `util_keylet`), duplicating the small amount of
+  argument-marshaling/testenv-interception plumbing. Reason: the
+  value-returning `keylet_xxx(...) -> Result<Keylet>` is this layer's
+  primary, best-documented API; the caller-buffer form exists specifically
+  as an opt-in escape hatch for a caller about to borrow the result into
+  another buffer-taking call right away (`_into` names that escape hatch
+  without reusing `_buf`'s "the caller-buffer form is the standard one"
+  connotation) — but routing the by-value form through its `_into` twin was
+  measured to cost a handful of extra worst-case instructions at a call
+  site that only uses the by-value API (an inlined delegation wrapper's own
+  local `out` has the same address-taken problem `_into` exists to avoid,
+  so delegation buys nothing there), so the two stand alone instead.
 - **"as-int64" mode** (`state`, `state_foreign`, `otxn_field`, `slot`):
   the host treats `write_ptr = 0, write_len = 0` as a request to return
   the data itself, packed **big-endian** into the non-negative `i64`
@@ -519,18 +554,22 @@ specifically to hold values that might *be* negative error codes.
 an infallible `Output` for any operator that can fail, since that would
 force a panic (or a silently wrong answer) on the failure path. `XFL`
 implements `core::ops::{Add, Sub, Mul, Div, Neg}`, all with `Output =
-Result<XFL, HookError>` — every one of these, including `Neg`, is a
-fallible host round trip (`float_sum`/`float_multiply`/`float_divide`/
-`float_negate`; `Sub` is `self + (-rhs)?`: one `float_negate` call plus one
-`float_sum` call, since there is no dedicated `float_subtract` function).
-`Neg` and comparison are host round trips rather than local bit
-manipulation on principle, not just for `Neg`/comparison specifically:
-this crate treats the host's `float_*` implementations as the sole
-authority on XFL bit-pattern semantics, and never maintains a parallel
-guest-side reimplementation of them — [`XFL::exponent`]'s local bit-field
-extraction is not an exception to this, since it only unpacks an
-already-host-produced value's fields rather than computing a new,
-independently-derived value the way negation or comparison would.
+Result<XFL, HookError>` — `Add`/`Mul`/`Div`/`Neg` are each a fallible host
+round trip (`float_sum`/`float_multiply`/`float_divide`/`float_negate`,
+respectively). `Sub` is `self + rhs.negated()`: one `float_sum` call, since
+there is no dedicated `float_subtract` function, and `XFL::negated` (unlike
+the `Neg` operator) is a local sign-bit flip, not a `float_negate` round
+trip — the sign of a canonical XFL is a single bit (bit 62), so negating
+one for a subtraction never needs the host. `Neg` and comparison are still
+host round trips rather than local bit manipulation on principle: this
+crate treats the host's `float_*` implementations as the sole authority on
+XFL bit-pattern semantics, and never maintains a parallel guest-side
+reimplementation of them for a value whose fields it does not already hold
+— `XFL::negated`'s bit flip is not an exception to this any more than
+[`XFL::exponent`]'s local bit-field extraction is, since both only
+manipulate an already-host-produced value's existing bits rather than
+computing a new, independently-derived value the way arithmetic or
+comparison would.
 Comparison has named methods (`eq`/`lt`/`gt`/`compare`, all `Result<bool>`
 via `float_compare`) *and* `PartialEq`/`PartialOrd` (`==`/`<`/`>`/...),
 both backed by the same `float_compare` calls — see below for the fallback
@@ -549,7 +588,7 @@ diagnostic, not just reasoned about).
 ```rust
 impl XFL {
     pub fn new(exponent: i32, mantissa: i64) -> Result<XFL>;      // float_set
-    pub fn one() -> XFL;
+    pub const fn one() -> XFL;                                     // fixed bits, no host call
     pub fn unchecked(self) -> XFLUnchecked;                        // zero-cost reinterpret, see below
     pub fn invert(self) -> Result<XFL>;
     pub fn mulratio(self, round_up: bool, num: u32, den: u32) -> Result<XFL>;
@@ -559,9 +598,10 @@ impl XFL {
     pub fn compare(self, rhs: XFL, mode: u32) -> Result<bool>;     // float_compare
     pub fn eq(self, rhs: XFL) -> Result<bool>; pub fn lt(self, rhs: XFL) -> Result<bool>; pub fn gt(self, rhs: XFL) -> Result<bool>;
     pub fn log(self) -> Result<XFL>; pub fn root(self, n: u32) -> Result<XFL>;
+    pub const fn negated(self) -> XFL;                             // sign-bit flip, no host call
 }
 impl core::ops::Add for XFL { type Output = Result<XFL>; ... }   // float_sum
-impl core::ops::Sub for XFL { type Output = Result<XFL>; ... }   // self + (-rhs)?: float_negate + float_sum
+impl core::ops::Sub for XFL { type Output = Result<XFL>; ... }   // self + rhs.negated(): float_sum only
 impl core::ops::Mul for XFL { type Output = Result<XFL>; ... }   // float_multiply
 impl core::ops::Div for XFL { type Output = Result<XFL>; ... }   // float_divide
 impl core::ops::Neg for XFL { type Output = Result<XFL>; ... }   // float_negate -- a host round trip, not a bit flip
@@ -636,7 +676,6 @@ types, N=1/4/8 chained ops):
 | checked `Result`-chain `Mul` | +14 |
 | raw `float_negate`+`float_sum` (baseline) | +5 |
 | `XFLUnchecked` `Sub` chain | +5 (matches raw exactly) |
-| checked `Result`-chain `Sub` | +27 |
 
 `XFLUnchecked`'s marginal cost matches a hand-written raw host-call chain
 exactly for both operators — its performance win over the checked operators
@@ -654,8 +693,8 @@ N=1/4/8 breakdown behind these marginal-cost figures).
   `guard_m!(m, n)` → `_g((1u32 << 31) + (line!() << 16) + (n), (m) + 1)`
   (same id formula as C `GUARDM`) for multiple loops on one line. All
   arithmetic explicit `u32` with `wrapping_add`-free constants.
-  Guards are the developer's responsibility by default (see 6.3); the
-  opt-in auto-guard pass exists mainly for compiler-generated loops.
+  Guards are the developer's responsibility (see 6.3): a compiler-generated
+  loop needs a source-level fix, not a build-time insertion pass.
 - `trace!("msg")`, `trace!("msg", data)`, `trace_num!`, `trace_float!` —
   compiled to nothing unless **rshooks's** `trace` feature is enabled
   (traces cost bytes and execution; examples enable it in dev). The feature
@@ -764,7 +803,7 @@ pub extern "C" fn hook(_reserved: u32) -> i64 {
   transcribers can't express directly, and reuses the same struct-shape
   parsing/codegen `#[derive(HookKey)]`/`#[derive(HookData)]`/
   `#[derive(ParamName)]`/`#[derive(ParamValue)]` already provide (see
-  `rshooks-macros`'s `decl_pair` module) rather than duplicating it in a
+  `rshooks-macros`'s `shape` module) rather than duplicating it in a
   macro-by-example. Still hand-rolled `proc_macro::TokenStream` parsing, no
   `syn`/`quote` (same reasoning as `#[hook]`/`#[cbak]` above): a flat,
   randomly-indexable token buffer with 2–3-token bounded lookahead is
@@ -792,9 +831,9 @@ which this same invocation just generated at exactly that name's size.
 concrete, non-generic
 `impl` block can, the same restriction `FixedRead::read_exact`'s doc
 comment documents for the read side). Measured impact:
-`examples/81_govern`'s `IS{seat}` (a composite, runtime-varying name)
+`examples/80_governance`'s `IS{seat}` (a composite, runtime-varying name)
 went from **+607** worst-case instructions over the raw baseline to
-**0** — see `examples/81_govern/src/lib.rs`'s `IS{seat}` doc comment.
+**0** — see `examples/80_governance/src/lib.rs`'s `IS{seat}` doc comment.
 `examples/12_typed-data`'s composite `AdminName` parameter improved too
 (485 → 470 worst-case instructions), confirming the fix generalizes.
 Overriding `with_name_bytes` also *replaces* the trait default's own
@@ -834,9 +873,33 @@ things:
    `0x61`, `0x73 0x21`, `0x81 0x14`), all `const fn` where layout-relevant.
 2. **`txn_template!`** — a declarative macro playing the role of the C
    code generator's output. The hook author declares an ordered field list
-   (kinds: `u32_field(sfXxx)`, `native_amount(sfXxx)`, `account_id(sfXxx)`,
-   `empty_vl(sfXxx)`, `emit_details`, plus the leading
-   `transaction_type = ttXXX`); the macro computes cumulative offsets and
+   (kinds: `u8_field`/`u16_field`/`u32_field`/`u64_field(sfXxx)`,
+   `hash128`/`hash160`/`hash256`/`currency(sfXxx)`, `native_amount(sfXxx)`,
+   `amount(sfXxx)` (optionally `= (xfl, currency, issuer)`),
+   `native_issue`/`issue(sfXxx)`, `account_id(sfXxx)`, `empty_vl(sfXxx)`,
+   `fixed_vl(sfXxx, N)` for an `STI_VL` field whose length is fixed by the
+   declaration rather than empty (`N`'s own magnitude picks rippled's
+   one/two/three-byte VL length prefix, baked in at compile time alongside
+   the header),
+   `object(sfXxx) { .. }` for a fixed-shape nested `STObject`,
+   `array(sfXxx) [ <element>* ]` for a nested `STArray` of individually
+   declared, independently shaped elements reached by position, or
+   `array(sfXxx) [ Elem:
+   object(sfY) { .. } ; N ]` for a nested `STArray` of `N` identically
+   shaped elements reached by runtime index, `emit_details`, plus the
+   leading `transaction_type = ttXXX`); a present-or-absent field of any
+   fixed-width kind (`optional <kind>(sfXxx)`), a runtime-chosen
+   native-or-issued `Amount` slot (`any_amount(sfXxx)`, or `optional
+   any_amount(sfXxx)`), a runtime-length `VL` blob within a compile-time
+   `MAX` (`vl(sfXxx, MIN, MAX)`, or `optional vl(..)`), a whole-container
+   present-or-absent `object`/`array` with no view type of its own
+   (`optional object(sfXxx) { .. }`/`optional array(sfXxx) [ .. ]`), and a
+   homogeneous array whose per-element
+   *fields* are `optional` while every element itself stays present
+   (`array(sfXxx) [ Elem: object(sfY) { field: optional .. } ; N ]`) —
+   all NOP-padded (`docs/NOP_PADDING_DESIGN.md`) so absence still costs a
+   compile-time-fixed byte offset, never a runtime-shaped one; the macro
+   computes cumulative offsets and
    total length at compile time, bakes the field headers into a
    `const fn new()` template (⇒ data segment via `HookStatic`), and
    generates typed `set_<field>` setters plus an `emit_details_region()`
@@ -846,34 +909,124 @@ things:
    a small, purpose-built identifier-concatenation macro that replaces
    nightly's `${concat(set_, $field)}` metavariable expression, letting
    `txn_template!` (and every crate that calls it) build on stable Rust.
-   A compile-time assertion rejects field lists that violate canonical
-   (type, field) ordering — a safety the C flow lacks. `emit_details`
-   must be last.
+   Every kind's declared `sfXxx` constant has its serialized type
+   (`code >> 16`, checked against `txn::codec::sti`'s hand-transcribed
+   `STI_*` constants) asserted against the kind at compile time —
+   `u32_field(sfFee)`, an `STI_AMOUNT` field declared as though it were
+   `STI_UINT32`, is rejected before it could corrupt the wire
+   representation. A compile-time assertion rejects field lists that
+   violate canonical (type, field) ordering — a safety the C flow lacks —
+   checked independently **per container**, not just at the template's top
+   level (see below). `emit_details` must be last, at the top level; inside
+   any `object`/`array` it is a compile error.
 
 The `PREPARE_TXN()` equivalent, `prepare_for_emit()`, is **generated by
 the macro too**, and the emit-plumbing fields are recognized **by their
 `sfXxx` code, not by special declaration syntax** — every field uses the
-same uniform kinds (`u32_field(sfXxx)`, `native_amount(sfXxx)`,
-`account_id(sfXxx)`, `empty_vl(sfXxx)`, `emit_details`). (An earlier
-role-kind design — `sequence: sequence,` next to
-`flags: u32_field(sfFlags)` — was rejected as a second declaration
-dialect users had to learn.)
+same uniform kinds. (An earlier role-kind design — `sequence: sequence,`
+next to `flags: u32_field(sfFlags)` — was rejected as a second declaration
+dialect users had to learn.) That detection is **top-level only**: an
+`sfAccount` (say) declared inside a nested `object`/`array` does not
+satisfy the presence check and is never patched by `prepare_for_emit`, so
+a `Signer`-shaped inner object can reuse the same field codes as the
+template's own required fields without interference.
 
 Mechanically, the muncher accumulates a const table of
-`(sfcode, kind tag, payload offset)` per field. The base arm then emits
-const-evaluated checks (all failures are named E0080 compile errors):
+`(sfcode, kind tag, payload offset, depth)` per field — `depth` is `0` for
+a field declared directly on the template and one more than its enclosing
+container's depth for a field inside a nested `object`/`array`; the
+top-level lookups above only ever match a `depth == 0` row, which is what
+makes the top-level-only detection above hold. A nested `object(sfX) {
+.. }`/`array(sfX) [ .. ]` flattens into the same linear field list the
+muncher walks, with a synthetic `@end_object`/`@end_array` continuation
+token appended after its inner fields: entering a container pushes the
+current setter-name prefix/order/context onto a stack and increments
+depth; the continuation token writes the closing marker (`0xE1` for
+`object`, `0xF1` for `array`), emits that container's own canonical-order
+check, and pops the stack back. This is what lets canonical `(type,
+field)` order be checked **per container** — each object's own direct
+fields (and the template's top-level fields) independently, not as one
+flat sequence — while every scalar field rule stays a single macro arm
+needing only `prefix`/`depth` from the muncher's state, not any special
+knowledge of nesting. An array's elements are not order-checked
+against each other, since they typically share one repeated `sfcode`
+(every `sfAmounts` element is an `sfAmountEntry`). Nesting depth is
+asserted at compile time against `STO_WRITER_MAX_DEPTH`, the same limit
+`StoWriter`/xahaud's own deserializer enforce; a homogeneous array's
+element counts as two levels against that bound (the array itself, then
+the element), the same as an array's own positional object element.
+Setter names for a nested field are the full `_`-joined declaration path
+(`set_amounts_0_amount`), spliced through the same `$crate::__paste!`
+every top-level setter uses — an array element takes no name of its own,
+only its zero-based position, which is just another path segment, not a
+repetition index.
+
+The homogeneous form (`array(sfX) [ Elem: object(sfY) { <field>* } ; N ]`)
+declares one element shape and reserves `N` back-to-back copies of it
+rather than generating a setter. The muncher spawns a second, independent
+`$crate::__txn_template_step!` invocation for `Elem`, seeded fresh (its
+own `prefix`/`order`/a single `stack` frame) with a new `mode = elem`
+state slot threaded through unchanged, and `fields = [ ..inner..,
+@end_object ]` — the *existing* `@end_object` arm closes it and runs its
+order check exactly as for a named object, so no new container-closing
+logic is needed. An `elem`-mode base case emits only a standalone
+element-view type (`Elem::LEN`, a baked `Elem::TEMPLATE`, and the same
+inner setters a template with that field list would generate, writing
+into an `&'a mut [u8]` view) — none of a template-mode base case's
+plumbing/presence/kind asserts, `prepare_for_emit`, or
+`TemplateBytes`/`Default`/`Clone`. On the parent, the field gets a
+runtime-indexed accessor named by its path with no `set_` prefix
+(`fn amounts(&mut self, index: usize) -> Option<Elem<'_>>`), returning
+`None` for `index >= N` via `slice::get_mut` rather than a raw, panicking
+index — consistent with the workspace's `indexing_slicing` lint (§9). Wire
+bytes are `header(sfX)`, `N` copies of `Elem::TEMPLATE` back to back, then
+`0xF1`, baked by a new `codec::write_repeated` helper (`write_const_bytes`
+applied `N` times at `Elem::LEN`-sized strides).
+
+`amount(sfXxx)`'s 48-byte value region (`[8-byte value][20-byte
+currency][20-byte issuer]`) needs no host call at either compile time or
+runtime: an `XFL`'s raw bit layout already occupies the exact bit
+positions `STAmount`'s issued 8-byte value uses (exponent, mantissa, and
+sign in the same fields), and canonical XFL zero (`0`) is `STAmount`'s
+canonical issued zero (`0x8000_0000_0000_0000`) — so
+`xfl.raw_bits() | (1 << 63)`, written big-endian, covers every canonical
+XFL, zero and nonzero alike. `native_amount`'s existing 62-bit-range
+failure has no analogue here: a canonical `XFL`'s exponent/mantissa ranges
+already match `STAmount`'s, so the `amount` setters cannot fail. Two
+setters follow: `set_x(xfl, &currency, &issuer)` writes all 48 bytes;
+`set_x_value(xfl)` writes only the 8 value bytes, keeping whatever
+currency/issuer was baked in as the field's default (or set previously) —
+the hot path once a default `(xfl, currency, issuer)` triple has fixed the
+currency/issuer for a field's lifetime.
+
+The base arm then emits const-evaluated checks over the accumulated table
+(all failures are named E0080 compile errors):
 
 - **presence**: `sfSequence`, `sfFirstLedgerSequence`,
   `sfLastLedgerSequence`, `sfFee`, `sfSigningPubKey`, `sfAccount` must
-  each appear in the table, and an `emit_details` field must be declared
-  (last); `transaction_type` is grammar-mandatory and first. An emitted
-  transaction without these is invalid at the protocol level, so the
-  macro refuses to build one.
+  each appear in the table at depth `0`, and a top-level `emit_details`
+  field must be declared (last); `transaction_type` is grammar-mandatory
+  and first. An emitted transaction without these is invalid at the
+  protocol level, so the macro refuses to build one.
 - **kind agreement**: the required codes must be declared with the right
   kind (`sfFee` as `native_amount`, `sfAccount` as `account_id`,
   `sfSigningPubKey` as `empty_vl`, the three sequence fields as
   `u32_field`) — a wrong kind would make `prepare_for_emit` corrupt the
   template, so it is rejected at compile time.
+- **serialized-type agreement**: every declared field's `sfXxx` constant
+  must have the serialized type (`code >> 16`) its kind expects — this is
+  the per-field check `2.` above already flagged, applied uniformly across
+  the entire table, nested rows included.
+- **NOP budget**: for every container (the top level, each named
+  `object`/`array`, each homogeneous array, each `optional` view), the
+  worst-case `NOP` count over its direct `optional`/`any_amount`/`vl`
+  children — "everything optional absent at once, every `vl` at `MIN`,
+  every `any_amount` native", the state the host may actually be asked to
+  parse — must be `<= codec::MAX_NOPS_PER_CONTAINER` (63), the same limit
+  xahaud's own `STObject`/`STArray` NOP counter enforces
+  (`docs/NOP_PADDING_DESIGN.md` §1/§3.1/§3.2). An `optional`/`vl`/
+  `any_amount` field whose `sfXxx` code is one of the six required-field
+  codes above is a separate compile error, independent of this budget.
 
 Because detection is by *value*, it is robust to how the constant is
 spelled (qualified paths, aliases). `prepare_for_emit(&mut self) ->
@@ -919,7 +1072,7 @@ back to this section instead of re-explaining it.
 
 | Domain | Endianness | Concrete evidence | Lives in |
 |---|---|---|---|
-| Xahau Binary (the protocol's own STObject/tx wire format) | **Big-endian** | `txn.rs`'s `txn_template!`-generated setters write every multi-byte field with an explicit big-endian encoding (`u32`/`u16` field values, the `tts` transaction-type code, native-amount drops — see e.g. the `.to_be_bytes()` calls building setter bodies and the `tts::$tt as u16).to_be_bytes()` STObject field header); `examples/80_reward/src/mint_txn.rs` and `examples/81_govern/src/txn.rs` (hand-rolled "Tx Builder" equivalents for the genesis hooks) do the same by hand throughout | `crates/rshooks/src/txn.rs`, `examples/80_reward`, `examples/81_govern` |
+| Xahau Binary (the protocol's own STObject/tx wire format) | **Big-endian** | `txn.rs`'s `txn_template!`-generated setters write every multi-byte field with an explicit big-endian encoding (`u32`/`u16` field values, the `tts` transaction-type code, native-amount drops — see e.g. the `.to_be_bytes()` calls building setter bodies and the `tts::$tt as u16).to_be_bytes()` STObject field header); `examples/80_governance/src/mint_txn.rs` and `examples/80_governance/src/txn.rs` (hand-rolled "Tx Builder" equivalents for the genesis hooks) do the same by hand throughout | `crates/rshooks/src/txn.rs`, `examples/80_governance` |
 | Xahau Binary — the Hook API host's "as-int64" mode | **Big-endian** | `state`/`state_foreign`/`otxn_field`/`slot` called with `write_ptr = 0, write_len = 0` return the entry's raw bytes packed big-endian into the non-negative `i64` result (xahaud `applyHook.cpp`, `data_as_int64`) | `api::state::state_u64`/`state_foreign_u64`, `api::otxn::otxn_field_u64` |
 | Xahau Binary — keylets | **Big-endian** | A keylet's first two bytes are the ledger-entry-type tag, big-endian, per xahaud's own keylet construction. rshooks never assembles keylet bytes itself — every `keylet_xxx` helper (`api/keylet.rs`) calls the host's `util_keylet` and receives an already-built, opaque `Keylet`/`[u8; 34]` back — this row documents the host's own convention, not code in this crate | xahaud host (`util_keylet`); wrapped opaquely by `crates/rshooks/src/api/keylet.rs` |
 | Xahau Binary — short state/param keys | **Big-endian-flavored zero-padding**: a key shorter than the fixed key width is **left**-padded with zero bytes by the host (the value's bytes end up at the *end* of the fixed-width key, not the front) | rshooks' `StateKeyEncode` layer (`[u8; N]`, `state_keys!`, `#[derive(HookKey)]`) sends a short key at its own real length and relies on this host-side left-pad directly — see §5.7 for the full rule; `pad_left!` (`crates/rshooks/src/macros.rs`) reproduces this same left-pad *locally*, for the rarer case of needing the already-padded bytes themselves as a value, not as a `state`/`state_set` argument | host left-pad: xahaud; local equivalent: `pad_left!` (`crates/rshooks/src/macros.rs`) |
@@ -1143,18 +1296,155 @@ integer literal there now needs a `u32` suffix; and `txn_template!` takes
 typed constants only.
 
 **Every example uses the typed layer.** No example calls a numbered slot
-function. The two production hooks needed care: `80_reward` measured nesting
-**68** with five typed reads inlined into its entry point (the limit is 32)
-and came back to 26 via an `#[inline(never)]` extraction *plus* replacing a
-4-way tuple `let (Ok(..), ..) = .. else` with sequential ones — the tuple
-pattern lowers to nested matches. `81_govern`, the hook with the least
-headroom in the repo, was unchanged at nesting 22 because `slot_path!`
-flattens a three-hop walk into one `if let` where the raw chain was three
-nested ones. Costs: 80_reward +220 instructions, 81_govern +83, both from
+function. The two production hook entries needed care:
+`examples/80_governance`'s `reward` entry measured nesting **68** with
+five typed reads inlined into its entry point (the limit is 32) and came
+back to 26
+via an `#[inline(never)]` extraction *plus* replacing a 4-way tuple `let
+(Ok(..), ..) = .. else` with sequential ones — the tuple pattern lowers to
+nested matches. Its `govern` entry, the hook with the least headroom in
+the repo, was unchanged at nesting 22 because `slot_path!` flattens a
+three-hop walk into one `if let` where the raw chain was three nested
+ones. Costs: `reward` +220 instructions, `govern` +83, both from
 `Result` plumbing and the 34-byte keylet copy `from_keylet` makes where the
 raw `slot_set` took a slice. `07_xfl-math` and `08_slot-ledger` got
 *cheaper* (−10 and −12), having dropped `slot_clear` calls the consuming
 reads make unnecessary.
+
+### 5.9 Generated format views: `views::{tx, ledger, inner}`
+
+Upstream amendments change transaction, ledger-entry, and inner-object field
+lists. Hand-writing one read view per type does not scale, so all are
+**generated** —
+the same pattern §4 already applies to `sfcodes.h → sfield.rs` and
+`tts.h → tx_type.rs`, applied to a third vendor group
+(`crates/rshooks-core/vendor/xahaud-protocol/`: `sfields.macro`,
+`transactions.macro`, `ledger_entries.macro`, `TxFormats.cpp`,
+`LedgerFormats.cpp`, `InnerObjectFormats.cpp`). Those six files are parsed
+once into the checked-in `crates/rshooks-core/protocol_formats.json`, and
+every renderer reads that artifact rather than re-parsing — so a future
+transaction-*builder* renderer consumes a stable, versioned input.
+
+```rust
+let p = views::tx::Payment::otxn()?;            // checks otxn_type == ttPAYMENT
+let dest: AccountId = p.destination()?;          // soeREQUIRED -> Result<T>
+let tag: Option<u32> = p.destination_tag()?;     // soeOPTIONAL -> Result<Option<T>>
+
+let line = views::ledger::RippleState::from_keylet(&keylet_line(a, b, cur)?)?;
+let bal: AmountBytes = line.balance()?;
+```
+
+The decisions behind it:
+
+- **This supersedes §5.5's "no library-owned shapes" rationale, narrowly.**
+  That argument was about release lag on *hand-maintained* shapes;
+  `scripts/sync-vendor.sh` + `cargo xtask gen-core` refreshes every shape at
+  once and `gen-core --check` fails CI on drift. Hand-written
+  shape-specific code stays banned. See `txn.rs`'s module doc comment.
+- **Generic over a sealed `FieldSource`.** A transaction view reads either
+  the originating transaction (`OtxnSource`, a ZST over `otxn_field` — one
+  host call per access, no slot consumed) or an already-loaded slot
+  (`SlotSource`). Both are monomorphized and every accessor is
+  `#[inline(always)]`, so the abstraction compiles away to the host call it
+  wraps. Ledger and inner views are slot-only and not generic. A third impl
+  over parsed bytes could be added without touching a line of generated
+  code.
+- **Constructors verify, by raw `u16` compare.** `Payment::otxn()` checks
+  `otxn_type` against `rshooks_core::ttPAYMENT`; `RippleState::from_slot`
+  checks `sfLedgerEntryType` against `ltRIPPLE_STATE`. Never a `TxType`/
+  `LedgerEntryType` decode — those are ~74- and ~34-arm matches with
+  §5.6's nesting cost, and a view checks its type on every construction. A
+  failed check consumes and clears the slot, like `try_cast`.
+- **Absence is decided on the raw return code.** `soeOPTIONAL`/`soeDEFAULT`
+  fields read as `Result<Option<T>>`, with `Ok(None)` decided by comparing
+  the undecoded `i64` against `DOESNT_EXIST` rather than by constructing a
+  `HookError` and comparing that — the raw code is already in hand at the
+  call site, per §5.1's convention for rshooks's own internals.
+  `soeDEFAULT` reads as `Option` too: upstream encodes "may be omitted",
+  not a default value.
+- **Slot-backed accessors are get → read → clear.** Every one navigates to
+  a child slot, performs a terminal read, and releases the child before
+  returning, through the `take_*` family (`SlotObject::take_raw` was added
+  for the variable-length case). A view's accessors can be called any
+  number of times and consume zero slots beyond the view's own root — the
+  only place a hook pays a `slot_clear` the C idiom skips, and the reason
+  a thirty-field ledger view is usable at all. The `*_slot` subobject
+  accessors are the documented exception: they hand the child's ownership
+  to the caller.
+- **Value types are keyed on the serialized type ID**, matching the
+  `SField<T>` §5.8's table already carries — with the two wire markers
+  reading back as values (`Amount` → `AmountBytes`, `Issue` → `IssueData`).
+  Unmodeled types (`Blob`, `PathSet`, `Vector256`, `Number`, `Hash128`,
+  `Hash160`, `XChainBridge`, …) get a raw `…_into` byte accessor documented
+  as raw access, not typed access; `Number` is explicitly not an `XFL`.
+  `STObject`/`STArray` fields get that raw accessor on every source, plus a
+  `…_slot` child-slot accessor on the slot-backed views only — `otxn_field`
+  cannot navigate into a container.
+- **Code, not data.** The renderer emits no `static`, no export, no
+  function pointer and no registration table, because §6.2's cleaner drops
+  unreachable *functions* but retains active data segments regardless of
+  reachability — a lookup table would land in every hook's wasm whether it
+  used a view or not. An xtask test asserts the rendered text contains none
+  of them.
+- **All logic lives in the hand-written `views/source.rs`.** The generated
+  files are declarations that call into it — one struct and one accessor
+  per upstream declaration, no branching of their own — so the reviewable
+  surface is the shared source module rather than the generated declarations.
+- **Not generated (v1):** `STArray` iteration sugar (compose the slot API
+  with `views::inner`), builders (the artifact carries what they need;
+  no builder code yet), and keylet construction, which stays in
+  `api::keylet` because keylet parameterization is per-type knowledge the
+  format macros do not encode — `from_keylet` just composes.
+
+### 5.10 Format availability: `active` / `pending` / `dormant`
+
+Upstream's format tables include formats unavailable on Xahau mainnet.
+`crates/rshooks-core/format_availability.json` classifies every declared
+format, and the ergonomic generated surface follows it.
+
+| tier | meaning |
+|---|---|
+| `active` | activated on Xahau mainnet |
+| `pending` | supported by xahaud, not yet activated |
+| `dormant` | not expected on Xahau mainnet, either from amendment evidence or curator judgment; custom networks may still enable it |
+
+Every tier is *generated*; two cargo features on `rshooks` decide which ones
+compile:
+
+| features on | active | pending | dormant |
+|---|---|---|---|
+| *(none)* — the default | yes | yes | no |
+| `active-amendments` | yes | no | no |
+| `all-amendments` | yes | yes | yes |
+| both | yes | yes | yes |
+
+The decisions behind it:
+
+- **The classification is curated, not vendor data.** Vendored
+  `features.macro` supplies amendment evidence, while the active/pending
+  boundary is verified against the mainnet Amendments object. The artifact's
+  `doc` field records the snapshot and verification recipe. Retired amendments
+  are absent from that object despite being active, so absence alone never
+  implies dormancy.
+- **Unknown formats default safely.** `gen-core` only appends new formats as
+  `dormant`; changing tiers remains a human decision. Validation also rejects
+  classifications for formats upstream no longer declares.
+- **Raw decoding remains exhaustive.** Availability gates views and typed
+  `sfield` constants, while `rshooks-core`'s raw tables and the transaction and
+  ledger-entry enums remain complete. Decoding a wire value is distinct from
+  advertising a usable capability.
+- **Field tiers are derived conservatively.** A field takes the best tier of
+  any format that references it; unreferenced structural fields remain active.
+  Curated `field_overrides` handles fields whose amendment availability cannot
+  be inferred from their containing formats. An accessor follows its field's
+  gate when that gate is narrower than the surrounding view.
+- **The default includes pending formats.** These are supported formats Xahau
+  may activate, while dormant formats stay out of the default surface.
+- **The wider feature wins.** Cargo unifies features across the dependency
+  graph, so `all-amendments` must dominate `active-amendments`; enabling a
+  dependency feature may add API but must not remove it.
+- **Views and their fields compile together.** `mise run lint` and `mise run
+  test` exercise the generated surface in each availability state.
 
 ## 6. rshooks-build
 
@@ -1167,10 +1457,11 @@ No walrus (C8).
 
 ```
 rshooks build [--manifest-path <dir/Cargo.toml>] [-p <crate>]
-                  [--api-version 0|1] [--auto-guard] [--default-maxiter N]
                   [--out <dir>] [--allow-oversize]
-rshooks clean <in.wasm> [-o out.wasm] [--api-version 0|1]   # post-process only
-rshooks check <file.wasm> [--api-version 0|1]               # validate only, no output
+                  [--no-optimize]
+rshooks clean <in.wasm> [-o out.wasm] [--no-optimize]
+                  # post-process only (any toolchain's wasm, incl. C)
+rshooks check <file.wasm>               # validate only, no output
 ```
 
 `build` =
@@ -1185,8 +1476,8 @@ rshooks check <file.wasm> [--api-version 0|1]               # validate only, no 
    size and estimated SetHook fee (`bytes × 5000` drops). When metadata was
    declared, also write `<out>/<crate>.json` with the final HookHash and WCE.
 
-`check` runs only 6.4 (+ guard verification instead of insertion) — usable
-against any wasm, including C-built hooks.
+`check` runs only 6.4 (+ guard verification, same as `build`'s 6.3) —
+usable against any wasm, including C-built hooks.
 
 ### 6.2 Cleaner (hook-cleaner equivalent)
 
@@ -1230,14 +1521,14 @@ Input: cargo's wasm. Output: SetHook-shaped wasm.
 5. Verify entry signatures: `hook`/`cbak` must be `(i32) -> i64`; error out
    otherwise (catches a missing `extern "C"` or wrong signature early).
 
-### 6.2b Flatten pass (full inlining) — api-version 0
+### 6.2b Flatten pass (full inlining)
 
 Two rules of the real checker (`Guard.h`, discovered by running the vendored
 checker against our phase-4 artifacts, which the Rust reimplementation had
 wrongly accepted):
 
-- **R1**: every api-version-0 module must import `_g`, even if it contains
-  no loop at all.
+- **R1**: every module must import `_g`, even if it contains no loop at
+  all.
 - **R2**: every entry in the type section must be the type of an import or
   the `(i32) -> i64` entry-point type. A defined helper function with any
   other signature — notably `compiler_builtins` `memset`/`memcpy`/`bcmp`
@@ -1246,25 +1537,25 @@ wrongly accepted):
   (`#![no_builtins]` does not prevent these under fat LTO; verified
   empirically. Source-level avoidance is not reliable.)
 
-Consequently the cleaner is followed by a **flatten pass** for api-version
-0: inline every defined non-entry function into its callers, bottom-up in
-topological order (the call graph is acyclic — recursion is banned — so
-this terminates), then drop the inlined functions and rebuild the type
-section to exactly {import types} ∪ {entry type}. Inlining transform per
-call site: arguments are spilled to fresh locals, the callee body is
-spliced in wrapped in a `block` of the callee's result type, callee locals
-are remapped to appended caller locals, and every `return` in the callee
-becomes a `br` to the wrapper block (branch depths inside the body shift by
-one accordingly). Multiple call sites duplicate the body — a size cost that
-is acceptable and reported. `_g` is ensured present as an import for
-api-version 0 (added if absent, never GC'd) per R1.
+Consequently the cleaner is followed by a **flatten pass**: inline every
+defined non-entry function into its callers, bottom-up in topological order
+(the call graph is acyclic — recursion is banned — so this terminates),
+then drop the inlined functions and rebuild the type section to exactly
+{import types} ∪ {entry type}. Inlining transform per call site: arguments
+are spilled to fresh locals, the callee body is spliced in wrapped in a
+`block` of the callee's result type, callee locals are remapped to appended
+caller locals, and every `return` in the callee becomes a `br` to the
+wrapper block (branch depths inside the body shift by one accordingly).
+Multiple call sites duplicate the body — a size cost that is acceptable and
+reported. `_g` is ensured present as an import (added if absent, never
+GC'd) per R1.
 
 Inlining wraps a call site in a `block` only when the callee body actually
 contains a non-trailing `return` (the block exists solely as the rewritten
 `br` target); a trailing `return` is dropped and falls through, and
 return-free bodies are spliced bare.
 
-### 6.2c Unnest pass (ladder flattening) — api-version 0
+### 6.2c Unnest pass (ladder flattening)
 
 `Guard.h` rejects modules whose block nesting exceeds **32 levels**
 (`NESTING_LIMIT`, 16 before `GuardRuleDepth32`) during its worst-case
@@ -1289,6 +1580,18 @@ are **self-contained and diverging** (push constants, `call rollback`,
    it fixed up. This also erases flatten wrapper blocks whose `return`
    rewrites never materialized.
 3. Iterate to fixpoint (ladders unwrap outermost-inward).
+4. **Dead-code elimination**: unwrapping a block in step 2 leaves its
+   original continuation in place, now sitting in straight-line code right
+   after the unconditional terminator (`unreachable`/`br`/`br_table`/
+   `return`) that used to end the block body — unreachable, but still
+   counted by the worst-case analysis, which sums instructions
+   syntactically rather than by reachability. A final linear pass drops
+   every instruction following such a terminator up to the closing
+   `end`/`else` at that nesting level, dropping a nested block/loop/if
+   encountered while already dead as one whole unit rather than descending
+   into it. No branch's `relative_depth` is affected, since every
+   surviving frame is untouched and every dropped frame's branches are
+   dead code too.
 
 The local `if` costs one level only inside a short error arm, while each
 removed ladder block spanned the entire function — net max-depth drops from
@@ -1296,8 +1599,8 @@ O(error paths) to O(real control structure). The duplicated tails cost a
 few bytes per branch site. Correctness is held by the same wasmi
 differential harness as flatten (identical results and host-call
 sequences pre/post pass). The validator (6.4) additionally computes max
-nesting depth, hard-erroring above 32 for api-version 0 (mirroring
-`GuardRuleDepth32`) and warning at ≥ 28; `build` prints the final depth.
+nesting depth, hard-erroring above 32 (mirroring `GuardRuleDepth32`) and
+warning at ≥ 28; `build` prints the final depth.
 
 The guard pass (6.3) runs **after** flattening and unnesting, so loops that
 arrive in `hook()` by inlining (memset/bcmp loops) get guards like any
@@ -1307,39 +1610,33 @@ executed pre- and post-flatten in a wasm interpreter (dev-dependency) with
 recorded host stubs, asserting identical results and host-call sequences —
 an inlining bug must fail tests, not silently change hook semantics.
 
-### 6.3 Guard pass (guard-checker equivalent + auto-insert)
-
-Skipped entirely when `--api-version 1`.
+### 6.3 Guard pass (guard-checker equivalent)
 
 For every function body, scan instructions; at each `loop` opcode:
 
 - If the body already starts with `i32.const a; i32.const b; call $_g`
   (optionally followed by `drop`) — accept it, record `(a, b)`.
-- Otherwise it is a **hard error by default**, reported with function index
+- Otherwise it is a **hard error**, reported with function index
   and instruction offset (pure guard-checker behavior, same as `check`).
-  Developers fix it with `guard!` at the top of the loop body.
-- With opt-in `--auto-guard`, the missing guard is instead inserted:
-  `i32.const <id>; i32.const <maxiter>; call $_g; drop` immediately after
-  the `loop` blocktype, id = `(1 << 30) + n` (sequential — disjoint from
-  the `(1 << 31) + …` space used by `guard!`/`guard_m!`), maxiter =
-  `--default-maxiter` (default 16, deliberately small). Auto-guard exists
-  primarily for **compiler-generated loops** the developer never wrote —
+  Developers fix it with `guard!` at the top of the loop body — including
+  for **compiler-generated loops** the developer never wrote:
   `compiler_builtins` `memcpy`/`memset` loops are the known offenders on
-  `wasm32v1-none` (no bulk-memory ⇒ byte loops). Whether examples can stay
-  guard-clean without it is validated empirically in phase 4; if they
-  cannot, revisit the default with that evidence.
+  `wasm32v1-none` (no bulk-memory ⇒ byte loops), fixed at the source level
+  (`rshooks::buf_eq_*`, `HookStatic`) rather than by inserting a guard
+  after the fact.
 
-Rationale for default-off (review finding): silent insertion with a small
-maxiter can turn into runtime `GUARD_VIOLATION`s, and it hides the real
-worst-case instruction budget that SetHook fee estimation is based on.
+Rationale (review finding): silent insertion with a small maxiter can turn
+into runtime `GUARD_VIOLATION`s, and it hides the real worst-case
+instruction budget that SetHook fee estimation is based on — an earlier
+opt-in auto-insertion pass was removed for exactly this reason.
 
 **Phase-4 empirical results** (2026-07-23, confirming both sides of this
 trade-off):
 - Compiler-generated loops are real. `firewall`'s `[u8; 20]` equality
   lowers to a bcmp-style byte-compare loop; `emit-txn`'s 320-byte buffer
   zero-init lowers to a `compiler_builtins`-style memset function with 5
-  loop constructs. Neither has any loop in Rust source; both need
-  `--auto-guard`.
+  loop constructs. Neither has any loop in Rust source; both need a
+  source-level fix.
 - Straight-line hooks (`accept-all`) and hooks whose only loops are
   source-level with `guard!` (`state-counter`) build clean with no flags —
   the strict default is workable.
@@ -1365,7 +1662,7 @@ trade-off):
   `rshooks::static_cell::HookStatic<T>` (take-once cell: `take()` yields
   the one `&'static mut`, second call returns `None`; the only `unsafe`
   lives inside rshooks, and hook code needs no `unsafe` and no clippy
-  allows). This removed emit-txn's memset entirely: no `--auto-guard`,
+  allows). This removed emit-txn's memset entirely:
   WCE 6798 → 331 and 1272 bytes total (current-toolchain measurement, at
   this workspace's `opt-level = 3` default — see C6 above; exact figures
   drift with compiler versions and profile settings, `rshooks build`
@@ -1375,18 +1672,14 @@ trade-off):
   `unsafe { &mut *&raw mut }` plus a `clippy::deref_addrof` allow at
   every site). Source-level avoidance of
   *initialization* libcalls is thus reliable via statics; comparison
-  libcalls (bcmp from `[u8; N]` `==`) still need `--auto-guard` (see
-  firewall).
-
-If a guard was inserted and `_g` is not imported, the import is added
-(import section rewrite ⇒ function index shift ⇒ handled by the same
-renumbering machinery as GC).
+  libcalls (bcmp from `[u8; N]` `==`) need the same treatment at the
+  source level — `rshooks::buf_eq_*` (see firewall).
 
 **After any mutation, the full guard verifier and validator (6.4) run again
 on the final bytes** — `build` never emits an artifact that `check` would
 reject; a bug in the insertion pass fails the build instead of shipping.
-For api-version 0 the authoritative final verdict comes from the vendored
-upstream checker (6.5), not from the Rust reimplementation.
+The authoritative final verdict comes from the vendored upstream checker
+(6.5), not from the Rust reimplementation.
 
 `emit()` reachability note: xahaud requires hooks that `emit` to have called
 `etxn_reserve`; that is runtime behavior, not validated here.
@@ -1413,12 +1706,12 @@ against xahaud source plus a known-good C-built hook fixture):
   reachability analysis; revisit only with conservative table analysis).
 - Call-graph cycle (recursion) — DFS over direct calls (C5); sound because
   `call_indirect` is banned.
-- For api-version 0: any unguarded `loop` (both `check` mode and the
-  post-mutation re-verification in `build`).
-- For api-version 0: missing `_g` import (6.2b R1), and any type-section
-  entry that is not an import's type or the entry-point type (6.2b R2).
-- For api-version 0: block nesting depth > 32 (`Guard.h` `NESTING_LIMIT`
-  under `GuardRuleDepth32`; warning from depth 28 — see 6.2c).
+- Any unguarded `loop` (both `check` mode and the post-mutation
+  re-verification in `build`).
+- Missing `_g` import (6.2b R1), and any type-section entry that is not an
+  import's type or the entry-point type (6.2b R2).
+- Block nesting depth > 32 (`Guard.h` `NESTING_LIMIT` under
+  `GuardRuleDepth32`; warning from depth 28 — see 6.2c).
 - Binary > 65,535 bytes. (`build` refuses to emit; `--allow-oversize`
   writes the artifact anyway for size-debugging, clearly marked INVALID.)
 
@@ -1433,12 +1726,19 @@ external wasm (including C-built hooks).
 
 ### 6.5 Verdict authority: the vendored upstream checker
 
-The final accept/reject verdict for API-version-0 modules comes from
+The guard-shape/WCE verdict comes from
 **xahaud's own guard checker, compiled into rshooks-build from vendored,
 byte-identical upstream source** — not from a Rust reimplementation. A port,
 however careful, can diverge from what the node actually runs; the checker
 is consensus logic, not a reference tool, so divergence means "rshooks-build
-says valid, SetHook says `temMALFORMED`" (or worse, vice versa).
+says valid, SetHook says `temMALFORMED`" (or worse, vice versa). Its
+authority is scoped to what it actually evaluates (guard prologue shape,
+R1/R2, block nesting, worst-case instruction count): an accepting verdict
+downgrades a Rust-only finding in that class to a warning, but never
+overrides a Rust hard error outside that class (MVP validity, the
+export/import set, structural sections, float opcodes, `call_indirect`,
+recursion, the size gate) — the native checker has no opinion on those at
+all, so its acceptance says nothing about them.
 
 Vendored files (upstream `Xahau/xahaud`, branch `release`, kept verbatim —
 never hand-edited; re-sync only via `scripts/sync-vendor.sh`, which also
@@ -1465,8 +1765,8 @@ compiler becomes a build requirement of rshooks-build.
 export shape, `call_indirect`, memory limits, custom sections, instruction
 legality), so the division of labor is:
 
-- **C++ vendored checker** — authoritative pass/fail for api-version 0, in
-  both `check` and post-transform `build`. Its captured log is printed on
+- **C++ vendored checker** — authoritative pass/fail, in both `check` and
+  post-transform `build`. Its captured log is printed on
   failure verbatim; on success the instruction counts are reported (they
   are also what SetHook fee estimation derives from). Note: these are
   *syntactic* worst-case counts (a host `call` counts as 1; host-function
@@ -1475,11 +1775,13 @@ legality), so the division of labor is:
   10 vs static 7 (see docs/E2E-TESTING.md). They are a fee-estimation
   input, not a runtime ceiling.
 - **Rust pipeline (6.2–6.4)** — everything the checker does not do
-  (cleaning, auto-guard insertion, the 65,535-byte size gate, fee
-  estimate, api-version 1 checks) plus pre-transform diagnostics with
-  precise function/offset locations, which upstream's log lacks. If the
-  Rust validator and the C++ checker ever disagree, the C++ verdict wins
-  and the disagreement is surfaced as a rshooks-build bug.
+  (cleaning, the 65,535-byte size gate, fee
+  estimate) plus pre-transform diagnostics with precise function/offset
+  locations, which upstream's log lacks. If the Rust validator and the C++
+  checker disagree on a guard/WCE finding, the C++ verdict wins and the
+  disagreement is surfaced as a rshooks-build bug; a Rust hard error outside
+  that class always stands regardless of what the C++ checker says, since it
+  never evaluated that rule to begin with.
 
 The cleaner remains native Rust (upstream hook-cleaner is a separate
 project, and cleaning is a transform whose output the authoritative checker
@@ -1547,7 +1849,7 @@ only.
   "WCE": { "hook": 4150, "cbak": 0 },
   "builder": {
     "name": "rshooks-build",
-    "version": "0.1.0",
+    "version": "0.2.1",
     "rustc": "rustc 1.89.0 (29483883e 2025-08-04)"
   },
   "human": {
@@ -1559,10 +1861,9 @@ only.
 ```
 
 `HookHash` is SHA512-Half of the exact final cleaned WASM bytes, matching
-`SetHook`'s hash of `CreateCode`. API-version-0 WCE values come from the
-vendored authoritative guard verdict; API version 1 writes `null` for both
-values because static WCE is not calculated for gas hooks. The final module's
-reachable `env::emit` import is also cross-checked against `HookCanEmit`: a
+`SetHook`'s hash of `CreateCode`. WCE values come from the vendored
+authoritative guard verdict. The final module's reachable `env::emit`
+import is also cross-checked against `HookCanEmit`: a
 declaration without emit usage and emit usage without a declaration both
 produce build warnings.
 
@@ -1704,7 +2005,7 @@ digit) — see `examples/README.md`.
 |---|---|---|
 | 01 | `accept-all` | minimal hook: `accept` everything (starter template) |
 | 02 | `state-counter` | `state`/`state_set` round-trip, counter in hook state |
-| 03 | `hook-params` | `hook_param`-configurable threshold, with a compiled-in default |
+| 03 | `hook-params` | `#[hook_param]`-configurable threshold, with a compiled-in default |
 | 04 | `errors` | a meaningful `hook_errors!`-based rollback error-code system |
 | 05 | `firewall` | read `otxn_field(sfAccount)` + hook param blacklist → `rollback` |
 | 06 | `guard-patterns` | `guard!`/`guard_m!` correctness and the array-`==` memcmp-loop pitfall |
@@ -1791,11 +2092,11 @@ message, or a raw, zero-indirection body.
   `Rollback::from_code` with no match. `?` therefore propagates a
   `hook_errors!` variant — code and message both — straight into a typed
   entry's `Err` side.
-- **Deliberately no `From<HookError> for Rollback`.** `HookError::code()` is
-  a 46-arm re-encode match; a `?`-propagated two-hop conversion measured
-  3.1x the worst-case instructions and +67% the size of a raw-code-check
-  twin (design doc §5, probe P5). The supported pattern is
-  `.map_err(|_| MyError::X)?`, discarding the decoded `HookError`.
+- **Deliberately no `From<HookError> for Rollback`.** A Hook API error code
+  is not the hook's own return code (`docs/HOOK_ERROR_DESIGN.md` §5); an
+  implicit conversion would publish the host's code as the hook's verdict.
+  The supported pattern is `.map_err(|_| MyError::X)?`, discarding the
+  `HookError`.
 - **Migration cost, measured**: `EntryReturn::finish`'s match is dead code
   on any path that always diverges through `accept!`/`rollback!`, so a
   signature-only migration (keeping an entry's raw internals, as

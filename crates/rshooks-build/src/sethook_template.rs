@@ -4,19 +4,25 @@
 use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
-use crate::carriers::{EntryDecl, resolve_trigger_masks};
-use crate::metadata::{hook_mask, utf8_hex};
+use crate::carriers::{EntryDecl, SiDecl, SigParamDecl, resolve_trigger_masks};
+use crate::metadata::{encode_upper_hex, hook_mask, utf8_hex};
 
 /// `hsfOVERRIDE` (vendor/xahaud Enum.h `HookSetFlags`): permits replacing an
 /// existing installed Hook at a declared (non-gap) position.
 pub const HSF_OVERRIDE: u32 = 1;
 
-/// Base58 alphabet used by XRPL/Xahau addresses (excludes `0`, `O`, `I`, `l`
-/// to avoid visual ambiguity).
-const BASE58_ALPHABET: &str = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+/// XRPL/Xahau's base58 alphabet — not Bitcoin's; same 58 symbols in a
+/// different order, so decoding must index into this exact ordering.
+/// `ALPHABET[0]` (`'r'`) is this alphabet's "zero" symbol.
+const ALPHABET: &[u8; 58] = b"rpshnaf39wBUDNEGHJKLM4PQRST7VWXYZ2bcdeCg65jkm8oFqi1tuvAxyz";
+
+/// Length of a base58check-decoded classic address: 1 version byte +
+/// 20-byte AccountID payload + 4-byte checksum.
+const DECODED_LEN: usize = 25;
 
 /// Validates a `--namespace` CLI value: exactly 64 ASCII hex characters.
 /// Normalizes the result to uppercase (the conventional `HookNamespace`
@@ -31,26 +37,112 @@ pub fn validate_namespace(s: &str) -> Result<String, String> {
     Ok(s.to_ascii_uppercase())
 }
 
-/// Validates a `--account` CLI value: a superficial (non-checksum) sanity
-/// check that it looks like an XRPL/Xahau classic address — non-empty,
-/// starts with `'r'`, and every remaining character is in the base58
-/// alphabet. Intended for use as a clap `value_parser`.
+/// Validates a `--account` CLI value: it must base58check-decode into a
+/// well-formed classic XRPL/Xahau AccountID — every character in the XRPL
+/// base58 alphabet, decoded length exactly 25 bytes, version byte `0x00`,
+/// and a matching double-SHA256 checksum. Intended for use as a clap
+/// `value_parser`.
 pub fn validate_account(s: &str) -> Result<String, String> {
-    if !s.starts_with('r') {
-        return Err("--account must start with 'r'".to_string());
-    }
-    let rest = s.get(1..).unwrap_or_default();
-    if rest.is_empty() {
-        return Err("--account must not be empty".to_string());
-    }
-    if !rest.chars().all(|c| BASE58_ALPHABET.contains(c)) {
-        return Err(
-            "--account must contain only base58 characters after the leading 'r' \
-             (no '0', 'O', 'I', or 'l')"
-                .to_string(),
-        );
-    }
+    decode_classic_address(s).map_err(|e| format!("--account: {e}"))?;
     Ok(s.to_string())
+}
+
+/// Why a classic address string failed to decode into a valid 20-byte
+/// AccountID.
+enum AddressDecodeError {
+    InvalidChar(char),
+    WrongLength(usize),
+    WrongVersion(u8),
+    ChecksumMismatch,
+}
+
+impl std::fmt::Display for AddressDecodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidChar(c) => write!(f, "'{c}' is not a valid XRPL base58 character"),
+            Self::WrongLength(len) => write!(
+                f,
+                "decoded address is {len} bytes, expected {DECODED_LEN} \
+                 (1 version byte + 20-byte AccountID + 4-byte checksum)"
+            ),
+            Self::WrongVersion(v) => write!(
+                f,
+                "decoded address has version byte 0x{v:02X}, expected 0x00 (classic AccountID)"
+            ),
+            Self::ChecksumMismatch => {
+                write!(
+                    f,
+                    "base58check checksum does not match — the address has a typo"
+                )
+            }
+        }
+    }
+}
+
+/// Decodes a classic XRPL/Xahau r-address string into its 20-byte
+/// AccountID, verifying length, version byte, and checksum along the way.
+// Every index/slice below is only reached after the `decoded.len() !=
+// DECODED_LEN` (25) check above returns early, so all of them are in
+// bounds by construction.
+#[allow(clippy::indexing_slicing)]
+fn decode_classic_address(address: &str) -> Result<[u8; 20], AddressDecodeError> {
+    let decoded = base58_decode(address)?;
+
+    if decoded.len() != DECODED_LEN {
+        return Err(AddressDecodeError::WrongLength(decoded.len()));
+    }
+
+    let version = decoded[0];
+    if version != 0x00 {
+        return Err(AddressDecodeError::WrongVersion(version));
+    }
+
+    let digest = Sha256::digest(Sha256::digest(&decoded[0..21]));
+    if digest[0..4] != decoded[21..25] {
+        return Err(AddressDecodeError::ChecksumMismatch);
+    }
+
+    let mut account_id = [0u8; 20];
+    account_id.copy_from_slice(&decoded[1..21]);
+    Ok(account_id)
+}
+
+/// Plain base58 decode (XRPL alphabet), with leading zero-symbol (`'r'`)
+/// characters becoming leading zero bytes in the output — no length or
+/// checksum validation, that's [`decode_classic_address`]'s job.
+fn base58_decode(s: &str) -> Result<Vec<u8>, AddressDecodeError> {
+    // Accumulator built by repeated multiply-by-58-and-add, stored
+    // little-endian while accumulating, reversed to big-endian at the end.
+    let mut num: Vec<u8> = Vec::new();
+
+    for ch in s.chars() {
+        let idx = ALPHABET
+            .iter()
+            .position(|&b| b as char == ch)
+            .ok_or(AddressDecodeError::InvalidChar(ch))?;
+
+        let mut carry = idx as u32;
+        for byte in num.iter_mut() {
+            carry += (*byte as u32) * 58;
+            *byte = (carry & 0xff) as u8;
+            carry >>= 8;
+        }
+        while carry > 0 {
+            num.push((carry & 0xff) as u8);
+            carry >>= 8;
+        }
+    }
+
+    num.reverse();
+
+    #[allow(clippy::indexing_slicing)] // ALPHABET[0] is a fixed in-bounds index
+    let leading_zeros = s
+        .chars()
+        .take_while(|&ch| ch == ALPHABET[0] as char)
+        .count();
+    let mut decoded = vec![0u8; leading_zeros];
+    decoded.extend_from_slice(&num);
+    Ok(decoded)
 }
 
 /// One `Hooks[i]` array element: either an untouched-position gap
@@ -94,10 +186,32 @@ struct HookEntryTemplate {
     hook_namespace: String,
     #[serde(rename = "HookApiVersion")]
     hook_api_version: u8,
+    #[serde(rename = "HookParameters", skip_serializing_if = "Option::is_none")]
+    hook_parameters: Option<Vec<HookParameterItem>>,
     #[serde(rename = "HookName", skip_serializing_if = "Option::is_none")]
     hook_name: Option<String>,
     #[serde(rename = "Flags", skip_serializing_if = "Option::is_none")]
     flags: Option<u32>,
+}
+
+/// One `HookParameters[i]` array element — a declaration entry.
+/// `HookParameterValue` carries either the signature-parameter interface's
+/// literal `"00"` placeholder byte (`docs/PARAM_SIGNATURE_DESIGN.md` §4's
+/// declaration-entry convention) or the state interface's real value schema
+/// (`docs/STATE_INTERFACE_DESIGN.md` §5), depending on which declaration
+/// produced this entry.
+#[derive(Serialize)]
+struct HookParameterItem {
+    #[serde(rename = "HookParameter")]
+    hook_parameter: HookParameterFields,
+}
+
+#[derive(Serialize)]
+struct HookParameterFields {
+    #[serde(rename = "HookParameterName")]
+    hook_parameter_name: String,
+    #[serde(rename = "HookParameterValue")]
+    hook_parameter_value: String,
 }
 
 #[derive(Serialize)]
@@ -123,8 +237,15 @@ pub type TemplateInput<'a> = (u8, &'a EntryDecl, &'a [u8]);
 /// when given, else the literal placeholder strings `<ACCOUNT>` /
 /// `<NAMESPACE>` are emitted. When `override_flag` is set, `Flags: 1`
 /// (`hsfOVERRIDE`) is added to every declared (non-gap) entry only.
+///
+/// `si_decls` is the chain's `#[state_interface(..)]` declarations
+/// (`docs/STATE_INTERFACE_DESIGN.md` §5) — chain-level, not per-entry, so
+/// the same list is emitted on every declared (non-gap) entry's
+/// `HookParameters`, after that entry's own signature-parameter
+/// declarations if any.
 pub fn build_template_json(
     declared: &[TemplateInput<'_>],
+    si_decls: &[SiDecl],
     account: Option<&str>,
     namespace: Option<&str>,
     override_flag: bool,
@@ -142,6 +263,7 @@ pub fn build_template_json(
             Some((_, entry, wasm)) => HookSlot::Entry(Box::new(build_entry_template(
                 entry,
                 wasm,
+                si_decls,
                 namespace,
                 override_flag,
             )?)),
@@ -164,6 +286,7 @@ pub fn build_template_json(
 fn build_entry_template(
     entry: &EntryDecl,
     wasm: &[u8],
+    si_decls: &[SiDecl],
     namespace: Option<&str>,
     override_flag: bool,
 ) -> Result<HookEntryTemplate> {
@@ -173,22 +296,85 @@ fn build_entry_template(
         .with_context(|| format!("entry {} (`{}`)", entry.index, entry.hook_fn))?;
 
     Ok(HookEntryTemplate {
-        create_code: wasm.iter().map(|byte| format!("{byte:02X}")).collect(),
+        create_code: encode_upper_hex(wasm),
         hook_on: masks.hook_on,
         hook_on_incoming: masks.hook_on_incoming,
         hook_on_outgoing: masks.hook_on_outgoing,
         hook_can_emit,
         hook_namespace: namespace.map_or_else(|| "<NAMESPACE>".to_string(), str::to_string),
         hook_api_version: 0,
+        hook_parameters: build_hook_parameters(
+            entry.index,
+            entry.sig_params.as_deref().unwrap_or(&[]),
+            si_decls,
+        )
+        .with_context(|| format!("entry {} (`{}`)", entry.index, entry.hook_fn))?,
         hook_name: entry.hook_name.as_deref().map(utf8_hex),
         flags: override_flag.then_some(HSF_OVERRIDE),
     })
 }
 
+/// The protocol's maximum `HookParameters` entries per `Hook` object —
+/// xahaud `validateHookParams`
+/// (`src/xrpld/app/tx/detail/SetHook.cpp`): `paramCount > 16` is rejected
+/// as malformed. Both declaration sources below share this one limit, so
+/// it's enforced where they're merged, not per-source.
+const MAX_HOOK_PARAMETERS_PER_ENTRY: usize = 16;
+
+/// Builds the `HookParameters` declaration array for one entry: its own
+/// declared signature parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §4,
+/// `HookParameterValue = "00"`), then the chain's state interface
+/// declarations (`docs/STATE_INTERFACE_DESIGN.md` §5, `HookParameterValue`
+/// = the real value schema) — `None` (key omitted) only when both are
+/// empty. This is the sole exception to the "`HookParameters` is never
+/// generated" rule (`docs/MULTI_HOOK_STRUCT_DESIGN.md` §9 point #10).
+/// `sig_params` is already carrier-order (= wire index) ascending, so no
+/// re-sorting needed; `si_decls` is chain-level and identical across every
+/// entry.
+///
+/// # Errors
+///
+/// If the combined count exceeds [`MAX_HOOK_PARAMETERS_PER_ENTRY`] — the
+/// generated template would otherwise be rejected on submit
+/// (`temMALFORMED`) by the same xahaud check this constant cites.
+fn build_hook_parameters(
+    index: u8,
+    sig_params: &[SigParamDecl],
+    si_decls: &[SiDecl],
+) -> Result<Option<Vec<HookParameterItem>>> {
+    if sig_params.is_empty() && si_decls.is_empty() {
+        return Ok(None);
+    }
+    let total = sig_params.len().wrapping_add(si_decls.len());
+    if total > MAX_HOOK_PARAMETERS_PER_ENTRY {
+        bail!(
+            "entry {index}: {total} HookParameters ({} signature-parameter declaration(s) + \
+             {} state interface declaration(s)) exceeds the protocol's \
+             {MAX_HOOK_PARAMETERS_PER_ENTRY}-per-entry limit (xahaud `validateHookParams`, \
+             src/xrpld/app/tx/detail/SetHook.cpp)",
+            sig_params.len(),
+            si_decls.len(),
+        );
+    }
+    let sig_items = sig_params.iter().map(|p| HookParameterItem {
+        hook_parameter: HookParameterFields {
+            hook_parameter_name: p.name_hex.clone(),
+            hook_parameter_value: "00".to_string(),
+        },
+    });
+    let si_items = si_decls.iter().map(|d| HookParameterItem {
+        hook_parameter: HookParameterFields {
+            hook_parameter_name: d.name_hex.clone(),
+            hook_parameter_value: d.value_hex.clone(),
+        },
+    });
+    Ok(Some(sig_items.chain(si_items).collect()))
+}
+
 /// Derives `required_amendments` from what the template's own fields
 /// structurally require. Always includes `"Hooks"`. Does NOT account for
-/// Hook API surface used inside the wasm itself — that limitation is
-/// documented in the sidecar's own field.
+/// Hook API surface used inside the wasm itself (documented in the
+/// sidecar's own field).
 #[must_use]
 pub fn required_amendments(entries: &[EntryDecl]) -> Vec<String> {
     let mut amendments = vec!["Hooks".to_string()];
@@ -316,6 +502,7 @@ mod tests {
             on,
             hook_can_emit: None,
             description: None,
+            sig_params: None,
         }
     }
 
@@ -371,6 +558,31 @@ mod tests {
     }
 
     #[test]
+    fn validate_account_rejects_too_short_address() {
+        let err = validate_account("rr").expect_err("must fail");
+        assert!(err.contains("--account"), "{err}");
+    }
+
+    #[test]
+    fn validate_account_rejects_bad_checksum() {
+        // Last char 'h' -> 'H': valid chars/length/version, bad checksum.
+        assert!(validate_account("rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTH").is_err());
+    }
+
+    #[test]
+    fn validate_account_rejects_wrong_version_byte() {
+        // Well-formed base58check string with version byte 5 (seed prefix),
+        // not 0 (classic AccountID).
+        assert!(validate_account("sJHw2iRxXngPFKZvYbjkfifqt8CJghksMM").is_err());
+    }
+
+    #[test]
+    fn validate_account_rejects_wrong_length() {
+        // Truncated by 2 chars: decodes to fewer than 25 bytes.
+        assert!(validate_account("rHb9CJAWyB4rj91VRWn96DkukG4bwdty").is_err());
+    }
+
+    #[test]
     fn civil_from_days_matches_known_dates() {
         assert_eq!(civil_from_days(0), (1970, 1, 1));
         assert_eq!(civil_from_days(30), (1970, 1, 31));
@@ -387,7 +599,8 @@ mod tests {
         let wasm2 = b"BB".as_slice();
         let declared: Vec<TemplateInput<'_>> = vec![(0, &e0, wasm0), (2, &e2, wasm2)];
 
-        let bytes = build_template_json(&declared, None, None, false).expect("template builds");
+        let bytes =
+            build_template_json(&declared, &[], None, None, false).expect("template builds");
         let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
 
         let hooks = value["Hooks"].as_array().expect("Hooks array");
@@ -412,6 +625,7 @@ mod tests {
 
         let bytes = build_template_json(
             &declared,
+            &[],
             Some("rACCOUNT"),
             Some("00".repeat(32).as_str()),
             true,
@@ -421,8 +635,8 @@ mod tests {
         assert_eq!(value["Hooks"][0]["Hook"]["Flags"], 1);
         assert_eq!(value["Account"], "rACCOUNT");
 
-        let bytes =
-            build_template_json(&declared_with_gap, None, None, true).expect("template builds");
+        let bytes = build_template_json(&declared_with_gap, &[], None, None, true)
+            .expect("template builds");
         let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
         assert!(
             value["Hooks"][0]["Hook"]
@@ -449,7 +663,8 @@ mod tests {
         ] {
             let wasm = b"AA".as_slice();
             let declared: Vec<TemplateInput<'_>> = vec![(0, e, wasm)];
-            let bytes = build_template_json(&declared, None, None, false).expect("template builds");
+            let bytes =
+                build_template_json(&declared, &[], None, None, false).expect("template builds");
             let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
             assert_eq!(
                 value["Hooks"][0]["Hook"].get("HookCanEmit").is_some(),
@@ -481,7 +696,8 @@ mod tests {
             let e = entry(0, "a", on, None);
             let wasm = b"AA".as_slice();
             let declared: Vec<TemplateInput<'_>> = vec![(0, &e, wasm)];
-            let bytes = build_template_json(&declared, None, None, false).expect("template builds");
+            let bytes =
+                build_template_json(&declared, &[], None, None, false).expect("template builds");
             let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
             let hook = &value["Hooks"][0]["Hook"];
             assert_eq!(hook.get("HookOn").is_some(), expect_hook_on);
@@ -495,7 +711,8 @@ mod tests {
         let named = entry(0, "a", omitted_on(), Some("dep"));
         let wasm = b"AA".as_slice();
         let declared: Vec<TemplateInput<'_>> = vec![(0, &named, wasm)];
-        let bytes = build_template_json(&declared, None, None, false).expect("template builds");
+        let bytes =
+            build_template_json(&declared, &[], None, None, false).expect("template builds");
         let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
         assert_eq!(value["Hooks"][0]["Hook"]["HookName"], "646570");
     }
@@ -570,5 +787,227 @@ mod tests {
                 .as_str()
                 .is_some_and(|s| s.ends_with('Z') && s.contains('T'))
         );
+    }
+
+    // --- `HookParameters` (docs/PARAM_SIGNATURE_DESIGN.md §4) ---
+
+    fn sig_param(field: &str, type_byte: u8, name_hex: &str) -> SigParamDecl {
+        SigParamDecl {
+            field: field.to_string(),
+            type_byte,
+            name_hex: name_hex.to_string(),
+        }
+    }
+
+    #[test]
+    fn entry_without_sig_params_emits_no_hook_parameters_key() {
+        let e = entry(0, "deposit", omitted_on(), None);
+        let wasm = b"AA".as_slice();
+        let declared: Vec<TemplateInput<'_>> = vec![(0, &e, wasm)];
+        let bytes =
+            build_template_json(&declared, &[], None, None, false).expect("template builds");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
+        assert!(value["Hooks"][0]["Hook"].get("HookParameters").is_none());
+    }
+
+    #[test]
+    fn entry_with_sig_params_emits_hook_parameters_in_index_order_with_zero_value() {
+        let mut e = entry(0, "increment", omitted_on(), None);
+        e.sig_params = Some(vec![
+            sig_param("account", 0x08, "5F5053000008076163636F756E74"),
+            sig_param("count", 0x01, "5F505300010105636F756E74"),
+        ]);
+        let wasm = b"AA".as_slice();
+        let declared: Vec<TemplateInput<'_>> = vec![(0, &e, wasm)];
+        let bytes =
+            build_template_json(&declared, &[], None, None, false).expect("template builds");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
+        let params = value["Hooks"][0]["Hook"]["HookParameters"]
+            .as_array()
+            .expect("HookParameters array");
+        assert_eq!(params.len(), 2);
+        assert_eq!(
+            params[0]["HookParameter"]["HookParameterName"],
+            "5F5053000008076163636F756E74"
+        );
+        assert_eq!(params[0]["HookParameter"]["HookParameterValue"], "00");
+        assert_eq!(
+            params[1]["HookParameter"]["HookParameterName"],
+            "5F505300010105636F756E74"
+        );
+        assert_eq!(params[1]["HookParameter"]["HookParameterValue"], "00");
+    }
+
+    #[test]
+    fn hook_parameters_key_sits_between_hook_api_version_and_hook_name() {
+        let mut e = entry(0, "increment", omitted_on(), Some("inc"));
+        e.sig_params = Some(vec![sig_param("count", 0x01, "5F505300010105636F756E74")]);
+        let wasm = b"AA".as_slice();
+        let declared: Vec<TemplateInput<'_>> = vec![(0, &e, wasm)];
+        let bytes =
+            build_template_json(&declared, &[], None, None, false).expect("template builds");
+        let text = String::from_utf8(bytes).expect("utf8");
+        let api_version_pos = text
+            .find("\"HookApiVersion\"")
+            .expect("HookApiVersion present");
+        let params_pos = text
+            .find("\"HookParameters\"")
+            .expect("HookParameters present");
+        let name_pos = text.find("\"HookName\"").expect("HookName present");
+        assert!(api_version_pos < params_pos);
+        assert!(params_pos < name_pos);
+    }
+
+    #[test]
+    fn mixed_chain_gap_and_no_sig_and_sig_entries_only_the_sig_entry_gets_hook_parameters() {
+        // A gap at 1, a plain entry at 0, a sig-param entry at 2 — the gap
+        // must stay exactly `{"Hook": {}}` and the plain entry must not
+        // gain `HookParameters` just because a sibling entry has one.
+        let e0 = entry(0, "deposit", omitted_on(), None);
+        let mut e2 = entry(2, "increment", omitted_on(), None);
+        e2.sig_params = Some(vec![sig_param("count", 0x01, "5F505300010105636F756E74")]);
+        let wasm = b"AA".as_slice();
+        let declared: Vec<TemplateInput<'_>> = vec![(0, &e0, wasm), (2, &e2, wasm)];
+        let bytes =
+            build_template_json(&declared, &[], None, None, false).expect("template builds");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
+
+        assert!(
+            value["Hooks"][1]["Hook"]
+                .as_object()
+                .expect("gap object")
+                .is_empty()
+        );
+        assert!(value["Hooks"][0]["Hook"].get("HookParameters").is_none());
+        assert_eq!(
+            value["Hooks"][2]["Hook"]["HookParameters"]
+                .as_array()
+                .expect("HookParameters array")
+                .len(),
+            1
+        );
+    }
+
+    // --- `HookParameters` (docs/STATE_INTERFACE_DESIGN.md §5) ---
+
+    fn si_decl(field: &str, id: u8, name_hex: &str, value_hex: &str) -> SiDecl {
+        SiDecl {
+            field: field.to_string(),
+            id,
+            name_hex: name_hex.to_string(),
+            value_hex: value_hex.to_string(),
+            key: "(account: AccountId, token: u32)".to_string(),
+            value: "(amount: u64, updated: u32)".to_string(),
+        }
+    }
+
+    #[test]
+    fn si_declarations_are_chain_level_and_emitted_on_every_declared_entry() {
+        // Two declared entries, neither with sig_params — the same chain-level
+        // `si_decls` list must appear on both.
+        let e0 = entry(0, "a", omitted_on(), None);
+        let e1 = entry(1, "b", omitted_on(), None);
+        let wasm = b"AA".as_slice();
+        let declared: Vec<TemplateInput<'_>> = vec![(0, &e0, wasm), (1, &e1, wasm)];
+        let si = vec![si_decl(
+            "balances",
+            0,
+            "5F534900000208076163636F756E740205746F6B656E",
+            "020306616D6F756E74020775706461746564",
+        )];
+        let bytes =
+            build_template_json(&declared, &si, None, None, false).expect("template builds");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
+
+        for i in 0..2 {
+            let params = value["Hooks"][i]["Hook"]["HookParameters"]
+                .as_array()
+                .expect("HookParameters array");
+            assert_eq!(params.len(), 1);
+            assert_eq!(
+                params[0]["HookParameter"]["HookParameterName"],
+                "5F534900000208076163636F756E740205746F6B656E"
+            );
+            assert_eq!(
+                params[0]["HookParameter"]["HookParameterValue"],
+                "020306616D6F756E74020775706461746564"
+            );
+        }
+    }
+
+    #[test]
+    fn si_declarations_follow_sig_param_declarations_on_the_same_entry() {
+        let mut e = entry(0, "increment", omitted_on(), None);
+        e.sig_params = Some(vec![sig_param("count", 0x01, "5F5F015F015F636F756E74")]);
+        let wasm = b"AA".as_slice();
+        let declared: Vec<TemplateInput<'_>> = vec![(0, &e, wasm)];
+        let si = vec![si_decl("balances", 0, "AABB", "CCDD")];
+        let bytes =
+            build_template_json(&declared, &si, None, None, false).expect("template builds");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
+
+        let params = value["Hooks"][0]["Hook"]["HookParameters"]
+            .as_array()
+            .expect("HookParameters array");
+        assert_eq!(params.len(), 2);
+        assert_eq!(
+            params[0]["HookParameter"]["HookParameterName"],
+            "5F5F015F015F636F756E74"
+        );
+        assert_eq!(params[0]["HookParameter"]["HookParameterValue"], "00");
+        assert_eq!(params[1]["HookParameter"]["HookParameterName"], "AABB");
+        assert_eq!(params[1]["HookParameter"]["HookParameterValue"], "CCDD");
+    }
+
+    #[test]
+    fn no_sig_params_and_no_si_decls_emits_no_hook_parameters_key() {
+        let e = entry(0, "deposit", omitted_on(), None);
+        let wasm = b"AA".as_slice();
+        let declared: Vec<TemplateInput<'_>> = vec![(0, &e, wasm)];
+        let bytes =
+            build_template_json(&declared, &[], None, None, false).expect("template builds");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
+        assert!(value["Hooks"][0]["Hook"].get("HookParameters").is_none());
+    }
+
+    /// `n` distinct single-value-field SI declarations, `id`s `0..n`.
+    fn si_decls(n: u8) -> Vec<SiDecl> {
+        (0..n)
+            .map(|i| si_decl(&format!("f{i}"), i, &format!("{i:02X}"), "00"))
+            .collect()
+    }
+
+    #[test]
+    fn sixteen_combined_hook_parameters_is_the_boundary_that_still_builds() {
+        let mut e = entry(0, "deposit", omitted_on(), None);
+        e.sig_params = Some(vec![sig_param("count", 0x01, "5F5F015F015F636F756E74")]);
+        let wasm = b"AA".as_slice();
+        let declared: Vec<TemplateInput<'_>> = vec![(0, &e, wasm)];
+        // 1 sig param + 15 SI declarations = 16, exactly at the limit.
+        let si = si_decls(15);
+        let bytes = build_template_json(&declared, &si, None, None, false).expect("16 builds");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
+        assert_eq!(
+            value["Hooks"][0]["Hook"]["HookParameters"]
+                .as_array()
+                .expect("HookParameters array")
+                .len(),
+            16
+        );
+    }
+
+    #[test]
+    fn seventeen_combined_hook_parameters_is_rejected_naming_entry_counts_and_limit() {
+        let mut e = entry(0, "deposit", omitted_on(), None);
+        e.sig_params = Some(vec![sig_param("count", 0x01, "5F5F015F015F636F756E74")]);
+        let wasm = b"AA".as_slice();
+        let declared: Vec<TemplateInput<'_>> = vec![(0, &e, wasm)];
+        // 1 sig param + 16 SI declarations = 17, one over the limit.
+        let si = si_decls(16);
+        let err = build_template_json(&declared, &si, None, None, false).expect_err("must fail");
+        let message = format!("{err:#}");
+        assert!(message.contains("entry 0"), "{message}");
+        assert!(message.contains("17"), "{message}");
+        assert!(message.contains("16-per-entry"), "{message}");
     }
 }

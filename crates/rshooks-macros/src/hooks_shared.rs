@@ -9,13 +9,133 @@
 //! and angle-bracket generics (`State<V>`), neither of which the derives
 //! ever need to recognize.
 
-use proc_macro::{Spacing, Span, TokenStream, TokenTree};
+use proc_macro::{Delimiter, Group, Spacing, Span, TokenStream, TokenTree};
 
 use crate::err;
+
+/// Scans zero or more leading `#[...]` attributes starting at
+/// `tokens[start]` — each `#` `Punct` immediately followed by its
+/// bracketed group, collected verbatim with no classification — returning
+/// their tokens and the index just past them. `malformed_msg` names the
+/// item a lone `#` not followed by a `[...]` group precedes (`#[hooks]`'s
+/// own leading attributes, on a struct or an impl).
+pub(crate) fn scan_attrs(
+    tokens: &[TokenTree],
+    start: usize,
+    malformed_msg: &str,
+) -> Result<(Vec<TokenTree>, usize), TokenStream> {
+    let mut attrs = Vec::new();
+    let mut i = start;
+    while let Some(tt) = tokens.get(i) {
+        if !is_punct(tt, '#') {
+            break;
+        }
+        attrs.push(tt.clone());
+        match tokens.get(i.wrapping_add(1)) {
+            Some(g @ TokenTree::Group(group)) if group.delimiter() == Delimiter::Bracket => {
+                attrs.push(g.clone());
+            }
+            _ => return Err(err(Span::call_site(), malformed_msg)),
+        }
+        i = i.wrapping_add(2);
+    }
+    Ok((attrs, i))
+}
+
+/// Scans an optional leading `pub`/`pub(..)` visibility starting at
+/// `tokens[start]`, returning its tokens (empty if absent) and the index
+/// just past it.
+pub(crate) fn scan_vis(tokens: &[TokenTree], start: usize) -> (Vec<TokenTree>, usize) {
+    let mut vis = Vec::new();
+    let mut i = start;
+    if let Some(tt @ TokenTree::Ident(id)) = tokens.get(i)
+        && id.to_string() == "pub"
+    {
+        vis.push(tt.clone());
+        i = i.wrapping_add(1);
+        if let Some(g @ TokenTree::Group(group)) = tokens.get(i)
+            && group.delimiter() == Delimiter::Parenthesis
+        {
+            vis.push(g.clone());
+            i = i.wrapping_add(1);
+        }
+    }
+    (vis, i)
+}
+
+/// Recursively walks `input`, trying `try_replace` at every remaining
+/// position; a `Some((replacement, consumed))` splices `replacement` in and
+/// skips `consumed` input tokens, otherwise the current token is kept
+/// (recursing into a [`proc_macro::Group`]'s own stream, with its delimiter
+/// and span preserved) and the walk advances by one. Shared by every
+/// marker-splicing macro (`paste!`'s `[< .. >]` and
+/// `__txn_template_index_elements!`'s `@ ELEMS`), which differ only in what
+/// counts as a marker and how many tokens it spans.
+pub(crate) fn map_tokens(
+    input: TokenStream,
+    try_replace: &impl Fn(&[TokenTree]) -> Option<(TokenStream, usize)>,
+) -> TokenStream {
+    let tokens: Vec<TokenTree> = input.into_iter().collect();
+    let mut out = TokenStream::new();
+    let mut i = 0usize;
+    while let Some(rest) = tokens.get(i..).filter(|rest| !rest.is_empty()) {
+        if let Some((replacement, consumed)) = try_replace(rest) {
+            out.extend(replacement);
+            i = i.wrapping_add(consumed);
+            continue;
+        }
+        match rest.first() {
+            Some(TokenTree::Group(group)) => {
+                let mut rewritten =
+                    Group::new(group.delimiter(), map_tokens(group.stream(), try_replace));
+                rewritten.set_span(group.span());
+                out.extend([TokenTree::Group(rewritten)]);
+            }
+            Some(other) => out.extend([other.clone()]),
+            None => {}
+        }
+        i = i.wrapping_add(1);
+    }
+    out
+}
 
 /// Whether `tt` is a bare `Punct` token spelled `ch`.
 pub(crate) fn is_punct(tt: &TokenTree, ch: char) -> bool {
     matches!(tt, TokenTree::Punct(p) if p.as_char() == ch)
+}
+
+/// Renders `bytes` as uppercase hex — used to fold a JSON carrier payload
+/// into its own export name (`hooks_struct`'s struct carrier,
+/// `hooks_impl`'s entries carrier).
+pub(crate) fn hex_upper(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02X}")).collect()
+}
+
+/// Renders `bytes` as lowercase hex — used to build a carrier function's
+/// digest-derived identifier.
+pub(crate) fn hex_lower(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Renders the wasm-only, zero-argument carrier export function that
+/// ferries a hex-encoded JSON payload through its own export name (contract
+/// §B1 item 6 for the struct carrier; the entries carrier follows the same
+/// shape): `#[cfg(target_arch = "wasm32")] .. #[unsafe(export_name =
+/// "<export_prefix><payload_hex>")] pub extern "C" fn <carrier_ident>(_reserved:
+/// u32) -> i64 { 0 }`. Shared by `hooks_struct`'s struct carrier and
+/// `hooks_impl`'s entries carrier — identical shape, different export
+/// prefix.
+pub(crate) fn render_carrier_export(
+    export_prefix: &str,
+    payload_hex: &str,
+    carrier_ident: &str,
+) -> String {
+    format!(
+        "#[cfg(target_arch = \"wasm32\")]\n\
+         #[doc(hidden)]\n\
+         #[unsafe(export_name = \"{export_prefix}{payload_hex}\")]\n\
+         pub extern \"C\" fn {carrier_ident}(_reserved: u32) -> i64 {{ 0 }}\n"
+    )
 }
 
 /// Whether `tt` is a `Punct` token spelled `ch` with [`Spacing::Joint`] —
@@ -32,23 +152,18 @@ fn is_joint_punct(tt: Option<&TokenTree>, ch: char) -> bool {
 /// Angle brackets never arrive as a [`proc_macro::Group`] — they are plain
 /// `Punct` tokens indistinguishable, at the token level, from the
 /// less-than/greater-than comparison operators, a `->` return-type arrow,
-/// or a `>>` shift-right operator. This helper resolves the two cases that
-/// matter for the grammars this crate scans:
+/// or a `>>` shift-right operator. Two cases need special handling:
 ///
 /// - A `->` arrow (`Punct('-', Joint)` immediately followed by
 ///   `Punct('>', _)`) is treated as one atomic non-bracket unit: neither
-///   token touches `depth`, and the returned `consumed` is `2` so the
-///   caller skips both at once. Without this, a value like
+///   token touches `depth`, and `consumed` is `2`. Otherwise a value like
 ///   `default = |x: u32| -> u32 { x }` would misread the arrow's `>` as a
 ///   generic close.
-/// - Every other `>` decrements `depth`, clamped at `0` (never negative).
-///   A `>>` run's two `>` `Punct`s are, at the token level, indistinguishable
-///   from two nested generic closes (`Vec<Vec<T>>`) — clamping means a
-///   shift-right operator used at depth `0` (e.g. `default = 1u32 >> 2`)
-///   leaves `depth` at `0` instead of going negative and desyncing every
-///   comma check for the remainder of the scan, while a genuine `>>`
-///   closing two open levels still decrements twice, back to `0`, exactly
-///   as two separate `>` tokens would.
+/// - Every other `>` decrements `depth`, clamped at `0` (never negative),
+///   so a shift-right operator used at depth `0` (e.g.
+///   `default = 1u32 >> 2`) can't desync later comma checks by going
+///   negative, while a genuine `>>` closing two open levels
+///   (`Vec<Vec<T>>`) still decrements twice, back to `0`.
 ///
 /// Returns `(consumed, new_depth)`.
 pub(crate) fn step_angle_depth(tokens: &[TokenTree], i: usize, depth: i32) -> (usize, i32) {
@@ -56,12 +171,10 @@ pub(crate) fn step_angle_depth(tokens: &[TokenTree], i: usize, depth: i32) -> (u
 }
 
 /// One token's classification for [`step_angle_depth`]'s purposes,
-/// independent of any live `proc_macro` type — kept separate purely so the
+/// independent of any live `proc_macro` type — kept separate so the
 /// depth-stepping logic itself ([`step_angle_depth_core`]) can be unit
 /// tested. `proc_macro::TokenTree`/`TokenStream::from_str`/`Span` all panic
-/// outside an actual macro invocation (see `hooks_struct`'s
-/// `ChainFieldJson` doc comment for the same convention followed
-/// elsewhere in this crate).
+/// outside an actual macro invocation.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum AngleTok {
     /// `<`
@@ -91,8 +204,7 @@ fn classify_angle_tok(tokens: &[TokenTree], i: usize) -> AngleTok {
     }
 }
 
-/// The pure depth-stepping core of [`step_angle_depth`] — see that
-/// function's doc comment for the full rationale. Operates on a
+/// The pure depth-stepping core of [`step_angle_depth`], operating on a
 /// pre-classified [`AngleTok`] instead of a live `TokenTree` so it is
 /// testable without a `proc_macro` context. Returns `(consumed, new_depth)`.
 pub(crate) fn step_angle_depth_core(kind: AngleTok, depth: i32) -> (usize, i32) {
@@ -192,8 +304,8 @@ pub(crate) fn parse_attr_entries(
 /// §5.4 and contract §B1 item 1.
 ///
 /// Splits on `_`, capitalizes the first ASCII letter of every non-empty
-/// segment and leaves the rest as written (never lower-cases an
-/// already-uppercase run), then concatenates with no separator.
+/// segment, leaves the rest as written, then concatenates with no
+/// separator.
 pub(crate) fn to_upper_camel(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     for segment in name.split('_') {
@@ -330,15 +442,57 @@ pub(crate) fn parse_byte_string_value(
     Ok((tt, decoded_len))
 }
 
+/// Whether `name` matches the interface drafts' shared display/field-name
+/// charset: `[A-Za-z][A-Za-z0-9]*`, 1..=16 bytes — the macro-time twin of
+/// the `rshooks` crate's shared `is_valid_name` const fn
+/// (`crates/rshooks/src/interface_name.rs`). Both interface drafts
+/// (`docs/PARAM_SIGNATURE_DESIGN.md` and `docs/STATE_INTERFACE_DESIGN.md`)
+/// define this same rule for a declared name/field name.
+pub(crate) fn is_valid_interface_name(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    if bytes.is_empty() || bytes.len() > 16 {
+        return false;
+    }
+    bytes.iter().enumerate().all(|(i, &b)| {
+        if i == 0 {
+            b.is_ascii_alphabetic()
+        } else {
+            b.is_ascii_alphanumeric()
+        }
+    })
+}
+
+/// Classifies a whitespace-stripped, flattened type spelling into its
+/// `(XAS-010d type code, encoded width)` pair, for the fixed-width type
+/// subset both interface drafts share (`docs/PARAM_SIGNATURE_DESIGN.md` §2
+/// and `docs/STATE_INTERFACE_DESIGN.md` §1.5). Variable-width types
+/// (`AmountBytes`/`IssueBytes`/`Blob<N>`) are outside this table — the
+/// Signature Interface, the only draft that supports them, classifies those
+/// itself.
+pub(crate) fn classify_fixed_sti_type_text(flat: &str) -> Option<(u8, usize)> {
+    match flat {
+        "u8" => Some((0x10, 1)),                // STI_UINT8
+        "u16" => Some((0x01, 2)),               // STI_UINT16
+        "u32" => Some((0x02, 4)),               // STI_UINT32
+        "u64" => Some((0x03, 8)),               // STI_UINT64
+        "[u8;16]" => Some((0x04, 16)),          // STI_UINT128
+        "[u8;32]" | "Hash" => Some((0x05, 32)), // STI_UINT256
+        "AccountId" => Some((0x08, 20)),        // STI_ACCOUNT
+        "[u8;20]" => Some((0x11, 20)),          // STI_UINT160
+        "CurrencyCode" => Some((0x1A, 20)),     // STI_CURRENCY
+        "XFL" => Some((0x80, 8)),               // XAS-010d XFL
+        _ => None,
+    }
+}
+
 /// Splits a token slice on top-level commas — i.e. commas not nested inside
 /// a [`proc_macro::Group`] or a manually-tracked `< .. >` pair. Used to
 /// split a generic-argument list (`V,` / `V`) and, in `hooks_impl`, a
 /// bracketed transaction-type list.
 ///
-/// An entirely empty trailing segment (from a trailing comma) is dropped —
-/// callers that care about a trailing comma's *presence* check that before
-/// calling this; callers that only want the non-empty argument list (the
-/// common case) get exactly that.
+/// An entirely empty trailing segment (from a trailing comma) is dropped;
+/// callers that care about a trailing comma's presence must check for it
+/// before calling this.
 pub(crate) fn split_top_level_commas(tokens: &[TokenTree]) -> Vec<Vec<TokenTree>> {
     let mut out = Vec::new();
     let mut current: Vec<TokenTree> = Vec::new();
@@ -388,17 +542,14 @@ mod tests {
     // --- F4: `step_angle_depth_core` — generic-containing inputs ---
     //
     // `proc_macro::TokenTree` cannot be constructed outside a live macro
-    // invocation (it panics — see `AngleTok`'s doc comment), so these tests
-    // exercise the pure depth-stepping core directly, simulating the token
-    // kind sequence a real `Pair<A, B>` / `State<Result<A, B>>` /
-    // `|x| -> u32 { x }` input would produce. This is the logic both
-    // `parse_attr_entries`'s value scan (hooks_shared.rs) and
-    // `parse_named_fields`'s field-type scan (hooks_struct.rs) now share.
+    // invocation, so these tests exercise the pure depth-stepping core
+    // directly, simulating the token kind sequence a real `Pair<A, B>` /
+    // `State<Result<A, B>>` / `|x| -> u32 { x }` input would produce —
+    // shared by `parse_attr_entries`'s value scan and `hooks_struct`'s
+    // field-type scan.
 
     /// Runs a full sequence of [`AngleTok`]s through [`step_angle_depth_core`]
-    /// starting at depth `0`, returning the depth *after* each input token
-    /// (an `ArrowStart` consumes 2 real tokens but only ever appears once in
-    /// these fixtures, so per-`AngleTok`-element depth tracking is exact).
+    /// starting at depth `0`, returning the depth *after* each input token.
     fn run(kinds: &[AngleTok]) -> Vec<i32> {
         let mut depth = 0i32;
         let mut out = Vec::with_capacity(kinds.len());
@@ -412,9 +563,8 @@ mod tests {
 
     #[test]
     fn generic_value_keeps_inner_comma_non_top_level() {
-        // `default = Pair<A, B>` — the token run after `=` is:
-        // Ident(Pair) `<` Ident(A) `,` Ident(B) `>`. A top-level-comma scan
-        // must NOT stop at the inner `,` (index 3): depth is 1 there.
+        // `default = Pair<A, B>`: Ident(Pair) `<` Ident(A) `,` Ident(B) `>`.
+        // A top-level-comma scan must not stop at the inner `,` (index 3).
         use AngleTok::{Gt, Lt, Other};
         let depths = run(&[Other, Lt, Other, Other, Other, Gt]);
         assert_eq!(
@@ -430,10 +580,8 @@ mod tests {
 
     #[test]
     fn nested_generic_field_type_closes_via_two_gt_tokens() {
-        // `State<Result<A, B>>` — field-type scan sees `<` `Result` `<` `A`
-        // `,` `B` `>` `>`. Two nested opens require two closes; the inner
-        // comma (index 4) must stay non-top-level, and depth must reach 0
-        // only after both `>` tokens.
+        // `State<Result<A, B>>`: `<` `Result` `<` `A` `,` `B` `>` `>`. Two
+        // nested opens require two closes before depth reaches 0.
         use AngleTok::{Gt, Lt, Other};
         let depths = run(&[Lt, Other, Lt, Other, Other, Other, Gt, Gt]);
         assert_eq!(depths[4], 2, "comma nested inside two open `<..>` levels");
@@ -443,14 +591,14 @@ mod tests {
 
     #[test]
     fn arrow_start_consumes_two_tokens_without_touching_depth() {
-        // `default = |x: u32| -> u32 { x }` — the `->` arrow's `-` and `>`
-        // must never be read as a generic close.
+        // `default = |x: u32| -> u32 { x }`: the arrow's `-`/`>` must never
+        // read as a generic close.
         let (consumed, depth) = step_angle_depth_core(AngleTok::ArrowStart, 0);
         assert_eq!(consumed, 2);
         assert_eq!(depth, 0);
 
-        // Same, mid-nesting (`Box<dyn Fn() -> T>`): the arrow must not
-        // prematurely close the still-open `Box<..>` level.
+        // Same, mid-nesting (`Box<dyn Fn() -> T>`): must not prematurely
+        // close the still-open `Box<..>` level.
         let (consumed, depth) = step_angle_depth_core(AngleTok::ArrowStart, 1);
         assert_eq!(consumed, 2);
         assert_eq!(depth, 1);
@@ -458,9 +606,8 @@ mod tests {
 
     #[test]
     fn stray_shift_right_at_depth_zero_clamps_instead_of_going_negative() {
-        // `default = 1u32 >> 2` at depth 0 — both `>` `Punct`s of the `>>`
-        // run must leave depth at 0, not go negative (which would desync
-        // every later top-level-comma check in the same scan).
+        // `default = 1u32 >> 2` at depth 0 — both `>` tokens must leave
+        // depth at 0, not go negative.
         let (_, d1) = step_angle_depth_core(AngleTok::Gt, 0);
         assert_eq!(d1, 0);
         let (_, d2) = step_angle_depth_core(AngleTok::Gt, d1);

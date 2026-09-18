@@ -4,72 +4,55 @@
 //! zero-cost `rshooks::convert::ToBytes`/`FromBytes`/`FixedRead` triple,
 //! for a **hook-state value** — read back and decoded by
 //! `state_get_typed`/`state_get`, written by `state_set_typed`/`state_set_loose`.
-//! See `rshooks::HookData`'s doc comment (the public-facing re-export
-//! site) for the full user-facing writeup, grammar, and worked/
-//! compile-fail examples — this module only implements the codegen.
+//! See `rshooks::HookData`'s doc comment for the user-facing writeup,
+//! grammar, and worked/compile-fail examples — this module only implements
+//! the codegen.
 //!
-//! Three sibling derives cover the other three roles a fixed-offset struct
-//! plays in this crate — see each one's own doc comment for the full
-//! rationale for why these are four separate, deliberately narrower
-//! derives rather than one derive covering everything:
+//! Three sibling derives cover the other roles a fixed-offset struct plays
+//! in this crate:
 //!
 //! - [`crate::hook_key`]'s `#[derive(HookKey)]` — a hook-state **key**
-//!   (write-only, plus an explicit `StateKeyEncode` impl with a 32-byte
-//!   bound checked at derive time).
+//!   (write-only, plus a `StateKeyEncode` impl with a 32-byte bound checked
+//!   at derive time).
 //! - [`crate::param_name`]'s `#[derive(ParamName)]` — a composite Hook API
-//!   parameter **name** (write-only, with the Hook API's 1–32-byte
-//!   parameter-name bound checked at derive time).
+//!   parameter **name** (write-only, 1–32-byte bound checked at derive
+//!   time).
 //! - [`crate::param_value`]'s `#[derive(ParamValue)]` — a Hook API
 //!   parameter **value** (read-only).
 //!
-//! # Why hand-rolled, not `syn`/`quote`
-//!
-//! Same reasoning as the rest of this crate (see the crate doc comment):
-//! this derive only ever needs to recognize one shape (a named-field
-//! struct, each field a bare `name: Type` pair, `Type` being a path or a
-//! `[u8; N]` array) — never a general Rust-item/type parser. `syn`+`quote`'s
-//! compile cost would be paid on every build of every hook crate for a
-//! job this small, token-shape-matching pass handles directly. Shared with
-//! [`crate::hook_key`]/[`crate::param_name`]/[`crate::param_value`] via
-//! [`crate::shape`].
+//! Shape-recognition rationale: see the crate doc comment in `lib.rs`.
+//! Shared with [`crate::hook_key`]/[`crate::param_name`]/
+//! [`crate::param_value`] via [`crate::shape`].
 //!
 //! # Codegen strategy
 //!
-//! Every field's byte width is that field's own
-//! `<FieldType as ToBytes>::MAX_LEN` — an associated-const expression, not a
-//! value this macro can compute (it only ever sees a field's type as
-//! syntax, e.g. the text `AccountId` or `[u8; 20]`, never its resolved
-//! `MAX_LEN`, which may live in a crate this macro cannot see). So instead
-//! of baking in literal numeric offsets, the generated code computes a
-//! chain of `const __OFF_N: usize = __OFF_{N-1} + <FieldTypeN as
-//! ToBytes>::MAX_LEN;` declarations — one per field boundary, entirely
-//! compile-time — and every field read/write uses `__dst[__OFF_i..__OFF_{i+1}]`
-//! against those consts. Because every offset is a compile-time constant
-//! (never a runtime-computed length), and every per-field copy delegates to
-//! that field's own already-optimized `ToBytes::write`/`FromBytes::read`
-//! (itself following the same convention, all the way down through nested
-//! `#[derive(HookData)]` types), the result is the same "unrolled, fixed
-//! offset" shape `rshooks` already hand-writes elsewhere (see
-//! `rshooks::txn::codec`'s `write_field_header`/`write_const_bytes` and
-//! `txn_template!`'s generated setters, which use the identical
-//! `#[allow(clippy::indexing_slicing)]`-annotated fixed-offset-range pattern
-//! for the same reason: proven in-bounds by construction, not by a runtime
-//! check clippy can see).
+//! Each field's byte width is `<FieldType as ToBytes>::MAX_LEN`, an
+//! associated-const expression this macro cannot resolve (it only sees a
+//! field's type as syntax). So instead of literal numeric offsets, the
+//! generated code emits a chain of `const __OFF_N: usize = __OFF_{N-1} +
+//! <FieldTypeN as ToBytes>::MAX_LEN;` declarations — one per field
+//! boundary — and every field read/write indexes `__dst[__OFF_i..__OFF_{i+1}]`
+//! against those consts. All offsets are compile-time constants and every
+//! per-field copy delegates to that field's own `ToBytes::write`/
+//! `FromBytes::read`, matching the same unrolled fixed-offset shape used by
+//! `rshooks::txn::codec` and `txn_template!`.
 //!
-//! # Why the generated code hardcodes `::rshooks::...` paths
+//! # Why the generated code uses absolute `rshooks` paths
 //!
 //! This derive is re-exported as `rshooks::HookData`, so every crate that
-//! can invoke it already depends on `rshooks` under that exact name (Cargo
-//! normalizes the hyphen to an underscore) — the generated code can
-//! therefore reference `::rshooks::convert::{ToBytes, FromBytes,
-//! FixedRead}` and `::rshooks::error::{HookError, Result}` as absolute
-//! paths unconditionally, without requiring the invoking module to have
-//! those names in scope via `use` (unlike relying on `rshooks::prelude::*`
-//! already being imported, which every example happens to do but which this
-//! derive does not assume).
+//! can invoke it already depends on `rshooks`, without requiring the
+//! invoking module to have `convert`/`error` in scope via `use`. The
+//! generated code references `convert::{ToBytes, FromBytes, FixedRead}` and
+//! `error::{HookError, Result}` through an absolute path built at
+//! expansion time by [`crate::krate::rewrite`] — `::rshooks::` normally,
+//! `crate::` when compiled as part of `rshooks` itself, or whatever name a
+//! consumer's `Cargo.toml` gives the dependency (`hooks = { package =
+//! "rshooks", .. }`).
 
-use crate::err;
-use crate::shape::{StructShape, parse_struct};
+use crate::shape::{
+    StructShape, fixed_read_impl, from_bytes_impl, max_len_expr, offset_consts, parse_struct,
+    read_body, to_bytes_impl, write_body,
+};
 use proc_macro::TokenStream;
 
 /// Entry point invoked by `#[proc_macro_derive(HookData)]` in `lib.rs`.
@@ -80,146 +63,54 @@ pub fn derive(input: TokenStream) -> TokenStream {
     }
 }
 
-/// Builds a rustdoc table (declaration order, field name, field type) for
-/// the generated `LEN` const. Deliberately does not print numeric offsets —
-/// this macro only ever sees a field's type as syntax, never its resolved
-/// `ToBytes::MAX_LEN`, so the concrete byte offsets are a compile-time fact
-/// this comment can describe but not compute.
-fn layout_table_doc(shape: &StructShape) -> String {
-    let mut s = String::new();
-    s.push_str("/// Total encoded length in bytes: [`rshooks::convert::ToBytes::MAX_LEN`].\n");
-    s.push_str("///\n");
-    s.push_str("/// Generated by `#[derive(HookData)]`. Fields are encoded back-to-back in\n");
-    s.push_str("/// declaration order, each contributing exactly its own `ToBytes::MAX_LEN`\n");
-    s.push_str("/// bytes — no padding between fields:\n");
-    s.push_str("///\n");
-    s.push_str("/// | # | field | type |\n");
-    s.push_str("/// |---|---|---|\n");
-    for (i, f) in shape.fields.iter().enumerate() {
-        s.push_str(&format!(
-            "/// | {i} | `{name}` | `{ty}` |\n",
-            i = i,
-            name = f.name,
-            ty = f.ty,
-        ));
+/// `HookData`'s one addition to the shared `ToBytes` impl — the `extra`
+/// text [`generate`] passes to [`crate::shape::to_bytes_impl`], including
+/// its own rustdoc so the derived type's generated `with_bytes` keeps it.
+const WITH_BYTES: &str = "
+    /// Encodes into a buffer sized to this struct's own
+    /// [`MAX_LEN`](::rshooks::convert::ToBytes::MAX_LEN) rather than
+    /// [`ToBytes::with_bytes`](::rshooks::convert::ToBytes::with_bytes)'s
+    /// generic-default scratch size — see that method's doc comment for why
+    /// only a concrete, non-generic impl (this one) can do so. `__buf` is
+    /// exactly `MAX_LEN` bytes, so `write` always succeeds and fills all of
+    /// it — the whole buffer is handed to `f` directly, with no slicing on
+    /// `write`'s return value.
+    #[inline(always)]
+    fn with_bytes<__R>(&self, f: impl FnOnce(&[u8]) -> __R) -> __R {
+        let mut __buf = [0u8; <Self as ::rshooks::convert::ToBytes>::MAX_LEN];
+        let _ = <Self as ::rshooks::convert::ToBytes>::write(self, &mut __buf);
+        f(&__buf)
     }
-    s
-}
+";
 
 /// Generates the `ToBytes`/`FromBytes`/`FixedRead` impls plus the inherent
 /// `LEN` const, for an already-validated [`StructShape`].
 pub(crate) fn generate(shape: &StructShape) -> TokenStream {
     let name = &shape.name;
 
-    let mut max_len_expr = String::from("0usize");
-    for f in &shape.fields {
-        max_len_expr.push_str(&format!(
-            " + <{ty} as ::rshooks::convert::ToBytes>::MAX_LEN",
-            ty = f.ty
-        ));
-    }
-
-    let mut offset_consts = String::from("const __OFF_0: usize = 0usize;\n");
-    for (i, f) in shape.fields.iter().enumerate() {
-        offset_consts.push_str(&format!(
-            "const __OFF_{next}: usize = __OFF_{i} + <{ty} as ::rshooks::convert::ToBytes>::MAX_LEN;\n",
-            next = i.wrapping_add(1),
-            i = i,
-            ty = f.ty,
-        ));
-    }
-
-    let mut write_body = String::new();
-    for (i, f) in shape.fields.iter().enumerate() {
-        write_body.push_str(&format!(
-            "let _ = ::rshooks::convert::ToBytes::write(&self.{field}, &mut __dst[__OFF_{i}..__OFF_{next}]);\n",
-            field = f.name,
-            i = i,
-            next = i.wrapping_add(1),
-        ));
-    }
-
-    let mut read_body = String::new();
-    for (i, f) in shape.fields.iter().enumerate() {
-        read_body.push_str(&format!(
-            "{field}: <{ty} as ::rshooks::convert::FromBytes>::read(&__src[__OFF_{i}..__OFF_{next}])?,\n",
-            field = f.name,
-            ty = f.ty,
-            i = i,
-            next = i.wrapping_add(1),
-        ));
-    }
-
-    let layout_doc = layout_table_doc(shape);
+    let max_len_expr = max_len_expr(&shape.fields);
+    let offset_consts = offset_consts(&shape.fields);
+    let write_body = write_body(&shape.fields);
+    let read_body = read_body(&shape.fields);
+    let len_expr = "<Self as ::rshooks::convert::ToBytes>::MAX_LEN";
 
     let src = format!(
-        "
-#[automatically_derived]
-impl ::rshooks::convert::ToBytes for {name} {{
-    const MAX_LEN: usize = {max_len_expr};
-
-    #[inline(always)]
-    #[allow(clippy::indexing_slicing)] // fixed, compile-time field offsets (see __OFF_* below); `__dst` was already proven to have exactly `MAX_LEN` bytes by the `get_mut(..MAX_LEN)` check\n\
-    fn write(&self, buf: &mut [u8]) -> usize {{
-        match buf.get_mut(..<Self as ::rshooks::convert::ToBytes>::MAX_LEN) {{
-            ::core::option::Option::Some(__dst) => {{
-                {offset_consts}
-                {write_body}
-                <Self as ::rshooks::convert::ToBytes>::MAX_LEN
-            }}
-            ::core::option::Option::None => 0,
-        }}
-    }}
-}}
-
-#[automatically_derived]
-impl ::rshooks::convert::FromBytes for {name} {{
-    #[inline(always)]
-    #[allow(clippy::indexing_slicing)] // same fixed compile-time offsets as the `ToBytes::write` impl above\n\
-    fn read(buf: &[u8]) -> ::rshooks::error::Result<Self> {{
-        let __src = buf.get(..<Self as ::rshooks::convert::ToBytes>::MAX_LEN)
-            .ok_or(::rshooks::error::HookError::TooSmall)?;
-        {offset_consts}
-        ::core::result::Result::Ok(Self {{
-            {read_body}
-        }})
-    }}
-}}
-
-#[automatically_derived]
-impl ::rshooks::convert::FixedRead for {name} {{
-    #[inline(always)]
-    fn read_exact(
-        read: impl FnOnce(&mut [u8]) -> ::rshooks::error::Result<usize>,
-    ) -> ::rshooks::error::Result<Self> {{
-        let mut __buf = [0u8; <Self as ::rshooks::convert::ToBytes>::MAX_LEN];
-        let __written = read(&mut __buf)?;
-        if __written == <Self as ::rshooks::convert::ToBytes>::MAX_LEN {{
-            <Self as ::rshooks::convert::FromBytes>::read(&__buf)
-        }} else {{
-            ::core::result::Result::Err(::rshooks::error::HookError::TooSmall)
-        }}
-    }}
-}}
-
+        "{to_bytes}{from_bytes}{fixed_read}
 impl {name} {{
-    {layout_doc}
+    /// Total encoded length in bytes: every field's own
+    /// [`ToBytes::MAX_LEN`](::rshooks::convert::ToBytes::MAX_LEN), summed
+    /// in declaration order, no padding between fields.
     pub const LEN: usize = <Self as ::rshooks::convert::ToBytes>::MAX_LEN;
 }}
 ",
-        name = name,
-        max_len_expr = max_len_expr,
-        offset_consts = offset_consts,
-        write_body = write_body,
-        read_body = read_body,
-        layout_doc = layout_doc,
-    );
-
-    match src.parse::<TokenStream>() {
-        Ok(ts) => ts,
-        Err(_) => err(
-            shape.name_span,
-            "rshooks-macros: internal HookData codegen failed to parse",
+        to_bytes = to_bytes_impl(
+            name,
+            &max_len_expr,
+            &format!("{offset_consts}\n{write_body}"),
+            WITH_BYTES,
         ),
-    }
+        from_bytes = from_bytes_impl(name, len_expr, &offset_consts, &read_body),
+        fixed_read = fixed_read_impl(name, len_expr),
+    );
+    crate::shape::finish(src, shape.name_span, "HookData")
 }

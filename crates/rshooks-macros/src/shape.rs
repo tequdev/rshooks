@@ -7,29 +7,195 @@
 //! All four need to recognize exactly the same input shape — a plain,
 //! non-generic, named-field struct, each field a bare `name: Type` pair —
 //! and differ only in what they generate from it (see each module's own
-//! doc comment). Factored out here so that shape-recognition logic (and
-//! its hand-rolled `proc_macro::TokenStream` walking — see `rshooks-macros`'
-//! crate doc comment for why this crate doesn't use `syn`/`quote`) has one
+//! doc comment). Factored out here so the shape-recognition logic has one
 //! definition, not four copies that could drift apart.
+//!
+//! [`to_bytes_impl`]/[`from_bytes_impl`]/[`fixed_read_impl`] generate the
+//! `ToBytes`/`FromBytes`/`FixedRead` impl blocks themselves — the same
+//! fixed-offset shape every one of the four derives (plus
+//! [`crate::hooks_struct`]'s `#[state_interface(..)]` value struct) needs,
+//! parameterized over each caller's own field-write/-read bodies and length
+//! expression.
 
 use crate::err;
-use proc_macro::{Delimiter, Spacing, Span, TokenStream, TokenTree};
+use proc_macro::{Delimiter, Span, TokenStream, TokenTree};
 use std::iter::Peekable;
 
+/// Sums every field's `<FieldType as ToBytes>::MAX_LEN`, as a source-text
+/// expression — the shared shape behind `HookKey`/`HookData`/`ParamName`'s
+/// `ToBytes::MAX_LEN` const and `ParamValue`'s inline total-length
+/// expression (see each module's own doc comment for why `ParamValue`
+/// cannot instead reference `<Self as ToBytes>::MAX_LEN`).
+pub(crate) fn max_len_expr(fields: &[FieldShape]) -> String {
+    let mut expr = String::from("0usize");
+    for f in fields {
+        expr.push_str(&format!(
+            " + <{ty} as ::rshooks::convert::ToBytes>::MAX_LEN",
+            ty = f.ty
+        ));
+    }
+    expr
+}
+
+/// Emits the `const __OFF_N: usize = __OFF_{N-1} + <FieldTypeN as
+/// ToBytes>::MAX_LEN;` chain every fixed-offset derive indexes its
+/// `write`/`read` body against — see [`crate::hook_data`]'s "Codegen
+/// strategy" doc section.
+pub(crate) fn offset_consts(fields: &[FieldShape]) -> String {
+    let mut consts = String::from("const __OFF_0: usize = 0usize;\n");
+    for (i, f) in fields.iter().enumerate() {
+        consts.push_str(&format!(
+            "const __OFF_{next}: usize = __OFF_{i} + <{ty} as ::rshooks::convert::ToBytes>::MAX_LEN;\n",
+            next = i.wrapping_add(1),
+            i = i,
+            ty = f.ty,
+        ));
+    }
+    consts
+}
+
+/// Emits one `ToBytes::write` call per field, into `__dst[__OFF_i..__OFF_{i+1}]`
+/// — shared by every derive that generates a `ToBytes` impl.
+pub(crate) fn write_body(fields: &[FieldShape]) -> String {
+    let mut body = String::new();
+    for (i, f) in fields.iter().enumerate() {
+        body.push_str(&format!(
+            "let _ = ::rshooks::convert::ToBytes::write(&self.{field}, &mut __dst[__OFF_{i}..__OFF_{next}]);\n",
+            field = f.name,
+            i = i,
+            next = i.wrapping_add(1),
+        ));
+    }
+    body
+}
+
+/// Emits one `FromBytes::read` call per field, from `__src[__OFF_i..__OFF_{i+1}]`
+/// — shared by every derive that generates a `FromBytes` impl.
+pub(crate) fn read_body(fields: &[FieldShape]) -> String {
+    let mut body = String::new();
+    for (i, f) in fields.iter().enumerate() {
+        body.push_str(&format!(
+            "{field}: <{ty} as ::rshooks::convert::FromBytes>::read(&__src[__OFF_{i}..__OFF_{next}])?,\n",
+            field = f.name,
+            ty = f.ty,
+            i = i,
+            next = i.wrapping_add(1),
+        ));
+    }
+    body
+}
+
+/// Generates the `ToBytes` impl block (`MAX_LEN` const + `write()`) shared
+/// by every fixed-offset codegen path: `HookKey`, `HookData`, `ParamName`,
+/// and `#[state_interface(..)]`'s generated value struct (`ParamValue` is
+/// the one exception — see its own doc comment for why it has no `ToBytes`
+/// at all). `body` is `write()`'s statements before the final `MAX_LEN`
+/// return (an [`offset_consts`]/[`write_body`] pair, or, for
+/// `state_interface`, per-field writes at macro-computed literal offsets).
+/// `extra` is spliced in as further associated items (`HookData`'s
+/// `with_bytes` override) — pass `""` for none.
+pub(crate) fn to_bytes_impl(name: &str, max_len_expr: &str, body: &str, extra: &str) -> String {
+    format!(
+        "
+#[automatically_derived]
+impl ::rshooks::convert::ToBytes for {name} {{
+    const MAX_LEN: usize = {max_len_expr};
+
+    #[inline(always)]
+    #[allow(clippy::indexing_slicing)] // fixed, compile-time field offsets; `__dst` was already proven to have exactly `MAX_LEN` bytes by the `get_mut(..MAX_LEN)` check\n\
+    fn write(&self, buf: &mut [u8]) -> usize {{
+        match buf.get_mut(..<Self as ::rshooks::convert::ToBytes>::MAX_LEN) {{
+            ::core::option::Option::Some(__dst) => {{
+                {body}
+                <Self as ::rshooks::convert::ToBytes>::MAX_LEN
+            }}
+            ::core::option::Option::None => 0,
+        }}
+    }}
+    {extra}
+}}
+"
+    )
+}
+
+/// Generates the `FromBytes` impl block (`read()`), shared the same way as
+/// [`to_bytes_impl`]. `len_expr` is the buffer length to slice off —
+/// `<Self as ::rshooks::convert::ToBytes>::MAX_LEN` when `Self` has a
+/// `ToBytes` impl, or an inline sum (parenthesized) when it does not (see
+/// [`crate::param_value`]'s doc comment). `body` is `read()`'s statements
+/// before the final struct literal (an [`offset_consts`] chain, or empty);
+/// `fields` are that struct literal's field initializers (a [`read_body`],
+/// or `state_interface`'s own per-field reads).
+pub(crate) fn from_bytes_impl(name: &str, len_expr: &str, body: &str, fields: &str) -> String {
+    format!(
+        "
+#[automatically_derived]
+impl ::rshooks::convert::FromBytes for {name} {{
+    #[inline(always)]
+    #[allow(clippy::indexing_slicing)] // same fixed compile-time offsets as the `ToBytes::write` impl above\n\
+    fn read(buf: &[u8]) -> ::rshooks::error::Result<Self> {{
+        let __src = buf.get(..{len_expr})
+            .ok_or(::rshooks::error::HookError::TooSmall)?;
+        {body}
+        ::core::result::Result::Ok(Self {{
+            {fields}
+        }})
+    }}
+}}
+"
+    )
+}
+
+/// Generates the `FixedRead` impl block (`read_exact()`), shared the same
+/// way as [`to_bytes_impl`]/[`from_bytes_impl`]. `len_expr` is used both as
+/// the scratch buffer's array length and as the read-length check — see
+/// [`from_bytes_impl`] for what it is in each caller.
+pub(crate) fn fixed_read_impl(name: &str, len_expr: &str) -> String {
+    format!(
+        "
+#[automatically_derived]
+impl ::rshooks::convert::FixedRead for {name} {{
+    #[inline(always)]
+    fn read_exact(
+        read: impl FnOnce(&mut [u8]) -> ::rshooks::error::Result<usize>,
+    ) -> ::rshooks::error::Result<Self> {{
+        let mut __buf = [0u8; {len_expr}];
+        let __written = read(&mut __buf)?;
+        if __written == {len_expr} {{
+            <Self as ::rshooks::convert::FromBytes>::read(&__buf)
+        }} else {{
+            ::core::result::Result::Err(::rshooks::error::HookError::TooSmall)
+        }}
+    }}
+}}
+"
+    )
+}
+
+/// Rewrites `src`'s hardcoded `::rshooks::` paths for the invoking crate
+/// (see [`crate::krate::rewrite`]) and parses it into the derive's final
+/// `TokenStream`, or a `compile_error!` at `name_span` naming `derive_name`
+/// if the generated source itself fails to parse — the shared tail of
+/// every fixed-offset derive's `generate` function.
+pub(crate) fn finish(src: String, name_span: Span, derive_name: &str) -> TokenStream {
+    let src = crate::krate::rewrite(src);
+    match src.parse::<TokenStream>() {
+        Ok(ts) => ts,
+        Err(_) => err(
+            name_span,
+            &format!("rshooks-macros: internal {derive_name} codegen failed to parse"),
+        ),
+    }
+}
+
 /// One `name: Type` field, as captured from the input tokens.
-///
-/// `Clone` because [`crate::decl_pair`] generates the identical per-field
-/// codegen twice per struct-shaped invocation — once for the declared
-/// key/name type, once for the entity that mirrors its fields.
-#[derive(Clone)]
 pub struct FieldShape {
     /// The field's name, verbatim.
     pub name: String,
     /// The field's type, reconstructed as source text (see
     /// [`tokens_to_string`]) — never type-checked by this macro itself; a
-    /// type that doesn't implement the trait(s) the caller's generated code
-    /// needs surfaces as an ordinary rustc trait-bound error against that
-    /// generated code, not a diagnostic this macro produces directly.
+    /// type that doesn't implement the required trait(s) surfaces as an
+    /// ordinary rustc trait-bound error against the generated code.
     pub ty: String,
 }
 
@@ -52,7 +218,7 @@ pub struct StructShape {
 /// valid item (rustc parses it before invoking the derive), so this never
 /// needs to report an error — an attribute here is always exactly `#`
 /// followed by a bracketed group.
-fn skip_attrs(iter: &mut Peekable<impl Iterator<Item = TokenTree>>) {
+pub(crate) fn skip_attrs(iter: &mut Peekable<impl Iterator<Item = TokenTree>>) {
     loop {
         match iter.peek() {
             Some(TokenTree::Punct(p)) if p.as_char() == '#' => {
@@ -65,15 +231,15 @@ fn skip_attrs(iter: &mut Peekable<impl Iterator<Item = TokenTree>>) {
 }
 
 /// Advances past an optional leading `pub`/`pub(...)` visibility.
-fn skip_vis(iter: &mut Peekable<impl Iterator<Item = TokenTree>>) {
-    if let Some(TokenTree::Ident(id)) = iter.peek() {
-        if id.to_string() == "pub" {
+pub(crate) fn skip_vis(iter: &mut Peekable<impl Iterator<Item = TokenTree>>) {
+    if let Some(TokenTree::Ident(id)) = iter.peek()
+        && id.to_string() == "pub"
+    {
+        iter.next();
+        if let Some(TokenTree::Group(g)) = iter.peek()
+            && g.delimiter() == Delimiter::Parenthesis
+        {
             iter.next();
-            if let Some(TokenTree::Group(g)) = iter.peek() {
-                if g.delimiter() == Delimiter::Parenthesis {
-                    iter.next();
-                }
-            }
         }
     }
 }
@@ -102,45 +268,29 @@ pub fn parse_struct(input: TokenStream, derive_name: &str) -> Result<StructShape
                 &format!("{derive_name} can only be derived for a struct, not a union"),
             ));
         }
-        Some(other) => {
-            return Err(err(
-                other.span(),
-                &format!("{derive_name}: expected a struct"),
-            ));
-        }
-        None => {
-            return Err(err(
-                Span::call_site(),
-                &format!("{derive_name}: expected a struct"),
-            ));
+        other => {
+            let span = other.map_or(Span::call_site(), |tt| tt.span());
+            return Err(err(span, &format!("{derive_name}: expected a struct")));
         }
     }
 
     let name_id = match iter.next() {
         Some(TokenTree::Ident(id)) => id,
-        Some(other) => {
-            return Err(err(
-                other.span(),
-                &format!("{derive_name}: expected a struct name"),
-            ));
-        }
-        None => {
-            return Err(err(
-                Span::call_site(),
-                &format!("{derive_name}: expected a struct name"),
-            ));
+        other => {
+            let span = other.map_or(Span::call_site(), |tt| tt.span());
+            return Err(err(span, &format!("{derive_name}: expected a struct name")));
         }
     };
     let name_span = name_id.span();
     let name = name_id.to_string();
 
-    if let Some(TokenTree::Punct(p)) = iter.peek() {
-        if p.as_char() == '<' {
-            return Err(err(
-                p.span(),
-                &format!("{derive_name} does not support generic structs"),
-            ));
-        }
+    if let Some(TokenTree::Punct(p)) = iter.peek()
+        && p.as_char() == '<'
+    {
+        return Err(err(
+            p.span(),
+            &format!("{derive_name} does not support generic structs"),
+        ));
     }
 
     match iter.next() {
@@ -166,14 +316,13 @@ pub fn parse_struct(input: TokenStream, derive_name: &str) -> Result<StructShape
             p.span(),
             &format!("{derive_name} does not support unit structs — it needs at least one field"),
         )),
-        Some(other) => Err(err(
-            other.span(),
-            &format!("{derive_name}: expected a `{{ .. }}` field list"),
-        )),
-        None => Err(err(
-            name_span,
-            &format!("{derive_name}: expected a `{{ .. }}` field list"),
-        )),
+        other => {
+            let span = other.map_or(name_span, |tt| tt.span());
+            Err(err(
+                span,
+                &format!("{derive_name}: expected a `{{ .. }}` field list"),
+            ))
+        }
     }
 }
 
@@ -213,15 +362,10 @@ pub(crate) fn parse_fields(
 
         match iter.next() {
             Some(TokenTree::Punct(p)) if p.as_char() == ':' => {}
-            Some(other) => {
+            other => {
+                let span = other.map_or(field_span, |tt| tt.span());
                 return Err(err(
-                    other.span(),
-                    &format!("{derive_name}: expected `:` after field name"),
-                ));
-            }
-            None => {
-                return Err(err(
-                    field_span,
+                    span,
                     &format!("{derive_name}: expected `:` after field name"),
                 ));
             }
@@ -258,24 +402,12 @@ pub(crate) fn parse_fields(
     Ok(fields)
 }
 
-/// Reconstructs a type's source text from its captured tokens, preserving
-/// exactly the adjacency `rshooks-macros`' own tokenizer already recorded via
-/// each `Punct`'s [`Spacing`] — so a multi-token compound like the `::` in
-/// `crate::types::AccountId` round-trips as `::` (no space, which Rust's
-/// path grammar requires) rather than `: :` (two independent colons, a
-/// parse error in path position). A space is inserted before every other
-/// token boundary; this is always syntactically safe (it can only ever
-/// separate two tokens that were already distinct, never accidentally glue
-/// two identifiers/literals into one).
+/// Reconstructs a type's source text from its captured tokens.
+/// `TokenStream::to_string()` already respects each `Punct`'s spacing,
+/// so a multi-token compound like the `::` in
+/// `crate::types::AccountId` round-trips as `::` (no space, required by
+/// Rust's path grammar) rather than `: :` (a parse error in path
+/// position).
 pub fn tokens_to_string(tokens: &[TokenTree]) -> String {
-    let mut out = String::new();
-    let mut prev_joint = false;
-    for tt in tokens {
-        if !out.is_empty() && !prev_joint {
-            out.push(' ');
-        }
-        out.push_str(&tt.to_string());
-        prev_joint = matches!(tt, TokenTree::Punct(p) if p.spacing() == Spacing::Joint);
-    }
-    out
+    tokens.iter().cloned().collect::<TokenStream>().to_string()
 }

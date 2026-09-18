@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use rshooks_build::chain_build::{ChainBuildArgs, run as run_chain_build};
-use rshooks_build::{ApiVersion, Options, ValidationReport};
+use rshooks_build::{Options, ValidationReport};
 
 /// A CLI toolchain for building and validating Xahau Hook wasm binaries.
 #[derive(Parser)]
@@ -33,25 +33,19 @@ enum Cmd {
         /// Build only the named package (forwarded to `cargo -p`).
         #[arg(short = 'p', long)]
         package: Option<String>,
-        /// The Hook API version this module targets. Only `0` is currently
-        /// supported for chain builds.
-        #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(u8).range(0..=1))]
-        api_version: u8,
-        /// Insert missing loop guards instead of treating them as an error.
-        #[arg(long)]
-        auto_guard: bool,
-        /// `maxiter` used for auto-inserted guards.
-        #[arg(long, default_value_t = 16)]
-        default_maxiter: u32,
         /// Output ROOT directory (default: `<target>/rshooks/<crate-name>`).
-        /// Generations are published under `<root>/gen-<n>`, with `<root>/current`
-        /// pointing at the latest.
+        /// Generations are published under `<root>/gen-<n>`, with
+        /// `<root>/current` pointing at the latest.
         #[arg(long)]
         out: Option<PathBuf>,
         /// Write per-entry output even if it exceeds the 65,535-byte
         /// SetHook limit (clearly marked invalid).
         #[arg(long)]
         allow_oversize: bool,
+        /// Skip the Binaryen `wasm-opt` `-Oz` size-optimization pass that
+        /// otherwise runs on each entry's raw wasm before cleaning.
+        #[arg(long)]
+        no_optimize: bool,
         /// SetHook `Account` placeholder value for the generated template
         /// (default: the literal placeholder `<ACCOUNT>`).
         #[arg(long, value_parser = rshooks_build::sethook_template::validate_account)]
@@ -67,7 +61,9 @@ enum Cmd {
         #[arg(long = "override")]
         override_flag: bool,
     },
-    /// Cleans and validates an already-built wasm file, without invoking
+    /// Runs the full post-processing pipeline — the Binaryen `wasm-opt`
+    /// `-Oz` pass, the cleaner, flatten, unnest, and guard validation — on
+    /// an already-built wasm file from any toolchain, without invoking
     /// cargo.
     Clean {
         /// The input wasm file.
@@ -76,37 +72,27 @@ enum Cmd {
         /// `<input>.clean.wasm`).
         #[arg(short = 'o', long)]
         out: Option<PathBuf>,
-        /// The Hook API version this module targets.
-        #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(u8).range(0..=1))]
-        api_version: u8,
-        /// Insert missing loop guards instead of treating them as an error.
-        #[arg(long)]
-        auto_guard: bool,
-        /// `maxiter` used for auto-inserted guards.
-        #[arg(long, default_value_t = 16)]
-        default_maxiter: u32,
         /// Write the output even if it exceeds the 65,535-byte SetHook
         /// limit (clearly marked invalid).
         #[arg(long)]
         allow_oversize: bool,
+        /// Skip the Binaryen `wasm-opt` `-Oz` size-optimization pass that
+        /// otherwise runs on the raw wasm before cleaning.
+        #[arg(long)]
+        no_optimize: bool,
     },
     /// Validates a wasm file against the full SetHook rule set, without
     /// modifying it. Works on any wasm, including C-built hooks.
     Check {
         /// The wasm file to validate.
         file: PathBuf,
-        /// The Hook API version this module targets.
-        #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(u8).range(0..=1))]
-        api_version: u8,
+        /// Print the result as one JSON object on stdout instead of
+        /// human-readable text (warnings still go to stderr):
+        /// `{"max_nesting_depth": N, "wce": {"hook": H, "cbak": C} | null}`.
+        /// For scripts that would otherwise scrape the text output.
+        #[arg(long)]
+        json: bool,
     },
-}
-
-fn api_version_from(v: u8) -> ApiVersion {
-    if v == 1 {
-        ApiVersion::V1
-    } else {
-        ApiVersion::V0
-    }
 }
 
 fn main() -> Result<()> {
@@ -115,11 +101,9 @@ fn main() -> Result<()> {
         Cmd::Build {
             manifest_path,
             package,
-            api_version,
-            auto_guard,
-            default_maxiter,
             out,
             allow_oversize,
+            no_optimize,
             account,
             namespace,
             override_flag,
@@ -127,11 +111,9 @@ fn main() -> Result<()> {
             let args = ChainBuildArgs {
                 manifest_path,
                 package,
-                api_version,
-                auto_guard,
-                default_maxiter,
                 out,
                 allow_oversize,
+                no_optimize,
                 account,
                 namespace,
                 override_flag,
@@ -141,33 +123,29 @@ fn main() -> Result<()> {
         Cmd::Clean {
             input,
             out,
-            api_version,
-            auto_guard,
-            default_maxiter,
             allow_oversize,
+            no_optimize,
         } => {
             let opts = Options {
-                api_version: api_version_from(api_version),
-                auto_guard,
-                default_maxiter,
                 allow_oversize,
+                optimize: !no_optimize,
             };
             cmd_clean(&input, out, &opts)
         }
-        Cmd::Check { file, api_version } => {
-            let opts = Options {
-                api_version: api_version_from(api_version),
-                ..Options::default()
-            };
-            cmd_check(&file, &opts)
+        Cmd::Check { file, json } => {
+            let opts = Options::default();
+            cmd_check(&file, &opts, json)
         }
     }
 }
 
-fn print_report(report: &ValidationReport) {
+fn print_warnings(report: &ValidationReport) {
     for w in &report.warnings {
         eprintln!("warning: {w}");
     }
+}
+
+fn print_report(report: &ValidationReport) {
     if let Some(verdict) = report.guard_verdict {
         println!(
             "worst-case instructions: hook={} cbak={}",
@@ -175,6 +153,22 @@ fn print_report(report: &ValidationReport) {
         );
     }
     println!("max nesting depth: {}", report.max_nesting_depth);
+}
+
+/// The `--json` counterpart to [`print_report`]'s two numeric lines,
+/// consumed by `scripts/record-example-metrics.py` and
+/// `scripts/probe-testenv-parity.sh` instead of scraping text output.
+fn print_report_json(report: &ValidationReport) {
+    let wce = report
+        .guard_verdict
+        .map(|v| serde_json::json!({"hook": v.hook_cost, "cbak": v.cbak_cost}));
+    println!(
+        "{}",
+        serde_json::json!({
+            "max_nesting_depth": report.max_nesting_depth,
+            "wce": wce,
+        })
+    );
 }
 
 fn print_size_and_fee(bytes: &[u8]) {
@@ -199,6 +193,7 @@ fn cmd_clean(input: &Path, out: Option<PathBuf>, opts: &Options) -> Result<()> {
 
 fn run_pipeline_and_report(wasm: &[u8], opts: &Options) -> Result<(Vec<u8>, ValidationReport)> {
     let (output, report) = rshooks_build::run_pipeline(wasm, opts)?;
+    print_warnings(&report);
     print_report(&report);
     Ok((output, report))
 }
@@ -222,13 +217,18 @@ fn write_wasm(output: &[u8], out_path: &Path, report: &ValidationReport) -> Resu
     Ok(())
 }
 
-fn cmd_check(file: &Path, opts: &Options) -> Result<()> {
+fn cmd_check(file: &Path, opts: &Options, json: bool) -> Result<()> {
     let wasm = std::fs::read(file).with_context(|| format!("reading {}", file.display()))?;
     match rshooks_build::verify(&wasm, opts) {
         Ok(report) => {
-            print_report(&report);
-            println!("OK: {} is a valid SetHook wasm binary", file.display());
-            print_size_and_fee(&wasm);
+            print_warnings(&report);
+            if json {
+                print_report_json(&report);
+            } else {
+                print_report(&report);
+                println!("OK: {} is a valid SetHook wasm binary", file.display());
+                print_size_and_fee(&wasm);
+            }
             Ok(())
         }
         Err(e) => {

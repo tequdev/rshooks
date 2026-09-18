@@ -1,12 +1,11 @@
 //! Parsing for the vendored xahaud `hook/*.h` C headers.
 //!
-//! This is a from-scratch parser written for `xtask`. It is deliberately
-//! independent of `crates/rshooks-core/tests/common/mod.rs`, which parses the
-//! same headers for a different purpose (parity assertions at test time):
-//! that module is this generator's correctness oracle, and if the two
-//! shared code, a bug in the shared parser would be invisible to the parity
-//! tests. See `crates/rshooks-core/vendor/xahaud-hook/VENDOR.md` and
-//! `docs/DESIGN.md` §4 for the header set this parses.
+//! Deliberately independent of `crates/rshooks-core/tests/common/mod.rs`,
+//! which parses the same headers for parity assertions at test time: that
+//! module is this generator's correctness oracle, and shared code would hide
+//! a shared bug from the parity tests. See
+//! `crates/rshooks-core/vendor/xahaud-hook/VENDOR.md` and `docs/DESIGN.md`
+//! §4 for the header set this parses.
 //!
 //! The header dialect handled here is narrow on purpose — object-like
 //! `#define`s, brace-delimited C enums with explicit `= value` on every
@@ -21,18 +20,19 @@ use anyhow::{Context, Result, anyhow, bail};
 pub struct Define {
     /// The macro name.
     pub name: String,
-    /// The macro's literal replacement text (untouched C expression text).
+    /// The macro's literal replacement text (untouched C expression):
+    /// [`crate::codegen`] renders it per family (plain decimal, 8-hex-digit
+    /// grouped, `(a << 16) + b` shift-add, or `ls_flags` alias path).
     pub value: String,
 }
 
 /// Scans `src` line by line for object-like `#define` macros, skipping
 /// function-like macros (`#define NAME(args) ...`) and value-less macros
 /// (bare include guards such as `#define HOOK_ERROR_CODES`). Every macro
-/// this generator actually consumes is a single physical line, so
-/// backslash-continued macro bodies (used elsewhere in `macro.h` for
-/// multi-statement helper macros) are read only up to their first line —
-/// which is exactly enough to see the name and, for function-like macros,
-/// the immediately-following `(` that identifies and skips them.
+/// this generator consumes is a single physical line, so backslash-continued
+/// macro bodies (used elsewhere in `macro.h` for multi-statement helper
+/// macros) are read only up to their first line — enough to see the name
+/// and, for function-like macros, the `(` that identifies and skips them.
 pub fn scan_defines(src: &str) -> Vec<Define> {
     let mut out = Vec::new();
     for line in src.lines() {
@@ -72,7 +72,8 @@ pub fn scan_defines(src: &str) -> Vec<Define> {
 pub struct EnumMember {
     /// The member's name.
     pub name: String,
-    /// The member's literal `= value` expression text.
+    /// The member's literal `= value` expression text, matching
+    /// [`Define::value`]'s shape.
     pub value: String,
 }
 

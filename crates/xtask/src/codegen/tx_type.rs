@@ -20,8 +20,10 @@ const MODULE_DOC: &str = "\
 ";
 
 /// Converts a C `tt*` constant name (e.g. `ttNFTOKEN_MINT`) into Xahau's
-/// canonical Rust spelling (`NFTokenMint`).
-fn variant_name(const_name: &str) -> Result<String> {
+/// canonical Rust spelling (`NFTokenMint`). Also used by
+/// [`super::tx_type_table`], whose build-side name table must use the exact
+/// same spellings as this typed enum.
+pub(super) fn variant_name(const_name: &str) -> Result<String> {
     let rest = const_name
         .strip_prefix("tt")
         .ok_or_else(|| anyhow!("expected a `tt`-prefixed name, got `{const_name}`"))?;
@@ -76,7 +78,7 @@ pub fn generate(tts: &[ConstSpec]) -> Result<String> {
     let mut known_codes = Vec::with_capacity(tts.len());
 
     for d in tts {
-        let value = expect_decimal(&d.name, &d.c_expr)?;
+        let value = expect_decimal(&d.name, &d.value)?;
         let variant = variant_name(&d.name)?;
         writeln!(variants, "    /// `{}` ({value}).", d.name).context("writing variant doc")?;
         writeln!(variants, "    {variant},").context("writing variant")?;
@@ -138,7 +140,7 @@ pub fn generate(tts: &[ConstSpec]) -> Result<String> {
          /// known or unknown.\n\
          #[inline(always)]\n\
          #[must_use]\n\
-         pub fn code(&self) -> u16 {\n\
+         pub const fn code(&self) -> u16 {\n\
          match *self {\n",
     );
     body.push_str(&code_arms);
@@ -154,6 +156,7 @@ pub fn generate(tts: &[ConstSpec]) -> Result<String> {
          \n\
          #[test]\n\
          fn round_trips_known_codes() {{\n\
+         const _: u16 = TxType::Unknown(0).code();\n\
          let known: &[u16] = &[{known_codes}];\n\
          for &code in known {{\n\
          assert_eq!(\n\

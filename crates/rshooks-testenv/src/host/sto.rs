@@ -1,19 +1,19 @@
 //! `sto_*` semantics (P2-D — `.claude/design/TESTENV_PHASE2_DESIGN.md` §4
 //! "sto_*", stage plan §7): pure byte-level STObject surgery over caller
 //! buffers, extending `crate::emit_walk`'s canonical field walker to expose
-//! offsets rather than forking it — see that module's own doc comment for
-//! the shared [`crate::emit_walk::FieldSpan`]/[`crate::emit_walk::field_value_payload`]
+//! offsets rather than forking it — see that module's doc comment for the
+//! shared [`crate::emit_walk::FieldSpan`]/[`crate::emit_walk::field_value_payload`]
 //! primitives every function here reuses.
 //!
 //! Ported against `Xahau/xahaud`, branch `dev`,
-//! `src/xrpld/app/hook/detail/HookAPI.cpp` (fetched and read directly for
-//! this stage). All five functions share one upstream helper,
-//! `HookAPI::get_stobject_length` (`HookAPI.cpp:2888-3179`) — a hand-rolled,
-//! non-STObject-constructing single-field parser this module's own
-//! `crate::emit_walk` walker already independently reimplements the same
-//! grammar for (canonical field-header/VL decoding, per-STI payload-length
-//! rules, recursive nested-object/array length computation stopping at the
-//! matching `0xE1`/`0xF1` terminator) — hence "extend, don't fork".
+//! `src/xrpld/app/hook/detail/HookAPI.cpp`. All five functions share one
+//! upstream helper, `HookAPI::get_stobject_length` (`HookAPI.cpp:2888-3179`)
+//! — a hand-rolled, non-STObject-constructing single-field parser this
+//! module's `crate::emit_walk` walker already independently reimplements the
+//! same grammar for (canonical field-header/VL decoding, per-STI
+//! payload-length rules, recursive nested-object/array length computation
+//! stopping at the matching `0xE1`/`0xF1` terminator) — hence "extend, don't
+//! fork".
 //!
 //! # `sto_subfield`'s offset/length convention
 //!
@@ -31,7 +31,7 @@
 //! excluded too for `STI_VL`(7)/`STI_ACCOUNT`(8), since
 //! `get_stobject_length`'s `payload_start`/`payload_length` are computed
 //! *after* decoding a VL type's own length prefix). This module's
-//! [`sto_subfield`] mirrors that split exactly: `field.range` (full,
+//! [`sto_subfield`] mirrors that split: `field.range` (full,
 //! header-included) for `STI_ARRAY`, [`crate::emit_walk::field_value_payload`]
 //! (VL-stripped payload) for everything else. Packed into the `int64_t`
 //! return value as `(offset << 32) | length` (`applyHook.cpp:2940`,
@@ -41,16 +41,16 @@
 //!
 //! `HookAPI::sto_subarray` (`HookAPI.cpp:158-234`) always returns elements
 //! **fully formed** (header + value + `0xE1`, `HookAPI.cpp:225`) — matching
-//! `crate::emit_walk::walk_array_elements`'s own element-span convention
-//! directly, no extra stripping needed. Upstream *optionally* strips a
-//! leading `0xF...` array-type header from the input buffer by blindly
-//! trimming bytes positionally, without verifying the trailing terminator
-//! it assumes is there (`HookAPI.cpp:174-193`); this module keeps the same
-//! optional header-stripping but — deliberately more strict, and documented
-//! as a departure — verifies the remaining bytes actually end in `0xF1` via
-//! [`crate::emit_walk::walk_array_elements`] rather than trusting position
-//! alone. It also assumes `fixHookAPI20251128`'s corrected 2-byte-header
-//! handling is always active (this harness does not model amendments).
+//! `crate::emit_walk::walk_array_elements`'s element-span convention; no
+//! extra stripping needed. Upstream *optionally* strips a leading `0xF...`
+//! array-type header from the input buffer by blindly trimming bytes
+//! positionally, without verifying the trailing terminator it assumes is
+//! there (`HookAPI.cpp:174-193`); this module keeps the same optional
+//! header-stripping but diverges by verifying the remaining bytes actually
+//! end in `0xF1` via [`crate::emit_walk::walk_array_elements`] rather than
+//! trusting position alone. It also assumes `fixHookAPI20251128`'s
+//! corrected 2-byte-header handling is always active (this harness does not
+//! model amendments).
 //!
 //! # `sto_validate`
 //!
@@ -58,22 +58,21 @@
 //! well-formedness + full-consumption check (no field-ordering or
 //! duplicate-field check, even though nested objects/arrays are internally
 //! bounded by their own terminators) — exactly
-//! [`crate::emit_walk::walk_top_level_fields`]'s own contract, reused
-//! as-is.
+//! [`crate::emit_walk::walk_top_level_fields`]'s contract, reused as-is.
 //!
 //! # `sto_emplace`/`sto_erase`
 //!
 //! `HookAPI::sto_emplace` (`HookAPI.cpp:236-376`): the `field` argument is
 //! **fully formed and wrapped** (header included, not just payload —
-//! `applyHook.cpp:3094-3099`'s own comment), spliced in verbatim
-//! (`HookAPI.cpp:359-364`) at the canonical position found by scanning
-//! source fields for the first `code > field_id` (`HookAPI.cpp:310-337`).
-//! This module always applies the `field_id`-vs-injected-header
-//! cross-check upstream gates behind `fixHookAPI20251128`
-//! (`HookAPI.cpp:262-286`) — again, no amendment model, so the corrected
-//! behavior is the only behavior. `sto_erase` (`applyHook.cpp:3184-3216`)
-//! is `sto_emplace` with an empty field, `DOESNT_EXIST` substituted when
-//! the output size equals the input size (nothing was removed).
+//! `applyHook.cpp:3094-3099`), spliced in verbatim (`HookAPI.cpp:359-364`)
+//! at the canonical position found by scanning source fields for the first
+//! `code > field_id` (`HookAPI.cpp:310-337`). This module always applies
+//! the `field_id`-vs-injected-header cross-check upstream gates behind
+//! `fixHookAPI20251128` (`HookAPI.cpp:262-286`) — no amendment model, so the
+//! corrected behavior is the only behavior. `sto_erase`
+//! (`applyHook.cpp:3184-3216`) is `sto_emplace` with an empty field,
+//! `DOESNT_EXIST` substituted when the output size equals the input size
+//! (nothing was removed).
 //!
 //! Size limits (`HookAPI.cpp:243-259`): source `2..=16384` bytes, field (if
 //! present) `2..=4096` bytes. `MEM_OVERLAP` (a wasm-linear-memory
@@ -84,11 +83,10 @@
 
 use std::vec::Vec;
 
+use rshooks::txn::codec::sti::STI_ARRAY;
 use rshooks_core::{DOESNT_EXIST, PARSE_ERROR, TOO_BIG, TOO_SMALL};
 
 use crate::emit_walk;
-
-const STI_ARRAY: u32 = 15;
 
 /// `SUB_OFFSET`/`SUB_LENGTH`'s packing (`macro.h`,
 /// `crates/rshooks-core/vendor/xahaud-hook/macro.h:145-146`): offset in the
@@ -102,7 +100,7 @@ pub(crate) fn sto_validate(sto: &[u8]) -> i64 {
     if sto.len() < 2 {
         return TOO_SMALL;
     }
-    match emit_walk::walk_top_level_fields(sto) {
+    match emit_walk::walk_top_level_fields(sto, emit_walk::NopMode::Strict) {
         Ok(_) => 1,
         Err(()) => 0,
     }
@@ -113,7 +111,7 @@ pub(crate) fn sto_subfield(sto: &[u8], field_id: u32) -> i64 {
     if sto.len() < 2 {
         return TOO_SMALL;
     }
-    let fields = match emit_walk::walk_top_level_fields(sto) {
+    let fields = match emit_walk::walk_top_level_fields(sto, emit_walk::NopMode::Strict) {
         Ok(f) => f,
         Err(()) => return PARSE_ERROR,
     };
@@ -154,7 +152,7 @@ pub(crate) fn sto_subarray(array: &[u8], index: u32) -> i64 {
     let Some(body) = array.get(base..) else {
         return PARSE_ERROR;
     };
-    let elements = match emit_walk::walk_array_elements(body) {
+    let elements = match emit_walk::walk_array_elements(body, emit_walk::NopMode::Strict) {
         Ok(e) => e,
         Err(()) => return PARSE_ERROR,
     };
@@ -180,11 +178,11 @@ pub(crate) fn sto_emplace(source: &[u8], field: &[u8], field_id: u32) -> Result<
         if field.len() < 2 {
             return Err(TOO_SMALL);
         }
-        // `fixHookAPI20251128`'s field_id/injected-header cross-check,
-        // always applied (see module doc comment): `field` must itself
-        // parse as exactly one fully-formed top-level field, whose own
-        // header code matches `field_id`.
-        let injected = emit_walk::walk_top_level_fields(field).map_err(|()| PARSE_ERROR)?;
+        // `fixHookAPI20251128`'s field_id/injected-header cross-check:
+        // `field` must parse as exactly one fully-formed top-level field
+        // whose header code matches `field_id`.
+        let injected = emit_walk::walk_top_level_fields(field, emit_walk::NopMode::Strict)
+            .map_err(|()| PARSE_ERROR)?;
         let [only] = injected.as_slice() else {
             return Err(PARSE_ERROR);
         };
@@ -193,7 +191,8 @@ pub(crate) fn sto_emplace(source: &[u8], field: &[u8], field_id: u32) -> Result<
         }
     }
 
-    let fields = emit_walk::walk_top_level_fields(source).map_err(|()| PARSE_ERROR)?;
+    let fields = emit_walk::walk_top_level_fields(source, emit_walk::NopMode::Strict)
+        .map_err(|()| PARSE_ERROR)?;
     let target = u64::from(field_id);
     let mut inject_start = source.len();
     let mut inject_end = source.len();
@@ -217,11 +216,9 @@ pub(crate) fn sto_emplace(source: &[u8], field: &[u8], field_id: u32) -> Result<
     Ok(out)
 }
 
-/// `sto_erase` — `sto_emplace` with an empty field
-/// (`applyHook.cpp:3196-3216`); `DOESNT_EXIST` when nothing shrank (the
-/// field was never present — an insert-only `sto_emplace` with an empty
-/// field never grows the output, so equal length unambiguously means "not
-/// found").
+/// `DOESNT_EXIST` when nothing shrank (`applyHook.cpp:3196-3216`): an
+/// insert-only `sto_emplace` with an empty field never grows the output, so
+/// equal length unambiguously means "not found".
 pub(crate) fn sto_erase(source: &[u8], field_id: u32) -> Result<Vec<u8>, i64> {
     let out = sto_emplace(source, &[], field_id)?;
     if out.len() == source.len() {
@@ -235,18 +232,9 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::indexing_slicing)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
 
     use super::*;
-
-    fn sf_sequence(v: u32) -> Vec<u8> {
-        let mut out = vec![0x24]; // (type 2, field 4)
-        out.extend_from_slice(&v.to_be_bytes());
-        out
-    }
-
-    fn sf_flags(v: u32) -> Vec<u8> {
-        let mut out = vec![0x22]; // (type 2, field 2)
-        out.extend_from_slice(&v.to_be_bytes());
-        out
-    }
+    use crate::testutil::nested_object_chain;
+    use crate::testutil::sf_flags_bytes as sf_flags;
+    use crate::testutil::sf_sequence_bytes as sf_sequence;
 
     fn sf_fee(drops: u64) -> Vec<u8> {
         let mut out = vec![0x68]; // (type 6, field 8)
@@ -256,10 +244,10 @@ mod tests {
         out
     }
 
-    const SF_SEQUENCE_CODE: u32 = (2 << 16) + 4;
-    const SF_FLAGS_CODE: u32 = (2 << 16) + 2;
-    const SF_FEE_CODE: u32 = (6 << 16) + 8;
-    const SF_ACCOUNT_CODE: u32 = (8 << 16) + 1;
+    const SF_SEQUENCE_CODE: u32 = rshooks::sfield::sfSequence.code();
+    const SF_FLAGS_CODE: u32 = rshooks::sfield::sfFlags.code();
+    const SF_FEE_CODE: u32 = rshooks::sfield::sfFee.code();
+    const SF_ACCOUNT_CODE: u32 = rshooks::sfield::sfAccount.code();
 
     fn sample() -> Vec<u8> {
         // Flags(2,2) < Sequence(2,4) < Fee(6,8), in canonical order.
@@ -284,6 +272,30 @@ mod tests {
     fn sto_validate_too_short_is_too_small() {
         assert_eq!(sto_validate(&[0x01]), TOO_SMALL);
         assert_eq!(sto_validate(&[]), TOO_SMALL);
+    }
+
+    #[test]
+    fn sto_validate_accepts_nesting_up_to_the_real_hosts_limit_and_rejects_beyond_it() {
+        // Real xahaud accepts recursion depths 0..=10 (`HookAPI.cpp:2901`);
+        // depth 10 is the boundary, depth 11 is over it.
+        assert_eq!(sto_validate(&nested_object_chain(2)), 1);
+        assert_eq!(sto_validate(&nested_object_chain(3)), 1);
+        assert_eq!(sto_validate(&nested_object_chain(10)), 1);
+        assert_eq!(sto_validate(&[0xE2; 11]), 0);
+    }
+
+    #[test]
+    fn sto_validate_rejects_a_nop_padded_sto() {
+        // `HookAPI::get_stobject_length` (the real parser behind every
+        // `sto_*` function) has no NOP handling — see
+        // `crate::emit_walk::NopMode::Strict`'s doc comment. A `0x99` byte
+        // between two otherwise well-formed fields must still fail here,
+        // exactly as `sto_validate` on the real host would report the sto
+        // invalid.
+        let mut padded = sf_flags(1);
+        padded.push(0x99); // NOP
+        padded.extend_from_slice(&sf_sequence(5));
+        assert_eq!(sto_validate(&padded), 0);
     }
 
     // -- sto_subfield --

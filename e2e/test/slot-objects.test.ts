@@ -1,24 +1,6 @@
-import {
-  ExecutionUtility,
-  Xrpld,
-  clearAllHooksV3,
-  hexNamespace,
-  readHookBinaryHexFromNS,
-  serverUrl,
-  setHooksV3,
-  setupClient,
-  teardownClient,
-  type SetHookParams,
-  type XrplIntegrationTestContext,
-  type iHook,
-} from '@transia/hooks-toolkit'
-import {
-  calculateHookOn,
-  convertStringToHex,
-  decodeAccountID,
-  type TransactionMetadata,
-} from 'xahau'
-import { HookFlags } from 'xahau/dist/npm/models/common/xahau'
+import { ExecutionUtility, Xrpld, setHooks } from '@xahau/hooks-toolkit'
+import { convertStringToHex, decodeAccountID, type TransactionMetadata } from 'xahau'
+import { buildHook, installHook } from './harness'
 
 const namespace = 'rshooks-e2e-slot-objects'
 const WORST_CASE_INSTRUCTIONS = 61658
@@ -58,11 +40,11 @@ const IOU_CURRENCY = 'USD'
 const IOU_AMOUNT = '100'
 
 describe('slot-objects (typed slot layer)', () => {
-  let testContext: XrplIntegrationTestContext
+  const getContext = installHook({})
   let checks = 0
 
   beforeAll(async () => {
-    testContext = await setupClient(serverUrl)
+    const testContext = getContext()
 
     // Install a SignerList so the failing path allocates intermediate slots.
     await Xrpld.submit(testContext.client, {
@@ -109,18 +91,11 @@ describe('slot-objects (typed slot layer)', () => {
       wallet: testContext.carol,
     })
 
-    const hook: iHook = {
-      CreateCode: readHookBinaryHexFromNS('slot_objects', 'wasm'),
-      Flags: HookFlags.hsfOverride,
-      HookOn: calculateHookOn(['Invoke']),
-      HookNamespace: hexNamespace(namespace),
-      HookApiVersion: 0,
-    }
-    await setHooksV3({
+    await setHooks({
       client: testContext.client,
-      seed: testContext.hook1.seed,
-      hooks: [{ Hook: hook }],
-    } as unknown as SetHookParams)
+      wallet: testContext.hook1,
+      hooks: [{ Hook: buildHook('slot_objects', namespace, ['Invoke']) }],
+    })
 
     // Run each group separately to stay within the instruction limit.
     for (const group of [
@@ -181,14 +156,6 @@ describe('slot-objects (typed slot layer)', () => {
     }
   })
 
-  afterAll(async () => {
-    await clearAllHooksV3({
-      client: testContext.client,
-      seed: testContext.hook1.seed,
-    } as unknown as SetHookParams)
-    await teardownClient(testContext)
-  })
-
   it('walks the account root with typed reads', () => {
     expect(checks & BIT_ACCOUNT_WALK).toBe(BIT_ACCOUNT_WALK)
   })
@@ -203,7 +170,6 @@ describe('slot-objects (typed slot layer)', () => {
   })
 
   it('keeps a child slot readable after its parent is cleared', () => {
-    // Child slots must remain valid after their parent is cleared.
     expect(checks & BIT_PARENT_CLEAR).toBe(BIT_PARENT_CLEAR)
   })
 

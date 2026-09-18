@@ -7,7 +7,7 @@
 //! [`wasm_encoder::reencode::Reencode`] to translate instruction streams
 //! rather than hand-rolling a match over every WebAssembly opcode.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
 
 use anyhow::{Context, Result, bail};
 use wasm_encoder::reencode::{self, Reencode};
@@ -224,81 +224,39 @@ pub(crate) fn parse(wasm: &[u8]) -> Result<ParsedModule<'_>> {
     Ok(m)
 }
 
+/// A [`Reencode`] with every type conversion left at its library default and
+/// no index remapping; a stand-in receiver for the `wasmparser` ->
+/// `wasm-encoder` type converters below. Reference types, `v128`, and other
+/// post-MVP encodings pass through unrejected here: `validator::mvp_features`
+/// is the authoritative WASM-MVP gate, run over the pipeline's final output.
+struct PlainReencoder;
+
+impl Reencode for PlainReencoder {
+    type Error = core::convert::Infallible;
+}
+
 /// Converts a `wasmparser` value type to the `wasm-encoder` equivalent.
-/// Reference types and `v128` are rejected: they are outside the WASM MVP
-/// (and thus outside what a SetHook-legal module may use).
 pub(crate) fn conv_valtype(v: wasmparser::ValType) -> Result<wasm_encoder::ValType> {
-    match v {
-        wasmparser::ValType::I32 => Ok(wasm_encoder::ValType::I32),
-        wasmparser::ValType::I64 => Ok(wasm_encoder::ValType::I64),
-        wasmparser::ValType::F32 => Ok(wasm_encoder::ValType::F32),
-        wasmparser::ValType::F64 => Ok(wasm_encoder::ValType::F64),
-        wasmparser::ValType::V128 => bail!("unsupported value type: v128 (SIMD is not MVP)"),
-        wasmparser::ValType::Ref(_) => {
-            bail!("unsupported value type: reference type (not MVP)")
-        }
-    }
+    Ok(PlainReencoder.val_type(v)?)
 }
 
-/// Converts a `wasmparser::FuncType` into `wasm-encoder` param/result vectors.
-pub(crate) fn conv_functype(
-    ft: &wasmparser::FuncType,
-) -> Result<(Vec<wasm_encoder::ValType>, Vec<wasm_encoder::ValType>)> {
-    let params = ft
-        .params()
-        .iter()
-        .copied()
-        .map(conv_valtype)
-        .collect::<Result<Vec<_>>>()?;
-    let results = ft
-        .results()
-        .iter()
-        .copied()
-        .map(conv_valtype)
-        .collect::<Result<Vec<_>>>()?;
-    Ok((params, results))
+/// Converts a `wasmparser::FuncType` into its `wasm-encoder` equivalent.
+pub(crate) fn conv_functype(ft: &wasmparser::FuncType) -> Result<wasm_encoder::FuncType> {
+    Ok(PlainReencoder.func_type(ft.clone())?)
 }
 
-pub(crate) fn conv_memtype(m: wasmparser::MemoryType) -> wasm_encoder::MemoryType {
-    wasm_encoder::MemoryType {
-        minimum: m.initial,
-        maximum: m.maximum,
-        memory64: m.memory64,
-        shared: m.shared,
-        page_size_log2: m.page_size_log2,
-    }
+pub(crate) fn conv_memtype(m: wasmparser::MemoryType) -> Result<wasm_encoder::MemoryType> {
+    Ok(PlainReencoder.memory_type(m)?)
 }
 
 pub(crate) fn conv_globaltype(g: wasmparser::GlobalType) -> Result<wasm_encoder::GlobalType> {
-    Ok(wasm_encoder::GlobalType {
-        val_type: conv_valtype(g.content_type)?,
-        mutable: g.mutable,
-        shared: g.shared,
-    })
+    Ok(PlainReencoder.global_type(g)?)
 }
 
-/// Converts a `wasmparser::TableType` into a `wasm-encoder` entity type.
-/// Only `funcref`/`externref` element types are supported (anything else is
-/// outside the WASM MVP).
-pub(crate) fn conv_tabletype(t: wasmparser::TableType) -> Result<wasm_encoder::EntityType> {
-    let element_type = match t.element_type.heap_type() {
-        wasmparser::HeapType::Abstract {
-            shared: false,
-            ty: wasmparser::AbstractHeapType::Func,
-        } => wasm_encoder::RefType::FUNCREF,
-        wasmparser::HeapType::Abstract {
-            shared: false,
-            ty: wasmparser::AbstractHeapType::Extern,
-        } => wasm_encoder::RefType::EXTERNREF,
-        _ => bail!("unsupported table element type (only funcref/externref are supported)"),
-    };
-    Ok(wasm_encoder::EntityType::Table(wasm_encoder::TableType {
-        element_type,
-        table64: t.table64,
-        minimum: t.initial,
-        maximum: t.maximum,
-        shared: t.shared,
-    }))
+/// Converts a `wasmparser::TableType` into its `wasm-encoder` equivalent
+/// (every call site accepts `impl Into<wasm_encoder::EntityType>`).
+pub(crate) fn conv_tabletype(t: wasmparser::TableType) -> Result<wasm_encoder::TableType> {
+    Ok(PlainReencoder.table_type(t)?)
 }
 
 /// References collected from a single function body: which functions it
@@ -311,8 +269,29 @@ pub(crate) struct BodyRefs {
     pub has_call_indirect: bool,
 }
 
-/// Scans a function body for direct `call` targets and `global.get`/
-/// `global.set` targets.
+/// Rejects operators from the exception-handling proposal. They open (or
+/// interact with) control frames that the flatten/unnest transforms do not
+/// model — letting one through would corrupt frame matching and branch
+/// depths silently, so the ban is enforced where those passes first collect
+/// a body's operators, before a transform can mangle it.
+pub(crate) fn reject_eh_operator(op: &wasmparser::Operator, func_idx: u32) -> Result<()> {
+    use wasmparser::Operator as Op;
+    if matches!(
+        op,
+        Op::Try { .. }
+            | Op::Catch { .. }
+            | Op::CatchAll
+            | Op::Delegate { .. }
+            | Op::Rethrow { .. }
+            | Op::TryTable { .. }
+            | Op::Throw { .. }
+            | Op::ThrowRef
+    ) {
+        bail!("function {func_idx}: exception-handling operators (`{op:?}`) are not supported");
+    }
+    Ok(())
+}
+
 pub(crate) fn scan_refs(body: &wasmparser::FunctionBody) -> Result<BodyRefs> {
     let mut refs = BodyRefs {
         calls: BTreeSet::new(),
@@ -438,6 +417,32 @@ pub(crate) fn body_needs_remap(
     Ok(false)
 }
 
+/// Checks that export `idx` (named `export_name`, e.g. `"hook"`/`"cbak"`)
+/// refers to a function with the required `(i32) -> i64` signature, and
+/// returns an error message describing the mismatch if it does not.
+pub(crate) fn check_entry_signature(
+    m: &ParsedModule,
+    idx: u32,
+    export_name: &str,
+) -> Option<String> {
+    let Some(type_idx) = m.func_type_index(idx) else {
+        return Some(format!(
+            "`{export_name}` export does not refer to a function"
+        ));
+    };
+    let Some(ty) = m.types.get(type_idx as usize) else {
+        return Some(format!("`{export_name}` export has an invalid type index"));
+    };
+    if ty.params() != [wasmparser::ValType::I32] || ty.results() != [wasmparser::ValType::I64] {
+        return Some(format!(
+            "`{export_name}` must have signature `(i32) -> i64`, found `({:?}) -> {:?}`",
+            ty.params(),
+            ty.results()
+        ));
+    }
+    None
+}
+
 /// Remaps a const expression (global initializer / data-segment offset)
 /// through the given remapper.
 pub(crate) fn remap_const_expr(
@@ -457,24 +462,31 @@ pub(crate) fn remap_const_expr(
 pub(crate) fn out_edges(m: &ParsedModule, idx: u32) -> Vec<u32> {
     match m.defined_body(idx) {
         Some(body) => match scan_refs(body) {
-            Ok(refs) => refs
-                .calls
-                .into_iter()
-                .collect::<HashSet<_>>()
-                .into_iter()
-                .collect(),
+            // `BodyRefs::calls` is already a `BTreeSet`; collecting it
+            // directly (rather than routing through a `HashSet`) keeps
+            // edge order deterministic (sorted ascending).
+            Ok(refs) => refs.calls.into_iter().collect(),
             Err(_) => Vec::new(),
         },
         None => Vec::new(),
     }
 }
 
-/// DFS-based cycle detection over the direct-call graph (imports are leaves
-/// with no out-edges). Returns one cycle (as a `Vec` of function indices) if
-/// any exists. Used by the validator (recursion is a hard error) and by the
-/// flatten pass (its inlining algorithm requires the call graph to be a DAG,
-/// checked *before* flattening — see `docs/DESIGN.md` §6.2b).
-pub(crate) fn find_call_cycle(m: &ParsedModule) -> Option<Vec<u32>> {
+/// Iterative DFS (to avoid unbounded recursion on adversarial input) over
+/// the graph with nodes `0..total` and edges from `out_edges`, visiting only
+/// nodes in `start_range` as roots. `Ok` is every visited node in
+/// post-order (every edge `u -> v` has `v` before `u`, so this is a valid
+/// reverse topological order when the graph is a DAG); `Err` is the first
+/// cycle found, as a path that starts and ends at the repeated node.
+///
+/// Shared by [`find_call_cycle`] (recursion is a hard error, checked both
+/// pre- and post-flatten) and the flatten pass's own topological order over
+/// the (by then already cycle-checked) defined-function subgraph.
+pub(crate) fn topo_sort_or_cycle(
+    total: u32,
+    start_range: std::ops::Range<u32>,
+    mut out_edges: impl FnMut(u32) -> Vec<u32>,
+) -> Result<Vec<u32>, Vec<u32>> {
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum Color {
         White,
@@ -482,9 +494,9 @@ pub(crate) fn find_call_cycle(m: &ParsedModule) -> Option<Vec<u32>> {
         Black,
     }
 
-    let total = m.total_funcs();
     let mut color = vec![Color::White; total as usize];
     let mut path: Vec<u32> = Vec::new();
+    let mut order: Vec<u32> = Vec::new();
 
     let get = |color: &[Color], idx: u32| color.get(idx as usize).copied().unwrap_or(Color::Black);
     let set = |color: &mut [Color], idx: u32, c: Color| {
@@ -493,12 +505,11 @@ pub(crate) fn find_call_cycle(m: &ParsedModule) -> Option<Vec<u32>> {
         }
     };
 
-    // Iterative DFS to avoid unbounded recursion on adversarial input.
-    for start in 0..total {
+    for start in start_range {
         if get(&color, start) != Color::White {
             continue;
         }
-        let mut stack: Vec<(u32, Vec<u32>)> = vec![(start, out_edges(m, start))];
+        let mut stack: Vec<(u32, Vec<u32>)> = vec![(start, out_edges(start))];
         set(&mut color, start, Color::Gray);
         path.push(start);
         while let Some((node, edges)) = stack.last_mut() {
@@ -508,55 +519,94 @@ pub(crate) fn find_call_cycle(m: &ParsedModule) -> Option<Vec<u32>> {
                     Color::White => {
                         set(&mut color, next, Color::Gray);
                         path.push(next);
-                        let next_edges = out_edges(m, next);
+                        let next_edges = out_edges(next);
                         stack.push((next, next_edges));
                     }
                     Color::Gray => {
                         let cycle_start = path.iter().position(|&p| p == next).unwrap_or(0);
                         let mut cycle = path.get(cycle_start..).unwrap_or(&[]).to_vec();
                         cycle.push(next);
-                        return Some(cycle);
+                        return Err(cycle);
                     }
                     Color::Black => {}
                 }
             } else {
                 set(&mut color, node, Color::Black);
                 path.pop();
+                order.push(node);
                 stack.pop();
             }
         }
     }
-    None
+    Ok(order)
+}
+
+/// DFS-based cycle detection over the direct-call graph (imports are leaves
+/// with no out-edges). Returns one cycle (as a `Vec` of function indices) if
+/// any exists. Used by the validator (recursion is a hard error) and by the
+/// flatten pass (its inlining algorithm requires the call graph to be a DAG,
+/// checked *before* flattening — see `docs/DESIGN.md` §6.2b).
+pub(crate) fn find_call_cycle(m: &ParsedModule) -> Option<Vec<u32>> {
+    let total = m.total_funcs();
+    topo_sort_or_cycle(total, 0..total, |idx| out_edges(m, idx)).err()
+}
+
+/// Tracks `block`/`loop`/`if` nesting depth across a stream of operators fed
+/// one at a time via [`DepthTracker::step`]. Counts depth the way the
+/// vendored upstream checker does (`Guard.h` `NESTING_LIMIT` /
+/// `GuardRuleDepth32` — see `docs/DESIGN.md` §6.2c/§6.4): starts at 0,
+/// increments on every `block`/`loop`/`if` entered, decrements on the
+/// matching `end` (`else` doesn't change depth — same `if` frame).
+/// [`max_nesting_depth`] drives it from a `FunctionBody` reader; the unnest
+/// pass drives it from an in-memory `Vec<Operator>` via
+/// [`DepthTracker::of_slice`].
+#[derive(Default)]
+pub(crate) struct DepthTracker {
+    depth: u32,
+    max: u32,
+}
+
+impl DepthTracker {
+    pub fn step(&mut self, op: &wasmparser::Operator) {
+        match op {
+            wasmparser::Operator::Block { .. }
+            | wasmparser::Operator::Loop { .. }
+            | wasmparser::Operator::If { .. } => {
+                self.depth += 1;
+                self.max = self.max.max(self.depth);
+            }
+            wasmparser::Operator::End => self.depth = self.depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+
+    pub fn max(&self) -> u32 {
+        self.max
+    }
+
+    /// Feeds an entire operator slice through [`step`](Self::step), in
+    /// order, returning the resulting maximum depth.
+    pub fn of_slice(ops: &[wasmparser::Operator]) -> u32 {
+        let mut tracker = Self::default();
+        for op in ops {
+            tracker.step(op);
+        }
+        tracker.max()
+    }
 }
 
 /// Computes the maximum simultaneous `block`/`loop`/`if` nesting depth
 /// reached in a function body (0 if it contains no such construct at all).
-/// This matches the vendored upstream checker's own count (`Guard.h`
-/// `NESTING_LIMIT` / `GuardRuleDepth32` — see `docs/DESIGN.md` §6.2c/§6.4):
-/// depth starts at 0 at the function's top level and increments on every
-/// `block`/`loop`/`if` entered, decrementing on the matching `end` (`else`
-/// does not change depth — it stays inside the same `if` frame). Shared by
-/// the unnest pass (which reports before/after depth per function it
-/// rewrites) and the validator (which enforces the hard limit); the unnest
-/// pass keeps its own copy of this loop over an in-memory `Vec<Operator>`
-/// rather than a `FunctionBody` reader — the two must be kept in sync.
+/// Shared by the unnest pass (which reports before/after depth per function
+/// it rewrites) and the validator (which enforces the hard limit) — see
+/// [`DepthTracker`].
 pub(crate) fn max_nesting_depth(body: &wasmparser::FunctionBody) -> Result<u32> {
-    let mut depth: u32 = 0;
-    let mut max_depth: u32 = 0;
+    let mut tracker = DepthTracker::default();
     let mut reader = body.get_operators_reader().context("function body")?;
     while !reader.eof() {
-        match reader.read().context("function body operator")? {
-            wasmparser::Operator::Block { .. }
-            | wasmparser::Operator::Loop { .. }
-            | wasmparser::Operator::If { .. } => {
-                depth += 1;
-                max_depth = max_depth.max(depth);
-            }
-            wasmparser::Operator::End => depth = depth.saturating_sub(1),
-            _ => {}
-        }
+        tracker.step(&reader.read().context("function body operator")?);
     }
-    Ok(max_depth)
+    Ok(tracker.max())
 }
 
 /// Finds a function type matching the given params/results exactly, or
@@ -579,4 +629,294 @@ pub(crate) fn find_or_insert_type(
         results.iter().copied(),
     ));
     idx
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
+mod tests {
+    use super::*;
+    use wasmparser::{BlockType, Operator, ValType};
+
+    /// Encodes `ops` (followed by an implicit `end`) into raw function-body
+    /// bytes (locals + operators), suitable for wrapping in a
+    /// `wasmparser::FunctionBody`. Stack-typing is never checked by the
+    /// readers these bytes feed (`scan_refs`, `DepthTracker`, ...), so the
+    /// instruction sequences below don't need to be valid in isolation.
+    fn body_bytes(ops: &[wasm_encoder::Instruction]) -> Vec<u8> {
+        let mut f = wasm_encoder::Function::new(std::iter::empty::<(u32, wasm_encoder::ValType)>());
+        for op in ops {
+            f.instruction(op);
+        }
+        f.instruction(&wasm_encoder::Instruction::End);
+        f.into_raw_body()
+    }
+
+    fn parse_body(bytes: &[u8]) -> wasmparser::FunctionBody<'_> {
+        wasmparser::FunctionBody::new(wasmparser::BinaryReader::new(bytes, 0))
+    }
+
+    /// A minimal `ParsedModule` for call-graph tests: `num_func_imports`
+    /// leaf imports (index 0..n), followed by one defined function per
+    /// entry in `bodies` (each already-encoded via `body_bytes`).
+    fn module_with_calls(num_func_imports: u32, bodies: &[Vec<u8>]) -> ParsedModule<'_> {
+        let imports = (0..num_func_imports)
+            .map(|_| wasmparser::Import {
+                module: "env",
+                name: "leaf",
+                ty: wasmparser::TypeRef::Func(0),
+            })
+            .collect();
+        let code = bodies.iter().map(|b| parse_body(b)).collect();
+        ParsedModule {
+            types: Vec::new(),
+            imports,
+            defined_func_types: vec![0; bodies.len()],
+            tables: Vec::new(),
+            memories: Vec::new(),
+            globals: Vec::new(),
+            exports: Vec::new(),
+            start: None,
+            elements: Vec::new(),
+            data_count: None,
+            datas: Vec::new(),
+            code,
+            had_custom_section: false,
+        }
+    }
+
+    fn call_body(targets: &[u32]) -> Vec<u8> {
+        let ops: Vec<wasm_encoder::Instruction> = targets
+            .iter()
+            .map(|&t| wasm_encoder::Instruction::Call(t))
+            .collect();
+        body_bytes(&ops)
+    }
+
+    // -- find_call_cycle --------------------------------------------------
+
+    #[test]
+    fn find_call_cycle_diamond_dag_has_no_cycle() {
+        // 0 -> {1, 2}, 1 -> 3, 2 -> 3, 3 -> {} (a DAG despite the shared
+        // descendant).
+        let bodies = vec![
+            call_body(&[1, 2]),
+            call_body(&[3]),
+            call_body(&[3]),
+            call_body(&[]),
+        ];
+        let m = module_with_calls(0, &bodies);
+        assert!(find_call_cycle(&m).is_none());
+    }
+
+    #[test]
+    fn find_call_cycle_detects_direct_self_recursion() {
+        let bodies = vec![call_body(&[0])];
+        let m = module_with_calls(0, &bodies);
+        let cycle = find_call_cycle(&m).expect("self-call is a cycle");
+        assert!(cycle.contains(&0));
+    }
+
+    #[test]
+    fn find_call_cycle_detects_mutual_recursion() {
+        let bodies = vec![call_body(&[1]), call_body(&[0])];
+        let m = module_with_calls(0, &bodies);
+        let cycle = find_call_cycle(&m).expect("mutual recursion is a cycle");
+        assert!(cycle.contains(&0) && cycle.contains(&1));
+    }
+
+    #[test]
+    fn find_call_cycle_treats_imports_as_leaves() {
+        // One import (index 0), one defined function (index 1) that calls
+        // it. The import has no body to recurse into, so this must not be
+        // reported as a cycle.
+        let bodies = vec![call_body(&[0])];
+        let m = module_with_calls(1, &bodies);
+        assert!(find_call_cycle(&m).is_none());
+        assert_eq!(out_edges(&m, 0), Vec::<u32>::new(), "import is a leaf");
+    }
+
+    // -- out_edges ----------------------------------------------------------
+
+    #[test]
+    fn out_edges_are_sorted_and_deduped() {
+        let bodies = vec![call_body(&[5, 1, 5, 3])];
+        let m = module_with_calls(0, &bodies);
+        assert_eq!(out_edges(&m, 0), vec![1, 3, 5]);
+    }
+
+    // -- DepthTracker / max_nesting_depth ------------------------------------
+
+    #[test]
+    fn depth_tracker_flat_body_has_zero_depth() {
+        let ops = vec![Operator::I32Const { value: 1 }, Operator::Drop];
+        assert_eq!(DepthTracker::of_slice(&ops), 0);
+    }
+
+    #[test]
+    fn depth_tracker_counts_nested_block_loop_if() {
+        let ops = vec![
+            Operator::Block {
+                blockty: BlockType::Empty,
+            },
+            Operator::Loop {
+                blockty: BlockType::Empty,
+            },
+            Operator::If {
+                blockty: BlockType::Empty,
+            },
+            Operator::End, // closes if
+            Operator::End, // closes loop
+            Operator::End, // closes block
+        ];
+        assert_eq!(DepthTracker::of_slice(&ops), 3);
+    }
+
+    #[test]
+    fn depth_tracker_else_does_not_change_depth() {
+        let ops = vec![
+            Operator::Block {
+                blockty: BlockType::Empty,
+            },
+            Operator::If {
+                blockty: BlockType::Empty,
+            },
+            Operator::Else,
+            Operator::End, // closes if
+            Operator::End, // closes block
+        ];
+        assert_eq!(DepthTracker::of_slice(&ops), 2);
+    }
+
+    #[test]
+    fn depth_tracker_sequential_blocks_do_not_accumulate() {
+        let ops = vec![
+            Operator::Block {
+                blockty: BlockType::Empty,
+            },
+            Operator::End,
+            Operator::Block {
+                blockty: BlockType::Empty,
+            },
+            Operator::End,
+        ];
+        assert_eq!(DepthTracker::of_slice(&ops), 1);
+    }
+
+    #[test]
+    fn max_nesting_depth_reads_from_a_function_body() {
+        let bytes = body_bytes(&[
+            wasm_encoder::Instruction::Block(wasm_encoder::BlockType::Empty),
+            wasm_encoder::Instruction::End,
+        ]);
+        let body = parse_body(&bytes);
+        assert_eq!(max_nesting_depth(&body).expect("valid body"), 1);
+    }
+
+    // -- find_or_insert_type --------------------------------------------------
+
+    #[test]
+    fn find_or_insert_type_dedupes_exact_match() {
+        let mut types = vec![wasmparser::FuncType::new([ValType::I32], [ValType::I64])];
+        let idx = find_or_insert_type(&mut types, &[ValType::I32], &[ValType::I64]);
+        assert_eq!(idx, 0);
+        assert_eq!(types.len(), 1, "no new type should have been appended");
+    }
+
+    #[test]
+    fn find_or_insert_type_appends_new_shape() {
+        let mut types = vec![wasmparser::FuncType::new([ValType::I32], [ValType::I64])];
+        let idx = find_or_insert_type(&mut types, &[ValType::I32, ValType::I32], &[ValType::I32]);
+        assert_eq!(idx, 1);
+        assert_eq!(types.len(), 2);
+    }
+
+    #[test]
+    fn find_or_insert_type_distinguishes_params_from_results() {
+        // Same shape as an existing entry with params/results swapped: must
+        // not be treated as a match.
+        let mut types = vec![wasmparser::FuncType::new([ValType::I32], [ValType::I64])];
+        let idx = find_or_insert_type(&mut types, &[ValType::I64], &[ValType::I32]);
+        assert_eq!(idx, 1);
+        assert_eq!(types.len(), 2);
+    }
+
+    // -- scan_refs ------------------------------------------------------------
+
+    #[test]
+    fn scan_refs_collects_calls_globals_and_flags_call_indirect() {
+        let bytes = body_bytes(&[
+            wasm_encoder::Instruction::Call(2),
+            wasm_encoder::Instruction::GlobalGet(3),
+            wasm_encoder::Instruction::GlobalSet(4),
+            wasm_encoder::Instruction::CallIndirect {
+                type_index: 0,
+                table_index: 0,
+            },
+        ]);
+        let body = parse_body(&bytes);
+        let refs = scan_refs(&body).expect("valid body");
+        assert_eq!(refs.calls, BTreeSet::from([2]));
+        assert_eq!(refs.globals, BTreeSet::from([3, 4]));
+        assert!(refs.has_call_indirect);
+    }
+
+    // -- const_expr_global_ref --------------------------------------------------
+
+    #[test]
+    fn const_expr_global_ref_global_get_is_some() {
+        // `global.get 0; end`.
+        let bytes = [0x23, 0x00, 0x0B];
+        let expr = wasmparser::ConstExpr::new(wasmparser::BinaryReader::new(&bytes, 0));
+        assert_eq!(const_expr_global_ref(&expr).expect("valid expr"), Some(0));
+    }
+
+    #[test]
+    fn const_expr_global_ref_i32_const_is_none() {
+        // `i32.const 5; end`.
+        let bytes = [0x41, 0x05, 0x0B];
+        let expr = wasmparser::ConstExpr::new(wasmparser::BinaryReader::new(&bytes, 0));
+        assert_eq!(const_expr_global_ref(&expr).expect("valid expr"), None);
+    }
+
+    // -- func_type_index --------------------------------------------------------
+
+    #[test]
+    fn func_type_index_covers_import_and_defined_ranges() {
+        let m = ParsedModule {
+            types: Vec::new(),
+            imports: vec![
+                wasmparser::Import {
+                    module: "env",
+                    name: "a",
+                    ty: wasmparser::TypeRef::Func(5),
+                },
+                wasmparser::Import {
+                    module: "env",
+                    name: "b",
+                    ty: wasmparser::TypeRef::Func(6),
+                },
+            ],
+            defined_func_types: vec![7, 8],
+            tables: Vec::new(),
+            memories: Vec::new(),
+            globals: Vec::new(),
+            exports: Vec::new(),
+            start: None,
+            elements: Vec::new(),
+            data_count: None,
+            datas: Vec::new(),
+            code: Vec::new(),
+            had_custom_section: false,
+        };
+        assert_eq!(m.func_type_index(0), Some(5), "import 0");
+        assert_eq!(m.func_type_index(1), Some(6), "import 1");
+        assert_eq!(m.func_type_index(2), Some(7), "defined function 0");
+        assert_eq!(m.func_type_index(3), Some(8), "defined function 1");
+        assert_eq!(m.func_type_index(4), None, "out of range");
+    }
 }

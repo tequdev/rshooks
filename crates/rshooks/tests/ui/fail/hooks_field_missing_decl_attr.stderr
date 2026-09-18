@@ -1,4 +1,4 @@
-error: #[hooks]: every chain-struct field must carry exactly one of `#[state(..)]`, `#[hook_param(..)]`, `#[otxn_param(..)]`
+error: #[hooks]: every chain-struct field must carry exactly one of `#[state(..)]`, `#[hook_param(..)]`, `#[otxn_param(..)]`, `#[state_interface(..)]`
  --> tests/ui/fail/hooks_field_missing_decl_attr.rs:7:1
   |
 7 | #[hooks]

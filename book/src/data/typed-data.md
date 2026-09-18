@@ -221,7 +221,7 @@ the `#[hooks] impl` via a `&self` entry, with no manual byte packing
 anywhere:
 
 ```rust,ignore
-let deposit = self.deposits.at(DepositKey { tag: DEPOSIT_TAG, owner });
+let deposit = self.state.deposits.at(DepositKey { tag: DEPOSIT_TAG, owner });
 let current = deposit.get()?.unwrap_or(EMPTY_DEPOSIT);
 // ...
 deposit.set(&next)?;
@@ -296,7 +296,7 @@ hand-written version that front-loads one length check the same way could
 match the derive's number — the point is the derive *always* generates
 that shape, by construction, without a hook author having to discover and
 apply the trick themselves. Both versions are guard-clean at the source
-level; no `--auto-guard`/`--default-maxiter` needed for either.
+level; neither needs a hand-written guard.
 
 Composite parameter *names* have one caveat: unlike a plain byte-string tag
 (`CFG`/`INS` above, free — the wire encoding *is* the in-memory bytes,

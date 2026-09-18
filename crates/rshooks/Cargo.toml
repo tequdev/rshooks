@@ -14,8 +14,8 @@ categories = ["no-std", "wasm", "cryptography::cryptocurrencies"]
 doctest = true
 
 [dependencies]
-rshooks-core = { path = "../rshooks-core", version = "0.1.0" }
-rshooks-macros = { path = "../rshooks-macros", version = "0.1.0" }
+rshooks-core = { workspace = true }
+rshooks-macros = { workspace = true }
 
 # Host-only, test-only: compiles the `tests/ui/*.rs` fixtures and diffs the
 # resulting rustc output against the committed `.stderr` files, so the
@@ -32,12 +32,34 @@ panic-handler = []
 # from a `std` context — see the handler's doc comment in lib.rs.
 host-panic-handler = []
 trace = []
+# Restrict the generated surface to formats active on Xahau mainnet.
+active-amendments = []
+
+# Include dormant formats for custom networks.
+all-amendments = []
 # Enables the native mock-host bridge (`rshooks_core::backend`): wrapper
 # functions in `api/*` consult an installed `HostBackend` instead of the
 # host stubs, and `HookStatic::take` gains a per-invocation claim path.
 # Default-off; forwards to `rshooks-core/testenv`. Never enable this from a
 # `wasm32` target.
 testenv = ["rshooks-core/testenv"]
+# Enables signature parameters on `#[hook(..)]` entry fns, per the Hook
+# Parameter Signature Interface draft (`docs/PARAM_SIGNATURE_DESIGN.md`).
+# `unstable-*` features are exempt from semver — breaking changes may land
+# in minor releases while the spec is a draft.
+unstable-param-sig-interface = ["rshooks-macros/unstable-param-sig-interface"]
+# Enables `#[state_interface(..)]` fields on a `#[hooks]` struct, per the
+# Hook State Interface draft (`docs/STATE_INTERFACE_DESIGN.md`).
+# `unstable-*` features are exempt from semver — breaking changes may land
+# in minor releases while the spec is a draft.
+unstable-state-interface = ["rshooks-macros/unstable-state-interface"]
+
+# Built with the unstable draft-spec features on, so `rshooks::sig`/
+# `rshooks::si` appear in published rustdoc — not `all-features`, since
+# `host-panic-handler` must never be enabled from a `std` context (see that
+# feature's own comment).
+[package.metadata.docs.rs]
+features = ["unstable-param-sig-interface", "unstable-state-interface"]
 
 [lints]
 workspace = true

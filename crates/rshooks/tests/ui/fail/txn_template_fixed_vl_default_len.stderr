@@ -1,0 +1,13 @@
+error[E0308]: mismatched types
+  --> tests/ui/fail/txn_template_fixed_vl_default_len.rs:19:54
+   |
+8  | / txn_template! {
+9  | |     struct Remit {
+10 | |         transaction_type = ttREMIT,
+11 | |         sequence: u32_field(sfSequence) = 0,
+...  |
+19 | |                 memo_data: fixed_vl(sfMemoData, 4) = *b"toolong",
+   | |                                                      ^^^^^^^^^^^ expected an array with a size of 4, found one with a size of 7
+...  |
+24 | | }
+   | |_- expected due to this

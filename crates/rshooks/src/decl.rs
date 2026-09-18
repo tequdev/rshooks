@@ -12,44 +12,38 @@
 //!
 //! # Why the accessors live here, not on the spec traits themselves
 //!
-//! [`StateSpec`]/[`ParamSpec`] are implemented by types *outside* this
-//! crate (macro-generated marker structs in a downstream hook crate), and
-//! Rust's orphan rules mean a downstream crate cannot add an inherent impl
-//! to [`State`]/[`HookParam`]/[`OtxnParam`] itself, nor a blanket trait impl
-//! that would give every `StateSpec`/`ParamSpec` implementor its own
-//! `.get()` method (that would require the *trait itself* to declare
-//! `.get()`, at which point every future accessor added here becomes a
-//! breaking change for any downstream `impl StateSpec for ...`). Instead,
-//! the marker traits declare only the *data* a spec carries (the value
-//! type, the key/name argument shape, and how to compute a key/name from
-//! those arguments) — [`State`]/[`HookParam`]/[`OtxnParam`]'s generic
-//! inherent impls, defined once in this crate, are what turn that data into
-//! callable methods. This is exactly why the ZST handle types
-//! ([`State`]/[`HookParam`]/[`OtxnParam`]) exist at all rather than calling
-//! `MySpec::get()` directly on the marker type.
+//! [`StateSpec`]/[`ParamSpec`] are implemented by macro-generated marker
+//! structs in a downstream hook crate, and Rust's orphan rules block that
+//! crate from adding an inherent impl to [`State`]/[`HookParam`]/
+//! [`OtxnParam`], or a blanket trait impl giving every implementor its own
+//! `.get()` (that would require the *trait itself* to declare `.get()`,
+//! making every future accessor added here a breaking change for any
+//! downstream `impl StateSpec for ...`). So the marker traits declare only
+//! the *data* a spec carries (value type, key/name argument shape, how to
+//! compute a key/name from those arguments), and [`State`]/[`HookParam`]/
+//! [`OtxnParam`]'s generic inherent impls, defined once in this crate, turn
+//! that data into callable methods.
 //!
 //! # `State` vs. [`mod@crate::state`]
 //!
-//! [`State<V, S>`]'s accessors are thin forwards onto
-//! [`mod@crate::state`]'s existing free functions (`state_get`,
-//! `state_set_loose`, `state_update_loose`, `state_delete`,
-//! `state_foreign_get`, `state_foreign_set_loose`) — this module adds no
-//! new decode logic of its own. The routing goes through
-//! [`EncodedStateKey`]'s identity [`StateKeyEncode`] impl (see that impl's
-//! doc comment in `state.rs`): [`StateSpec::encode_key`] produces an
-//! already-encoded key once, and every accessor here hands that same
-//! [`EncodedStateKey`] straight to the existing free functions, which are
-//! generic over `&impl StateKeyEncode`.
+//! [`State<V, S>`]'s accessors are thin forwards onto [`mod@crate::state`]'s
+//! internal `_encoded`-suffixed funnels (`state_get_encoded`,
+//! `state_set_encoded`, `state_update_encoded`, `state_delete_encoded`,
+//! `state_foreign_get_encoded`, `state_foreign_set_encoded`) — this module
+//! adds no new decode logic of its own. [`StateSpec::with_key`] produces an
+//! already-encoded key (via [`StateSpec::encode_key`] by default, or a
+//! `'static`-promoted literal for a macro-generated constant key — see
+//! [`StateSpec::with_key`]'s doc comment) and hands it straight to the
+//! matching funnel, so no [`StateKeyEncode::encode`] call happens on this
+//! path — [`StateEntry`] (bound via [`State::at`]) calls the same funnels
+//! directly with its own already-encoded key.
 //!
 //! # Params: absence vs. decode failure
 //!
-//! [`HookParam`]/[`OtxnParam`]'s `.get()` is built on the new
-//! [`crate::api::hook_ctx::hook_param_opt`]/[`crate::api::otxn::otxn_param_opt`]
-//! absence-aware reads, not the older [`crate::api::hook_ctx::hook_param_exact`]/
-//! [`crate::api::otxn::otxn_param_exact`] — see those functions' doc
-//! comments for the exact "absent is `Ok(None)`, a present-but-malformed
-//! value is still `Err`, never confused" contract every accessor in this
-//! module preserves. `.get_or_default()` only ever substitutes
+//! [`HookParam`]/[`OtxnParam`]'s `.get()` is built on
+//! [`crate::api::hook_ctx::hook_param_opt`]/[`crate::api::otxn::otxn_param_opt`]:
+//! absent is `Ok(None)`, a present-but-malformed value is still `Err`,
+//! never confused. `.get_or_default()` only ever substitutes
 //! [`ParamDefault::default_value`] for the *absent* case; a decode failure
 //! still propagates as `Err`. `.get_required()` maps absence specifically
 //! to [`crate::error::HookError::DoesntExist`].
@@ -216,6 +210,19 @@ pub trait StateSpec {
 
     /// Computes this spec's [`EncodedStateKey`] from `args`.
     fn encode_key(args: &Self::KeyArgs) -> EncodedStateKey;
+
+    /// Computes this spec's key (via [`Self::encode_key`] by default) and
+    /// hands it to `f`, returning whatever `f` returns. [`State`]'s
+    /// constant-key accessors all route through this method rather than
+    /// [`Self::encode_key`] directly, so a macro-generated literal
+    /// `#[state(key = b"...")]` marker can override it to hand `f` a
+    /// compile-time-computed, `'static`-promoted [`EncodedStateKey`]
+    /// instead of re-encoding the same literal at runtime on every call —
+    /// see [`crate::state::EncodedStateKey::from_short`].
+    #[inline(always)]
+    fn with_key<R>(args: &Self::KeyArgs, f: impl FnOnce(&EncodedStateKey) -> R) -> R {
+        f(&Self::encode_key(args))
+    }
 }
 
 /// Declares how a [`HookParam`]/[`OtxnParam`] marker `S` encodes its
@@ -324,14 +331,14 @@ where
     /// vs. decode failure" contract this forwards to unchanged.
     #[inline(always)]
     pub fn get(&self) -> Result<Option<V>> {
-        crate::state::state_get::<V>(&S::encode_key(&()))
+        S::with_key(&(), crate::state::state_get_encoded::<V>)
     }
 
     /// Writes this entry, encoding `value` as `V`. Returns the number of
     /// bytes written.
     #[inline(always)]
     pub fn set(&self, value: &V) -> Result<usize> {
-        crate::state::state_set_loose::<V>(&S::encode_key(&()), value)
+        S::with_key(&(), |key| crate::state::state_set_encoded::<V>(key, value))
     }
 
     /// Read-modify-writes this entry: reads the current value (or `None` if
@@ -339,14 +346,16 @@ where
     /// returns the number of bytes written.
     #[inline(always)]
     pub fn update(&self, f: impl FnOnce(Option<V>) -> V) -> Result<usize> {
-        crate::state::state_update_loose::<V, _>(&S::encode_key(&()), f)
+        S::with_key(&(), |key| {
+            crate::state::state_update_encoded::<V, _>(key, f)
+        })
     }
 
     /// Deletes this entry. See [`crate::state::state_delete`]'s doc comment
     /// for why deletion has no distinct "not found" failure.
     #[inline(always)]
     pub fn delete(&self) -> Result<()> {
-        crate::state::state_delete(&S::encode_key(&()))
+        S::with_key(&(), crate::state::state_delete_encoded)
     }
 
     /// Reads this entry belonging to another namespace/account, decoded as
@@ -354,7 +363,9 @@ where
     /// `Option` convention. `Ok(None)` means no entry exists.
     #[inline(always)]
     pub fn get_foreign(&self, ns: Option<&[u8]>, acct: Option<&[u8]>) -> Result<Option<V>> {
-        crate::state::state_foreign_get::<V>(&S::encode_key(&()), ns, acct)
+        S::with_key(&(), |key| {
+            crate::state::state_foreign_get_encoded::<V>(key, ns, acct)
+        })
     }
 
     /// Writes this entry belonging to another namespace/account, encoding
@@ -363,7 +374,9 @@ where
     /// the number of bytes written.
     #[inline(always)]
     pub fn set_foreign(&self, value: &V, ns: Option<&[u8]>, acct: Option<&[u8]>) -> Result<usize> {
-        crate::state::state_foreign_set_loose::<V>(&S::encode_key(&()), value, ns, acct)
+        S::with_key(&(), |key| {
+            crate::state::state_foreign_set_encoded::<V>(key, value, ns, acct)
+        })
     }
 }
 
@@ -386,8 +399,10 @@ where
 /// An encoded-key view of a [`State`] entry, bound to concrete key
 /// arguments via [`State::at`] — same accessor set as [`State`]'s
 /// constant-key inherent impls, forwarding to the same
-/// [`mod@crate::state`] free functions through the already-computed
-/// [`EncodedStateKey`] this holds.
+/// [`mod@crate::state`] `_encoded`-suffixed funnels (`state_get_encoded`,
+/// `state_set_encoded`, `state_update_encoded`, `state_delete_encoded`,
+/// `state_foreign_get_encoded`, `state_foreign_set_encoded`) through the
+/// already-computed [`EncodedStateKey`] this holds.
 ///
 /// `PhantomData<fn() -> V>` rather than `PhantomData<V>` so this view is
 /// `Send`/`Sync`/`Copy` regardless of what `V` is — see
@@ -411,14 +426,14 @@ impl<V: ToBytes + FromBytes> StateEntry<V> {
     /// Reads this entry, decoded as `V`. `Ok(None)` means no entry exists.
     #[inline(always)]
     pub fn get(&self) -> Result<Option<V>> {
-        crate::state::state_get::<V>(&self.key)
+        crate::state::state_get_encoded::<V>(&self.key)
     }
 
     /// Writes this entry, encoding `value` as `V`. Returns the number of
     /// bytes written.
     #[inline(always)]
     pub fn set(&self, value: &V) -> Result<usize> {
-        crate::state::state_set_loose::<V>(&self.key, value)
+        crate::state::state_set_encoded::<V>(&self.key, value)
     }
 
     /// Read-modify-writes this entry: reads the current value (or `None` if
@@ -426,13 +441,13 @@ impl<V: ToBytes + FromBytes> StateEntry<V> {
     /// returns the number of bytes written.
     #[inline(always)]
     pub fn update(&self, f: impl FnOnce(Option<V>) -> V) -> Result<usize> {
-        crate::state::state_update_loose::<V, _>(&self.key, f)
+        crate::state::state_update_encoded::<V, _>(&self.key, f)
     }
 
     /// Deletes this entry.
     #[inline(always)]
     pub fn delete(&self) -> Result<()> {
-        crate::state::state_delete(&self.key)
+        crate::state::state_delete_encoded(&self.key)
     }
 
     /// Reads this entry belonging to another namespace/account, decoded as
@@ -440,7 +455,7 @@ impl<V: ToBytes + FromBytes> StateEntry<V> {
     /// `Option` convention. `Ok(None)` means no entry exists.
     #[inline(always)]
     pub fn get_foreign(&self, ns: Option<&[u8]>, acct: Option<&[u8]>) -> Result<Option<V>> {
-        crate::state::state_foreign_get::<V>(&self.key, ns, acct)
+        crate::state::state_foreign_get_encoded::<V>(&self.key, ns, acct)
     }
 
     /// Writes this entry belonging to another namespace/account, encoding
@@ -449,7 +464,7 @@ impl<V: ToBytes + FromBytes> StateEntry<V> {
     /// the number of bytes written.
     #[inline(always)]
     pub fn set_foreign(&self, value: &V, ns: Option<&[u8]>, acct: Option<&[u8]>) -> Result<usize> {
-        crate::state::state_foreign_set_loose::<V>(&self.key, value, ns, acct)
+        crate::state::state_foreign_set_encoded::<V>(&self.key, value, ns, acct)
     }
 }
 
@@ -493,12 +508,10 @@ where
     /// Reads this parameter, decoded as `V`, treating absence as
     /// [`HookError::DoesntExist`] rather than `None`.
     ///
-    /// Caveat: this maps *absence* to [`HookError::DoesntExist`]. No
-    /// in-tree [`FixedRead`] decoder ever returns that same error code for
-    /// a present-but-malformed value (they return [`HookError::TooSmall`]
-    /// instead) — but if a value type's own `FixedRead` impl ever did
-    /// return `DoesntExist` while decoding a *present* value, that case
-    /// would be indistinguishable from true absence here.
+    /// Caveat: no in-tree [`FixedRead`] decoder returns `DoesntExist` for a
+    /// present-but-malformed value (they return [`HookError::TooSmall`]),
+    /// but a custom `FixedRead` impl that did would be indistinguishable
+    /// from true absence here.
     #[inline(always)]
     pub fn get_required(&self) -> Result<V> {
         match self.get()? {
@@ -565,12 +578,10 @@ where
     /// Reads this parameter, decoded as `V`, treating absence as
     /// [`HookError::DoesntExist`] rather than `None`.
     ///
-    /// Caveat: this maps *absence* to [`HookError::DoesntExist`]. No
-    /// in-tree [`FixedRead`] decoder ever returns that same error code for
-    /// a present-but-malformed value (they return [`HookError::TooSmall`]
-    /// instead) — but if a value type's own `FixedRead` impl ever did
-    /// return `DoesntExist` while decoding a *present* value, that case
-    /// would be indistinguishable from true absence here.
+    /// Caveat: no in-tree [`FixedRead`] decoder returns `DoesntExist` for a
+    /// present-but-malformed value (they return [`HookError::TooSmall`]),
+    /// but a custom `FixedRead` impl that did would be indistinguishable
+    /// from true absence here.
     #[inline(always)]
     pub fn get_required(&self) -> Result<V>
     where
@@ -623,12 +634,10 @@ where
     /// Reads this parameter, decoded as `V`, treating absence as
     /// [`HookError::DoesntExist`] rather than `None`.
     ///
-    /// Caveat: this maps *absence* to [`HookError::DoesntExist`]. No
-    /// in-tree [`FixedRead`] decoder ever returns that same error code for
-    /// a present-but-malformed value (they return [`HookError::TooSmall`]
-    /// instead) — but if a value type's own `FixedRead` impl ever did
-    /// return `DoesntExist` while decoding a *present* value, that case
-    /// would be indistinguishable from true absence here.
+    /// Caveat: no in-tree [`FixedRead`] decoder returns `DoesntExist` for a
+    /// present-but-malformed value (they return [`HookError::TooSmall`]),
+    /// but a custom `FixedRead` impl that did would be indistinguishable
+    /// from true absence here.
     #[inline(always)]
     pub fn get_required(&self) -> Result<V> {
         match self.get()? {
@@ -695,12 +704,10 @@ where
     /// Reads this parameter, decoded as `V`, treating absence as
     /// [`HookError::DoesntExist`] rather than `None`.
     ///
-    /// Caveat: this maps *absence* to [`HookError::DoesntExist`]. No
-    /// in-tree [`FixedRead`] decoder ever returns that same error code for
-    /// a present-but-malformed value (they return [`HookError::TooSmall`]
-    /// instead) — but if a value type's own `FixedRead` impl ever did
-    /// return `DoesntExist` while decoding a *present* value, that case
-    /// would be indistinguishable from true absence here.
+    /// Caveat: no in-tree [`FixedRead`] decoder returns `DoesntExist` for a
+    /// present-but-malformed value (they return [`HookError::TooSmall`]),
+    /// but a custom `FixedRead` impl that did would be indistinguishable
+    /// from true absence here.
     #[inline(always)]
     pub fn get_required(&self) -> Result<V>
     where
@@ -872,5 +879,95 @@ mod tests {
             MockKeyedState::encode_key(&1).as_ref(),
             MockKeyedState::encode_key(&2).as_ref()
         );
+    }
+}
+
+/// Proves a declared `#[hook_param]` field (via [`HookParam::get`]) inherits
+/// [`crate::api::hook_ctx::hook_param_opt`]'s truncation-safety: absent,
+/// exact-length, shorter, and longer backend values all resolve the way
+/// that function's own doc comment describes, with a longer value never
+/// silently decoded as a truncated prefix.
+#[cfg(all(test, feature = "testenv"))]
+mod testenv_tests {
+    #![allow(clippy::unwrap_used, clippy::panic)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
+
+    extern crate std;
+
+    use std::rc::Rc;
+    use std::vec::Vec;
+
+    use super::*;
+    use rshooks_core::backend::{HostBackend, install};
+
+    struct FixedBytesBackend(&'static [u8]);
+
+    impl HostBackend for FixedBytesBackend {
+        fn hook_param(&self, _name: &[u8]) -> core::result::Result<Vec<u8>, i64> {
+            Ok(self.0.to_vec())
+        }
+
+        fn accept(&self, _msg: &[u8], _code: i64) -> ! {
+            panic!("FixedBytesBackend::accept unexpectedly called")
+        }
+
+        fn rollback(&self, _msg: &[u8], _code: i64) -> ! {
+            panic!("FixedBytesBackend::rollback unexpectedly called")
+        }
+    }
+
+    struct AbsentBackend;
+
+    impl HostBackend for AbsentBackend {
+        fn hook_param(&self, _name: &[u8]) -> core::result::Result<Vec<u8>, i64> {
+            Err(rshooks_core::DOESNT_EXIST)
+        }
+
+        fn accept(&self, _msg: &[u8], _code: i64) -> ! {
+            panic!("AbsentBackend::accept unexpectedly called")
+        }
+
+        fn rollback(&self, _msg: &[u8], _code: i64) -> ! {
+            panic!("AbsentBackend::rollback unexpectedly called")
+        }
+    }
+
+    struct FieldParam;
+
+    impl ParamSpec for FieldParam {
+        type Value = [u8; 4];
+        type NameArgs = ();
+
+        #[inline(always)]
+        fn with_name_bytes<R>(_args: &(), f: impl FnOnce(&[u8]) -> R) -> R {
+            f(b"MK")
+        }
+    }
+
+    #[test]
+    fn hook_param_field_absent_is_none() {
+        let _guard = install(Rc::new(AbsentBackend));
+        let param: HookParam<[u8; 4], FieldParam> = HookParam::new();
+        assert_eq!(param.get(), Ok(None));
+    }
+
+    #[test]
+    fn hook_param_field_exact_length_decodes() {
+        let _guard = install(Rc::new(FixedBytesBackend(&[1, 2, 3, 4])));
+        let param: HookParam<[u8; 4], FieldParam> = HookParam::new();
+        assert_eq!(param.get(), Ok(Some([1, 2, 3, 4])));
+    }
+
+    #[test]
+    fn hook_param_field_shorter_value_is_too_small() {
+        let _guard = install(Rc::new(FixedBytesBackend(&[1, 2])));
+        let param: HookParam<[u8; 4], FieldParam> = HookParam::new();
+        assert_eq!(param.get(), Err(HookError::TooSmall));
+    }
+
+    #[test]
+    fn hook_param_field_longer_value_is_too_small_not_truncated() {
+        let _guard = install(Rc::new(FixedBytesBackend(&[1, 2, 3, 4, 5, 6, 7, 8, 9])));
+        let param: HookParam<[u8; 4], FieldParam> = HookParam::new();
+        assert_eq!(param.get(), Err(HookError::TooSmall));
     }
 }

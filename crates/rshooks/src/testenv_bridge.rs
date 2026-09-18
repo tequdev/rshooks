@@ -4,9 +4,8 @@
 //! back an owned `Result<Vec<u8>, i64>`; every wrapper function in
 //! [`crate::api`] that reads bytes writes into a caller-supplied
 //! `out: &mut [u8]` and returns the number of bytes written (or an error).
-//! This module is the seam between the two conventions, honoring the host
-//! buffer contract (`.claude/design/TESTENV_DESIGN.md` §5.2): a
-//! destination shorter than the value returns
+//! This module is the seam between the two conventions: a destination
+//! shorter than the value returns
 //! [`HookError::TooSmall`](crate::error::HookError::TooSmall) — it never
 //! truncates. [`write_bytes_truncate`]/[`write_bytes_truncate_code`] are the
 //! sole, deliberate exception, mirroring xahaud's own `hook_param`
@@ -35,16 +34,7 @@ type BackendResult<T> = core::result::Result<T, i64>;
 /// decoded through [`res`], the same as every raw host call's return code.
 #[inline(always)]
 pub(crate) fn write_bytes(out: &mut [u8], r: BackendResult<Vec<u8>>) -> HookResult<usize> {
-    match r {
-        Ok(value) => match out.get_mut(..value.len()) {
-            Some(dst) => {
-                dst.copy_from_slice(&value);
-                Ok(value.len())
-            }
-            None => Err(HookError::TooSmall),
-        },
-        Err(code) => res(code).map(|v| v as usize),
-    }
+    res(write_bytes_code(out, r)).map(|v| v as usize)
 }
 
 /// Fixed-size counterpart to [`write_bytes`], for `HostBackend` methods
@@ -80,16 +70,7 @@ pub(crate) fn write_array<const N: usize>(
 /// value.len)`), never the value's full length when it was truncated.
 #[inline(always)]
 pub(crate) fn write_bytes_truncate(out: &mut [u8], r: BackendResult<Vec<u8>>) -> HookResult<usize> {
-    match r {
-        Ok(value) => {
-            let n = out.len().min(value.len());
-            if let (Some(dst), Some(src)) = (out.get_mut(..n), value.get(..n)) {
-                dst.copy_from_slice(src);
-            }
-            Ok(n)
-        }
-        Err(code) => res(code).map(|v| v as usize),
-    }
+    res(write_bytes_truncate_code(out, r)).map(|v| v as usize)
 }
 
 /// Raw-code counterpart to [`write_bytes_truncate`] — same truncating
@@ -120,6 +101,28 @@ pub(crate) fn write_bytes_code(out: &mut [u8], r: BackendResult<Vec<u8>>) -> i64
         Ok(value) => match out.get_mut(..value.len()) {
             Some(dst) => {
                 dst.copy_from_slice(&value);
+                value.len() as i64
+            }
+            None => rshooks_core::TOO_SMALL,
+        },
+        Err(code) => code,
+    }
+}
+
+/// [`write_bytes_code`] into uninitialized storage. Each byte is
+/// initialized explicitly because the destination must not be reborrowed as
+/// `&mut [u8]`.
+#[inline(always)]
+pub(crate) fn write_bytes_uninit_code(
+    out: &mut [core::mem::MaybeUninit<u8>],
+    r: BackendResult<Vec<u8>>,
+) -> i64 {
+    match r {
+        Ok(value) => match out.get_mut(..value.len()) {
+            Some(dst) => {
+                for (slot, byte) in dst.iter_mut().zip(value.iter()) {
+                    slot.write(*byte);
+                }
                 value.len() as i64
             }
             None => rshooks_core::TOO_SMALL,
@@ -202,4 +205,20 @@ pub(crate) fn keylet_result(r: BackendResult<[u8; 34]>) -> HookResult<Keylet> {
         Ok(bytes) => Ok(Keylet::from(bytes)),
         Err(code) => Err(HookError::from(code)),
     }
+}
+
+pub(crate) use rshooks_core::backend::KeyletArg;
+
+/// Testenv interception shared by every typed `api::keylet` helper (both
+/// the by-value and `_into` families). Neither `util_keylet_buf` nor
+/// `util_keylet` still has real slices by the time a typed helper calls
+/// it, so interception happens one level up, where `account`/`hash`/...
+/// are still real references; the wasm/no-backend fallback in every typed
+/// helper still calls `util_keylet_buf`/`util_keylet` unchanged.
+#[inline(always)]
+pub(crate) fn keylet_intercept(
+    keylet_type: u32,
+    args: [KeyletArg<'_>; 6],
+) -> Option<HookResult<Keylet>> {
+    rshooks_core::backend::with_backend(|b| b.util_keylet(keylet_type, args)).map(keylet_result)
 }

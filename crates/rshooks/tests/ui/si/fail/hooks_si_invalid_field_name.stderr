@@ -1,0 +1,15 @@
+error: #[state_interface]: a key/value field name must be 1..=16 ASCII bytes matching [A-Za-z][A-Za-z0-9]* (the Hook State Interface's field-name rule) — rename the field
+ --> tests/ui/si/fail/hooks_si_invalid_field_name.rs:7:1
+  |
+7 | #[hooks]
+  | ^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unused import: `rshooks::decl::State`
+ --> tests/ui/si/fail/hooks_si_invalid_field_name.rs:4:5
+  |
+4 | use rshooks::decl::State;
+  |     ^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default

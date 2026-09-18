@@ -1,8 +1,7 @@
 //! Off-chain unit tests for the `slot-ledger` example, driven through
 //! `TestEnv::invoke` against the real `SlotLedger` chain — no wasm build,
 //! no node. Exercises `SlotObject::from_otxn`/`slot_subfield`/`slot_size`/
-//! `raw_exact` through `rshooks-testenv`'s P2-D slot family
-//! (`.claude/design/TESTENV_PHASE2_DESIGN.md` §4/§7 "slot family").
+//! `raw_exact` through `rshooks-testenv`'s slot family.
 
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, missing_docs)]
 
@@ -81,12 +80,10 @@ fn rolls_back_when_the_otxn_has_no_amount_field() {
 
 #[test]
 fn rolls_back_on_a_non_native_amount() {
-    // A 48-byte IOU-shaped Amount: byte 0's top bit set marks it non-native
-    // on the wire, which is what makes `otxn_slot`'s canonical
-    // serialization self-consistent (the amount's own wire framing decides
-    // how many bytes it occupies within the field sequence) — an all-zero
-    // 48-byte value would misparse as an 8-byte native amount instead,
-    // corrupting every field after it.
+    // A 48-byte IOU-shaped Amount: the top bit of byte 0 marks it non-native
+    // on the wire. An all-zero 48-byte value would misparse as an 8-byte
+    // native amount instead, corrupting every field after it in the otxn's
+    // canonical serialization.
     let mut iou_amount = [0u8; 48];
     iou_amount[0] = 0x80;
     let e = TestEnv::new().hook_account([1u8; 20]).otxn(

@@ -1,38 +1,35 @@
-//! `hook_api.json` intermediate representation.
+//! Hook API intermediate representation.
 //!
 //! [`build`] parses the vendored xahaud `hook/*.h` headers (via
-//! [`crate::parse`]) exactly once into a single serializable [`HookApiSpec`]
-//! tree. `gen_core` then round-trips that tree through JSON — serializing it
-//! to `crates/rshooks-core/hook_api.json`, then deserializing it back — before
-//! handing it to the per-file generators in [`crate::codegen`]. Those
-//! generators therefore never touch header text or [`crate::parse`] types
-//! directly; they consume only this IR, so `hook_api.json` is the true
-//! intermediate artifact of the pipeline (`scripts/sync-vendor.sh` -> parse
-//! -> `hook_api.json` -> per-file codegen -> `rustfmt`), not just a
-//! documentation side-effect of it.
-//!
-//! This is a data-shape change only: every generator's rendering logic is
-//! unchanged, so `crates/rshooks-core/src/*.rs` stays byte-for-byte identical
-//! (`cargo xtask gen-core --check`, `docs/DESIGN.md` §4).
+//! [`crate::parse`]) exactly once into a single [`HookApiSpec`] tree, which
+//! `gen_core` hands directly to the per-file generators in
+//! [`crate::codegen`]; those never touch header text or [`crate::parse`]
+//! types directly (`scripts/sync-vendor.sh` -> parse -> `HookApiSpec` ->
+//! per-file codegen -> `rustfmt`).
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 
 use crate::parse::{ExternFn, scan_defines, scan_enum_groups, scan_extern_fns};
 
+/// One named constant and a named group of related constants, both
+/// identical, field-for-field, to their [`crate::parse`] counterparts —
+/// [`crate::parse::Define`]/[`crate::parse::EnumGroup`] — so the artifact
+/// reuses the parsed shapes directly instead of duplicating them.
+pub use crate::parse::{Define as ConstSpec, EnumGroup as ConstGroup};
+
 /// One Hook API function parameter, in declaration order.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ParamSpec {
     /// The parameter's name, verbatim from `extern.h`.
     pub name: String,
     /// The parameter's C type token (e.g. `uint32_t`), verbatim from
-    /// `extern.h` — unmapped, so `hook_api.json` genuinely quotes the header
-    /// rather than a Rust-side reinterpretation of it.
+    /// `extern.h` — unmapped, so this genuinely quotes the header rather
+    /// than a Rust-side reinterpretation of it.
     pub c_type: String,
 }
 
 /// One Hook API host function, from `extern.h`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct FunctionSpec {
     /// The function's name, verbatim from `extern.h`.
     pub name: String,
@@ -44,46 +41,12 @@ pub struct FunctionSpec {
     /// prototype text (`<ret> <name>(<params>)`), quoting `extern.h`
     /// byte-for-byte modulo whitespace normalization.
     pub doc: String,
-    /// The `HookApiVersion` this function was introduced in. Every function
-    /// in the current vendored headers is `HookApiVersion` 0 (Guard-type);
-    /// this field exists so a future Gas-type (`HookApiVersion` 1) surface
-    /// can be modeled in this same schema without a breaking change.
-    pub hook_api_version: u32,
-}
-
-/// One named constant, carrying its *unrendered* C literal/expression text
-/// verbatim — [`crate::codegen`] renders it per family (plain decimal, 8-hex
-/// -digit grouped, `(a << 16) + b` shift-add, or `ls_flags` alias path), so
-/// the IR itself stays a faithful, un-opinionated quote of the header.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConstSpec {
-    /// The constant's name, verbatim from its header.
-    pub name: String,
-    /// The constant's literal/expression text, verbatim from its header.
-    pub c_expr: String,
-}
-
-/// A named group of related constants — one C enum block (`ls_flags.h`,
-/// `tx_flags.h`) or one hand-picked `#define` family (`consts.rs`'s
-/// `KEYLET_*`/`COMPARE_*`/... sections).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConstGroup {
-    /// The group's name (an enum's C name, or a family label such as
-    /// `"KEYLET"`).
-    pub name: String,
-    /// The group's members, in declaration order.
-    pub items: Vec<ConstSpec>,
 }
 
 /// The complete Hook API surface, parsed from the vendored headers: every
 /// host function plus every constant family `rshooks-core` translates.
-/// Serialized verbatim as `crates/rshooks-core/hook_api.json`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct HookApiSpec {
-    /// The `HookApiVersion` this snapshot of the vendored headers describes.
-    /// Currently always 0 (Guard-type) — the only `HookApiVersion` the
-    /// vendored `hook/*.h` headers and this toolchain support.
-    pub hook_api_version: u32,
     /// Every `extern.h` host function (`_g` plus the 74 Hook API functions),
     /// in header order.
     pub functions: Vec<FunctionSpec>,
@@ -135,39 +98,7 @@ fn function_spec(f: &ExternFn) -> FunctionSpec {
             .collect(),
         ret_c_type: f.ret_c_ty.clone(),
         doc: c_prototype_text(f),
-        // All vendored `extern.h` functions are HookApiVersion 0 today; see
-        // `FunctionSpec::hook_api_version`.
-        hook_api_version: 0,
     }
-}
-
-/// Parses `defines` into [`ConstSpec`]s, in file order.
-fn const_specs(defines: &[crate::parse::Define]) -> Vec<ConstSpec> {
-    defines
-        .iter()
-        .map(|d| ConstSpec {
-            name: d.name.clone(),
-            c_expr: d.value.clone(),
-        })
-        .collect()
-}
-
-/// Parses `groups` into [`ConstGroup`]s, in file order.
-fn const_groups(groups: &[crate::parse::EnumGroup]) -> Vec<ConstGroup> {
-    groups
-        .iter()
-        .map(|g| ConstGroup {
-            name: g.name.clone(),
-            items: g
-                .members
-                .iter()
-                .map(|m| ConstSpec {
-                    name: m.name.clone(),
-                    c_expr: m.value.clone(),
-                })
-                .collect(),
-        })
-        .collect()
 }
 
 /// Builds the complete [`HookApiSpec`] from the eight vendored headers'
@@ -188,53 +119,42 @@ pub fn build(
         .map(function_spec)
         .collect();
 
-    let error_codes = const_specs(&scan_defines(error_h));
-    let tts = const_specs(&scan_defines(tts_h));
-    let sfcodes = const_specs(&scan_defines(sfcodes_h));
-    let ls_flags = const_groups(&scan_enum_groups(ls_flags_h)?);
-    let tx_flags = const_groups(&scan_enum_groups(tx_flags_h)?);
+    let error_codes = scan_defines(error_h);
+    let tts = scan_defines(tts_h);
+    let sfcodes = scan_defines(sfcodes_h);
+    let ls_flags = scan_enum_groups(ls_flags_h)?;
+    let tx_flags = scan_enum_groups(tx_flags_h)?;
 
     let hookapi_defines = scan_defines(hookapi_h);
-    let keylet = const_specs(
-        &hookapi_defines
-            .iter()
-            .filter(|d| d.name.starts_with("KEYLET_"))
-            .cloned()
-            .collect::<Vec<_>>(),
-    );
-    let compare = const_specs(
-        &hookapi_defines
-            .iter()
-            .filter(|d| d.name.starts_with("COMPARE_"))
-            .cloned()
-            .collect::<Vec<_>>(),
-    );
+    let keylet = hookapi_defines
+        .iter()
+        .filter(|d| d.name.starts_with("KEYLET_"))
+        .cloned()
+        .collect::<Vec<_>>();
+    let compare = hookapi_defines
+        .iter()
+        .filter(|d| d.name.starts_with("COMPARE_"))
+        .cloned()
+        .collect::<Vec<_>>();
 
     let macro_defines = scan_defines(macro_h);
-    let canonical = const_specs(
-        &macro_defines
-            .iter()
-            .filter(|d| d.name == "tfCANONICAL")
-            .cloned()
-            .collect::<Vec<_>>(),
-    );
-    let at_family = const_specs(
-        &macro_defines
-            .iter()
-            .filter(|d| d.name.starts_with("at"))
-            .cloned()
-            .collect::<Vec<_>>(),
-    );
-    let am_family = const_specs(
-        &macro_defines
-            .iter()
-            .filter(|d| d.name.starts_with("am"))
-            .cloned()
-            .collect::<Vec<_>>(),
-    );
+    let canonical = macro_defines
+        .iter()
+        .filter(|d| d.name == "tfCANONICAL")
+        .cloned()
+        .collect::<Vec<_>>();
+    let at_family = macro_defines
+        .iter()
+        .filter(|d| d.name.starts_with("at"))
+        .cloned()
+        .collect::<Vec<_>>();
+    let am_family = macro_defines
+        .iter()
+        .filter(|d| d.name.starts_with("am"))
+        .cloned()
+        .collect::<Vec<_>>();
 
     Ok(HookApiSpec {
-        hook_api_version: 0,
         functions,
         error_codes,
         tts,

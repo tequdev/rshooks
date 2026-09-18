@@ -12,45 +12,54 @@ pub mod decl;
 pub mod error;
 mod errors;
 pub mod exit;
+#[cfg(any(
+    feature = "unstable-param-sig-interface",
+    feature = "unstable-state-interface"
+))]
+mod interface_name;
+pub mod ledger_entry_type;
 mod macros;
 pub mod sfield;
+#[cfg(feature = "unstable-state-interface")]
+pub mod si;
+#[cfg(feature = "unstable-param-sig-interface")]
+pub mod sig;
 pub mod slot_obj;
 pub mod state;
 pub mod static_cell;
+pub mod sto_writer;
 #[cfg(all(not(target_arch = "wasm32"), feature = "testenv"))]
 pub(crate) mod testenv_bridge;
 pub mod tx_type;
 pub mod txn;
 pub mod types;
+pub mod views;
 pub mod xfl;
 pub mod xfl_unchecked;
 
-// `pad!` expands to `$crate::padded_bytes(...)`; the helper lives in the
-// private `macros` module, so re-export it (hidden) at the crate root.
+// `pad!`/`pad_left!` expand to `$crate::padded_bytes(...)`/
+// `$crate::padded_bytes_left(...)`; re-exported (hidden) here since the
+// helpers live in the private `macros` module.
 #[doc(hidden)]
 pub use macros::padded_bytes;
-
-// `pad_left!` expands to `$crate::padded_bytes_left(...)` — same reasoning
-// as `padded_bytes` above.
 #[doc(hidden)]
 pub use macros::padded_bytes_left;
 
-/// Direct re-export of `rshooks-core`: raw Hook API declarations and every
-/// C-verbatim constant. See the crate doc comment for why this is a plain
-/// alias rather than a re-exporting wrapper module.
+pub use macros::no_unroll;
+
+/// Re-export of `rshooks-core`: the raw Hook API declarations and every
+/// C-verbatim constant, unwrapped.
 pub use rshooks_core as raw;
 
-/// Convenience re-export of [`decl`]'s ZST chain-declaration handle types —
-/// the field types a `#[hooks]`-annotated struct declares against. See
-/// [`decl`]'s module doc comment for the full story; the rest of that
-/// module (`StateEntry`, `HookParamAt`, `OtxnParamAt`, the `*Spec` traits)
-/// stays reachable at `decl::` rather than being re-exported here, since
-/// those are the macro-generated side of the handshake, not something a
-/// hook author names directly.
+/// Re-export of [`decl`]'s ZST chain-declaration handle types — the field
+/// types a `#[hooks]`-annotated struct declares against. The rest of
+/// [`decl`] (`StateEntry`, `HookParamAt`, `OtxnParamAt`, the `*Spec` traits)
+/// is the macro-generated side of the handshake, not something a hook
+/// author names directly, so it stays reachable only at `decl::`.
 pub use decl::{HookParam, OtxnParam, State};
 
-/// Implementation-detail handshake between the (forthcoming) `#[hooks]`
-/// struct macro and `#[hooks]` impl macro.
+/// Implementation-detail handshake between the `#[hooks]` struct macro and
+/// `#[hooks]` impl macro.
 #[doc(hidden)]
 pub mod __internal {
     /// Implemented (by generated code) on a chain-struct type by the
@@ -126,14 +135,14 @@ pub use rshooks_macros::account_id;
 ///
 /// # Why this exists
 ///
-/// XFL is a decimal floating-point format (see [`xfl`]'s module doc
-/// comment for the full bit layout): every value expressible in decimal —
-/// `0.1`, `2600000`, `0.003333333333333333` — has exactly one correct XFL
-/// encoding, and hand-computing that encoding's raw bit pattern (as a
-/// `const DEFAULT_REWARD_RATE_BITS: i64 = 6_038_156_834_009_797_973;`,
-/// say) is both opaque at the call site and exactly the kind of manual
-/// arithmetic a compile-time macro exists to replace. `XFL!` takes the
-/// decimal value itself:
+/// XFL is a decimal floating-point format (see [`xfl`]'s module doc for the
+/// bit layout); every decimal value has exactly one correct XFL encoding,
+/// and hand-computing its raw bit pattern is opaque and error-prone. `XFL!`
+/// takes the decimal value directly, parsing its literal text by hand
+/// instead of routing it through `f64` — `f64` cannot represent `0.1` (or
+/// most decimal fractions) exactly and would silently reintroduce the
+/// rounding error XFL exists to avoid. Every digit up to XFL's
+/// 16-significant-digit limit is preserved exactly:
 ///
 /// ```
 /// use rshooks::XFL;
@@ -142,13 +151,6 @@ pub use rshooks_macros::account_id;
 /// const DEFAULT_REWARD_RATE: XflType = XFL!(0.003333333333333333);
 /// assert_eq!(DEFAULT_REWARD_RATE.raw_bits(), 6_038_156_834_009_797_973);
 /// ```
-///
-/// Bit-exactness is the entire reason this macro parses the literal's text
-/// by hand instead of routing it through `f64`: `f64` cannot represent
-/// `0.1` (or most decimal fractions) exactly, so a `f64`-based encoder
-/// would silently reintroduce the very rounding error XFL exists to avoid.
-/// Every digit of the literal, up to XFL's 16-significant-digit limit, is
-/// preserved exactly.
 ///
 /// # Grammar
 ///
@@ -237,36 +239,31 @@ pub use rshooks_macros::XFL;
 /// counterpart, [`ParamName`] for the analogous Hook API parameter-*name*
 /// role, and [`ParamValue`] for the analogous parameter-*value* role.
 ///
-/// # Why a separate derive from [`HookData`]
+/// # Choosing among the derives
 ///
-/// A hook-state *key* and a hook-state *value* share the same "fixed-offset,
-/// named-field struct" shape, but play genuinely different roles, so this
-/// crate keeps them as two narrower derives instead of one derive (and one
-/// blanket impl) covering both:
+/// [`HookKey`], [`HookData`], [`ParamName`], and [`ParamValue`] all derive
+/// from the same "fixed-offset, named-field struct" shape, differing only in
+/// which impls they generate, which direction data flows, and whether their
+/// encoded length is bounded:
 ///
-/// - A key is only ever **encoded outward** — handed to `state`/
-///   `state_foreign` to *locate* an entry — never read back and decoded as
-///   itself (the *value* stored at that key is what gets read back).
-///   `HookKey` reflects that by generating only [`convert::ToBytes`] plus
-///   [`state::StateKeyEncode`]: no `FromBytes`, no `FixedRead`, no inherent
-///   `LEN` const.
-/// - A key has a bound the Hook API's fixed key space imposes — its real
-///   encoded length must fit within 32 bytes — distinct from a value's lack
-///   of any size cap (beyond this crate's own `MAX_TYPED_STATE_LEN`
-///   convenience limit — see [`state`]'s module doc comment). `HookKey`
-///   checks that bound **at derive time**, unconditionally: a
-///   `#[derive(HookKey)]` struct that encodes to 33+ bytes fails to compile
-///   at its own definition, before it is used as a key. The encoded key sent
-///   to the host is **not** locally zero-padded up to 32 bytes — it is exactly
-///   the struct's own natural
-///   length, e.g. 2 bytes for a `{ tag: u8, small: u8 }`, and the host
-///   itself left-pads a key shorter than 32 bytes (see [`state`]'s module
-///   doc comment, "Key length and padding").
-/// - Only a `#[derive(HookKey)]` struct, a [`state_keys!`](crate::state_keys)
-///   enum, or [`types::StateKey`] itself implements
-///   [`state::StateKeyEncode`] — an ordinary `#[derive(HookData)]` *value*
-///   struct does **not** automatically qualify as a key, so a state value
-///   can never be passed where a key is expected by accident.
+/// | derive | generates | direction | size bound |
+/// |---|---|---|---|
+/// | `HookKey` | [`convert::ToBytes`] + [`state::StateKeyEncode`] | write-only (locates a state entry) | ≤ 32 bytes, checked at derive time |
+/// | `HookData` | [`convert::ToBytes`] + [`convert::FromBytes`] + [`convert::FixedRead`] + `LEN` | read-write | uncapped (see [`state`]'s `MAX_TYPED_STATE_LEN` doc) |
+/// | `ParamName` | [`convert::ToBytes`] only | write-only (locates a parameter) | 1..=32 bytes, checked at derive time |
+/// | `ParamValue` | [`convert::FromBytes`] + [`convert::FixedRead`] (no `LEN`) | read-only | uncapped |
+///
+/// A `HookKey`'s real encoded length is **not** locally zero-padded — it is
+/// exactly the struct's own length, e.g. 2 bytes for `{ tag: u8, small: u8
+/// }`; the host itself left-pads a key shorter than 32 bytes (see
+/// [`state`]'s module doc, "Key length and padding"). Only a
+/// `#[derive(HookKey)]` struct, a [`state_keys!`](crate::state_keys) enum, or
+/// [`types::StateKey`] itself implements [`state::StateKeyEncode`] — an
+/// ordinary `#[derive(HookData)]` value struct does not automatically
+/// qualify as a key. `HookKey` pairs with a value type via
+/// [`state::TypedStateKey`]; `ParamName` pairs with a value type via
+/// [`convert::TypedParamName`] the same way (see [`state::TypedStateKey`]'s
+/// doc comment for that pairing's own comparison table).
 ///
 /// # Grammar
 ///
@@ -279,19 +276,18 @@ pub use rshooks_macros::XFL;
 /// # What gets generated
 ///
 /// - `impl ToBytes for Name`: fields encoded back-to-back, in declaration
-///   order — identical codegen to [`HookData`]'s `ToBytes` impl (see its doc
-///   comment's "What gets generated"/"Zero-cost by construction" sections);
-///   this derive only adds the `StateKeyEncode` impl on top.
+///   order — identical codegen to [`HookData`]'s `ToBytes` impl; this derive
+///   only adds the `StateKeyEncode` impl on top.
 /// - `impl state::StateKeyEncode for Name`: encodes `self` via the `ToBytes`
 ///   impl above into an [`state::EncodedStateKey`] carrying exactly `Name`'s
 ///   own real encoded length (never padded to 32), with a compile-time
-///   (monomorphized) assert that the length fits within 32 bytes.
+///   assert that the length fits within 32 bytes.
 ///
-/// # Real length, not zero-padded: the exact byte image sent to the host
+/// # Byte image sent to the host
 ///
-/// The bytes [`state::StateKeyEncode::encode`] produces are `Name`'s fields,
-/// little-endian, back-to-back — nothing more. A `{ tag: u8, small: u16 }`
-/// key encodes to exactly 3 bytes, not 32:
+/// [`state::StateKeyEncode::encode`] produces `Name`'s fields, little-endian,
+/// back-to-back — nothing more. A `{ tag: u8, small: u16 }` key encodes to
+/// exactly 3 bytes, not 32:
 ///
 /// ```
 /// use rshooks::HookKey;
@@ -310,13 +306,12 @@ pub use rshooks_macros::XFL;
 /// # Examples
 ///
 /// A composite state key (a tag byte plus an `AccountId`) paired with a
-/// composite state value via a hand-written [`state::TypedStateKey`] impl
-/// and used with [`state::state_get_typed`]/[`state::state_set_typed`] — no
+/// composite state value via a hand-written [`state::TypedStateKey`] impl,
+/// used with [`state::state_get_typed`]/[`state::state_set_typed`] — no
 /// `state_keys!` declaration, no hand-packed byte buffer, and (unlike the
 /// loose [`state::state_get`]/[`state::state_set_loose`], which take the
-/// value type as an independent generic parameter — see
-/// [`state::TypedStateKey`]'s doc comment) no way to accidentally read/write
-/// `DepositKey`'s entry as some other struct's value type:
+/// value type as an independent generic parameter) no way to accidentally
+/// read/write `DepositKey`'s entry as some other struct's value type:
 ///
 /// ```
 /// use rshooks::{HookData, HookKey};
@@ -380,11 +375,10 @@ pub use rshooks_macros::XFL;
 /// ```
 ///
 /// The loose [`state::state_get`]/[`state::state_set_loose`] take a key and
-/// a value type as independent generic parameters, so nothing there stops
-/// pairing a key with the *wrong* value type — a [`state::TypedStateKey`]
-/// impl plus [`state::state_set_typed`] closes that: `value`'s type is
-/// checked against the key's own declared [`state::TypedStateKey::Value`],
-/// so passing a value meant for a different key is a compile error:
+/// value type as independent generic parameters, so nothing stops pairing a
+/// key with the *wrong* value type. [`state::state_set_typed`] closes that:
+/// `value`'s type is checked against the key's declared
+/// [`state::TypedStateKey::Value`], so a mismatched value is a compile error:
 ///
 /// ```compile_fail
 /// use rshooks::{HookData, HookKey};
@@ -416,16 +410,14 @@ pub use rshooks_macros::HookKey;
 
 /// Derives [`convert::ToBytes`]/[`convert::FromBytes`]/[`convert::FixedRead`]
 /// for a fixed-size, named-field struct used as a **composite hook-state
-/// value** — read back and decoded by `state_get`/`state_get_typed`, written by
-/// `state_set_loose`/`state_set_typed`. See [`HookKey`] for the state-*key*
-/// counterpart (and why it's a separate, narrower derive rather than
-/// `HookData` also serving as a key), [`ParamName`] for the analogous Hook
-/// API parameter-*name* role, and [`ParamValue`] for the analogous
-/// parameter-*value* role (a `#[derive(HookData)]` struct also happens to
-/// satisfy `ParamValue`'s `FromBytes`/`FixedRead` requirement and so *can*
-/// be used as a parameter value directly — [`ParamValue`] is the narrower,
-/// intent-revealing choice for a struct that is only ever a parameter
-/// payload and never a state value).
+/// value** — read back and decoded by `state_get`/`state_get_typed`, written
+/// by `state_set_loose`/`state_set_typed`. See [`HookKey`] for the
+/// state-*key* counterpart, [`ParamName`] for the parameter-*name* role, and
+/// [`ParamValue`] for the parameter-*value* role (a `#[derive(HookData)]`
+/// struct also satisfies `ParamValue`'s `FromBytes`/`FixedRead`
+/// requirement and so *can* be used as a parameter value directly —
+/// [`ParamValue`] is the narrower, intent-revealing choice for a struct
+/// that is only ever a parameter payload).
 ///
 /// # Grammar
 ///
@@ -437,18 +429,15 @@ pub use rshooks_macros::HookKey;
 /// }
 /// ```
 ///
-/// - A plain (non-generic) struct with **named fields only** — no tuple
-///   structs, no unit structs, no enums, no unions.
-/// - At least one field.
-/// - Every field's type must implement [`convert::ToBytes`] +
-///   [`convert::FromBytes`]: any of this crate's fixed-size primitives
-///   (`u8`/`u16`/`u32`/`u64`/`i64`), [`xfl::XFL`], any `rshooks::types`
-///   newtype (`AccountId`, `Hash`, ...), a raw `[u8; N]`, or another
-///   `#[derive(HookData)]` struct (nesting composes for free — see below).
-///   A field of any other (variable-length) type fails to compile with an
-///   ordinary rustc trait-bound error naming the missing `ToBytes`/
-///   `FromBytes` impl against the generated code — this derive does not
-///   implement its own type checker.
+/// A plain, non-generic, named-field struct (no tuple structs, unit
+/// structs, enums, or unions) with at least one field. Every field's type
+/// must implement [`convert::ToBytes`] + [`convert::FromBytes`]: this
+/// crate's fixed-size primitives (`u8`/`u16`/`u32`/`u64`/`i64`),
+/// [`xfl::XFL`], any `rshooks::types` newtype (`AccountId`, `Hash`, ...), a
+/// raw `[u8; N]`, or another `#[derive(HookData)]` struct (nesting composes
+/// for free — see below). A field of any other (variable-length) type fails
+/// to compile with an ordinary rustc trait-bound error naming the missing
+/// trait.
 ///
 /// # What gets generated
 ///
@@ -463,26 +452,23 @@ pub use rshooks_macros::HookKey;
 ///
 /// # Zero-cost by construction
 ///
-/// Every field offset is a compile-time constant (a chain of `const`
-/// declarations built from each field's own `ToBytes::MAX_LEN`, resolved at
-/// compile time), and every field read/write delegates straight to that
-/// field's own `ToBytes::write`/`FromBytes::read` — the identical "fixed,
-/// unrolled offsets, no runtime-computed length" shape this crate already
-/// hand-writes for [`txn_template!`]'s generated setters. There is no
-/// per-field loop, and (for a total size the toolchain still lowers to
-/// inlined stores rather than a `memset`/`memcpy` builtin call — empirically
-/// up to 32 bytes at this crate's release profile, see
-/// [`state`]'s `MAX_TYPED_STATE_LEN` doc comment) no unguarded loop at all.
-/// `examples/12_typed-data`'s README measures this directly: a
-/// `#[derive(HookData)]` struct and a hand-packed equivalent compile to the
-/// same worst-case instruction count.
+/// Every field offset is a compile-time constant, and every field
+/// read/write delegates straight to that field's own
+/// `ToBytes::write`/`FromBytes::read` — the same "fixed, unrolled offsets,
+/// no runtime-computed length" shape this crate hand-writes for
+/// [`txn_template!`]'s generated setters. There is no per-field loop, and
+/// (up to 32 bytes at this crate's release profile — see [`state`]'s
+/// `MAX_TYPED_STATE_LEN` doc) the toolchain lowers it to inlined stores
+/// rather than a `memset`/`memcpy` call, so no unguarded loop at all.
+/// `examples/12_typed-data`'s README measures this: a `#[derive(HookData)]`
+/// struct and a hand-packed equivalent compile to the same worst-case
+/// instruction count.
 ///
 /// # Nesting
 ///
-/// A `#[derive(HookData)]` struct can itself be a field of another — since
-/// the derive only ever requires a field's type to implement `ToBytes`/
-/// `FromBytes`/`FixedRead`, and every derived struct does, nesting needs no
-/// special support:
+/// A `#[derive(HookData)]` struct can itself be a field of another, since
+/// every derived struct already implements `ToBytes`/`FromBytes`/
+/// `FixedRead` — nesting needs no special support:
 ///
 /// ```
 /// use rshooks::HookData;
@@ -529,15 +515,13 @@ pub use rshooks_macros::HookKey;
 /// assert_eq!(value, Err(HookError::NotImplemented));
 /// ```
 ///
-/// # Full byte image: fields are little-endian, back-to-back, in
-/// declaration order
+/// # Full byte image
 ///
 /// The examples above only check `Name::LEN`/round-trip-through-itself —
-/// this one instead pins down `write()`'s exact output byte-for-byte
-/// against a hand-built `expected` array, proving both each field's
-/// little-endian encoding (see DESIGN.md §5.6, "Endianness conventions")
-/// and its offset directly, not just that encode-then-decode is the
-/// identity function:
+/// this one pins down `write()`'s exact output byte-for-byte against a
+/// hand-built `expected` array, proving each field's little-endian
+/// encoding and offset directly (see DESIGN.md §5.6, "Endianness
+/// conventions"):
 ///
 /// ```
 /// use rshooks::HookData;
@@ -607,9 +591,8 @@ pub use rshooks_macros::HookKey;
 /// ```
 ///
 /// A `HookData` struct does **not** automatically work as a state *key* —
-/// unlike the pre-4-derive design, there is no blanket
-/// [`state::StateKeyEncode`] impl over every `ToBytes` type, so this fails
-/// to compile (use [`HookKey`] instead):
+/// there is no blanket [`state::StateKeyEncode`] impl over every `ToBytes`
+/// type, so this fails to compile (use [`HookKey`] instead):
 ///
 /// ```compile_fail
 /// use rshooks::HookData;
@@ -632,54 +615,25 @@ pub use rshooks_macros::HookData;
 /// [`convert::TypedParamName`] via a hand-written impl pairing it with a
 /// value type, then read with
 /// [`crate::api::hook_ctx::hook_param_typed`]/
-/// [`crate::api::otxn::otxn_param_typed`], which take **a reference to a name
-/// value**). See [`HookKey`] for the analogous hook-state *key* role, and
-/// [`ParamValue`] for the parameter *value* counterpart (what the paired
-/// value type above must satisfy).
+/// [`crate::api::otxn::otxn_param_typed`], which take a reference to a name
+/// value. See [`HookKey`] for the analogous hook-state *key* role, and
+/// [`ParamValue`] for the parameter *value* counterpart.
 ///
 /// # Why this derive doesn't implement [`convert::TypedParamName`] itself
 ///
-/// This derive only ever generates [`convert::ToBytes`] for the annotated
-/// struct — it does not implement [`convert::TypedParamName`] itself (that
-/// trait additionally needs `type Value`, supplied by a hand-written impl
-/// that pairs the name type with the value type it's read as — exactly like
-/// [`state::TypedStateKey`] pairs a [`HookKey`] type with its value type).
-/// `ParamName` (this derive) and `TypedParamName` (that trait) share "name"
-/// in their names only in
-/// the sense that both describe "the parameter name" concept from two
-/// different angles (derive vs. runtime trait) — Rust's separate macro and
-/// type namespaces mean this is not an identifier collision; the names are
-/// kept parallel deliberately, for readability at the declaration site.
+/// This derive only generates [`convert::ToBytes`] for the annotated
+/// struct; it does not implement [`convert::TypedParamName`] itself, since
+/// that trait additionally needs `type Value`, supplied by a hand-written
+/// impl pairing the name type with the value type it's read as — exactly
+/// like [`state::TypedStateKey`] pairs a [`HookKey`] type with its value
+/// type.
 ///
-/// # Relationship to [`HookData`]
-///
-/// A hook-state value and a Hook API parameter *name* share the same
-/// "fixed-offset struct" shape, but are genuinely different concepts —
-/// `ParamName` is deliberately narrower than `HookData`, not just an alias
-/// for it:
-///
-/// - A parameter name is only ever **written** (handed to
-///   `hook_param`/`otxn_param` to locate a value) — never read back and
-///   decoded as itself. `ParamName` reflects that by generating only
-///   [`convert::ToBytes`]: no [`convert::FromBytes`], no
-///   [`convert::FixedRead`], no inherent `LEN` const. Trying to read a
-///   `#[derive(ParamName)]` type back as a value (or use it where
-///   `hook_param_typed`/`otxn_param_typed` expect a value type) fails to compile
-///   with an ordinary rustc trait-bound error naming the missing trait.
-/// - A parameter name has its own length bound the Hook API itself
-///   enforces — [`convert::PARAM_NAME_MAX_LEN`], **1 to 32 bytes**
-///   (`hook_api.h`: `TOO_SMALL` below 1, `TOO_BIG` above 32) — the same
-///   upper bound a hook state key's real encoded length is checked against
-///   (see [`HookKey`]; a key is sent to the host at its own real length,
-///   never locally zero-padded — the Hook API host itself left-pads a
-///   shorter key), while a state *value* has no size cap at all.
-///   `ParamName` checks this **at derive time**, unconditionally: a
-///   `#[derive(ParamName)]` struct that encodes to 0 or to 33+ bytes fails
-///   to compile at its own definition, before it's ever used as a
-///   parameter name at all (contrast with [`HookKey`]'s analogous
-///   derive-time check, which only has an upper bound — a key may be
-///   shorter than 32 bytes, but a parameter name may not be shorter than 1
-///   byte).
+/// See [the derive comparison table](HookKey#choosing-among-the-derives) for
+/// how `ParamName` compares to [`HookData`]/[`HookKey`]/[`ParamValue`]. Its size
+/// bound is [`convert::PARAM_NAME_MAX_LEN`] — **1 to 32 bytes**
+/// (`hook_api.h`: `TOO_SMALL` below 1, `TOO_BIG` above 32), checked at
+/// derive time: a struct that encodes to 0 or to 33+ bytes fails to compile
+/// at its own definition.
 ///
 /// # Grammar
 ///
@@ -769,24 +723,20 @@ pub use rshooks_macros::ParamName;
 /// **Hook API parameter value** — the [`convert::TypedParamName::Value`] a
 /// [`ParamName`] type is paired with via a hand-written
 /// [`convert::TypedParamName`] impl, read back and decoded by
-/// [`api::hook_ctx::hook_param_typed`]/[`api::otxn::otxn_param_typed`] (and the
-/// loose [`api::hook_ctx::hook_param_exact`]/
-/// [`api::otxn::otxn_param_exact`]). See [`HookData`] for the analogous
-/// hook-state *value* role, and [`ParamName`] for the parameter *name*
-/// counterpart (what locates this value).
+/// [`api::hook_ctx::hook_param_typed`]/[`api::otxn::otxn_param_typed`] (and
+/// the loose [`api::hook_ctx::hook_param_exact`]/
+/// [`api::otxn::otxn_param_exact`]). See [`HookData`] for the hook-state
+/// *value* role, and [`ParamName`] for the parameter *name* counterpart.
 ///
-/// # Why this derive generates no [`convert::ToBytes`]
-///
-/// A parameter value is only ever **read back and decoded** — this hook
-/// never writes its *own* parameters (`hook_param_set` writes a *different*
-/// hook's parameter, taking a raw `&[u8]`, not a typed value). `ParamValue`
-/// reflects that by generating only [`convert::FromBytes`]/
-/// [`convert::FixedRead`]: no [`convert::ToBytes`], no inherent `LEN` const.
-/// A consequence: a `#[derive(ParamValue)]` struct cannot be used as a
-/// [`HookKey`]/[`ParamName`] field, nor as a hook-state value with
-/// [`state::state_set_loose`] — both need `ToBytes`, which this derive
-/// deliberately does not provide (use [`HookData`] for a struct that needs
-/// to go both directions).
+/// See [the derive comparison table](HookKey#choosing-among-the-derives) for
+/// how `ParamValue` compares to [`HookData`]/[`HookKey`]/[`ParamName`]: this
+/// hook never writes its *own* parameters (`hook_param_set` writes a
+/// *different* hook's parameter, taking a raw `&[u8]`, not a typed value),
+/// so `ParamValue` generates no [`convert::ToBytes`] and no inherent `LEN`
+/// const — a consequence is that a `#[derive(ParamValue)]` struct cannot be
+/// used as a [`HookKey`]/[`ParamName`] field, nor as a hook-state value with
+/// [`state::state_set_loose`] (use [`HookData`] for a struct that needs to
+/// go both directions).
 ///
 /// # Grammar
 ///
@@ -886,6 +836,12 @@ pub use rshooks_macros::ParamValue;
 #[doc(hidden)]
 pub use rshooks_macros::paste as __paste;
 
+// `txn_template!`'s named-array elements are numbered by position through
+// `$crate::__txn_template_index_elements!`; re-export it (hidden) at the
+// crate root for the same reason as `__paste!` above.
+#[doc(hidden)]
+pub use rshooks_macros::txn_template_index_elements as __txn_template_index_elements;
+
 /// Common imports for hook developers: `use rshooks::prelude::*;` pulls in
 /// the `api::*` wrapper functions, the typed slot layer
 /// ([`slot_obj::SlotObject`] and the generated [`sfield`] constants), the
@@ -893,11 +849,10 @@ pub use rshooks_macros::paste as __paste;
 /// [`xfl::XFL`]/[`xfl_unchecked::XFLUnchecked`]/[`tx_type::TxType`] types,
 /// [`error::HookError`]/[`error::Result`], and the C-verbatim constant
 /// families (`sfXxx`, `ttXxx`, `lsfXxx`, `tfXxx`, and `hookapi.h`'s
-/// `KEYLET_*`/`COMPARE_*`/... constants). Deliberately does NOT re-export
-/// all of `rshooks_core` (its raw `api::*` functions share names with this
-/// crate's own wrappers, e.g. both define `state`) — only the constant-only
-/// modules are pulled in, so there is no ambiguity between a
-/// prelude-imported name and a rshooks wrapper.
+/// `KEYLET_*`/`COMPARE_*`/... constants). It deliberately does not
+/// re-export all of `rshooks_core` — its raw `api::*` functions share names
+/// with this crate's own wrappers (both define `state`, say) — only the
+/// constant-only modules are pulled in, so there is no ambiguity.
 ///
 /// # Two deliberate absences
 ///
@@ -914,22 +869,17 @@ pub use rshooks_macros::paste as __paste;
 ///   `rshooks::api::otxn::otxn_slot`) — see [`mod@api::slot`]'s module doc
 ///   comment.
 pub mod prelude {
-    // `api::*` minus the numbered slot functions: those address the same 255
-    // registers `SlotObject` manages, and a stray `slot_clear(3)` next to a
-    // live handle silently corrupts it. They stay public at
-    // `rshooks::api::slot::*` (and `rshooks::api::otxn::otxn_slot`), where
-    // reaching for them is at least visible at the call site — see
-    // `crate::slot_obj`'s module doc comment.
+    // `api::*` minus the numbered slot functions — see "Two deliberate
+    // absences" above.
     pub use crate::api::control::*;
     pub use crate::api::etxn::*;
     pub use crate::api::float::*;
     pub use crate::api::hook_ctx::*;
     pub use crate::api::keylet::*;
     pub use crate::api::ledger::*;
-    // Everything `api::otxn` exports *except* `otxn_slot`, which is a slot
-    // function and leaves for the reason above. Listed by name rather than
-    // globbed-then-shadowed so that adding one upstream is a deliberate act:
-    // dropping a non-slot API here would be a silent, unrelated break.
+    // Everything `api::otxn` exports except `otxn_slot`, listed by name
+    // (rather than globbed-then-shadowed) so adding one upstream is a
+    // deliberate act.
     pub use crate::api::otxn::{
         OtxnFieldValue, otxn_burden, otxn_field, otxn_field_exact, otxn_field_typed,
         otxn_field_u64, otxn_generation, otxn_id, otxn_id_buf, otxn_param, otxn_param_exact,
@@ -942,9 +892,15 @@ pub mod prelude {
     pub use crate::buf_eq::*;
     pub use crate::convert::{FixedRead, FromBytes, ToBytes, TypedParamName};
     pub use crate::decl::{HookParam, OtxnParam, State};
-    pub use crate::error::{HookError, Result};
+    pub use crate::error::{HookError, HookErrorKind, Result};
     pub use crate::exit::{Accept, HookResult, Rollback};
+    pub use crate::ledger_entry_type::LedgerEntryType;
+    pub use crate::macros::no_unroll;
     pub use crate::sfield::*;
+    #[cfg(feature = "unstable-param-sig-interface")]
+    pub use crate::sig::{
+        Blob, IssueBytes, SigName, SigParamType, hook_sig_param, otxn_sig_param, otxn_sig_param_opt,
+    };
     pub use crate::slot_obj::{AmountBytes, CastTarget, IssueData, SlotKey, SlotObject};
     pub use crate::state::{
         StateKeyEncode, TypedStateKey, state_delete, state_foreign_get, state_foreign_get_typed,
@@ -953,19 +909,19 @@ pub mod prelude {
         state_update_loose, state_update_typed,
     };
     pub use crate::static_cell::HookStatic;
+    pub use crate::sto_writer::StoWriter;
     pub use crate::tx_type::TxType;
     pub use crate::types::*;
+    pub use crate::views::ledger::LedgerEntryCommonFields;
+    pub use crate::views::tx::{TransactionCommonFields, TransactionCommonSlotFields};
     pub use crate::xfl::XFL;
     pub use crate::xfl_unchecked::XFLUnchecked;
-    // The `XFL!` macro and the `xfl::XFL` type above share a name but live
-    // in different namespaces (macro vs. type — the same relationship as
-    // std's `Clone` trait and its `#[derive(Clone)]` macro), so both glob
-    // imports coexist here without ambiguity.
+    // `XFL!` (macro) and `xfl::XFL` (type) live in separate namespaces, so
+    // both glob imports coexist without ambiguity.
     pub use rshooks_macros::XFL;
-    // `sfcodes::*` is deliberately absent: `crate::sfield`'s typed `sfXxx`
-    // constants take those names. The raw `u32` table is still there for
-    // const contexts that need it — `rshooks::raw::sfcodes::*`.
-    pub use rshooks_core::{consts::*, ls_flags::*, tts::*, tx_flags::*};
+    // `sfcodes::*` is deliberately absent — see "Two deliberate absences"
+    // above.
+    pub use rshooks_core::{consts::*, lets::*, ls_flags::*, tts::*, tx_flags::*};
 }
 
 /// Distinctive negative code used by the panic handler below when rolling
@@ -976,12 +932,10 @@ pub mod prelude {
 const PANIC_ROLLBACK_CODE: i64 = -999_999;
 
 /// Panic handler for wasm Hook binaries: rolls the hook back with a fixed
-/// message instead of leaving an unhandled panic (which has no defined
-/// behavior on the Hook host and, per DESIGN.md §2 C7, panic machinery is
-/// something rshooks is built to avoid needing in the first place — this
-/// handler is the last-resort backstop, not the primary correctness
-/// mechanism). Enabled by the default-on `panic-handler` feature; disable it
-/// if a hook wants to supply its own.
+/// message instead of leaving an unhandled panic, which has no defined
+/// behavior on the Hook host. This is a last-resort backstop, not the
+/// primary correctness mechanism (see DESIGN.md §2 C7). Enabled by the
+/// default-on `panic-handler` feature; disable it to supply your own.
 #[cfg(all(target_arch = "wasm32", feature = "panic-handler"))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
@@ -995,23 +949,19 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 /// **non-default** `host-panic-handler` feature.
 ///
 /// A hook crate is a `no_std` cdylib, so even a host `cargo check` (what
-/// rust-analyzer runs for completion and diagnostics) demands a
-/// `#[panic_handler]` — but the wasm handler above is target-gated, and
-/// rshooks cannot provide one unconditionally on the host: any `std`
-/// consumer (like rshooks's own test harness) would then hit a duplicate
-/// lang item. Hook crates opt in via
-/// `rshooks = { ..., features = ["host-panic-handler"] }`, which makes
-/// host analysis work; the handler itself is never reached (host builds of
-/// hook crates are for analysis only, not execution).
+/// rust-analyzer runs for diagnostics) demands a `#[panic_handler]` — but
+/// the wasm handler above is target-gated, and rshooks cannot provide one
+/// unconditionally on the host: a `std` consumer (like rshooks's own test
+/// harness) would then hit a duplicate lang item. Hook crates opt in via
+/// `rshooks = { ..., features = ["host-panic-handler"] }` to make host
+/// analysis work; the handler itself is never reached (host builds of hook
+/// crates are for analysis only, not execution).
 ///
 /// Additionally gated `not(feature = "testenv")`: a `[dev-dependencies]`
-/// setup enabling both `host-panic-handler` (for rust-analyzer) and
-/// `testenv` (for `cargo test`) unifies both features into one build via
-/// ordinary Cargo feature unification. `std` already provides a
-/// `#[panic_handler]` in that build (the test harness links `std`), so
-/// this item is simply not emitted rather than colliding with it — the
-/// `testenv` build's own panic-based `HookExitSignal` unwinding uses
-/// `std`'s handler, not this one.
+/// setup enabling both `host-panic-handler` and `testenv` unifies both into
+/// one build via Cargo feature unification, and `std` already provides a
+/// `#[panic_handler]` there (the test harness links `std`) — so this item
+/// is simply not emitted rather than colliding with it.
 #[cfg(all(
     not(target_arch = "wasm32"),
     feature = "host-panic-handler",

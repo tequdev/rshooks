@@ -7,7 +7,7 @@ node and verifies their runtime behavior.
 ## Prerequisites
 
 - Docker-compatible container runtime
-- [`xrpld-netgen`](https://www.npmjs.com/package/xrpld-netgen)
+- [`xrpld-lab`](https://pypi.org/project/xrpld-lab/)
 - pnpm
 
 The node version is configured by `XAHAUD_VERSION` in `mise.toml`.
@@ -37,7 +37,7 @@ mise run e2e:node-down
 
 ## What the tests verify
 
-The suite deploys example hooks with `@transia/hooks-toolkit`, triggers them,
+The suite deploys example hooks with `@xahau/hooks-toolkit`, triggers them,
 and inspects transaction metadata and ledger state. Coverage includes:
 
 - Hook acceptance and rollback results

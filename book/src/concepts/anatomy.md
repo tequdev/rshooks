@@ -80,16 +80,17 @@ already names its own unit value (Rust gives every unit struct exactly one,
 for free), and that's the value `&self` borrows in its entry above.
 
 Every entry takes `&self` to receive that value by shared reference, and
-reads any declared fields as `self.some_field` — the canonical style
-whenever an entry, or a helper function inside the same `impl`, touches a
-declared field:
+reads any declared field through its kind's namespace —
+`self.state.some_field`, `self.hook_param.some_field`, or
+`self.otxn_param.some_field` — the canonical style whenever an entry, or a
+helper function inside the same `impl`, touches a declared field:
 
 ```rust,ignore
 #[hooks]
 impl StateCounter {
     #[hook(0, on = [Invoke])]
     fn main(&self) -> HookResult {
-        let count = self.counter.get().unwrap_or(Some(0)).unwrap_or(0);
+        let count = self.state.counter.get().unwrap_or(Some(0)).unwrap_or(0);
         // ...
     }
 }
@@ -97,7 +98,7 @@ impl StateCounter {
 
 Code *outside* the impl — a free function, another module — has no `self`
 to borrow, so it reaches the identical static by the struct's own name
-instead: `StateCounter.counter.get()`. Both spellings name the same
+instead: `StateCounter.state.counter.get()`. Both spellings name the same
 zero-sized value; `&self` is a reference to a zero-sized value, so it
 optimizes away completely, even across an `#[inline(never)]` boundary. Use
 `&self` inside the annotated `impl` and the struct-name static everywhere

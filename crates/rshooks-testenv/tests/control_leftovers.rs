@@ -1,10 +1,7 @@
 //! Integration tests for `hook_again`/`hook_skip`/`hook_param_set` semantics
-//! (P2-E — `.claude/design/TESTENV_PHASE2_DESIGN.md` §4 "control
-//! leftovers"). Hand-rolled `NativeEntry` tables (not `#[hooks]`-declared)
-//! drive `rshooks::api::control`/`rshooks::api::hook_ctx` directly, matching
-//! `crates/rshooks-testenv/src/env.rs`'s own in-crate test-module pattern
-//! (`OneEntry`/`accepting_hook`, etc.) — this file exercises the same
-//! machinery from outside the crate, through the public `TestEnv` API only.
+//! (design §4 "control leftovers"). Hand-rolled `NativeEntry` tables (not
+//! `#[hooks]`-declared) drive `rshooks::api::control`/`rshooks::api::hook_ctx`
+//! directly through the public `TestEnv` API.
 
 #![allow(
     clippy::unwrap_used,
@@ -71,12 +68,10 @@ const OVERRIDE_HASH: [u8; 32] = [0x77; 32];
 const PARAM_NAME: &[u8] = b"K";
 
 /// Calls `hook_param_set(value, PARAM_NAME, OVERRIDE_HASH)`, then reads
-/// `hook_param(PARAM_NAME)` (same invocation) and records what it saw into
-/// state (`b"seen"`) as either the raw value or a sentinel — proving the
-/// documented "not visible within the same invocation" limitation (design
-/// §4: overrides commit only on `accept!`, so a same-invocation read
-/// consults only the world's already-committed value from a *previous*
-/// invocation, if any).
+/// `hook_param(PARAM_NAME)` in the same invocation and records what it saw
+/// into state (`b"seen"`). Overrides commit only on `accept!`, so a
+/// same-invocation read only sees the world's already-committed value from
+/// a *previous* invocation, if any.
 fn set_override_and_record_same_invocation_read(_r: u32) -> i64 {
     let _ = rshooks::api::hook_ctx::hook_param_set(b"OVERRIDDEN", PARAM_NAME, &OVERRIDE_HASH);
     let mut buf = [0u8; 32];

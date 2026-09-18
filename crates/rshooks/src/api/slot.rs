@@ -14,18 +14,17 @@
 //! value types, and the reads are the same host calls behind
 //! `#[inline(always)]` wrappers. Measured against raw code making the same
 //! calls with the same cleanup policy, the typed version is byte-identical —
-//! 197 instructions and 925 bytes either way (see
-//! `examples/08_slot-ledger`'s README, which tabulates the clearing variants
-//! too). Reach for the typed layer by
-//! default; reach for this one when a hook genuinely wants to place things
-//! in specific numbered slots and manage them itself, which
-//! `examples/80_reward` and `examples/81_govern` both do.
+//! 197 instructions and 925 bytes either way (see `examples/08_slot-ledger`'s
+//! README). Reach for the typed layer by default; reach for this one when a
+//! hook genuinely wants to place things in specific numbered slots and
+//! manage them itself, which `examples/80_governance`'s `govern`/`reward`
+//! entries both do.
 //!
 //! **Do not mix the two.** Both address the same 255 registers. A
 //! `slot_clear(3)` here while a `SlotObject` happens to hold slot 3 leaves
 //! that handle looking valid while describing whatever lands there next —
-//! a logic hazard, not a memory-safety one (no `unsafe` on either side), so
-//! nothing prevents it. Pick one layer per hook.
+//! a logic hazard, not a memory-safety one, so nothing prevents it. Pick one
+//! layer per hook.
 //!
 //! That is also why these functions are **not in the prelude**: reaching for
 //! them takes an explicit `rshooks::api::slot::` path (and
@@ -48,6 +47,30 @@ pub fn slot<B: AsMut<[u8]> + ?Sized>(out: &mut B, slot_no: u32) -> Result<usize>
         .map(|v| v as usize)
 }
 
+/// [`slot`] into uninitialized scratch, returning the **undecoded** `i64`
+/// the host call produced. The caller may treat only the prefix reported as
+/// written as initialized; the buffer remains `MaybeUninit` across FFI to
+/// avoid invalid references and guard-charged zeroing stores.
+///
+/// Raw-code, for the reason `api::state`'s `state_raw_code` documents: the
+/// one caller reads a fixed width, so it compares the code against that
+/// width directly — a single test that a negative code also fails — instead
+/// of testing the sign and the count separately.
+#[inline(always)]
+pub(crate) fn slot_uninit_raw_code(out: &mut [core::mem::MaybeUninit<u8>], slot_no: u32) -> i64 {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.slot(slot_no)) {
+        return crate::testenv_bridge::write_bytes_uninit_code(out, r);
+    }
+    unsafe {
+        rshooks_core::slot(
+            out.as_mut_ptr().cast::<u8>() as u32,
+            out.len() as u32,
+            slot_no,
+        )
+    }
+}
+
 /// Serialize the object in `slot_no` and return it as a big-endian `u64`
 /// ("as-int64" mode: `write_ptr = 0, write_len = 0`; only for data of at
 /// most 8 bytes with the top bit clear, else
@@ -63,15 +86,12 @@ pub fn slot_u64(slot_no: u32) -> Result<u64> {
 
 /// Serialize the object in `slot_no`, requiring the serialization to be
 /// exactly `T`'s length — any [`crate::convert::FixedRead`] type. A
-/// serialization longer than that already fails as
+/// serialization longer than `T` fails as
 /// [`crate::error::HookError::TooSmall`] from the underlying host call; a
 /// serialization shorter is caught by `T::read_exact` itself and mapped to
-/// the same variant — see `state_exact` (`state.rs`) for the identical
-/// pattern and rationale. No loop, no panic.
+/// the same variant. No loop, no panic.
 ///
-/// `T` is inferred from context, not a turbofish — see
-/// [`crate::api::otxn::otxn_field_exact`]'s doc comment for the full
-/// story.
+/// `T` is inferred from context, not a turbofish.
 ///
 /// # Examples
 ///
@@ -155,6 +175,29 @@ pub fn slot_subfield(parent_slot: u32, field_id: impl Into<u32>, new_slot: u32) 
         return res(v).map(|v| v as u32);
     }
     res(unsafe { rshooks_core::slot_subfield(parent_slot, field_id, new_slot) }).map(|v| v as u32)
+}
+
+/// [`slot_subfield`], returning the **undecoded** `i64` the host call
+/// produced instead of a decoded [`Result`].
+///
+/// A missing field is reported here as `DOESNT_EXIST`, so this is where a
+/// caller distinguishing "absent" from "failed" has to look — before any
+/// [`crate::error::HookError`] is constructed, per `docs/DESIGN.md` §5.6's
+/// nesting-depth rule. Backs
+/// [`SlotObject::get_opt`](crate::slot_obj::SlotObject::get_opt), which the
+/// generated views' optional-field accessors use.
+///
+/// Body duplicated rather than shared with [`slot_subfield`], for the
+/// reason `api::state`'s `state_raw_code` documents.
+#[inline(always)]
+pub(crate) fn slot_subfield_raw_code(parent_slot: u32, field_id: u32, new_slot: u32) -> i64 {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) =
+        rshooks_core::backend::with_backend(|b| b.slot_subfield(parent_slot, field_id, new_slot))
+    {
+        return v;
+    }
+    unsafe { rshooks_core::slot_subfield(parent_slot, field_id, new_slot) }
 }
 
 /// The type of the object in `slot_no`: with `flags = 0`, the field code;

@@ -28,8 +28,8 @@ pub struct StaticUser {
 #[hooks]
 impl StaticUser {
     /// Takes the static cell twice: the second take within the same
-    /// invocation must be `None`. Reports `10` when exactly the first take
-    /// succeeded (the expected shape), anything else otherwise.
+    /// invocation must be `None`. Reports `10` when the first take succeeds
+    /// and the second does not, anything else otherwise.
     #[hook(0, on = [Invoke])]
     fn take_twice(&self) -> HookResult {
         let first = SCRATCH.take();

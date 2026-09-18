@@ -1,0 +1,12 @@
+error: txn_template!: unrecognized field declaration: 0 : native_amount(sfAmount) = 1, , @ end_array, emit_details : emit_details,
+  --> tests/ui/fail/txn_template_scalar_in_array.rs:10:1
+   |
+10 | / txn_template! {
+11 | |     struct Remit {
+12 | |         transaction_type = ttREMIT,
+13 | |         sequence: u32_field(sfSequence) = 0,
+...  |
+24 | | }
+   | |_^
+   |
+   = note: this error originates in the macro `$crate::__txn_template_step` which comes from the expansion of the macro `txn_template` (in Nightly builds, run with -Z macro-backtrace for more info)

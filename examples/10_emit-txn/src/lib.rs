@@ -7,17 +7,17 @@ txn_template! {
     /// A payment template for emitted transactions.
     struct Payment {
         transaction_type = ttPAYMENT,
-        flags: u32_field(sfFlags) = tfCANONICAL,
-        source_tag: u32_field(sfSourceTag) = 0,
-        sequence: u32_field(sfSequence) = 0,
-        destination_tag: u32_field(sfDestinationTag) = 0,
-        first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
-        last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
-        amount: native_amount(sfAmount) = 0,
-        fee: native_amount(sfFee) = 0,
-        signing_pub_key: empty_vl(sfSigningPubKey),
-        account: account_id(sfAccount),
-        destination: account_id(sfDestination),
+        flags: sfFlags = tfCANONICAL,
+        source_tag: sfSourceTag = 0,
+        sequence: sfSequence = 0,
+        destination_tag: sfDestinationTag = 0,
+        first_ledger_sequence: sfFirstLedgerSequence = 0,
+        last_ledger_sequence: sfLastLedgerSequence = 0,
+        amount: sfAmount = NativeAmount(0),
+        fee: sfFee = NativeAmount(0),
+        signing_pub_key: sfSigningPubKey = [],
+        account: sfAccount,
+        destination: sfDestination,
         emit_details: emit_details,
     }
 }
@@ -100,11 +100,9 @@ impl EmitTxn {
 
 // In-crate off-chain unit test, driven through `TestEnv::invoke` against
 // the entry declared above — no wasm build, no node. Only reachable via
-// `cargo test` (`--test` implies `cfg(test)`, which is what switches off
-// `no_std` above); never part of the shipped wasm artifact. See
-// `tests/emit.rs` for the equivalent integration-test-style layout, and
-// `book/src/testing/unit-tests.md` for both layouts documented side by
-// side.
+// `cargo test` (which is what switches off `no_std` above); never part of
+// the shipped wasm artifact. See `tests/emit.rs` for the equivalent
+// integration-test-style layout.
 #[cfg(test)]
 mod tests {
     use rshooks_testenv::prelude::*;

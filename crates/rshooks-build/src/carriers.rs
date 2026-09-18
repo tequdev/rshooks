@@ -3,9 +3,8 @@
 //! `#[hooks] struct` and `#[hooks] impl` each embed a JSON declaration in the
 //! name of a deliberately dead wasm export, using the same
 //! prefix-plus-uppercase-hex mechanism as the `metadata!` carrier. This
-//! module extracts and validates both carriers and exposes the shared
-//! trigger/mask logic the sidecar and SetHook template generators both
-//! need.
+//! module extracts and validates both carriers, and exposes the shared
+//! trigger/mask logic used by the sidecar and SetHook template generators.
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -45,6 +44,39 @@ pub struct ChainDecls {
     /// `#[otxn_param(...)]` field declarations.
     #[serde(default)]
     pub otxn_params: Vec<ParamDecl>,
+    /// `#[state_interface(...)]` field declarations
+    /// (`docs/STATE_INTERFACE_DESIGN.md`). `#[serde(default)]` so a carrier
+    /// built without any (older `rshooks`, or simply no such field on the
+    /// struct) still parses, as an empty list — the macro itself only emits
+    /// the `state_interface` key when non-empty (byte-identity with a
+    /// pre-`unstable-state-interface` build).
+    #[serde(default)]
+    pub state_interface: Vec<SiDecl>,
+}
+
+/// One `#[state_interface(...)]` field declaration
+/// (`docs/STATE_INTERFACE_DESIGN.md` §5). Chain-level (like [`StateDecl`]),
+/// not per-entry: all entries of the struct share the account/namespace
+/// state, so [`crate::sethook_template`] emits this declaration's
+/// `HookParameters` entry on every non-gap entry.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SiDecl {
+    /// The struct field name.
+    pub field: String,
+    /// The State ID, `0..=255`.
+    pub id: u8,
+    /// The full declared `HookParameterName`, uppercase hex — resolved at
+    /// macro time.
+    pub name_hex: String,
+    /// The full declared `HookParameterValue` (the value schema, not a
+    /// `"00"` marker), uppercase hex — resolved at macro time.
+    pub value_hex: String,
+    /// Human-readable `(name: Type, ..)` display form of `key(..)` (`"()"`
+    /// for a singleton), matching [`StateDecl`]'s display-string convention.
+    pub key: String,
+    /// Human-readable `(name: Type, ..)` display form of `value(..)`.
+    pub value: String,
 }
 
 /// One `#[state(...)]` field declaration.
@@ -75,12 +107,10 @@ pub struct ParamDecl {
     pub value: String,
     /// Whether `required` was declared.
     pub required: bool,
-    /// Normalized token text of the `default = ...` expression, if
-    /// declared (`None` when no `default` was declared). Carrying the
-    /// actual expression text, not just whether one was present, keeps it
-    /// covered by the byte-equal discovery-vs-selected-build consistency
-    /// check (`assert_carriers_match`) and lets it appear in the per-entry
-    /// sidecar's transcribed `chain.decls`.
+    /// Normalized token text of the `default = ...` expression, or `None`
+    /// if not declared. Kept as text (not just presence) so it's covered by
+    /// `assert_carriers_match`'s byte-equal check and can appear in the
+    /// per-entry sidecar's transcribed `chain.decls`.
     pub default: Option<String>,
 }
 
@@ -119,6 +149,31 @@ pub struct EntryDecl {
     pub hook_can_emit: Option<Vec<String>>,
     /// The `description = "..."` attribute value, if declared.
     pub description: Option<String>,
+    /// Declared signature parameters (`docs/PARAM_SIGNATURE_DESIGN.md`
+    /// §1/§4) — extra `ident: Type` arguments on the `#[hook(..)]` fn, in
+    /// wire-index order. The carrier key is present iff the emitting macro
+    /// was built with `unstable-param-sig-interface`: `None` means the key
+    /// is absent (the interface was not compiled in); `Some(list)`,
+    /// possibly empty, means the key is present. `#[serde(default)]` so a
+    /// carrier with no `sig_params` key parses as `None`.
+    #[serde(default)]
+    pub sig_params: Option<Vec<SigParamDecl>>,
+}
+
+/// One declared signature parameter (`docs/PARAM_SIGNATURE_DESIGN.md`
+/// §1/§4). Index is the position within [`EntryDecl::sig_params`].
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SigParamDecl {
+    /// The declared name — the entry fn argument's own identifier.
+    pub field: String,
+    /// The type code (an XAS-010d type code — `docs/PARAM_SIGNATURE_DESIGN.md`
+    /// §2's table).
+    pub type_byte: u8,
+    /// The full declared `HookParameterName`, uppercase hex — resolved at
+    /// macro time (`docs/PARAM_SIGNATURE_DESIGN.md` §4), so the build tool
+    /// never re-derives it.
+    pub name_hex: String,
 }
 
 /// The trigger declaration for one entry, in the three-state-preserving wire
@@ -260,10 +315,9 @@ const HOOKS_SCHEMA: &str = "rshooks-hooks-v2";
 
 /// Validates the two carriers' declared identity: exact schema tags, and
 /// that the impl carrier's target type matches the struct carrier's
-/// annotated struct — both carriers are untrusted input from the build's
-/// perspective (hand-decoded from wasm export names), so a mismatch here
-/// signals a version skew or a malformed/foreign carrier rather than a
-/// well-formed but merely invalid chain, and is reported distinctly from
+/// annotated struct. Both carriers are untrusted input (hand-decoded from
+/// wasm export names), so a mismatch here signals version skew or a
+/// malformed/foreign carrier, reported distinctly from
 /// [`validate_entries`]'s content-level checks.
 fn validate_carrier_identity(chain: &ChainCarrier, hooks: &EntriesCarrier) -> Result<()> {
     if chain.schema != CHAIN_SCHEMA {
@@ -293,9 +347,8 @@ fn validate_carrier_identity(chain: &ChainCarrier, hooks: &EntriesCarrier) -> Re
 }
 
 /// Validates a parsed impl carrier: non-empty, unique indices in `0..=9`
-/// (the macro already guarantees this; re-checked here since carriers are
-/// untrusted input from the build's perspective), known transaction-type
-/// names, and `HookName` character-count rules.
+/// (re-checked here since carriers are untrusted input), known
+/// transaction-type names, and `HookName` character-count rules.
 pub fn validate_entries(entries: &EntriesCarrier) -> Result<()> {
     if entries.entries.is_empty() {
         bail!("no #[hook] entries declared in the #[hooks] impl block");
@@ -410,17 +463,14 @@ pub struct TriggerMasks {
 
 /// The `on = all` `HookOn` mask: 64 zero hex digits.
 ///
-/// `hook_mask` cannot express this: passing `None` yields "field omitted"
-/// (the `on` attribute itself was never written), and passing `Some(&[])`
-/// yields the deny-all base mask (`FF..BF..FF`, i.e. "fires on nothing").
-/// Neither is "fires on everything except SetHook", which is what `on = all`
-/// means. Per the ordinary (active-low) HookOn bits, 0 means "do fire"; per
-/// the special-cased SetHook bit (byte 29, tt22), 0 also means "do NOT
-/// fire" (that bit is active-high). So the all-zero mask is exactly
-/// "fire on every transaction type except SetHook" — see the rshooks v0.2
-/// implementation contract §D for the derivation, and
-/// `on_all_mask_is_all_zero_and_fires_on_everything_but_sethook` below for
-/// the cross-check against `metadata::hook_mask`'s bit conventions.
+/// `hook_mask` cannot express this: `None` means "field omitted" (the `on`
+/// attribute was never written), and `Some(&[])` yields the deny-all base
+/// mask (`FF..BF..FF`, "fires on nothing") — neither is "fires on everything
+/// except SetHook", which is what `on = all` means. Ordinary (active-low)
+/// HookOn bits: 0 = do fire. The special-cased SetHook bit (byte 29, tt22)
+/// is active-high: 0 = do NOT fire. So the all-zero mask is exactly "fire on
+/// every transaction type except SetHook" — see the rshooks v0.2
+/// implementation contract §D for the derivation.
 #[must_use]
 pub fn hook_on_all_mask() -> String {
     "0".repeat(64)
@@ -467,13 +517,15 @@ pub fn resolve_trigger_masks(on: &OnDecl) -> Result<TriggerMasks> {
 mod tests {
     use super::*;
 
-    fn upper_hex(input: &[u8]) -> String {
-        input.iter().map(|byte| format!("{byte:02X}")).collect()
-    }
-
     fn wasm_with_carriers(chain_json: &str, hooks_json: &str) -> Vec<u8> {
-        let chain_marker = format!("{CHAIN_EXPORT_PREFIX}{}", upper_hex(chain_json.as_bytes()));
-        let hooks_marker = format!("{HOOKS_EXPORT_PREFIX}{}", upper_hex(hooks_json.as_bytes()));
+        let chain_marker = format!(
+            "{CHAIN_EXPORT_PREFIX}{}",
+            metadata::encode_upper_hex(chain_json.as_bytes())
+        );
+        let hooks_marker = format!(
+            "{HOOKS_EXPORT_PREFIX}{}",
+            metadata::encode_upper_hex(hooks_json.as_bytes())
+        );
         wat::parse_str(format!(
             r#"
             (module
@@ -563,7 +615,7 @@ mod tests {
         let marker = format!(
             "{}{}",
             metadata::METADATA_EXPORT_PREFIX,
-            upper_hex(br#"{"name":"Probe"}"#)
+            metadata::encode_upper_hex(br#"{"name":"Probe"}"#)
         );
         let wasm = wat::parse_str(format!(
             r#"
@@ -608,13 +660,11 @@ mod tests {
         assert_eq!(mask.len(), 64);
         assert!(mask.chars().all(|c| c == '0'));
 
-        // Cross-check against `hook_mask`'s own bit conventions: the deny-all
-        // base value has every ordinary bit set to 1 (do NOT fire) and the
-        // SetHook bit (byte 29, low nibble) cleared to 0 within 0xBF (do NOT
-        // fire on SetHook either). `on = all` must invert every ordinary bit
-        // to 0 (DO fire) while leaving the SetHook bit at 0 (still do NOT
-        // fire) — which is exactly the all-zero mask, confirming the byte-29
-        // special case does not need separate handling here.
+        // Cross-check against `hook_mask`: the deny-all base has every
+        // ordinary bit set to 1 (do NOT fire) and the SetHook bit (byte 29,
+        // low nibble) cleared to 0 within 0xBF (do NOT fire on SetHook
+        // either). `on = all` inverts every ordinary bit to 0 (DO fire)
+        // while leaving the SetHook bit at 0 — exactly the all-zero mask.
         let deny_all = metadata::hook_mask(Some(&[]))
             .expect("hook_mask never fails for an empty list")
             .expect("deny-all base mask is never all-zero");
@@ -665,5 +715,94 @@ mod tests {
         assert!(resolved.hook_on.is_none());
         assert!(resolved.hook_on_incoming.is_some());
         assert!(resolved.hook_on_outgoing.is_some());
+    }
+
+    // --- `sig_params` (docs/PARAM_SIGNATURE_DESIGN.md §1/§4) ---
+
+    #[test]
+    fn entry_decl_without_sig_params_key_parses_as_none() {
+        let on = r#"{"form":"omitted","HookOn":null,"HookOnIncoming":null,"HookOnOutgoing":null}"#;
+        let wasm = wasm_with_carriers(CHAIN_JSON, &entries_json(on, "null"));
+        let carriers = extract_chain_carriers(&wasm, "vault").expect("extraction succeeds");
+        assert!(carriers.hooks.entries[0].sig_params.is_none());
+    }
+
+    #[test]
+    fn entry_decl_round_trips_sig_params() {
+        let on = r#"{"form":"omitted","HookOn":null,"HookOnIncoming":null,"HookOnOutgoing":null}"#;
+        let hooks = format!(
+            r#"{{"schema":"rshooks-hooks-v2","impl":"Vault","entries":[{{"index":0,"hook_fn":"increment","cbak_fn":null,"HookName":null,"on":{on},"HookCanEmit":null,"description":null,"sig_params":[{{"field":"account","type_byte":8,"name_hex":"5F5053000008076163636F756E74"}},{{"field":"count","type_byte":1,"name_hex":"5F505300010105636F756E74"}}]}}]}}"#
+        );
+        let wasm = wasm_with_carriers(CHAIN_JSON, &hooks);
+        let carriers = extract_chain_carriers(&wasm, "vault").expect("extraction succeeds");
+        let sig_params = carriers.hooks.entries[0]
+            .sig_params
+            .as_ref()
+            .expect("sig_params key present");
+        assert_eq!(sig_params.len(), 2);
+        assert_eq!(sig_params[0].field, "account");
+        assert_eq!(sig_params[0].type_byte, 8);
+        assert_eq!(sig_params[0].name_hex, "5F5053000008076163636F756E74");
+        assert_eq!(sig_params[1].field, "count");
+        assert_eq!(sig_params[1].type_byte, 1);
+    }
+
+    #[test]
+    fn entry_decl_rejects_unknown_sig_param_field() {
+        let on = r#"{"form":"omitted","HookOn":null,"HookOnIncoming":null,"HookOnOutgoing":null}"#;
+        let hooks = format!(
+            r#"{{"schema":"rshooks-hooks-v2","impl":"Vault","entries":[{{"index":0,"hook_fn":"increment","cbak_fn":null,"HookName":null,"on":{on},"HookCanEmit":null,"description":null,"sig_params":[{{"field":"account","type_byte":8,"name_hex":"AA","unknown":1}}]}}]}}"#
+        );
+        let wasm = wasm_with_carriers(CHAIN_JSON, &hooks);
+        assert!(extract_chain_carriers(&wasm, "vault").is_err());
+    }
+
+    // --- `state_interface` (docs/STATE_INTERFACE_DESIGN.md §5) ---
+
+    #[test]
+    fn chain_carrier_without_state_interface_key_defaults_to_empty() {
+        let on = r#"{"form":"omitted","HookOn":null,"HookOnIncoming":null,"HookOnOutgoing":null}"#;
+        let wasm = wasm_with_carriers(CHAIN_JSON, &entries_json(on, "null"));
+        let carriers = extract_chain_carriers(&wasm, "vault").expect("extraction succeeds");
+        assert!(carriers.chain.decls.state_interface.is_empty());
+    }
+
+    #[test]
+    fn chain_carrier_round_trips_state_interface_decls() {
+        let on = r#"{"form":"omitted","HookOn":null,"HookOnIncoming":null,"HookOnOutgoing":null}"#;
+        let chain_json = concat!(
+            r#"{"schema":"rshooks-chain-v2","struct":"Vault","description":null,"#,
+            r#""decls":{"state":[],"hook_params":[],"otxn_params":[],"state_interface":[{"#,
+            r#""field":"balances","id":0,"#,
+            r#""name_hex":"5F534900000208076163636F756E740205746F6B656E","#,
+            r#""value_hex":"020306616D6F756E74020775706461746564","#,
+            r#""key":"(account: AccountId, token: u32)","value":"(amount: u64, updated: u32)"}]}}"#
+        );
+        let wasm = wasm_with_carriers(chain_json, &entries_json(on, "null"));
+        let carriers = extract_chain_carriers(&wasm, "vault").expect("extraction succeeds");
+        let si = &carriers.chain.decls.state_interface;
+        assert_eq!(si.len(), 1);
+        assert_eq!(si[0].field, "balances");
+        assert_eq!(si[0].id, 0);
+        assert_eq!(
+            si[0].name_hex,
+            "5F534900000208076163636F756E740205746F6B656E"
+        );
+        assert_eq!(si[0].value_hex, "020306616D6F756E74020775706461746564");
+        assert_eq!(si[0].key, "(account: AccountId, token: u32)");
+        assert_eq!(si[0].value, "(amount: u64, updated: u32)");
+    }
+
+    #[test]
+    fn chain_carrier_rejects_unknown_state_interface_field() {
+        let on = r#"{"form":"omitted","HookOn":null,"HookOnIncoming":null,"HookOnOutgoing":null}"#;
+        let chain_json = concat!(
+            r#"{"schema":"rshooks-chain-v2","struct":"Vault","description":null,"#,
+            r#""decls":{"state":[],"hook_params":[],"otxn_params":[],"state_interface":[{"#,
+            r#""field":"balances","id":0,"name_hex":"AA","value_hex":"BB","key":"()","#,
+            r#""value":"()","unknown":1}]}}"#
+        );
+        let wasm = wasm_with_carriers(chain_json, &entries_json(on, "null"));
+        assert!(extract_chain_carriers(&wasm, "vault").is_err());
     }
 }

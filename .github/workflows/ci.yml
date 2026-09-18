@@ -4,6 +4,17 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
+  # Every five days: GitHub evicts Actions caches unused for 7 days, and a
+  # pull request can only restore caches saved on main, so an idle main
+  # would leave every new PR rebuilding Binaryen (wasm-opt-sys) from
+  # scratch in each Rust job.
+  schedule:
+    - cron: "0 6 */5 * *"
+  workflow_dispatch:
+  # Lets publish.yml re-run every check here against the exact commit it is
+  # about to publish, rather than trusting an unrelated earlier CI run.
+  workflow_call: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -11,6 +22,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  XAHAUD_VERSION: 2026.6.21-release+3350
 
 jobs:
   fmt:
@@ -29,8 +41,45 @@ jobs:
         working-directory: examples
         run: cargo fmt --all --check
 
+  # Clippy and the test build resolve different feature sets, so their
+  # build-script outputs (notably Binaryen behind wasm-opt-sys) are not
+  # shared; running them as separate jobs puts the two builds side by side
+  # instead of back to back.
+  lint:
+    name: Clippy (root workspace)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # mise-action installs mise.toml's pinned rust *version* but not the
+      # wasm32v1-none target/components rust-toolchain.toml also declares;
+      # this step covers those (and no-ops once mise-action's toolchain is
+      # already active).
+      - name: Install Rust toolchain (per rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: jdx/mise-action@v2
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            examples
+
+      - name: Clippy (per mise.toml's lint task)
+        run: mise run lint
+
+      - name: Clippy (host, unstable draft-spec features, deny warnings)
+        run: cargo clippy --workspace --all-targets --features rshooks/unstable-param-sig-interface,rshooks/unstable-state-interface,rshooks-testenv/unstable-param-sig-interface,rshooks-testenv/unstable-state-interface -- -D warnings
+
+      - name: Clippy (wasm32v1-none, deny warnings)
+        run: cargo clippy -p rshooks-core -p rshooks --target wasm32v1-none -- -D warnings
+
+      - name: Clippy (wasm32v1-none, unstable draft-spec features, deny warnings)
+        run: cargo clippy -p rshooks --target wasm32v1-none --features unstable-param-sig-interface,unstable-state-interface -- -D warnings
+
   build-test:
-    name: Lint, build & test (root workspace)
+    name: Build & test (root workspace)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -38,32 +87,143 @@ jobs:
       - name: Install Rust toolchain (per rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
 
+      - uses: jdx/mise-action@v2
+
       - uses: Swatinem/rust-cache@v2
 
       - name: Generated rshooks-core sources are up to date
         run: cargo run -q -p xtask -- gen-core --check
 
-      - name: Clippy (host, deny warnings)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Every version reference tracks the root workspace version
+        run: cargo run -q -p xtask -- check-versions
 
-      - name: Clippy (wasm32v1-none, deny warnings)
-        run: cargo clippy -p rshooks-core -p rshooks --target wasm32v1-none -- -D warnings
+      # `cargo test` builds every lib, bin and test target; there is no
+      # separate `cargo build` step for it to duplicate.
+      - name: Test (per mise.toml's test task)
+        run: mise run test
 
-      - name: Build
-        run: cargo build --workspace
-
-      - name: Test
-        run: cargo test --workspace
+      - name: Test (unstable draft-spec features)
+        run: mise run test:unstable
 
       - name: Build no_std crates for wasm32v1-none
         run: cargo build -p rshooks-core -p rshooks --target wasm32v1-none --release
 
-  # Build & check every example (end-to-end): one independent job per
-  # example (matrix, fail-fast: false), so one example failing never
-  # blocks the others from running or reporting their own PR check. See
-  # build-examples.yml for the discovery/build/clippy jobs this expands
-  # into — it's the single source of truth shared with e2e.yml's
-  # `build-hooks` job, so the two workflows can't drift out of sync.
+      - name: Build no_std crates for wasm32v1-none (unstable draft-spec features)
+        run: cargo build -p rshooks --target wasm32v1-none --release --features unstable-param-sig-interface,unstable-state-interface
+
+  msrv:
+    name: MSRV (1.88)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Overrides rust-toolchain.toml's 1.89.0 pin for this job by exporting
+      # RUSTUP_TOOLCHAIN, so plain `cargo` invocations below resolve to the
+      # declared `rust-version` floor instead of the pinned toolchain.
+      - name: Install Rust 1.88 (declared rust-version floor)
+        uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          targets: wasm32v1-none
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check (root workspace, host, all targets)
+        run: cargo check --workspace --all-targets
+
+      - name: Check (no_std crates, wasm32v1-none)
+        run: cargo check -p rshooks-core -p rshooks --target wasm32v1-none
+
+  # Build & check every example (end-to-end). See build-examples.yml for
+  # the discovery/build jobs this expands into (its examples-workspace
+  # clippy run is covered by the `lint` job above's `mise run lint`); the
+  # `e2e` job below deploys the artifacts it uploads.
   examples:
     name: Build & check examples (end-to-end)
     uses: ./.github/workflows/build-examples.yml
+
+  e2e:
+    name: Deploy & test on standalone Xahau
+    needs: examples
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      # build-examples.yml's "Upload hook binaries" step uploads the
+      # `examples/*/out/current/...` tree itself, so downloading straight
+      # into `examples/` reconstructs `rshooks build`'s own publication
+      # layout with no reassembly step: `e2e/scripts/copy-wasm.mjs`
+      # and e2e suites that read a generated `sethook.template.json`
+      # directly (e.g. `e2e/test/param-signature.test.ts`) see the same
+      # paths as a local `mise run build-examples` run.
+      - name: Download example hook binaries into examples/*/out/current/
+        uses: actions/download-artifact@v8
+        with:
+          name: example-hooks
+          path: examples
+
+      - name: List downloaded hook artifacts
+        run: find examples -name '*.wasm' -o -name 'sethook.template.json'
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+
+      - name: Install e2e dependencies
+        run: pnpm --dir e2e install
+
+      - name: Typecheck e2e suite
+        run: pnpm --dir e2e run typecheck
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      # `xrpld-lab` is a PyPI package (not vendored config): using it
+      # here, identically to `mise run e2e:node-up` locally, avoids hand-
+      # rolling a genesis-ledger generator. hooks-toolkit-ts's own CI
+      # pattern does exactly that (a vendored `.ci-config/genesis.js`) but
+      # that repo - and hence that script - is GPL-3.0-or-later, which
+      # cannot be vendored into this MIT-licensed repo; driving the same
+      # published CLI tool as a subprocess has no such issue and keeps
+      # local/CI provisioning identical (both `up:standalone`).
+      - name: Install xrpld-lab
+        run: pip install xrpld-lab==3.1.2 'anyio<4.15'
+
+      - name: Start standalone Xahau node
+        run: |
+          xrpld-lab up:standalone --protocol xahau --version "${{ env.XAHAUD_VERSION }}"
+          curl -fsSL -o "workspace/xahau-${{ env.XAHAUD_VERSION }}/xahaud.${{ env.XAHAUD_VERSION }}" \
+            "https://build.xahau.tech/${{ env.XAHAUD_VERSION }}"
+          chmod +x "workspace/xahau-${{ env.XAHAUD_VERSION }}/xahaud.${{ env.XAHAUD_VERSION }}"
+          perl -pi -e 's/"None"/""/' "workspace/xahau-${{ env.XAHAUD_VERSION }}/Dockerfile"
+          xrpld-lab up --name "xahau-${{ env.XAHAUD_VERSION }}"
+
+      - name: Wait for the node to answer admin RPC
+        run: |
+          for _ in $(seq 1 30); do
+            if curl -sf -X POST http://0.0.0.0:5005 -d '{"method":"server_info"}' \
+                | grep -q '"build_version"'; then
+              echo "node is up"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "node did not become ready in time" >&2
+          docker logs xahau --tail 200 || true
+          exit 1
+
+      - name: Run e2e suite
+        run: pnpm --dir e2e test
+
+      - name: Node debug log (on failure)
+        if: failure()
+        run: docker logs xahau --tail 500 || true
+
+      - name: Stop standalone Xahau node
+        if: always()
+        run: xrpld-lab down:standalone --protocol xahau --version "${{ env.XAHAUD_VERSION }}" || true

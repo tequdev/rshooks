@@ -1,0 +1,15 @@
+error: #[state_interface]: duplicate State ID 0 (State IDs must be unique across every `#[state_interface(..)]` field on this struct)
+ --> tests/ui/si/fail/hooks_si_duplicate_state_id.rs:7:1
+  |
+7 | #[hooks]
+  | ^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unused import: `rshooks::decl::State`
+ --> tests/ui/si/fail/hooks_si_duplicate_state_id.rs:4:5
+  |
+4 | use rshooks::decl::State;
+  |     ^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default

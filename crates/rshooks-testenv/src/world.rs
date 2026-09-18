@@ -16,6 +16,12 @@ use crate::otxn::Otxn;
 /// method's doc comment.
 pub(crate) const DEFAULT_MAX_STATE_VALUE_LEN: usize = 256;
 
+/// `hook::maxNamespaces()` (`Xahau/xahaud` `dev`,
+/// `crates/rshooks-build/vendor/xahaud/Enum.h`): the per-account cap on
+/// distinct hook namespaces holding at least one live state entry, enforced
+/// in [`World::check_namespace_budget`].
+const MAX_NAMESPACES: usize = 256;
+
 /// A state entry's storage key: the entry's own account, its namespace, and
 /// its 32-byte left-pad-normalized key (design §5.3 — `b"RR"` and its
 /// left-padded 32-byte form address the same entry).
@@ -32,9 +38,10 @@ pub enum EmitFailureReason {
     /// `TOO_MANY_EMITTED_TXN`).
     ReserveExceeded,
     /// The blob failed the emission walker's acceptance grammar (design
-    /// §5.6: `EMISSION_FAILURE`) — malformed framing, an unknown/out-of-order
-    /// field, a required field missing or wrong, or an `EmitDetails` field
-    /// whose bytes did not exactly match this invocation's `etxn_details()`.
+    /// §5.6: `EMISSION_FAILURE`) — malformed framing, an unknown or
+    /// duplicate field, a required field missing or wrong, or an
+    /// `EmitDetails` field whose bytes did not exactly match this
+    /// invocation's `etxn_details()`.
     InvalidBlob,
 }
 
@@ -44,7 +51,13 @@ pub enum EmitFailureReason {
 /// invocation that ultimately rolled back.
 #[derive(Debug, Clone)]
 pub struct EmitAttempt {
-    /// The raw bytes the hook passed to `emit`.
+    /// For an accepted attempt (`outcome` is `Ok`), the same canonical
+    /// (NOP-stripped) bytes as the resulting [`EmittedTxn::blob`] — see
+    /// `crate::backend::Backend::emit`'s doc comment for why the stored
+    /// form is canonical. For a rejected attempt, the raw bytes the hook
+    /// passed to `emit`, unchanged: a reservation failure never reaches
+    /// `validate_emit_blob`/`canonicalize` at all, and a blob that fails
+    /// `validate_emit_blob` may not even be structurally canonicalizable.
     pub blob: Vec<u8>,
     /// `Ok(())` if the blob was accepted (it also appears in
     /// [`crate::TestEnv::emitted`]); `Err(reason)` if it was rejected.
@@ -118,10 +131,10 @@ pub(crate) struct World {
     /// The normalized keys of every entry seeded via
     /// [`crate::TestEnv::state_entry`] (own account, own namespace at
     /// *some* point — not necessarily the current one). [`Self::rekey_own_seeds`]
-    /// consults this set to know which `state` entries a later
+    /// uses this set to know which `state` entries a later
     /// `hook_account`/`own_namespace` builder call must follow to their new
     /// address; a `foreign_state_entry` seed is never added here, so it is
-    /// never re-keyed even if it happens to land at the same address.
+    /// never re-keyed even at the same address.
     pub(crate) own_seeded_keys: HashSet<[u8; 32]>,
     pub(crate) grants: HashMap<([u8; 20], [u8; 32]), Vec<Grant>>,
     pub(crate) ledger_seq: u32,
@@ -141,40 +154,32 @@ pub(crate) struct World {
 
     // -- Phase 2 (`.claude/design/TESTENV_PHASE2_DESIGN.md` §3) --
     //
-    // Plain data plumbing as of P2-A, landing per-family in P2-B..P2-E:
-    // `ledger_objects` is read by `ledger_keylet` as of P2-C (below); the
-    // remaining fields are still seeded/read only by the builders and
-    // accessors below — no `crate::backend::Backend` method reads or writes
-    // them yet, so their own `HostBackend` methods still fall through to
-    // the trait default.
+    // `ledger_objects` backs `ledger_keylet` and `slot_set`; `otxn_meta`
+    // backs `meta_slot`; `xpop` backs `xpop_slot` — see
+    // `crate::backend::Backend`'s slot_* overrides.
     /// Seeded ledger objects, keyed by their 34-byte keylet — backs
-    /// `slot_set` (P2-D, not yet landed: only this map's *keys* are read so
-    /// far) and `ledger_keylet` (P2-C, landed — `crate::backend::Backend::
-    /// ledger_keylet` searches these keys directly). Builder:
-    /// [`crate::TestEnv::ledger_object`].
+    /// `slot_set` (`crate::backend::Backend::slot_set` looks up the keylet
+    /// here) and `ledger_keylet` (`crate::backend::Backend::ledger_keylet`
+    /// searches these keys directly). Builder: [`crate::TestEnv::ledger_object`].
     pub(crate) ledger_objects: HashMap<[u8; 34], Vec<u8>>,
-    /// The current transaction's metadata, if seeded — backs `meta_slot`
-    /// (P2-D). Builder: [`crate::TestEnv::otxn_meta`].
-    #[allow(dead_code)] // scaffolding (P2-A): read once meta_slot lands (P2-D)
+    /// The current transaction's metadata, if seeded — backs `meta_slot`.
+    /// Builder: [`crate::TestEnv::otxn_meta`].
     pub(crate) otxn_meta: Option<Vec<u8>>,
     /// An XPOP's `(transaction, metadata)` pair, if seeded — backs
-    /// `xpop_slot` (P2-D). Builder: [`crate::TestEnv::xpop`].
-    #[allow(dead_code)] // scaffolding (P2-A): read once xpop_slot lands (P2-D)
+    /// `xpop_slot`. Builder: [`crate::TestEnv::xpop`].
     pub(crate) xpop: Option<(Vec<u8>, Vec<u8>)>,
     /// Parameters written by `hook_param_set` during a *previous*,
     /// already-`accept!`ed invocation — `(hook_hash, name) -> value` — read
     /// back by `hook_param` when the currently invoked position's hash
-    /// matches (P2-E; design §4 "control leftovers"). Committed the same
-    /// way state is: only on `accept!` — `crate::env::TestEnv`'s
-    /// `run_entry` helper merges `InvocationContext::pending_param_overrides`
-    /// in on that arm; see `crate::host::control`'s module doc comment for
-    /// the upstream citation behind the commit gate.
+    /// matches (P2-E; design §4 "control leftovers"). Committed only on
+    /// `accept!`: `crate::env::TestEnv::run_entry` merges
+    /// `InvocationContext::pending_param_overrides` in on that arm (see
+    /// `crate::host::control`'s module doc for the upstream citation).
     pub(crate) hook_param_overrides: HashMap<([u8; 32], Vec<u8>), Vec<u8>>,
     /// Whether the most recently **accepted** invocation called `hook_again`
-    /// (design §4; see `crate::host::control`'s module doc comment for why
-    /// this harness ties the commit to `accept!` — a documented
-    /// simplification of upstream's own, more involved commit path). Read
-    /// by `TestEnv::hook_again_requested()` (P2-E).
+    /// (design §4; commit tied to `accept!` — see `crate::host::control`'s
+    /// module doc for the upstream-vs-harness commit-path simplification).
+    /// Read by `TestEnv::hook_again_requested()` (P2-E).
     pub(crate) hook_again_requested: bool,
     /// Every `hook_skip(hash, flags)` directive from every **accepted**
     /// invocation so far, verbatim, in call order (design §4: "recorded
@@ -239,26 +244,56 @@ impl World {
         }
     }
 
+    /// Checks (without mutating) whether a state write into `(account, ns)`
+    /// is within `MAX_NAMESPACES` for `account` — the account's *own*
+    /// ledger namespaces, not just the ones touched by the invocation in
+    /// progress. A namespace exists here iff `account` currently has at
+    /// least one live entry in it, mirroring the real host's
+    /// `AccountRoot.HookNamespaces` (`Xahau/xahaud` `dev`,
+    /// `src/xrpld/app/hook/detail/HookAPI.cpp`'s `set_state_cache`: a
+    /// namespace counts iff its `HookStateDir` exists, which is true iff it
+    /// holds a live entry) and matching the harness's own
+    /// seeded-state-entry builders (`state_entry`/`foreign_state_entry`),
+    /// which write directly into [`Self::state`] with no separate seeding
+    /// step required. Recomputed from [`Self::state`] on every call rather
+    /// than cached: a namespace this or an earlier invocation emptied is
+    /// never counted, and one a hook writes into earlier in the *same*
+    /// invocation is counted for a later, distinct new namespace in that
+    /// invocation, since the earlier write already landed in
+    /// [`Self::state`] (state writes apply live, restored only on
+    /// rollback — see [`Self::restore`]).
+    pub(crate) fn check_namespace_budget(
+        &self,
+        account: [u8; 20],
+        ns: [u8; 32],
+    ) -> Result<(), i64> {
+        let existing: HashSet<[u8; 32]> = self
+            .state
+            .keys()
+            .filter(|(acc, _, _)| *acc == account)
+            .map(|(_, entry_ns, _)| *entry_ns)
+            .collect();
+        if existing.contains(&ns) {
+            return Ok(());
+        }
+        if existing.len() >= MAX_NAMESPACES {
+            return Err(rshooks_core::TOO_MANY_NAMESPACES);
+        }
+        Ok(())
+    }
+
     /// Snapshot of every field a rolled-back/restored invocation must undo:
-    /// the state map, the committed-emission list, and (P2-E) the three
-    /// control-leftover commit targets (`hook_param_overrides`/
-    /// `hook_again_requested`/`skip_directives`) — under the current
-    /// stage-then-merge implementation (`crate::env::TestEnv::run_entry`
-    /// only ever writes these three on the `ExitType::Accept` arm, never
-    /// speculatively) a rolled-back invocation never actually mutates them
-    /// in the first place, so restoring is a defensive no-op rather than an
-    /// undo; captured anyway so that invariant does not have to be
-    /// re-verified by hand at every future call site (design §3, deliverable
-    /// 3: "rollback must not leak them"). Everything else (params, otxn,
-    /// ledger fields, grants) is not writable by a hook invocation, so it
-    /// needs no snapshot/restore.
+    /// the state map and the committed-emission list. `hook_param_overrides`/
+    /// `hook_again_requested`/`skip_directives` are only ever written by
+    /// `crate::env::TestEnv::run_entry` on the `ExitType::Accept` arm (see
+    /// `crate::host::control`'s module doc), so a rollback never mutates
+    /// them and they need no snapshot/restore. Everything else (params,
+    /// otxn, ledger fields, grants) is not writable by a hook invocation
+    /// and needs no snapshot/restore either.
     pub(crate) fn snapshot(&self) -> WorldSnapshot {
         WorldSnapshot {
             state: self.state.clone(),
             committed_emissions_len: self.committed_emissions.len(),
-            hook_param_overrides: self.hook_param_overrides.clone(),
-            hook_again_requested: self.hook_again_requested,
-            skip_directives_len: self.skip_directives.len(),
         }
     }
 
@@ -266,9 +301,6 @@ impl World {
         self.state = snap.state;
         self.committed_emissions
             .truncate(snap.committed_emissions_len);
-        self.hook_param_overrides = snap.hook_param_overrides;
-        self.hook_again_requested = snap.hook_again_requested;
-        self.skip_directives.truncate(snap.skip_directives_len);
     }
 }
 
@@ -276,9 +308,6 @@ impl World {
 pub(crate) struct WorldSnapshot {
     state: HashMap<StateAddr, Vec<u8>>,
     committed_emissions_len: usize,
-    hook_param_overrides: HashMap<([u8; 32], Vec<u8>), Vec<u8>>,
-    hook_again_requested: bool,
-    skip_directives_len: usize,
 }
 
 /// Left-pad-normalizes a hook-state key per design §5.3 / xahaud's own
@@ -299,4 +328,83 @@ pub(crate) fn normalize_state_key(key: &[u8]) -> Result<[u8; 32], i64> {
         dst.copy_from_slice(key);
     }
     Ok(buf)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
+
+    use super::*;
+
+    #[test]
+    fn namespace_budget_only_costs_for_genuinely_new_namespaces() {
+        let mut w = World::new();
+        let acc = [1u8; 20];
+        let ns = [2u8; 32];
+        for i in 0..1000u32 {
+            assert_eq!(w.check_namespace_budget(acc, ns), Ok(()));
+            w.state.insert((acc, ns, [i as u8; 32]), vec![1]);
+        }
+        let existing: HashSet<[u8; 32]> = w
+            .state
+            .keys()
+            .filter(|(a, _, _)| *a == acc)
+            .map(|(_, n, _)| *n)
+            .collect();
+        assert_eq!(existing.len(), 1);
+    }
+
+    #[test]
+    fn namespace_budget_rejects_the_257th_distinct_namespace() {
+        let mut w = World::new();
+        let acc = [0u8; 20];
+        for i in 0..256u16 {
+            let mut ns = [0u8; 32];
+            ns[0] = (i >> 8) as u8;
+            ns[1] = (i & 0xFF) as u8;
+            assert_eq!(w.check_namespace_budget(acc, ns), Ok(()));
+            w.state.insert((acc, ns, [0u8; 32]), vec![1]);
+        }
+        let overflow_ns = [0xFFu8; 32];
+        assert_eq!(
+            w.check_namespace_budget(acc, overflow_ns),
+            Err(rshooks_core::TOO_MANY_NAMESPACES)
+        );
+    }
+
+    #[test]
+    fn namespace_budget_is_scoped_per_account() {
+        let mut w = World::new();
+        let acc_a = [1u8; 20];
+        let acc_b = [2u8; 20];
+        for i in 0..256u16 {
+            let mut ns = [0u8; 32];
+            ns[0] = (i >> 8) as u8;
+            ns[1] = (i & 0xFF) as u8;
+            w.state.insert((acc_a, ns, [0u8; 32]), vec![1]);
+        }
+        // `acc_a` is full, but a fresh `acc_b` is unaffected.
+        assert_eq!(
+            w.check_namespace_budget(acc_a, [0xFFu8; 32]),
+            Err(rshooks_core::TOO_MANY_NAMESPACES)
+        );
+        assert_eq!(w.check_namespace_budget(acc_b, [0xFFu8; 32]), Ok(()));
+    }
+
+    #[test]
+    fn namespace_budget_frees_up_once_the_last_entry_is_removed() {
+        let mut w = World::new();
+        let acc = [3u8; 20];
+        let ns = [4u8; 32];
+        w.state.insert((acc, ns, [0u8; 32]), vec![1]);
+        w.state.remove(&(acc, ns, [0u8; 32]));
+        // No live entry left in `ns`, so it no longer counts as existing.
+        let existing: HashSet<[u8; 32]> = w
+            .state
+            .keys()
+            .filter(|(a, _, _)| *a == acc)
+            .map(|(_, n, _)| *n)
+            .collect();
+        assert!(existing.is_empty());
+    }
 }

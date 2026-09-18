@@ -2,13 +2,23 @@
 //!
 //! Every Hook API function returns an `i64`: non-negative values are success
 //! payloads (often "bytes written" or a slot/field-pointer value), negative
-//! values are one of the 45 error codes from `hook/error.h`. [`HookError`] is
-//! a typed, exhaustive-by-construction mirror of those codes (plus
-//! [`HookError::Unknown`] for forward-compatibility with codes this crate
-//! does not yet know about).
+//! values are one of the error codes from `hook/error.h`. [`HookError`] is a
+//! transparent newtype over that raw code: constructing one from a Hook API
+//! return, and reading the code back out, is the identity. [`HookErrorKind`]
+//! is the decoded, exhaustive-by-construction view, computed on demand by
+//! [`HookError::kind`].
 
-/// A Hook API error, decoded from the negative `i64` return of a raw
-/// `rshooks-core` call.
+/// A Hook API error: the raw negative `i64` return of a `rshooks-core` call.
+///
+/// `HookError` is `#[repr(transparent)]` over that `i64`, so building one
+/// and reading [`HookError::code`] back out are both identity operations —
+/// no decode. Each named Hook API error has an associated constant, in
+/// PascalCase (`HookError::DoesntExist`, `HookError::TooBig`, …), usable as
+/// a value (`Err(HookError::X)`) and in comparisons (`err == HookError::X`).
+///
+/// `HookError` is a struct, not an enum, so its constants are not patterns: a
+/// `match` on a specific error is written as a guard, or dispatches on
+/// [`HookError::kind`] instead.
 ///
 /// # Examples
 ///
@@ -19,14 +29,248 @@
 /// assert_eq!(err, HookError::DoesntExist);
 /// assert_eq!(err.code(), -5);
 /// ```
-// `#[repr(u8)]` is load-bearing for `code()` below: it lets the discriminant
-// be read via unsafe pointer casting even though `Unknown(i64)` carries data
-// (see the Rust reference, "Casting" > "Pointer casting" for enums with a
-// primitive representation). Declaration order 0..=44 must stay in exact
-// sync with `code()`'s `TABLE`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Matching a specific error:
+///
+/// ```
+/// use rshooks::error::HookError;
+///
+/// fn describe(err: HookError) -> &'static str {
+///     match err {
+///         e if e == HookError::DoesntExist => "missing",
+///         e if e == HookError::TooBig => "oversized",
+///         _ => "other",
+///     }
+/// }
+/// assert_eq!(describe(HookError::DoesntExist), "missing");
+/// ```
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct HookError(i64);
+
+/// Builds a `HookError` from an `rshooks_core` error code.
+const fn of(code: i64) -> HookError {
+    HookError(code)
+}
+
+// The associated constants below are the Hook API's own error names
+// (`hook/error.h`), kept in PascalCase so every existing value-position use
+// (`Err(HookError::TooSmall)`, `== HookError::DoesntExist`, `?`) compiles
+// unchanged; they are not local bindings subject to the usual naming
+// convention.
+#[allow(non_upper_case_globals)]
+impl HookError {
+    /// `OUT_OF_BOUNDS` (-1): memory access out of bounds.
+    pub const OutOfBounds: HookError = of(rshooks_core::OUT_OF_BOUNDS);
+    /// `INTERNAL_ERROR` (-2): unexpected internal error.
+    pub const InternalError: HookError = of(rshooks_core::INTERNAL_ERROR);
+    /// `TOO_BIG` (-3): data is too large.
+    pub const TooBig: HookError = of(rshooks_core::TOO_BIG);
+    /// `TOO_SMALL` (-4): buffer is too small.
+    pub const TooSmall: HookError = of(rshooks_core::TOO_SMALL);
+    /// `DOESNT_EXIST` (-5): requested item does not exist.
+    pub const DoesntExist: HookError = of(rshooks_core::DOESNT_EXIST);
+    /// `NO_FREE_SLOTS` (-6): no available slots.
+    pub const NoFreeSlots: HookError = of(rshooks_core::NO_FREE_SLOTS);
+    /// `INVALID_ARGUMENT` (-7): argument is invalid.
+    pub const InvalidArgument: HookError = of(rshooks_core::INVALID_ARGUMENT);
+    /// `ALREADY_SET` (-8): already configured.
+    pub const AlreadySet: HookError = of(rshooks_core::ALREADY_SET);
+    /// `PREREQUISITE_NOT_MET` (-9): prerequisite condition not satisfied.
+    pub const PrerequisiteNotMet: HookError = of(rshooks_core::PREREQUISITE_NOT_MET);
+    /// `FEE_TOO_LARGE` (-10): fee is too large.
+    pub const FeeTooLarge: HookError = of(rshooks_core::FEE_TOO_LARGE);
+    /// `EMISSION_FAILURE` (-11): transaction emission failed.
+    pub const EmissionFailure: HookError = of(rshooks_core::EMISSION_FAILURE);
+    /// `TOO_MANY_NONCES` (-12): nonce generation limit exceeded.
+    pub const TooManyNonces: HookError = of(rshooks_core::TOO_MANY_NONCES);
+    /// `TOO_MANY_EMITTED_TXN` (-13): emitted transaction limit exceeded.
+    pub const TooManyEmittedTxn: HookError = of(rshooks_core::TOO_MANY_EMITTED_TXN);
+    /// `NOT_IMPLEMENTED` (-14): feature not implemented (also what every
+    /// host-build stub returns).
+    pub const NotImplemented: HookError = of(rshooks_core::NOT_IMPLEMENTED);
+    /// `INVALID_ACCOUNT` (-15): account ID is invalid.
+    pub const InvalidAccount: HookError = of(rshooks_core::INVALID_ACCOUNT);
+    /// `GUARD_VIOLATION` (-16): infinite-loop guard violation.
+    pub const GuardViolation: HookError = of(rshooks_core::GUARD_VIOLATION);
+    /// `INVALID_FIELD` (-17): field ID is invalid.
+    pub const InvalidField: HookError = of(rshooks_core::INVALID_FIELD);
+    /// `PARSE_ERROR` (-18): failed to parse data.
+    pub const ParseError: HookError = of(rshooks_core::PARSE_ERROR);
+    /// `RC_ROLLBACK` (-19): hook execution terminated via rollback.
+    pub const RcRollback: HookError = of(rshooks_core::RC_ROLLBACK);
+    /// `RC_ACCEPT` (-20): hook execution terminated via accept.
+    pub const RcAccept: HookError = of(rshooks_core::RC_ACCEPT);
+    /// `NO_SUCH_KEYLET` (-21): keylet not found.
+    pub const NoSuchKeylet: HookError = of(rshooks_core::NO_SUCH_KEYLET);
+    /// `NOT_AN_ARRAY` (-22): object is not an array.
+    pub const NotAnArray: HookError = of(rshooks_core::NOT_AN_ARRAY);
+    /// `NOT_AN_OBJECT` (-23): object is not an object.
+    pub const NotAnObject: HookError = of(rshooks_core::NOT_AN_OBJECT);
+    /// `INVALID_FLOAT` (-10024, verbatim from the header — not -24): XFL
+    /// value is invalid.
+    pub const InvalidFloat: HookError = of(rshooks_core::INVALID_FLOAT);
+    /// `DIVISION_BY_ZERO` (-25): division by zero.
+    pub const DivisionByZero: HookError = of(rshooks_core::DIVISION_BY_ZERO);
+    /// `MANTISSA_OVERSIZED` (-26): XFL mantissa too large.
+    pub const MantissaOversized: HookError = of(rshooks_core::MANTISSA_OVERSIZED);
+    /// `MANTISSA_UNDERSIZED` (-27): XFL mantissa too small.
+    pub const MantissaUndersized: HookError = of(rshooks_core::MANTISSA_UNDERSIZED);
+    /// `EXPONENT_OVERSIZED` (-28): XFL exponent too large.
+    pub const ExponentOversized: HookError = of(rshooks_core::EXPONENT_OVERSIZED);
+    /// `EXPONENT_UNDERSIZED` (-29): XFL exponent too small.
+    pub const ExponentUndersized: HookError = of(rshooks_core::EXPONENT_UNDERSIZED);
+    /// `XFL_OVERFLOW` (-30): XFL arithmetic overflow.
+    pub const XflOverflow: HookError = of(rshooks_core::XFL_OVERFLOW);
+    /// `NOT_IOU_AMOUNT` (-31): not an IOU amount.
+    pub const NotIouAmount: HookError = of(rshooks_core::NOT_IOU_AMOUNT);
+    /// `NOT_AN_AMOUNT` (-32): not an amount type.
+    pub const NotAnAmount: HookError = of(rshooks_core::NOT_AN_AMOUNT);
+    /// `CANT_RETURN_NEGATIVE` (-33): cannot return a negative value.
+    pub const CantReturnNegative: HookError = of(rshooks_core::CANT_RETURN_NEGATIVE);
+    /// `NOT_AUTHORIZED` (-34): no access permission.
+    pub const NotAuthorized: HookError = of(rshooks_core::NOT_AUTHORIZED);
+    /// `PREVIOUS_FAILURE_PREVENTS_RETRY` (-35): a previous failure prevents
+    /// retrying this operation.
+    pub const PreviousFailurePreventsRetry: HookError =
+        of(rshooks_core::PREVIOUS_FAILURE_PREVENTS_RETRY);
+    /// `TOO_MANY_PARAMS` (-36): parameter limit exceeded.
+    pub const TooManyParams: HookError = of(rshooks_core::TOO_MANY_PARAMS);
+    /// `INVALID_TXN` (-37): transaction is invalid.
+    pub const InvalidTxn: HookError = of(rshooks_core::INVALID_TXN);
+    /// `RESERVE_INSUFFICIENT` (-38): reserve insufficient for the operation.
+    pub const ReserveInsufficient: HookError = of(rshooks_core::RESERVE_INSUFFICIENT);
+    /// `COMPLEX_NOT_SUPPORTED` (-39): complex-domain result not supported.
+    pub const ComplexNotSupported: HookError = of(rshooks_core::COMPLEX_NOT_SUPPORTED);
+    /// `DOES_NOT_MATCH` (-40): values do not match.
+    pub const DoesNotMatch: HookError = of(rshooks_core::DOES_NOT_MATCH);
+    /// `INVALID_KEY` (-41): key is invalid.
+    pub const InvalidKey: HookError = of(rshooks_core::INVALID_KEY);
+    /// `NOT_A_STRING` (-42): value is not a string.
+    pub const NotAString: HookError = of(rshooks_core::NOT_A_STRING);
+    /// `MEM_OVERLAP` (-43): memory regions overlap.
+    pub const MemOverlap: HookError = of(rshooks_core::MEM_OVERLAP);
+    /// `TOO_MANY_STATE_MODIFICATIONS` (-44): state modification limit
+    /// exceeded.
+    pub const TooManyStateModifications: HookError = of(rshooks_core::TOO_MANY_STATE_MODIFICATIONS);
+    /// `TOO_MANY_NAMESPACES` (-45): namespace limit exceeded.
+    pub const TooManyNamespaces: HookError = of(rshooks_core::TOO_MANY_NAMESPACES);
+}
+
+impl HookError {
+    /// The raw negative `i64` error code this value wraps. Exact inverse of
+    /// [`HookError::from`]: `HookError::from(c).code() == c` for every
+    /// nonzero `c`.
+    #[must_use]
+    #[inline(always)]
+    pub const fn code(self) -> i64 {
+        self.0
+    }
+
+    /// The decoded error kind, for exhaustive dispatch. This is the only
+    /// place `HookError` performs a decode; it costs one code-to-kind table
+    /// lookup (nesting depth 1) and is paid only when called.
+    ///
+    /// `INVALID_FLOAT` is tested before the table: its value is `-10024`,
+    /// not the `-24` its declaration-order position would suggest (kept
+    /// verbatim from `rshooks_core::INVALID_FLOAT`). Folding it into the
+    /// table instead would mis-map a genuine `-24` error onto
+    /// [`HookErrorKind::InvalidFloat`] and stop the table from ever
+    /// recognizing the real `-10024` value. `-24` itself is a genuine gap
+    /// (maps to [`HookErrorKind::Unknown`]), matching `error.h` upstream.
+    #[must_use]
+    pub fn kind(self) -> HookErrorKind {
+        let code = self.code();
+        if code == rshooks_core::INVALID_FLOAT {
+            return HookErrorKind::InvalidFloat;
+        }
+        // Table, not a match over every known code: LLVM lowers a match
+        // over this many wide `i64` constants into a deeply nested
+        // block-per-arm decision tree, which alone can blow the Guard-type
+        // nesting limit once inlined. A table lookup is nesting-depth 1.
+        const KINDS: [HookErrorKind; 45] = [
+            HookErrorKind::OutOfBounds,
+            HookErrorKind::InternalError,
+            HookErrorKind::TooBig,
+            HookErrorKind::TooSmall,
+            HookErrorKind::DoesntExist,
+            HookErrorKind::NoFreeSlots,
+            HookErrorKind::InvalidArgument,
+            HookErrorKind::AlreadySet,
+            HookErrorKind::PrerequisiteNotMet,
+            HookErrorKind::FeeTooLarge,
+            HookErrorKind::EmissionFailure,
+            HookErrorKind::TooManyNonces,
+            HookErrorKind::TooManyEmittedTxn,
+            HookErrorKind::NotImplemented,
+            HookErrorKind::InvalidAccount,
+            HookErrorKind::GuardViolation,
+            HookErrorKind::InvalidField,
+            HookErrorKind::ParseError,
+            HookErrorKind::RcRollback,
+            HookErrorKind::RcAccept,
+            HookErrorKind::NoSuchKeylet,
+            HookErrorKind::NotAnArray,
+            HookErrorKind::NotAnObject,
+            HookErrorKind::Unknown, // gap: raw code -24, not InvalidFloat (-10024)
+            HookErrorKind::DivisionByZero,
+            HookErrorKind::MantissaOversized,
+            HookErrorKind::MantissaUndersized,
+            HookErrorKind::ExponentOversized,
+            HookErrorKind::ExponentUndersized,
+            HookErrorKind::XflOverflow,
+            HookErrorKind::NotIouAmount,
+            HookErrorKind::NotAnAmount,
+            HookErrorKind::CantReturnNegative,
+            HookErrorKind::NotAuthorized,
+            HookErrorKind::PreviousFailurePreventsRetry,
+            HookErrorKind::TooManyParams,
+            HookErrorKind::InvalidTxn,
+            HookErrorKind::ReserveInsufficient,
+            HookErrorKind::ComplexNotSupported,
+            HookErrorKind::DoesNotMatch,
+            HookErrorKind::InvalidKey,
+            HookErrorKind::NotAString,
+            HookErrorKind::MemOverlap,
+            HookErrorKind::TooManyStateModifications,
+            HookErrorKind::TooManyNamespaces,
+        ];
+        let idx = code.wrapping_neg().wrapping_sub(1);
+        // `.get` + `unwrap_or`, not `KINDS[..]`: this crate denies
+        // `clippy::indexing_slicing` (docs/DESIGN.md §8).
+        usize::try_from(idx)
+            .ok()
+            .and_then(|i| KINDS.get(i))
+            .copied()
+            .unwrap_or(HookErrorKind::Unknown)
+    }
+}
+
+impl From<i64> for HookError {
+    /// Builds a `HookError` from a raw Hook API return code: the identity.
+    /// Non-negative codes are representable and report
+    /// [`HookErrorKind::Unknown`] from [`HookError::kind`]; [`res`] only
+    /// constructs a `HookError` from negative values.
+    fn from(code: i64) -> Self {
+        HookError(code)
+    }
+}
+
+impl core::fmt::Debug for HookError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self.kind() {
+            HookErrorKind::Unknown => f.debug_tuple("Unknown").field(&self.code()).finish(),
+            kind => write!(f, "{kind:?}"),
+        }
+    }
+}
+
+/// The decoded kind of a [`HookError`]: one variant per named code in
+/// `hook/error.h`, plus [`HookErrorKind::Unknown`] for any code without a
+/// named constant (positive, the `-24` gap, or below `-45`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
-pub enum HookError {
+pub enum HookErrorKind {
     /// `OUT_OF_BOUNDS` (-1): memory access out of bounds.
     OutOfBounds,
     /// `INTERNAL_ERROR` (-2): unexpected internal error.
@@ -121,147 +365,8 @@ pub enum HookError {
     TooManyStateModifications,
     /// `TOO_MANY_NAMESPACES` (-45): namespace limit exceeded.
     TooManyNamespaces,
-    /// A negative code this version of rshooks does not recognize yet.
-    /// Carries the raw code for forward-compatibility.
-    Unknown(i64),
-}
-
-impl From<i64> for HookError {
-    fn from(code: i64) -> Self {
-        // Indexed table instead of a 46-arm match: LLVM lowers the match into a
-        // ~45-deep nested-block decision tree (the Unknown(i64) payload prevents an
-        // identity mapping), which alone blows the Guard-type nesting limit once
-        // inlined into hook/cbak. A table lookup is nesting-depth ~1.
-        //
-        // `INVALID_FLOAT` is handled *before* the table, not inside it: its value is
-        // `-10024`, not the `-24` its declaration-order position would suggest (see
-        // `rshooks_core::INVALID_FLOAT`'s own doc comment — "kept verbatim; this is
-        // not a typo in this translation"). Folding it into the table naively (by
-        // declaration-order position, matching the original match arms' order) would
-        // both mis-map a real `-24` return to `InvalidFloat` and, far worse, silently
-        // stop recognizing genuine `-10024` returns as `InvalidFloat` (they'd fall
-        // through to `Unknown`, breaking any caller that specifically matches on
-        // `HookError::InvalidFloat`) -- caught by cross-checking this table against
-        // `rshooks_core::error`'s constants sorted by value, not by source order.
-        // `-24` itself is not assigned to anything and is left a genuine gap (`None`)
-        // below, matching `error.h` upstream.
-        if code == rshooks_core::INVALID_FLOAT {
-            return HookError::InvalidFloat;
-        }
-        // A byte tag table avoids loading/copying payload-sized enum values.
-        // 45 is the sentinel for the unassigned -24 gap.
-        const TABLE: [u8; 45] = [
-            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 45,
-            24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
-        ];
-        let idx = code.wrapping_neg().wrapping_sub(1);
-        let Some(tag) = usize::try_from(idx)
-            .ok()
-            .and_then(|i| TABLE.get(i))
-            .copied()
-        else {
-            return HookError::Unknown(code);
-        };
-        if tag >= 45 {
-            return HookError::Unknown(code);
-        }
-        // SAFETY: `HookError` is `#[repr(u8)]`; tags 0..=44 are exactly its
-        // fieldless variants in declaration order. Zeroing initializes the
-        // complete enum storage before the valid discriminant is written.
-        let mut error = core::mem::MaybeUninit::<HookError>::zeroed();
-        unsafe {
-            error.as_mut_ptr().cast::<u8>().write(tag);
-            error.assume_init()
-        }
-    }
-}
-
-impl HookError {
-    /// The raw negative `i64` error code this variant corresponds to. Exact
-    /// inverse of [`HookError::from`]: `HookError::from(c).code() == c` for
-    /// every code, known or unknown.
-    ///
-    /// Like `From`'s inverse, this is deliberately NOT a 46-arm match:
-    /// matching on the variant to select 1-of-45 distinct wide `i64`
-    /// constants requires WASM structured control flow to nest a nearly
-    /// equal number of blocks (unlike a native jump table, WASM's
-    /// `br_table` still needs one nested block per distinct branch target),
-    /// which alone can blow the Guard-type 16-level nesting limit once
-    /// inlined. Instead this reads the variant's discriminant directly
-    /// (an O(1) memory load, no branching) and indexes a const table.
-    #[must_use]
-    pub fn code(&self) -> i64 {
-        // The one payload-carrying arm is handled by a single two-way
-        // branch, not folded into the table: it can't participate in a
-        // dense discriminant-indexed lookup since its code is data, not a
-        // per-variant constant.
-        if let HookError::Unknown(code) = *self {
-            return code;
-        }
-        // SAFETY: `HookError` is `#[repr(u8)]`, so per the Rust reference
-        // ("Casting" > "Pointer casting"), the discriminant is reliably
-        // readable via this pointer cast even though `Unknown` carries
-        // data. `self` is not `Unknown` here (handled above), so this
-        // reads the u8 discriminant of one of the 45 fieldless variants,
-        // which by declaration order is in `0..45`.
-        let tag = unsafe { *(self as *const Self as *const u8) };
-        const TABLE: [i64; 45] = [
-            rshooks_core::OUT_OF_BOUNDS,
-            rshooks_core::INTERNAL_ERROR,
-            rshooks_core::TOO_BIG,
-            rshooks_core::TOO_SMALL,
-            rshooks_core::DOESNT_EXIST,
-            rshooks_core::NO_FREE_SLOTS,
-            rshooks_core::INVALID_ARGUMENT,
-            rshooks_core::ALREADY_SET,
-            rshooks_core::PREREQUISITE_NOT_MET,
-            rshooks_core::FEE_TOO_LARGE,
-            rshooks_core::EMISSION_FAILURE,
-            rshooks_core::TOO_MANY_NONCES,
-            rshooks_core::TOO_MANY_EMITTED_TXN,
-            rshooks_core::NOT_IMPLEMENTED,
-            rshooks_core::INVALID_ACCOUNT,
-            rshooks_core::GUARD_VIOLATION,
-            rshooks_core::INVALID_FIELD,
-            rshooks_core::PARSE_ERROR,
-            rshooks_core::RC_ROLLBACK,
-            rshooks_core::RC_ACCEPT,
-            rshooks_core::NO_SUCH_KEYLET,
-            rshooks_core::NOT_AN_ARRAY,
-            rshooks_core::NOT_AN_OBJECT,
-            rshooks_core::INVALID_FLOAT, // tag 23 (InvalidFloat), value -10024 not -24
-            rshooks_core::DIVISION_BY_ZERO,
-            rshooks_core::MANTISSA_OVERSIZED,
-            rshooks_core::MANTISSA_UNDERSIZED,
-            rshooks_core::EXPONENT_OVERSIZED,
-            rshooks_core::EXPONENT_UNDERSIZED,
-            rshooks_core::XFL_OVERFLOW,
-            rshooks_core::NOT_IOU_AMOUNT,
-            rshooks_core::NOT_AN_AMOUNT,
-            rshooks_core::CANT_RETURN_NEGATIVE,
-            rshooks_core::NOT_AUTHORIZED,
-            rshooks_core::PREVIOUS_FAILURE_PREVENTS_RETRY,
-            rshooks_core::TOO_MANY_PARAMS,
-            rshooks_core::INVALID_TXN,
-            rshooks_core::RESERVE_INSUFFICIENT,
-            rshooks_core::COMPLEX_NOT_SUPPORTED,
-            rshooks_core::DOES_NOT_MATCH,
-            rshooks_core::INVALID_KEY,
-            rshooks_core::NOT_A_STRING,
-            rshooks_core::MEM_OVERLAP,
-            rshooks_core::TOO_MANY_STATE_MODIFICATIONS,
-            rshooks_core::TOO_MANY_NAMESPACES,
-        ];
-        // `.get` + `unwrap_or`, not `TABLE[..]`: this crate denies
-        // `clippy::indexing_slicing` (panic-free is enforced, not
-        // promised, per `docs/DESIGN.md` §8). `tag` is provably in
-        // `0..45` here, so the fallback is unreachable in practice --
-        // mirrors `From`'s own `.get(..)` table lookup above.
-        TABLE
-            .get(tag as usize)
-            .copied()
-            .unwrap_or(rshooks_core::INTERNAL_ERROR)
-    }
+    /// Any code without a named constant (positive, `-24`, below `-45`, …).
+    Unknown,
 }
 
 /// The result type every rshooks wrapper returns: `Ok(payload)` for a
@@ -269,11 +374,12 @@ impl HookError {
 pub type Result<T> = core::result::Result<T, HookError>;
 
 /// Funnel point every wrapper in `api/*.rs` and `xfl.rs` calls through:
-/// convert a raw Hook API `i64` return into a [`Result<i64>`] by sign.
+/// convert a raw Hook API `i64` return into a [`Result<i64>`] by sign. This
+/// is the identity on the negative branch: no decode.
 #[inline(always)]
 pub(crate) fn res(code: i64) -> Result<i64> {
     if code < 0 {
-        Err(HookError::from(code))
+        Err(HookError(code))
     } else {
         Ok(code)
     }
@@ -283,14 +389,237 @@ pub(crate) fn res(code: i64) -> Result<i64> {
 mod tests {
     use super::*;
 
+    const KNOWN: &[(i64, HookError, HookErrorKind)] = &[
+        (
+            rshooks_core::OUT_OF_BOUNDS,
+            HookError::OutOfBounds,
+            HookErrorKind::OutOfBounds,
+        ),
+        (
+            rshooks_core::INTERNAL_ERROR,
+            HookError::InternalError,
+            HookErrorKind::InternalError,
+        ),
+        (
+            rshooks_core::TOO_BIG,
+            HookError::TooBig,
+            HookErrorKind::TooBig,
+        ),
+        (
+            rshooks_core::TOO_SMALL,
+            HookError::TooSmall,
+            HookErrorKind::TooSmall,
+        ),
+        (
+            rshooks_core::DOESNT_EXIST,
+            HookError::DoesntExist,
+            HookErrorKind::DoesntExist,
+        ),
+        (
+            rshooks_core::NO_FREE_SLOTS,
+            HookError::NoFreeSlots,
+            HookErrorKind::NoFreeSlots,
+        ),
+        (
+            rshooks_core::INVALID_ARGUMENT,
+            HookError::InvalidArgument,
+            HookErrorKind::InvalidArgument,
+        ),
+        (
+            rshooks_core::ALREADY_SET,
+            HookError::AlreadySet,
+            HookErrorKind::AlreadySet,
+        ),
+        (
+            rshooks_core::PREREQUISITE_NOT_MET,
+            HookError::PrerequisiteNotMet,
+            HookErrorKind::PrerequisiteNotMet,
+        ),
+        (
+            rshooks_core::FEE_TOO_LARGE,
+            HookError::FeeTooLarge,
+            HookErrorKind::FeeTooLarge,
+        ),
+        (
+            rshooks_core::EMISSION_FAILURE,
+            HookError::EmissionFailure,
+            HookErrorKind::EmissionFailure,
+        ),
+        (
+            rshooks_core::TOO_MANY_NONCES,
+            HookError::TooManyNonces,
+            HookErrorKind::TooManyNonces,
+        ),
+        (
+            rshooks_core::TOO_MANY_EMITTED_TXN,
+            HookError::TooManyEmittedTxn,
+            HookErrorKind::TooManyEmittedTxn,
+        ),
+        (
+            rshooks_core::NOT_IMPLEMENTED,
+            HookError::NotImplemented,
+            HookErrorKind::NotImplemented,
+        ),
+        (
+            rshooks_core::INVALID_ACCOUNT,
+            HookError::InvalidAccount,
+            HookErrorKind::InvalidAccount,
+        ),
+        (
+            rshooks_core::GUARD_VIOLATION,
+            HookError::GuardViolation,
+            HookErrorKind::GuardViolation,
+        ),
+        (
+            rshooks_core::INVALID_FIELD,
+            HookError::InvalidField,
+            HookErrorKind::InvalidField,
+        ),
+        (
+            rshooks_core::PARSE_ERROR,
+            HookError::ParseError,
+            HookErrorKind::ParseError,
+        ),
+        (
+            rshooks_core::RC_ROLLBACK,
+            HookError::RcRollback,
+            HookErrorKind::RcRollback,
+        ),
+        (
+            rshooks_core::RC_ACCEPT,
+            HookError::RcAccept,
+            HookErrorKind::RcAccept,
+        ),
+        (
+            rshooks_core::NO_SUCH_KEYLET,
+            HookError::NoSuchKeylet,
+            HookErrorKind::NoSuchKeylet,
+        ),
+        (
+            rshooks_core::NOT_AN_ARRAY,
+            HookError::NotAnArray,
+            HookErrorKind::NotAnArray,
+        ),
+        (
+            rshooks_core::NOT_AN_OBJECT,
+            HookError::NotAnObject,
+            HookErrorKind::NotAnObject,
+        ),
+        (
+            rshooks_core::INVALID_FLOAT,
+            HookError::InvalidFloat,
+            HookErrorKind::InvalidFloat,
+        ),
+        (
+            rshooks_core::DIVISION_BY_ZERO,
+            HookError::DivisionByZero,
+            HookErrorKind::DivisionByZero,
+        ),
+        (
+            rshooks_core::MANTISSA_OVERSIZED,
+            HookError::MantissaOversized,
+            HookErrorKind::MantissaOversized,
+        ),
+        (
+            rshooks_core::MANTISSA_UNDERSIZED,
+            HookError::MantissaUndersized,
+            HookErrorKind::MantissaUndersized,
+        ),
+        (
+            rshooks_core::EXPONENT_OVERSIZED,
+            HookError::ExponentOversized,
+            HookErrorKind::ExponentOversized,
+        ),
+        (
+            rshooks_core::EXPONENT_UNDERSIZED,
+            HookError::ExponentUndersized,
+            HookErrorKind::ExponentUndersized,
+        ),
+        (
+            rshooks_core::XFL_OVERFLOW,
+            HookError::XflOverflow,
+            HookErrorKind::XflOverflow,
+        ),
+        (
+            rshooks_core::NOT_IOU_AMOUNT,
+            HookError::NotIouAmount,
+            HookErrorKind::NotIouAmount,
+        ),
+        (
+            rshooks_core::NOT_AN_AMOUNT,
+            HookError::NotAnAmount,
+            HookErrorKind::NotAnAmount,
+        ),
+        (
+            rshooks_core::CANT_RETURN_NEGATIVE,
+            HookError::CantReturnNegative,
+            HookErrorKind::CantReturnNegative,
+        ),
+        (
+            rshooks_core::NOT_AUTHORIZED,
+            HookError::NotAuthorized,
+            HookErrorKind::NotAuthorized,
+        ),
+        (
+            rshooks_core::PREVIOUS_FAILURE_PREVENTS_RETRY,
+            HookError::PreviousFailurePreventsRetry,
+            HookErrorKind::PreviousFailurePreventsRetry,
+        ),
+        (
+            rshooks_core::TOO_MANY_PARAMS,
+            HookError::TooManyParams,
+            HookErrorKind::TooManyParams,
+        ),
+        (
+            rshooks_core::INVALID_TXN,
+            HookError::InvalidTxn,
+            HookErrorKind::InvalidTxn,
+        ),
+        (
+            rshooks_core::RESERVE_INSUFFICIENT,
+            HookError::ReserveInsufficient,
+            HookErrorKind::ReserveInsufficient,
+        ),
+        (
+            rshooks_core::COMPLEX_NOT_SUPPORTED,
+            HookError::ComplexNotSupported,
+            HookErrorKind::ComplexNotSupported,
+        ),
+        (
+            rshooks_core::DOES_NOT_MATCH,
+            HookError::DoesNotMatch,
+            HookErrorKind::DoesNotMatch,
+        ),
+        (
+            rshooks_core::INVALID_KEY,
+            HookError::InvalidKey,
+            HookErrorKind::InvalidKey,
+        ),
+        (
+            rshooks_core::NOT_A_STRING,
+            HookError::NotAString,
+            HookErrorKind::NotAString,
+        ),
+        (
+            rshooks_core::MEM_OVERLAP,
+            HookError::MemOverlap,
+            HookErrorKind::MemOverlap,
+        ),
+        (
+            rshooks_core::TOO_MANY_STATE_MODIFICATIONS,
+            HookError::TooManyStateModifications,
+            HookErrorKind::TooManyStateModifications,
+        ),
+        (
+            rshooks_core::TOO_MANY_NAMESPACES,
+            HookError::TooManyNamespaces,
+            HookErrorKind::TooManyNamespaces,
+        ),
+    ];
+
     #[test]
-    fn round_trips_known_codes() {
-        let known: &[i64] = &[
-            -1, -2, -3, -4, -5, -6, -7, -8, -9, -10, -11, -12, -13, -14, -15, -16, -17, -18, -19,
-            -20, -21, -22, -23, -10024, -25, -26, -27, -28, -29, -30, -31, -32, -33, -34, -35, -36,
-            -37, -38, -39, -40, -41, -42, -43, -44, -45,
-        ];
-        for &code in known {
+    fn round_trips_every_known_code() {
+        for &(code, _, _) in KNOWN {
             assert_eq!(
                 HookError::from(code).code(),
                 code,
@@ -300,92 +629,16 @@ mod tests {
     }
 
     #[test]
-    fn every_known_code_maps_to_its_named_variant() {
-        let mappings = [
-            (rshooks_core::OUT_OF_BOUNDS, HookError::OutOfBounds),
-            (rshooks_core::INTERNAL_ERROR, HookError::InternalError),
-            (rshooks_core::TOO_BIG, HookError::TooBig),
-            (rshooks_core::TOO_SMALL, HookError::TooSmall),
-            (rshooks_core::DOESNT_EXIST, HookError::DoesntExist),
-            (rshooks_core::NO_FREE_SLOTS, HookError::NoFreeSlots),
-            (rshooks_core::INVALID_ARGUMENT, HookError::InvalidArgument),
-            (rshooks_core::ALREADY_SET, HookError::AlreadySet),
-            (
-                rshooks_core::PREREQUISITE_NOT_MET,
-                HookError::PrerequisiteNotMet,
-            ),
-            (rshooks_core::FEE_TOO_LARGE, HookError::FeeTooLarge),
-            (rshooks_core::EMISSION_FAILURE, HookError::EmissionFailure),
-            (rshooks_core::TOO_MANY_NONCES, HookError::TooManyNonces),
-            (
-                rshooks_core::TOO_MANY_EMITTED_TXN,
-                HookError::TooManyEmittedTxn,
-            ),
-            (rshooks_core::NOT_IMPLEMENTED, HookError::NotImplemented),
-            (rshooks_core::INVALID_ACCOUNT, HookError::InvalidAccount),
-            (rshooks_core::GUARD_VIOLATION, HookError::GuardViolation),
-            (rshooks_core::INVALID_FIELD, HookError::InvalidField),
-            (rshooks_core::PARSE_ERROR, HookError::ParseError),
-            (rshooks_core::RC_ROLLBACK, HookError::RcRollback),
-            (rshooks_core::RC_ACCEPT, HookError::RcAccept),
-            (rshooks_core::NO_SUCH_KEYLET, HookError::NoSuchKeylet),
-            (rshooks_core::NOT_AN_ARRAY, HookError::NotAnArray),
-            (rshooks_core::NOT_AN_OBJECT, HookError::NotAnObject),
-            (rshooks_core::INVALID_FLOAT, HookError::InvalidFloat),
-            (rshooks_core::DIVISION_BY_ZERO, HookError::DivisionByZero),
-            (
-                rshooks_core::MANTISSA_OVERSIZED,
-                HookError::MantissaOversized,
-            ),
-            (
-                rshooks_core::MANTISSA_UNDERSIZED,
-                HookError::MantissaUndersized,
-            ),
-            (
-                rshooks_core::EXPONENT_OVERSIZED,
-                HookError::ExponentOversized,
-            ),
-            (
-                rshooks_core::EXPONENT_UNDERSIZED,
-                HookError::ExponentUndersized,
-            ),
-            (rshooks_core::XFL_OVERFLOW, HookError::XflOverflow),
-            (rshooks_core::NOT_IOU_AMOUNT, HookError::NotIouAmount),
-            (rshooks_core::NOT_AN_AMOUNT, HookError::NotAnAmount),
-            (
-                rshooks_core::CANT_RETURN_NEGATIVE,
-                HookError::CantReturnNegative,
-            ),
-            (rshooks_core::NOT_AUTHORIZED, HookError::NotAuthorized),
-            (
-                rshooks_core::PREVIOUS_FAILURE_PREVENTS_RETRY,
-                HookError::PreviousFailurePreventsRetry,
-            ),
-            (rshooks_core::TOO_MANY_PARAMS, HookError::TooManyParams),
-            (rshooks_core::INVALID_TXN, HookError::InvalidTxn),
-            (
-                rshooks_core::RESERVE_INSUFFICIENT,
-                HookError::ReserveInsufficient,
-            ),
-            (
-                rshooks_core::COMPLEX_NOT_SUPPORTED,
-                HookError::ComplexNotSupported,
-            ),
-            (rshooks_core::DOES_NOT_MATCH, HookError::DoesNotMatch),
-            (rshooks_core::INVALID_KEY, HookError::InvalidKey),
-            (rshooks_core::NOT_A_STRING, HookError::NotAString),
-            (rshooks_core::MEM_OVERLAP, HookError::MemOverlap),
-            (
-                rshooks_core::TOO_MANY_STATE_MODIFICATIONS,
-                HookError::TooManyStateModifications,
-            ),
-            (
-                rshooks_core::TOO_MANY_NAMESPACES,
-                HookError::TooManyNamespaces,
-            ),
-        ];
-        for (code, expected) in mappings {
-            assert_eq!(HookError::from(code), expected, "wrong variant for {code}");
+    fn every_known_code_maps_to_its_named_constant() {
+        for &(code, expected, _) in KNOWN {
+            assert_eq!(HookError::from(code), expected, "wrong constant for {code}");
+        }
+    }
+
+    #[test]
+    fn every_known_code_reports_its_kind() {
+        for &(code, _, kind) in KNOWN {
+            assert_eq!(HookError::from(code).kind(), kind, "wrong kind for {code}");
         }
     }
 
@@ -393,40 +646,37 @@ mod tests {
     fn invalid_float_is_irregular() {
         assert_eq!(HookError::from(-10024), HookError::InvalidFloat);
         assert_eq!(HookError::InvalidFloat.code(), -10024);
-        assert_eq!(HookError::from(-24), HookError::Unknown(-24));
+        assert_eq!(HookError::InvalidFloat.kind(), HookErrorKind::InvalidFloat);
+        let gap = HookError::from(-24);
+        assert_eq!(gap.code(), -24);
+        assert_eq!(gap.kind(), HookErrorKind::Unknown);
     }
 
     #[test]
-    fn table_lookup_preserves_out_of_range_codes() {
+    fn out_of_range_codes_round_trip_as_unknown() {
         for code in [i64::MIN, -46, 0, 1, i64::MAX] {
-            assert_eq!(HookError::from(code), HookError::Unknown(code));
-            assert_eq!(HookError::from(code).code(), code);
+            let err = HookError::from(code);
+            assert_eq!(err.code(), code);
+            assert_eq!(err.kind(), HookErrorKind::Unknown);
         }
     }
 
     #[test]
-    fn discriminant_matches_declaration_order() {
-        // Guards the invariant `code()`'s SAFETY comment relies on: the u8
-        // discriminant read via pointer casting must match each variant's
-        // position in the enum's declaration (and thus its slot in
-        // `code()`'s `TABLE`). Spot-checks the first, last, and one
-        // interior fieldless variant, plus `Unknown`'s discriminant (45,
-        // even though `code()` never indexes the table with it).
-        fn discriminant(e: &HookError) -> u8 {
-            // SAFETY: same reasoning as `code()` -- see its doc comment.
-            unsafe { *(e as *const HookError as *const u8) }
-        }
-        assert_eq!(discriminant(&HookError::OutOfBounds), 0);
-        assert_eq!(discriminant(&HookError::InvalidFloat), 23);
-        assert_eq!(discriminant(&HookError::TooManyNamespaces), 44);
-        assert_eq!(discriminant(&HookError::Unknown(-9999)), 45);
+    fn debug_prints_the_constant_name() {
+        extern crate std;
+        use std::format;
+
+        assert_eq!(format!("{:?}", HookError::DoesntExist), "DoesntExist");
+        assert_eq!(format!("{:?}", HookError::from(-9999)), "Unknown(-9999)");
     }
 
     #[test]
-    fn unknown_code_round_trips() {
-        let err = HookError::from(-9999);
-        assert_eq!(err, HookError::Unknown(-9999));
-        assert_eq!(err.code(), -9999);
+    fn result_is_a_scalar_pair() {
+        assert_eq!(core::mem::size_of::<HookError>(), 8);
+        assert_eq!(
+            core::mem::size_of::<core::result::Result<i64, HookError>>(),
+            16
+        );
     }
 
     #[test]

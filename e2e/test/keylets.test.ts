@@ -1,28 +1,8 @@
 import { createHash } from 'node:crypto'
-import {
-  ExecutionUtility,
-  StateUtility,
-  Xrpld,
-  clearAllHooksV3,
-  clearHookStateV3,
-  hexNamespace,
-  readHookBinaryHexFromNS,
-  serverUrl,
-  setHooksV3,
-  setupClient,
-  teardownClient,
-  type SetHookParams,
-  type XrplIntegrationTestContext,
-  type iHook,
-} from '@transia/hooks-toolkit'
-import {
-  calculateHookOn,
-  decodeAccountID,
-  hashes,
-  type TransactionMetadata,
-} from 'xahau'
-import { HookFlags } from 'xahau/dist/npm/models/common/xahau'
+import { ExecutionUtility, StateUtility, Xrpld, hexNamespace } from '@xahau/hooks-toolkit'
+import { decodeAccountID, hashes, type TransactionMetadata } from 'xahau'
 import { hashCron } from 'xahau/dist/npm/utils/hashes'
+import { installHook } from './harness'
 
 const namespace = 'rshooks-e2e-keylets'
 const WORST_CASE_INSTRUCTIONS = 4150
@@ -133,47 +113,19 @@ function expectedUnchecked(hashHex: string): string {
 }
 
 describe('keylets', () => {
-  let testContext: XrplIntegrationTestContext
   const hookNamespace = hexNamespace(namespace)
-
-  beforeAll(async () => {
-    testContext = await setupClient(serverUrl)
-
-    const hook: iHook = {
-      CreateCode: readHookBinaryHexFromNS('keylets', 'wasm'),
-      Flags: HookFlags.hsfOverride,
-      HookOn: calculateHookOn(['Invoke']),
-      HookNamespace: hookNamespace,
-      HookApiVersion: 0,
-    }
-    await setHooksV3({
-      client: testContext.client,
-      seed: testContext.hook1.seed,
-      hooks: [{ Hook: hook }],
-    } as unknown as SetHookParams)
+  const getContext = installHook({
+    wasmName: 'keylets',
+    namespace,
+    hookOn: ['Invoke'],
+    clearState: true,
   })
 
-  afterAll(async () => {
-    const clearStateHook: iHook = {
-      Flags: HookFlags.hsfNSDelete,
-      HookNamespace: hookNamespace,
-    }
-    await clearHookStateV3({
-      client: testContext.client,
-      seed: testContext.hook1.seed,
-      hooks: [{ Hook: clearStateHook }],
-    } as unknown as SetHookParams)
-    await clearAllHooksV3({
-      client: testContext.client,
-      seed: testContext.hook1.seed,
-    } as unknown as SetHookParams)
-    await teardownClient(testContext)
-  })
+  const owner = () => getContext().alice.classicAddress
+  const dest = () => getContext().hook1.classicAddress
 
-  const owner = () => testContext.alice.classicAddress
-  const dest = () => testContext.hook1.classicAddress
-
-  it('accepts the Invoke and writes all 26 keylets', async () => {
+  it('accepts the Invoke and writes every keylet except Ticket', async () => {
+    const testContext = getContext()
     const response = await Xrpld.submit(testContext.client, {
       tx: {
         TransactionType: 'Invoke',
@@ -196,6 +148,7 @@ describe('keylets', () => {
   })
 
   async function readKeylet(discriminant: number): Promise<string> {
+    const testContext = getContext()
     const entry = await StateUtility.getHookState(
       testContext.client,
       testContext.hook1.classicAddress,

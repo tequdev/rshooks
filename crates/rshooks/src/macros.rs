@@ -32,9 +32,11 @@
 /// ```
 #[macro_export]
 macro_rules! guard {
-    ($m:expr) => {
-        unsafe { $crate::raw::_g((1u32 << 31) + line!(), ($m) + 1) }
-    };
+    ($m:expr) => {{
+        let __guard_id: u32 = (1u32 << 31).wrapping_add(line!());
+        let __maxiter: u32 = (($m) as u32).wrapping_add(1);
+        unsafe { $crate::raw::_g(__guard_id, __maxiter) }
+    }};
 }
 
 /// Like [`guard!`], but for multiple loops that share one source line (the
@@ -42,9 +44,91 @@ macro_rules! guard {
 /// exactly.
 #[macro_export]
 macro_rules! guard_m {
-    ($m:expr, $n:expr) => {
-        unsafe { $crate::raw::_g((1u32 << 31) + (line!() << 16) + ($n), ($m) + 1) }
-    };
+    ($m:expr, $n:expr) => {{
+        let __guard_id: u32 = (1u32 << 31)
+            .wrapping_add(line!().wrapping_shl(16))
+            .wrapping_add(($n) as u32);
+        let __maxiter: u32 = (($m) as u32).wrapping_add(1);
+        unsafe { $crate::raw::_g(__guard_id, __maxiter) }
+    }};
+}
+
+/// Defeats full loop unrolling for a small, fixed-trip-count loop whose body
+/// contains further [`guard!`]-protected work, by making the loop's own
+/// trip count opaque to the optimizer. Wrap the loop's induction variable at
+/// its comparison, e.g. `while no_unroll(i) < N { .. }`.
+///
+/// # Why this exists
+///
+/// `guard!`'s worst-case-instruction-count model assumes each call site is
+/// a single point in the compiled module, so an inner `guard!`'s cost is
+/// meant to amortize across the outer loop's iterations rather than being
+/// counted per iteration — this holds only as long as the compiled module
+/// contains one physical copy of the inner loop.
+///
+/// At `opt-level = 3`, LLVM often fully unrolls a small, provably-bounded
+/// outer loop (2 or 3 iterations is a typical threshold), independent of
+/// whether its body is inline or behind a function call (the flatten pass
+/// inlines everything into `hook()`/`cbak()` first, so unrolling and
+/// inlining compound — `docs/DESIGN.md` §6.2b). When the outer loop wraps
+/// an inner `guard!`-protected loop, unrolling physically duplicates that
+/// inner loop once per outer iteration, and the checker (which walks
+/// compiled bytecode, not source) counts the inner loop's full worst-case
+/// cost once per duplicate instead of once total — multiplying rather than
+/// amortizing its contribution. On `examples/80_governance`'s
+/// vote-garbage-collection loop (an outer 2-iteration table loop wrapping a
+/// `guard!(66)`-bounded 32-topic scan), this doubled the loop's measured
+/// cost, worth roughly a third of the whole `govern` entry's worst-case
+/// instruction count.
+///
+/// `no_unroll` routes the loop's induction variable through
+/// [`core::hint::black_box`] at its comparison: the optimizer can no longer
+/// prove the trip count at compile time, so it keeps the loop as one real
+/// `loop` construct instead of duplicating its body. This changes no
+/// observable behavior (`black_box` is the identity function) — only which
+/// optimizations the compiler is allowed to apply.
+///
+/// Only worth reaching for where this pathology can actually occur (an
+/// outer loop small enough to be a full-unroll candidate, wrapping further
+/// `guard!`-protected work) — a plain small loop with a cheap, unguarded
+/// body is usually *cheaper* fully unrolled, so applying this
+/// unconditionally to every `guard!`-protected loop is not a good default.
+///
+/// # Failure mode
+///
+/// `black_box` is a best-effort optimization barrier, not a guaranteed
+/// one — documented (as of this writing) to stay opaque in practice, but
+/// not contractually required to. If a future toolchain stopped treating it
+/// as opaque, the unrolling above could silently return, regressing the
+/// caller's worst-case instruction count with no compile-time or runtime
+/// signal — nothing below the protocol's 65535 ceiling would catch a
+/// regression that stays under it. Re-measure the worst case after any
+/// toolchain upgrade for a hook that relies on `no_unroll`.
+///
+/// # Examples
+///
+/// ```
+/// use rshooks::{guard, no_unroll};
+///
+/// let mut outer = 0u8;
+/// while no_unroll(outer) < 2 {
+///     guard!(2);
+///     let this_outer = outer;
+///     outer += 1;
+///
+///     let mut inner = 0u8;
+///     while inner < 32 {
+///         guard!(64);
+///         inner += 1;
+///         let _ = this_outer;
+///     }
+/// }
+/// assert_eq!(outer, 2);
+/// ```
+#[inline(always)]
+#[must_use] // `no_unroll(x);` as a bare statement is silently a no-op
+pub fn no_unroll<T>(value: T) -> T {
+    core::hint::black_box(value)
 }
 
 /// Terminate hook execution successfully. `accept!()` sends no message and
@@ -108,28 +192,36 @@ macro_rules! trace_float {
     };
 }
 
+/// Write loop shared by [`padded_bytes`]/[`padded_bytes_left`]: copies `src`
+/// into a zeroed `[u8; N]` starting at `offset` (`0` for a right pad, `N -
+/// src.len()` for a left pad). Both callers' own `assert!` already bounds
+/// `src.len() <= N`, so the indexing below is in-bounds and, since every
+/// caller runs this inside a `const { .. }` block, const-evaluated only.
+#[allow(clippy::indexing_slicing)]
+const fn padded_at<const N: usize>(src: &[u8], offset: usize) -> [u8; N] {
+    let mut output = [0u8; N];
+    let mut i = 0;
+
+    while i < src.len() {
+        output[offset.wrapping_add(i)] = src[i];
+        i = i.wrapping_add(1);
+    }
+
+    output
+}
+
 /// Compile-time zero-padding helper backing [`pad!`](crate::pad).
 ///
 /// Copies `src` into the start of a zeroed `[u8; N]`. The `pad!` macro wraps
-/// every call in an inline `const` block, so the `assert!` and the indexing
-/// below are compile-time checks — they can never become runtime panics.
+/// every call in an inline `const` block, so the `assert!` below is a
+/// compile-time check — it can never become a runtime panic.
 #[doc(hidden)]
-#[allow(clippy::indexing_slicing)] // in-bounds by the assert, const-evaluated only
 pub const fn padded_bytes<const N: usize>(src: &[u8]) -> [u8; N] {
     assert!(
         src.len() <= N,
         "pad!: source is larger than the destination"
     );
-
-    let mut output = [0u8; N];
-    let mut i = 0;
-
-    while i < src.len() {
-        output[i] = src[i];
-        i = i.wrapping_add(1);
-    }
-
-    output
+    padded_at(src, 0)
 }
 
 /// Zero-pad a constant byte string to a fixed-size array, at compile time.
@@ -145,19 +237,18 @@ pub const fn padded_bytes<const N: usize>(src: &[u8]) -> [u8; N] {
 ///
 /// This right-pads (`src` at the front, zero bytes at the end).
 ///
-/// **Not needed for building a short hook-state key anymore**: a
-/// `[u8; N]` (`1 <= N <= `[`crate::types::STATE_KEY_LEN`]) works directly
-/// as a [`crate::state::StateKeyEncode`] key — e.g. `state_get::<u64>(b"counter")` —
-/// sent to the host at its own real length; the host itself left-pads a
+/// Not needed for building a short hook-state key: a `[u8; N]`
+/// (`1 <= N <= `[`crate::types::STATE_KEY_LEN`]) works directly as a
+/// [`crate::state::StateKeyEncode`] key — e.g. `state_get::<u64>(b"counter")`
+/// — sent to the host at its own real length; the host itself left-pads a
 /// short key internally (see `rshooks::state`'s module doc comment, "Key
 /// length and padding," and DESIGN.md §5.7). Reach for `pad!` when a
-/// fixed-size buffer genuinely needs local right-padding for some other
-/// reason — e.g. building a full, already-32-byte
-/// [`crate::types::StateKey`]/[`crate::types::NameSpace`] constant on
-/// purpose, or padding a byte string for a use unrelated to hook-state
-/// keys. [`pad_left!`](crate::pad_left) is the mirror-image macro (left-pad
-/// instead of right-pad) for the same kind of non-key use — see its own
-/// doc comment.
+/// fixed-size buffer needs local right-padding for some other reason — e.g.
+/// building a full, already-32-byte [`crate::types::StateKey`]/
+/// [`crate::types::NameSpace`] constant, or padding a byte string for a use
+/// unrelated to hook-state keys. [`pad_left!`](crate::pad_left) is the
+/// mirror-image macro (left-pad instead of right-pad) for the same kind of
+/// non-key use.
 ///
 /// # Examples
 /// ```
@@ -189,27 +280,15 @@ macro_rules! pad {
 ///
 /// Copies `src` into the *end* of a zeroed `[u8; N]` — the mirror image of
 /// [`padded_bytes`], which copies `src` into the start. The `pad_left!`
-/// macro wraps every call in an inline `const` block, so the `assert!` and
-/// the indexing below are compile-time checks — they can never become
-/// runtime panics.
+/// macro wraps every call in an inline `const` block, so the `assert!` below
+/// is a compile-time check — it can never become a runtime panic.
 #[doc(hidden)]
-#[allow(clippy::indexing_slicing)] // in-bounds by the assert, const-evaluated only
 pub const fn padded_bytes_left<const N: usize>(src: &[u8]) -> [u8; N] {
     assert!(
         src.len() <= N,
         "pad_left!: source is larger than the destination"
     );
-
-    let mut output = [0u8; N];
-    let offset = N.wrapping_sub(src.len());
-    let mut i = 0;
-
-    while i < src.len() {
-        output[offset.wrapping_add(i)] = src[i];
-        i = i.wrapping_add(1);
-    }
-
-    output
+    padded_at(src, N.wrapping_sub(src.len()))
 }
 
 /// Zero-pad a constant byte string to a fixed-size array, at compile time —
@@ -218,17 +297,16 @@ pub const fn padded_bytes_left<const N: usize>(src: &[u8]) -> [u8; N] {
 ///
 /// The host itself left-pads a state/param key shorter than the fixed key
 /// width (32 bytes for hook state, 1–32 bytes for hook/otxn parameters) —
-/// see DESIGN.md §5.6 ("Endianness conventions") for that host-side
-/// behavior, and §5.7 ("Hook state key encoding") for why a Rust hook does
-/// **not** need to reproduce it locally for an ordinary `StateKeyEncode`
-/// key (a plain `[u8; N]`, `state_keys!` variant, or `#[derive(HookKey)]`
-/// struct passed at its own real length already lands on the same slot the
-/// host's left-pad produces — no `pad_left!` involved). Reach for
-/// `pad_left!` instead when a hook genuinely needs the *already-padded* 32
-/// bytes themselves as a value — e.g. reproducing, byte-for-byte, what the
-/// host's left-pad of a given short key would look like, for a purpose
-/// other than passing it to `state`/`state_set` (which never needs this:
-/// pass the short key directly).
+/// see DESIGN.md §5.6 ("Endianness conventions") and §5.7 ("Hook state key
+/// encoding"). An ordinary `StateKeyEncode` key (a plain `[u8; N]`,
+/// `state_keys!` variant, or `#[derive(HookKey)]` struct passed at its own
+/// real length) already lands on the same slot the host's left-pad
+/// produces, with no `pad_left!` involved. Reach for `pad_left!` instead
+/// when a hook needs the *already-padded* 32 bytes themselves as a value —
+/// e.g. reproducing, byte-for-byte, what the host's left-pad of a given
+/// short key would look like, for a purpose other than passing it to
+/// `state`/`state_set` (which never needs this: pass the short key
+/// directly).
 ///
 /// Same compile-time-only shape as [`pad!`](crate::pad): the array length
 /// is inferred from context, the argument must be a constant expression, a

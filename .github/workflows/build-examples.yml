@@ -1,32 +1,10 @@
 name: Build examples (reusable)
 
-# Reusable workflow: the ONE place that builds every crate under examples/
-# through rshooks-build and validates the output. Called from both ci.yml
-# (as its `examples` job) and e2e.yml (as its `build-hooks` job) so the
-# two workflows can never drift out of sync with each other again — the
-# historical failure mode here was a *step* being added to one workflow's
-# hand-written per-example list and forgotten in the other's (or forgotten
-# entirely for a new example). There is now only one list, and it isn't
-# even hand-written: the `discover` job below derives it from
-# examples/*/Cargo.toml, so adding a new example directory needs zero
-# workflow edits (a per-example flag override, if the example needs one,
-# is the only case that still touches this file — see the `discover` job).
-#
-# Jobs (all independent except `build`, which needs the other two):
-#   discover           - lists examples/*/Cargo.toml and emits the build matrix
-#   build-tool         - builds `rshooks-build` once (release) and shares the
-#                        binary via artifact, so it isn't rebuilt per example
-#   clippy             - lints the whole examples workspace once (not per-example)
-#   testenv-parity     - continuous zero-wasm-impact probe (design doc §7)
-#   unit-tests-examples - off-chain unit tests (rshooks-testenv harness)
-#   build              - matrix job, one leg per example, fail-fast: false so one
-#                        example failing never blocks the others from completing
-#
-# mise.toml's `build-examples` task (the local equivalent) is intentionally
-# NOT generated from this same discovery logic — it's plain shell so it
-# stays readable and debuggable when run by hand; keep its per-example
-# invocations and comments in sync with the flag overrides declared in
-# `discover` below when either changes.
+# Reusable workflow: builds every crate under examples/ through
+# rshooks-build and validates the output. Called from ci.yml as its
+# `examples` job, whose `e2e` job then deploys the uploaded artifacts; the
+# `discover` job finds which examples are host-testable (dev-dependency on
+# rshooks-testenv) for the `unit-tests-examples` job below.
 
 on:
   workflow_call: {}
@@ -39,42 +17,29 @@ jobs:
     name: Discover examples
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.discover.outputs.matrix }}
+      test-packages: ${{ steps.discover.outputs.test-packages }}
     steps:
       - uses: actions/checkout@v7
 
-      - name: Build example matrix from examples/*/Cargo.toml
+      - name: Install Rust toolchain (per rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Discover host-testable examples from examples/*/Cargo.toml
         id: discover
         shell: bash
         run: |
           set -euo pipefail
 
-          # Per-example `rshooks build` flag overrides. This is the
-          # ONLY place per-example build flags are declared for CI — add
-          # one line per example that needs non-default flags (keyed by
-          # its examples/ directory name) and both ci.yml and e2e.yml
-          # pick it up automatically, with no further workflow edits.
-          declare -A EXTRA_ARGS=(
-            # [11_gas-counter]="--api-version 1"
-            # 13_keylets needed --auto-guard --default-maxiter 34 before
-            # this workspace's opt-level = 3 default (examples/Cargo.toml,
-            # docs/DESIGN.md's §2 C6) raised the zero-init-inlining
-            # threshold past Keylet's 34 bytes - no longer needed.
-          )
+          # Host-testable examples: crates with a dev-dependency on
+          # rshooks-testenv, i.e. the ones wired up with off-chain unit
+          # tests under tests/. Derived from cargo metadata instead of
+          # hand-listed so a new testenv-wired example is picked up
+          # without a workflow edit.
+          test_packages="$(cargo metadata --manifest-path examples/Cargo.toml --format-version 1 --no-deps \
+            | jq -r '[.packages[] | select(.dependencies[]? | .name == "rshooks-testenv" and .kind == "dev") | .name] | sort | join(" ")')"
 
-          matrix='[]'
-          for manifest in examples/*/Cargo.toml; do
-            dir="$(dirname "$manifest")"
-            name="$(basename "$dir")"
-            args="${EXTRA_ARGS[$name]:-}"
-            entry="$(jq -nc --arg name "$name" --arg dir "$dir" --arg args "$args" \
-              '{name: $name, dir: $dir, args: $args}')"
-            matrix="$(jq -c --argjson e "$entry" '. + [$e]' <<<"$matrix")"
-          done
-
-          echo "Discovered matrix:"
-          jq . <<<"$matrix"
-          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "Host-testable (testenv-wired) packages: $test_packages"
+          echo "test-packages=$test_packages" >> "$GITHUB_OUTPUT"
 
   build-tool:
     name: Build rshooks-build (shared binary)
@@ -98,33 +63,14 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  clippy:
-    name: Clippy (examples workspace, wasm32v1-none)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install Rust toolchain (per rust-toolchain.toml)
-        run: rustup show active-toolchain || rustup toolchain install
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: examples
-
-      - name: Clippy (examples, wasm32v1-none, deny warnings)
-        # --lib instead of --all-targets: wasm32v1-none has no `test` crate,
-        # so the implicit test-profile target can never build for it.
-        working-directory: examples
-        run: cargo clippy --workspace --lib --target wasm32v1-none -- -D warnings
-
   # Continuous zero-wasm-impact check (design doc
   # .claude/design/TESTENV_DESIGN.md §7): builds every example twice at
   # this same commit — as-committed vs. with all off-chain-unit-test wiring
   # mechanically stripped — and diffs every produced wasm plus its WCE/
   # size/nesting numbers. Catches any future leak of test machinery into a
-  # shipped artifact; independent of the `build`/`discover` matrix above
-  # (it drives `rshooks build` itself via scripts/probe-testenv-parity.sh,
-  # not the shared binary those jobs upload).
+  # shipped artifact; independent of the `build` job above (it drives
+  # `rshooks build` itself via scripts/probe-testenv-parity.sh, not the
+  # shared binary that job uploads).
   testenv-parity:
     name: Testenv parity probe (as-committed == test-wiring-stripped)
     runs-on: ubuntu-latest
@@ -139,16 +85,10 @@ jobs:
       - name: Build examples twice and diff wasm + WCE/size/nesting
         run: bash scripts/probe-testenv-parity.sh
 
-  # Off-chain unit tests (rshooks-testenv harness): plain `cargo test`, no
-  # wasm build, no node. Exercises both documented test layouts (see the
-  # book's "Testing hooks" chapter) — 02_state-counter's tests/ integration
-  # test and 10_emit-txn's in-crate #[cfg(test)] module — plus the harness
-  # crate's own test suite. 16_typed-results follows the tests/ integration
-  # layout too, and additionally covers the typed entry-return form's
-  # rollback path (a `hook_errors!` msg-clause message surfacing in
-  # `HookExit.msg` through `?`).
+  # Off-chain tests for the harness and examples that opt into its host wiring.
   unit-tests-examples:
     name: Off-chain unit tests (rshooks-testenv)
+    needs: discover
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -161,17 +101,30 @@ jobs:
       - name: cargo test -p rshooks-testenv (root workspace)
         run: cargo test -p rshooks-testenv
 
+      # ${{ needs.discover.outputs.test-packages }} is a space-separated
+      # list of examples/ package names that declare a dev-dependency on
+      # rshooks-testenv (see the `discover` job) - every host-testable
+      # example, not a hand-picked subset.
       - name: cargo test (examples workspace, testenv-wired examples)
-        run: cargo test --manifest-path examples/Cargo.toml -p state-counter -p emit-txn -p typed-results
+        run: |
+          set -euo pipefail
+          pkgs=(${{ needs.discover.outputs.test-packages }})
+          args=()
+          for pkg in "${pkgs[@]}"; do
+            args+=(-p "$pkg")
+          done
+          cargo test --manifest-path examples/Cargo.toml "${args[@]}"
 
+  # One job looping every example instead of one runner per example
+  # (`mise run build-examples` already loops all of them; a runner per
+  # example is pure spin-up overhead for a seconds-long build).
+  # `continue-on-error` semantics are implemented by hand per example so
+  # one broken example doesn't hide the pass/fail of the rest; the job
+  # still fails overall if any example failed.
   build:
-    name: ${{ matrix.name }}
-    needs: [discover, build-tool]
+    name: Build & check examples
+    needs: build-tool
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJSON(needs.discover.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v7
 
@@ -183,7 +136,7 @@ jobs:
           workspaces: examples
 
       - name: Download rshooks-build binary
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: rshooks-build-bin
           path: bin
@@ -197,18 +150,60 @@ jobs:
       # entry (see `80_governance`), each landing as its own
       # `<index>.<entry-fn>.wasm` under `out/current/` — check every
       # artifact the build produced rather than assuming exactly one.
-      - name: Build and check
+      # examples/<dir>/metrics.json is the recorded WCE / size / nesting
+      # snapshot; refresh locally with `mise run record-example-metrics`.
+      - name: Build, check, and verify recorded metrics for every example
         run: |
-          set -euo pipefail
-          chmod +x bin/rshooks
-          bin/rshooks build --manifest-path "${{ matrix.dir }}/Cargo.toml" --out "${{ matrix.dir }}/out" ${{ matrix.args }}
-          for wasm in "${{ matrix.dir }}/out/current"/*.wasm; do
-            bin/rshooks check "$wasm"
-          done
+          set -uo pipefail
+          chmod +x bin/rshooks || exit 1
+          failed=0
+          {
+            echo "| Example | Build & check | Recorded metrics |"
+            echo "|---|---|---|"
+          } >>"$GITHUB_STEP_SUMMARY"
+          for manifest in examples/*/Cargo.toml; do
+            dir="$(dirname "$manifest")"
+            name="$(basename "$dir")"
+            build_ok=":white_check_mark:"
+            metrics_ok=":white_check_mark:"
 
-      - name: Upload hook binary
+            if bin/rshooks build --manifest-path "$manifest" --out "$dir/out"; then
+              for wasm in "$dir"/out/current/*.wasm; do
+                bin/rshooks check "$wasm" || build_ok=":x:"
+              done
+            else
+              build_ok=":x:"
+            fi
+
+            if [ "$build_ok" = ":white_check_mark:" ]; then
+              python3 scripts/record-example-metrics.py \
+                --check --skip-build --example "$name" --rshooks bin/rshooks \
+                || metrics_ok=":x:"
+            else
+              metrics_ok="skipped"
+            fi
+
+            if [ "$build_ok" = ":x:" ] || [ "$metrics_ok" = ":x:" ]; then
+              failed=1
+            fi
+            echo "| $name | $build_ok | $metrics_ok |" >>"$GITHUB_STEP_SUMMARY"
+          done
+          exit "$failed"
+
+      # `*.wasm` for `copy-wasm.mjs`/`readHookBinaryHexFromNS`, plus each
+      # example's own `sethook.template.json` for the (growing) set of e2e
+      # suites that install a hook using its generated declaration entries
+      # verbatim (e.g. `e2e/test/param-signature.test.ts`) rather than
+      # hand-writing them — the e2e job never runs `rshooks build`, so
+      # anything it reads from `out/current/` has to come through this
+      # artifact. Uploaded even if some examples failed above, so the
+      # examples that did build stay inspectable.
+      - name: Upload hook binaries
+        if: '!cancelled()'
         uses: actions/upload-artifact@v7
         with:
-          name: example-hooks-${{ matrix.name }}
-          path: ${{ matrix.dir }}/out/current/*.wasm
+          name: example-hooks
+          path: |
+            examples/*/out/current/*.wasm
+            examples/*/out/current/sethook.template.json
           if-no-files-found: error

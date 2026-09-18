@@ -1,13 +1,13 @@
 //! Safe Rust wrapper around the vendored upstream guard checker
 //! (`docs/DESIGN.md` §6.5). This is the *authoritative* accept/reject
-//! verdict for API-version-0 modules: [`validate_guards_native`] calls into
-//! `cpp/guard_shim.cpp`, which in turn calls xahaud's own
-//! `validateGuards()`, compiled in unmodified from `vendor/xahaud/`.
+//! verdict: [`validate_guards_native`] calls into `cpp/guard_shim.cpp`, which
+//! in turn calls xahaud's own `validateGuards()`, compiled in unmodified
+//! from `vendor/xahaud/`.
 //!
 //! The Rust validator (`crate::validator`) remains useful for pre-transform
 //! diagnostics with precise function/offset locations and for rules the
-//! checker doesn't cover (size gate, api-version 1), but for API version 0
-//! this module's verdict wins on any disagreement.
+//! checker doesn't cover (the size gate), but this module's verdict wins on
+//! any disagreement.
 
 use std::os::raw::c_char;
 
@@ -102,9 +102,8 @@ impl std::error::Error for NativeGuardError {}
 
 /// Runs the vendored upstream guard checker (`validateGuards`) against
 /// `wasm`, exactly as a real xahaud node would. This is the authoritative
-/// verdict for API-version-0 modules (`docs/DESIGN.md` §6.5) — it supersedes
-/// the Rust validator's guard/import/export/shape checks whenever the two
-/// disagree.
+/// verdict (`docs/DESIGN.md` §6.5) — it supersedes the Rust validator's
+/// guard/import/export/shape checks whenever the two disagree.
 ///
 /// # Panics
 ///

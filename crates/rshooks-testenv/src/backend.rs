@@ -85,12 +85,10 @@ impl HostBackend for Backend {
         if data.len() > max_len {
             return Err(rshooks_core::TOO_BIG);
         }
-        let addr_ns = (hook_account, own_ns);
-        {
-            let ctx = self.ctx.borrow();
-            ctx.check_state_modification_budget()?;
-            ctx.check_namespace_budget(&addr_ns)?;
-        }
+        self.ctx.borrow().check_state_modification_budget()?;
+        self.world
+            .borrow()
+            .check_namespace_budget(hook_account, own_ns)?;
         {
             let mut w = self.world.borrow_mut();
             let key_addr = (hook_account, own_ns, norm);
@@ -100,7 +98,7 @@ impl HostBackend for Backend {
                 w.state.insert(key_addr, data.to_vec());
             }
         }
-        self.ctx.borrow_mut().record_state_modification(addr_ns);
+        self.ctx.borrow_mut().record_state_modification();
         Ok(data.len() as i64)
     }
 
@@ -162,12 +160,10 @@ impl HostBackend for Backend {
         if data.len() > max_len {
             return Err(rshooks_core::TOO_BIG);
         }
-        let addr_ns = (target_acc, target_ns);
-        {
-            let ctx = self.ctx.borrow();
-            ctx.check_state_modification_budget()?;
-            ctx.check_namespace_budget(&addr_ns)?;
-        }
+        self.ctx.borrow().check_state_modification_budget()?;
+        self.world
+            .borrow()
+            .check_namespace_budget(target_acc, target_ns)?;
         {
             let mut w = self.world.borrow_mut();
             let key_addr = (target_acc, target_ns, norm);
@@ -177,7 +173,7 @@ impl HostBackend for Backend {
                 w.state.insert(key_addr, data.to_vec());
             }
         }
-        self.ctx.borrow_mut().record_state_modification(addr_ns);
+        self.ctx.borrow_mut().record_state_modification();
         Ok(data.len() as i64)
     }
 
@@ -227,36 +223,31 @@ impl HostBackend for Backend {
         }
     }
 
-    // Ported against `HookAPI::hook_param` (`Xahau/xahaud`, branch `dev`,
-    // `src/xrpld/app/hook/detail/HookAPI.cpp:1672-1698`, fetched for P2-E):
-    // overrides for the *currently invoked* position's hook hash are
-    // checked first — an entry present there (even an empty one) answers
-    // the call outright, `DOESNT_EXIST` for an empty value ("allow
-    // overrides to 'delete' parameters", matching upstream's own comment)
-    // and never falling through to the seeded `hook_params` below. This
-    // reduces xahaud's real chain-forward semantics (any *later* hook in
-    // the same chain execution sees a param override set by an *earlier*
-    // one, keyed by the setting hook's own `hookHash` argument) to this
-    // harness's explicit-invocation model: there is no chain, so "the
-    // currently invoked position's hash" (`World::current_hook_hash`,
-    // i.e. `world.hook_hashes[world.hook_pos]` when seeded) stands in for
-    // "the hook whose params these are" — an override only takes effect on
-    // a *later, separate* `TestEnv::invoke` call seeded with the same
-    // `hook_pos`/`hook_hash`, never within the invocation that set it (see
-    // `crate::host::control`'s module doc comment for the commit-on-accept
-    // timing this implies). No `current_hook_hash()` at all (position never
-    // seeded a hash) skips the override lookup entirely, per this method's
-    // own "absent -> no override lookup" contract.
+    // Ported against `HookAPI::hook_param` (`Xahau/xahaud` `dev`,
+    // `src/xrpld/app/hook/detail/HookAPI.cpp:1672-1698`): overrides for the
+    // *currently invoked* position's hook hash are checked first — a
+    // present entry (even empty) answers the call outright, `DOESNT_EXIST`
+    // for an empty value ("allow overrides to 'delete' parameters",
+    // matching upstream), never falling through to seeded `hook_params`.
+    // Reduces xahaud's chain-forward semantics (a later hook in the chain
+    // sees an override an earlier one set, keyed by the setting hook's own
+    // `hookHash`) to this harness's explicit-invocation model: "the
+    // currently invoked position's hash" (`World::current_hook_hash`)
+    // stands in for "the hook whose params these are" — an override only
+    // takes effect on a later, separate `invoke` call seeded with the same
+    // `hook_pos`/`hook_hash` (see `crate::host::control`'s module doc for
+    // the commit-on-accept timing this implies). No seeded hash at the
+    // position skips the override lookup entirely.
     fn hook_param(&self, name: &[u8]) -> Result<Vec<u8>, i64> {
         let w = self.world.borrow();
-        if let Some(hash) = w.current_hook_hash() {
-            if let Some(value) = w.hook_param_overrides.get(&(hash, name.to_vec())) {
-                return if value.is_empty() {
-                    Err(rshooks_core::DOESNT_EXIST)
-                } else {
-                    Ok(value.clone())
-                };
-            }
+        if let Some(hash) = w.current_hook_hash()
+            && let Some(value) = w.hook_param_overrides.get(&(hash, name.to_vec()))
+        {
+            return if value.is_empty() {
+                Err(rshooks_core::DOESNT_EXIST)
+            } else {
+                Ok(value.clone())
+            };
         }
         w.hook_params
             .get(name)
@@ -294,7 +285,7 @@ impl HostBackend for Backend {
     }
 
     fn ledger_nonce(&self) -> Result<[u8; 32], i64> {
-        self.ctx.borrow_mut().next_nonce()
+        self.ctx.borrow_mut().next_ledger_nonce()
     }
 
     #[allow(clippy::expect_used)] // documented API: `TestEnv::base_fee_drops` validates drops fits in i64 before it ever reaches `World`
@@ -328,30 +319,49 @@ impl HostBackend for Backend {
         }
     }
 
+    // Ported against `HookAPI::etxn_details` (`Xahau/xahaud` `dev`,
+    // `src/xrpld/app/hook/detail/HookAPI.cpp:914`): `EmitCallback` is
+    // written iff `hookCtx.result.hasCallback` — set from
+    // `hookDef->isFieldPresent(sfHookCallbackFee)`
+    // (`Transactor.cpp:1408`), i.e. whether the *currently executing*
+    // hook's own wasm declares a `cbak` export — and its value is
+    // `hookCtx.result.account`, the currently executing hook's own account
+    // (never a different account). `InvocationContext::has_callback`
+    // stands in for that per-hook-definition flag (set once per invocation
+    // by `crate::env::TestEnv::run_entry` from the invoked entry's
+    // `cbak.is_some()`), and `World::hook_account` stands in for
+    // `hookCtx.result.account`.
     fn etxn_details(&self) -> Result<Vec<u8>, i64> {
         let reserved = self.ctx.borrow().require_reserved()?;
         let burden = self.compute_etxn_burden(reserved)?;
         let generation = self.compute_etxn_generation();
         let generation = u32::try_from(generation).map_err(|_| rshooks_core::FEE_TOO_LARGE)?;
-        let (parent_txn_id, hook_hash) = {
+        let has_callback = self.ctx.borrow().has_callback;
+        let (parent_txn_id, hook_hash, callback) = {
             let w = self.world.borrow();
-            (w.otxn.id, w.current_hook_hash().unwrap_or([0u8; 32]))
+            (
+                w.otxn.id,
+                w.current_hook_hash().unwrap_or([0u8; 32]),
+                has_callback.then_some(w.hook_account),
+            )
         };
-        let nonce = self.ctx.borrow_mut().next_details_nonce();
-        // This harness never populates `EmitCallback` — every emitted blob
-        // is built with `callback: None`, regardless of whether the
-        // currently invoked entry declares a `#[cbak]` body. This is a
-        // real, permanent limitation (not a landed-later gap): an
-        // `invoke_cbak` context built from such a blob therefore always
-        // differs from a genuine on-chain callback in that one field — see
-        // the book's "what this harness does not model" list.
+        // `HookAPI::etxn_details` (`HookAPI.cpp:902-904`) calls
+        // `HookAPI::etxn_nonce()` directly and maps a nonce-budget failure to
+        // `INTERNAL_ERROR` rather than propagating `TOO_MANY_NONCES` —
+        // `etxn_details` shares `etxn_nonce`'s counter/budget, but not its
+        // error code.
+        let nonce = self
+            .ctx
+            .borrow_mut()
+            .next_emit_nonce()
+            .map_err(|_| rshooks_core::INTERNAL_ERROR)?;
         let details = build_etxn_details(&EmitDetailsInputs {
             generation,
             burden,
             parent_txn_id,
             nonce,
             hook_hash,
-            callback: None,
+            callback,
         });
         self.ctx.borrow_mut().last_etxn_details = Some(details.clone());
         Ok(details)
@@ -373,15 +383,15 @@ impl HostBackend for Backend {
     }
 
     fn etxn_nonce(&self) -> Result<[u8; 32], i64> {
-        self.ctx.borrow_mut().next_nonce()
+        self.ctx.borrow_mut().next_emit_nonce()
     }
 
     fn emit(&self, tx_blob: &[u8]) -> Result<[u8; 32], i64> {
-        // Each `RefCell` read below is taken into an owned value on its own
-        // statement, never as a `match`/`if` scrutinee — a scrutinee's
-        // temporary `Ref` is kept alive for the whole `match`/`if`
-        // expression (Rust's temporary-scope rule), which would still be
-        // borrowed when an arm below needs `borrow_mut()`.
+        // Each `RefCell` read below is taken into an owned value on its
+        // own statement, never as a `match`/`if` scrutinee: a scrutinee's
+        // temporary `Ref` stays alive for the whole expression (Rust's
+        // temporary-scope rule) and would still be borrowed when an arm
+        // below needs `borrow_mut()`.
         let require_result = self.ctx.borrow().require_reserved();
         let reserved = match require_result {
             Ok(r) => r,
@@ -401,11 +411,42 @@ impl HostBackend for Backend {
         }
 
         let expected = self.ctx.borrow().last_etxn_details.clone();
-        match crate::emit_walk::validate_emit_blob(tx_blob, expected.as_deref()) {
-            Ok(()) => {
-                let hash = deterministic_hash(tx_blob);
+        let (hook_account, ledger_seq) = {
+            let w = self.world.borrow();
+            (w.hook_account, w.ledger_seq)
+        };
+        // Real `HookAPI::emit` rule 7 rejects outright if its own
+        // `etxn_fee_base` call fails (`minfee < 0` -> `EMISSION_FAILURE`).
+        //
+        // Both `emit` and `etxn_fee_base` parse the blob through
+        // `STTx(SerialIter&)` on the real host, so a NOP-padded blob's
+        // ledger-stored (re-serialized) form is already NOP-free (design
+        // §1) — `EmittedTxn::blob` must match that, both so two emissions
+        // differing only in padding are indistinguishable (and hash
+        // identically) and so anything derived from a stored `EmittedTxn`
+        // (`top_level_transaction_type`, `crate::otxn::from_emitted`) never
+        // has to special-case a NOP that real xahaud would already have
+        // dropped. `canonicalize` failing here after `validate_emit_blob`
+        // already succeeded would mean the two disagree about what's
+        // parseable — defensive, not expected to be reachable.
+        let fee_base = self.etxn_fee_base(tx_blob);
+        let validation = if fee_base < 0 {
+            Err(())
+        } else {
+            crate::emit_walk::validate_emit_blob(
+                tx_blob,
+                expected.as_deref(),
+                &hook_account,
+                ledger_seq,
+                fee_base as u64,
+            )
+            .and_then(|()| crate::emit_walk::canonicalize(tx_blob))
+        };
+        match validation {
+            Ok(canonical) => {
+                let hash = deterministic_hash(&canonical);
                 self.ctx.borrow_mut().record_emitted(EmittedTxn {
-                    blob: tx_blob.to_vec(),
+                    blob: canonical,
                     hash,
                 });
                 Ok(hash)
@@ -543,7 +584,7 @@ impl HostBackend for Backend {
     // file's module doc comment.
 
     fn util_sha512h(&self, data: &[u8]) -> Result<[u8; 32], i64> {
-        Ok(crate::host::util::util_sha512h(data))
+        Ok(crate::host::util::sha512_half(data))
     }
 
     fn util_accid(&self, r_address: &[u8]) -> Result<Vec<u8>, i64> {
@@ -566,35 +607,27 @@ impl HostBackend for Backend {
         crate::host::keylet::util_keylet(keylet_type, args)
     }
 
-    // `ledger_keylet` needs `World` access (a seeded ledger-object search),
-    // unlike every other P2-C function above — see `host::util`'s module
-    // doc comment for why it stays here rather than in a `host::` submodule
-    // (mirrors the state family's own `self.world.borrow()` pattern).
-    // Search rule: the smallest seeded 34-byte keylet whose 32-byte key is
-    // strictly greater than `low`'s and less-than-or-equal-to `high`'s (the
-    // half-open-below/closed-above range `(low, high]`) — ported from
-    // `HookAPI::ledger_keylet` (`Xahau/xahaud`, branch `dev`,
+    // `ledger_keylet` needs `World` access (seeded ledger-object search),
+    // unlike other P2-C functions above — see `host::util`'s module doc
+    // for why it stays here (mirrors the state family's own
+    // `self.world.borrow()` pattern). Search rule: the smallest seeded
+    // 34-byte keylet whose 32-byte key is strictly greater than `low`'s
+    // and `<=` `high`'s (half-open-below/closed-above `(low, high]`) —
+    // ported from `HookAPI::ledger_keylet` (`Xahau/xahaud` `dev`,
     // `src/xrpld/app/hook/detail/HookAPI.cpp`), which calls
-    // `view().succ(klLo.key, klHi.key.next())`: `View::succ` finds the
-    // smallest key strictly greater than its first argument that is less
-    // than its (exclusive) second argument, and passing `klHi.key.next()`
-    // (the immediate successor of `high`) as that exclusive bound makes the
-    // overall range inclusive of `high` itself. This port compares directly
-    // against `high` (`<=`) instead of reproducing `.next()`'s wraparound
-    // arithmetic on an all-`0xFF` key — an intentional simplification for
-    // an edge case unreachable in practice (a real keylet hash landing on
-    // the maximum possible 256-bit value), noted here per this stage's
-    // "state the assumption" policy for details not pinned by a source (1-3
-    // list in the design doc). `low`/`high` must be well-formed 34-byte
-    // keylets — a length `< 34` is `TOO_SMALL`, `> 34` is `TOO_BIG`
-    // (upstream's own wasm-wrapper gate, `applyHook.cpp:2841-2844`: `<`
-    // checked for `lread_len`/`hread_len`/`write_len` together before `>`
-    // is checked for all three) — and share the same 2-byte type prefix
+    // `view().succ(klLo.key, klHi.key.next())`: `succ` finds the smallest
+    // key strictly greater than its first argument and less than its
+    // (exclusive) second, and passing `high.next()` as that bound makes
+    // the range inclusive of `high`. This port compares directly against
+    // `high` (`<=`) instead of reproducing `.next()`'s wraparound on an
+    // all-`0xFF` key — a stated simplification for an edge case
+    // unreachable in practice (a keylet hash at the max 256-bit value).
+    // `low`/`high` must be well-formed 34-byte keylets — `< 34` is
+    // `TOO_SMALL`, `> 34` is `TOO_BIG` (upstream's wasm-wrapper gate,
+    // `applyHook.cpp:2841-2844`) — sharing the same 2-byte type prefix
     // (`DOES_NOT_MATCH` otherwise, matching `klLo.type != klHi.type`); the
-    // output keylet's type prefix is always taken from `low` (`Keylet
-    // kl_out{klLo.type, *found}` — never looked up from the found object
-    // itself, since `succ()` searches the *global* key space with no type
-    // filter).
+    // output's type prefix is always taken from `low` (`succ()` searches
+    // the *global* key space with no type filter).
     fn ledger_keylet(&self, low: &[u8], high: &[u8]) -> Result<Vec<u8>, i64> {
         if low.len() < 34 || high.len() < 34 {
             return Err(rshooks_core::TOO_SMALL);
@@ -626,14 +659,12 @@ impl HostBackend for Backend {
     }
 
     // `trace_float` needs `World` access (captures into `World::traces`),
-    // so — like `trace`/`trace_num` above — it lands directly here rather
-    // than in a `host::` submodule; `host::control`'s module doc comment
-    // notes the same for this function specifically. Stores the message
-    // verbatim and the raw XFL `i64` bit pattern as its big-endian 8-byte
-    // encoding, mirroring `trace_num`'s own convention exactly (a full
-    // xahaud-faithful "Float mantissa*10^(exponent)" text rendering is not
-    // reproduced — design doc §4 marks that as not required, only that the
-    // raw value itself is captured for a test to inspect/decode).
+    // so it lands here rather than a `host::` submodule, like `trace`/
+    // `trace_num` above. Stores the message verbatim and the raw XFL `i64`
+    // bit pattern as big-endian 8 bytes, mirroring `trace_num`'s
+    // convention (design §4: a full xahaud-faithful "Float
+    // mantissa*10^(exponent)" text rendering is not required, only that
+    // the raw value is captured for a test to decode).
     fn trace_float(&self, msg: &[u8], value: i64) -> i64 {
         self.world
             .borrow_mut()
@@ -764,37 +795,47 @@ impl HostBackend for Backend {
     // methods, so it lives here rather than in a `host::` submodule (see
     // `host::mod`'s module doc comment).
     //
-    // Ported against `Xahau/xahaud`, branch `dev`,
-    // `src/xrpld/app/hook/detail/HookAPI.cpp:382-495`
-    // (`HookAPI::prepare`) — fetched and read directly for this stage:
+    // Ported against `HookAPI::prepare` (`Xahau/xahaud` `dev`,
+    // `src/xrpld/app/hook/detail/HookAPI.cpp:382-495`):
     //
     // - Requires a prior `etxn_reserve` (`PREREQUISITE_NOT_MET` otherwise,
     //   `HookAPI.cpp:387-388`).
     // - A template that fails to parse is `INVALID_ARGUMENT`
     //   (`HookAPI.cpp:393-404`/`463-464`/`483-484` — **not** `PARSE_ERROR`,
-    //   which this function never returns, matching the cited source).
+    //   which this function never returns).
     // - Always overwritten, unconditionally (`HookAPI.cpp:407-419`):
     //   `Sequence = 0`, `SigningPubKey` = empty, `Account` = the hook's own
-    //   account (never validated against a pre-existing value — always
-    //   clobbered).
+    //   account (never checked against a pre-existing value).
     // - Filled only if absent (`HookAPI.cpp:421-453`):
     //   `FirstLedgerSequence = ledger_seq + 1`,
     //   `LastLedgerSequence = ledger_seq + 5` (inlined literals, no named
-    //   constant upstream — matches this repo's own `txn.rs`
-    //   `prepare_for_emit`, independently pinned the same way),
+    //   constant upstream — matches this repo's `txn.rs`
+    //   `prepare_for_emit`, pinned independently the same way),
     //   `EmitDetails` = this invocation's `etxn_details()` bytes (already
-    //   fully-formed field bytes — `crate::details::build_etxn_details`
-    //   builds header + object + terminator in one call, so no extra
-    //   wrapping is applied here).
-    // - `Fee` = `etxn_fee_base` of the blob *with* `EmitDetails` already
-    //   spliced in but `Fee` not yet set (`HookAPI.cpp:475-479` — `Fee` is
-    //   computed and overwritten last, deliberately after `EmitDetails`,
-    //   since the fee call needs the `EmitDetails`-sized blob).
+    //   fully-formed — `crate::details::build_etxn_details` builds header
+    //   + object + terminator in one call).
+    // - `Fee` = `etxn_fee_base` of the blob with `EmitDetails` already
+    //   spliced in but `Fee` not yet set (`HookAPI.cpp:475-479` — computed
+    //   and overwritten last, since the fee call needs the
+    //   `EmitDetails`-sized blob).
     fn prepare(&self, template: &[u8]) -> Result<Vec<u8>, i64> {
         self.ctx.borrow().require_reserved()?;
 
-        let existing = crate::emit_walk::walk_top_level_fields(template)
+        // Real `HookAPI::prepare` parses `template` through `STObject::set`
+        // (tolerant of header-position NOPs, see
+        // `crate::emit_walk::NopMode::Tolerant`'s doc comment) and every
+        // later step — the `emplace_value`/`sto_emplace` pipeline below —
+        // goes through the strict `sto_*` family, which must never see a
+        // NOP. `canonicalize` bridges the two: it parses tolerantly once,
+        // up front, and hands the rest of this function a NOP-free
+        // template, exactly the canonical (re-serialized) form real
+        // xahaud's own tolerant parse produces.
+        let template = crate::emit_walk::canonicalize(template)
             .map_err(|()| rshooks_core::INVALID_ARGUMENT)?;
+
+        let existing =
+            crate::emit_walk::walk_top_level_fields(&template, crate::emit_walk::NopMode::Strict)
+                .map_err(|()| rshooks_core::INVALID_ARGUMENT)?;
         let has = |code: u32| existing.iter().any(|f| f.code == u64::from(code));
 
         let (hook_account, ledger_seq) = {
@@ -803,7 +844,7 @@ impl HostBackend for Backend {
         };
 
         let mut blob = emplace_value(
-            template,
+            &template,
             rshooks::sfield::sfSequence.code(),
             &0u32.to_be_bytes(),
         )?;
@@ -859,14 +900,14 @@ fn emplace_value(blob: &[u8], code: u32, value: &[u8]) -> Result<Vec<u8>, i64> {
 }
 
 /// Boundary tests for the checked `u64` → `i64` conversions this file
-/// applies to protocol values (design review FIX 7): values guaranteed
-/// valid by [`crate::TestEnv`]'s now-validating builders (`otxn_emitted`,
-/// `base_fee_drops`) pass through unchanged at the `i64::MAX` boundary, and
-/// a burden/reserve product that still overflows past `i64::MAX` (despite
-/// fitting in `u64`) reports `FEE_TOO_LARGE` rather than wrapping. White-box
-/// (constructs `Backend` directly over a fresh `World`/`InvocationContext`)
-/// so `reserved` can be pinned precisely, independent of any one `#[hooks]`
-/// chain's hardcoded `etxn_reserve` call.
+/// applies to protocol values: values guaranteed valid by
+/// [`crate::TestEnv`]'s validating builders (`otxn_emitted`,
+/// `base_fee_drops`) pass through unchanged at the `i64::MAX` boundary,
+/// and a burden/reserve product that overflows past `i64::MAX` (despite
+/// fitting in `u64`) reports `FEE_TOO_LARGE` rather than wrapping.
+/// White-box (constructs `Backend` directly over a fresh
+/// `World`/`InvocationContext`) so `reserved` can be pinned precisely,
+/// independent of any `#[hooks]` chain's hardcoded `etxn_reserve` call.
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::indexing_slicing)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
@@ -1040,12 +1081,71 @@ mod tests {
         assert_eq!(backend.etxn_fee_base(&[]), rshooks_core::FEE_TOO_LARGE);
     }
 
+    // -- nonce budgets (design §4 / CR-03): `ledger_nonce` and the
+    // `etxn_nonce`/`etxn_details` emit-nonce family each get their own
+    // 256-call budget, matching xahaud's separate `ledger_nonce_counter`/
+    // `emit_nonce_counter` (`HookAPI.cpp`) --
+
+    #[test]
+    fn ledger_and_etxn_nonce_budgets_are_independent_at_the_backend() {
+        let (_world, _ctx, backend) = fresh();
+        for _ in 0..256 {
+            assert!(backend.ledger_nonce().is_ok());
+        }
+        // The ledger-nonce budget is exhausted, but `etxn_nonce` draws from
+        // a separate budget that is still untouched.
+        assert!(backend.etxn_nonce().is_ok());
+        assert_eq!(backend.ledger_nonce(), Err(rshooks_core::TOO_MANY_NONCES));
+    }
+
+    #[test]
+    fn etxn_details_consumes_the_etxn_nonce_budget() {
+        let (_world, ctx, backend) = fresh();
+        ctx.borrow_mut().reserve(1).unwrap();
+        // `etxn_details` calls the same emit-nonce counter `etxn_nonce`
+        // does (xahaud's `HookAPI::etxn_details` calls
+        // `HookAPI::etxn_nonce()` directly) — 256 calls to `etxn_details`
+        // alone exhaust the budget `etxn_nonce` also draws from.
+        for _ in 0..256 {
+            assert!(backend.etxn_details().is_ok());
+        }
+        assert_eq!(backend.etxn_nonce(), Err(rshooks_core::TOO_MANY_NONCES));
+    }
+
+    #[test]
+    fn etxn_details_past_the_nonce_budget_is_internal_error() {
+        let (_world, ctx, backend) = fresh();
+        ctx.borrow_mut().reserve(1).unwrap();
+        for _ in 0..256 {
+            assert!(backend.etxn_nonce().is_ok());
+        }
+        // xahaud's `HookAPI::etxn_details` maps its internal
+        // `etxn_nonce()` call failing to `INTERNAL_ERROR`, not
+        // `TOO_MANY_NONCES` (`HookAPI.cpp:902-904`).
+        assert_eq!(backend.etxn_details(), Err(rshooks_core::INTERNAL_ERROR));
+    }
+
     // -- prepare (P2-D) --
 
     /// A minimal well-formed template: just `TransactionType = ttPAYMENT`
     /// (`(1, 2)` -> header `0x12`, value `0`).
     fn minimal_template() -> Vec<u8> {
         vec![0x12, 0x00, 0x00]
+    }
+
+    /// [`minimal_template`] plus the two fields `prepare` itself never
+    /// fills in — `sfAmount`/`sfDestination`, both `presence: "required"`
+    /// for Payment in `protocol_formats.json` — so the result passes
+    /// `validate_emit_blob`'s required-field check. Everything else is
+    /// `prepare`'s job (unconditionally filled or overwritten).
+    fn minimal_emittable_payment_template() -> Vec<u8> {
+        let mut out = minimal_template();
+        out.push(0x61); // Amount (6, 1): native 1 drop
+        out.extend_from_slice(&0x4000_0000_0000_0001u64.to_be_bytes());
+        out.push(0x83); // Destination (8, 3)
+        out.push(20);
+        out.extend_from_slice(&[2u8; 20]);
+        out
     }
 
     #[test]
@@ -1074,18 +1174,31 @@ mod tests {
         world.borrow_mut().ledger_seq = 100;
         ctx.borrow_mut().reserve(1).unwrap();
 
-        let prepared = backend.prepare(&minimal_template()).unwrap();
+        let prepared = backend
+            .prepare(&minimal_emittable_payment_template())
+            .unwrap();
 
         let expected_details = ctx.borrow().last_etxn_details.clone();
+        let min_fee = backend.etxn_fee_base(&prepared);
+        assert!(min_fee >= 0);
         assert!(
-            crate::emit_walk::validate_emit_blob(&prepared, expected_details.as_deref()).is_ok()
+            crate::emit_walk::validate_emit_blob(
+                &prepared,
+                expected_details.as_deref(),
+                &[7u8; 20],
+                100,
+                min_fee as u64,
+            )
+            .is_ok()
         );
 
         // Round-trip: `prepare`'s own output is accepted by `emit`.
         assert!(backend.emit(&prepared).is_ok());
 
         // Account is always set to the hook's own account.
-        let fields = crate::emit_walk::walk_top_level_fields(&prepared).unwrap();
+        let fields =
+            crate::emit_walk::walk_top_level_fields(&prepared, crate::emit_walk::NopMode::Tolerant)
+                .unwrap();
         let account_code = u64::from(rshooks::sfield::sfAccount.code());
         let account_field = fields.iter().find(|f| f.code == account_code).unwrap();
         let (start, end) = crate::emit_walk::field_value_payload(&prepared, account_field).unwrap();
@@ -1103,6 +1216,56 @@ mod tests {
     }
 
     #[test]
+    fn prepare_strips_nops_from_a_nop_padded_template() {
+        // A NOP-padded template — real `HookAPI::prepare` parses this
+        // tolerantly (`STObject::set`) and returns a canonical, NOP-free
+        // blob; `prepare` must match that via `crate::emit_walk::canonicalize`
+        // rather than handing NOP-padded bytes to the strict `sto_*`
+        // pipeline (which would reject them with `PARSE_ERROR`).
+        let (world, ctx, backend) = fresh();
+        world.borrow_mut().hook_account = [7u8; 20];
+        world.borrow_mut().ledger_seq = 100;
+        ctx.borrow_mut().reserve(1).unwrap();
+
+        let mut padded = vec![rshooks::txn::codec::NOP, rshooks::txn::codec::NOP];
+        padded.extend_from_slice(&minimal_emittable_payment_template());
+        padded.push(rshooks::txn::codec::NOP);
+
+        let prepared = backend.prepare(&padded).unwrap();
+
+        // No header-position NOP survives: a `NopMode::Strict` walk (which
+        // fails on any `0x99` header) succeeds on the returned bytes.
+        assert!(
+            crate::emit_walk::walk_top_level_fields(&prepared, crate::emit_walk::NopMode::Strict)
+                .is_ok(),
+            "prepare's output must be canonical (NOP-free): {prepared:02x?}"
+        );
+
+        // Round-trip: `prepare`'s NOP-free output is accepted by `emit`,
+        // and matches the plain (never-padded) template's own prepared
+        // bytes exactly except for the `EmitDetails` region (a fresh
+        // nonce per `prepare` call — see `InvocationContext::next_details_nonce`).
+        assert!(backend.emit(&prepared).is_ok());
+        let plain_prepared = backend
+            .prepare(&minimal_emittable_payment_template())
+            .unwrap();
+        let ed_code = u64::from(rshooks::sfield::sfEmitDetails.code());
+        let strip_emit_details = |blob: &[u8]| -> Vec<u8> {
+            let fields =
+                crate::emit_walk::walk_top_level_fields(blob, crate::emit_walk::NopMode::Strict)
+                    .unwrap();
+            let ed = fields.iter().find(|f| f.code == ed_code).unwrap();
+            let mut out = blob[..ed.range.0].to_vec();
+            out.extend_from_slice(&blob[ed.range.1..]);
+            out
+        };
+        assert_eq!(
+            strip_emit_details(&prepared),
+            strip_emit_details(&plain_prepared)
+        );
+    }
+
+    #[test]
     fn prepare_does_not_overwrite_an_already_present_ledger_window() {
         let (world, ctx, backend) = fresh();
         world.borrow_mut().ledger_seq = 100;
@@ -1117,7 +1280,9 @@ mod tests {
         template.extend_from_slice(&999u32.to_be_bytes());
 
         let prepared = backend.prepare(&template).unwrap();
-        let fields = crate::emit_walk::walk_top_level_fields(&prepared).unwrap();
+        let fields =
+            crate::emit_walk::walk_top_level_fields(&prepared, crate::emit_walk::NopMode::Tolerant)
+                .unwrap();
         let fls_code = u64::from(rshooks::sfield::sfFirstLedgerSequence.code());
         let fls_field = fields.iter().find(|f| f.code == fls_code).unwrap();
         let (s, e) = crate::emit_walk::field_value_payload(&prepared, fls_field).unwrap();
@@ -1135,7 +1300,9 @@ mod tests {
         template.extend_from_slice(&42u32.to_be_bytes());
 
         let prepared = backend.prepare(&template).unwrap();
-        let fields = crate::emit_walk::walk_top_level_fields(&prepared).unwrap();
+        let fields =
+            crate::emit_walk::walk_top_level_fields(&prepared, crate::emit_walk::NopMode::Tolerant)
+                .unwrap();
         let seq_code = u64::from(rshooks::sfield::sfSequence.code());
         let matches: Vec<_> = fields.iter().filter(|f| f.code == seq_code).collect();
         // Exactly one Sequence field survives (no duplicate from the

@@ -1,5 +1,5 @@
 //! Generates `crates/rshooks-core/src/tx_flags.rs` from `tx_flags.h`'s parsed
-//! [`ConstGroup`]s (`crates/xtask/src/ir.rs`, `hook_api.json`).
+//! [`ConstGroup`]s (`crates/xtask/src/ir.rs`).
 
 use anyhow::Result;
 
@@ -47,12 +47,12 @@ pub fn generate(groups: &[ConstGroup]) -> Result<String> {
         body.push('\n');
         body.push_str(&group_comment(&group.name));
         body.push('\n');
-        for member in &group.items {
-            let value = render_flag_value(&member.c_expr, "ls_flags")?;
-            let doc = if is_bare_identifier(&member.c_expr) {
+        for member in &group.members {
+            let value = render_flag_value(&member.value, "ls_flags")?;
+            let doc = if is_bare_identifier(&member.value) {
                 format!(
                     "C: `{}` (tx_flags.h, `enum {}`) = `{}`",
-                    member.name, group.name, member.c_expr
+                    member.name, group.name, member.value
                 )
             } else {
                 format!("C: `{}` (tx_flags.h, `enum {}`)", member.name, group.name)

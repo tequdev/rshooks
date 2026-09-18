@@ -17,7 +17,7 @@ categories = ["no-std", "wasm", "api-bindings", "cryptography::cryptocurrencies"
 testenv = []
 
 [dev-dependencies]
-sha2 = "0.10"
+serde_json = "1.0"
 
 [lints]
 workspace = true

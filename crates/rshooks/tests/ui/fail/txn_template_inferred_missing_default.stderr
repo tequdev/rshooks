@@ -1,0 +1,12 @@
+error[E0080]: evaluation panicked: txn_template!: `flags` is an integer kind and needs `= default`
+  --> tests/ui/fail/txn_template_inferred_missing_default.rs:8:1
+   |
+8  | / txn_template! {
+9  | |     struct MissingDefault {
+10 | |         transaction_type = ttPAYMENT,
+11 | |         flags: sfFlags,
+...  |
+20 | | }
+   | |_^ evaluation of `_` failed here
+   |
+   = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `txn_template` (in Nightly builds, run with -Z macro-backtrace for more info)

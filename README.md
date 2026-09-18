@@ -1,5 +1,8 @@
 # rshooks
 
+[![Crates.io](https://img.shields.io/crates/v/rshooks.svg)](https://crates.io/crates/rshooks)
+[![Documentation](https://docs.rs/rshooks/badge.svg)](https://docs.rs/rshooks)
+
 A Rust monorepo for developing [Xahau](https://xahau.network/) Hooks
 (WebAssembly smart contracts) end to end — from raw Hook API bindings to
 one or more SetHook-valid `.wasm` binaries and a generated `SetHook`
@@ -49,7 +52,7 @@ Numbered in suggested reading order — see
 |---|---|---|
 | 01 | [`accept-all`](examples/01_accept-all) | minimal hook: `accept` everything (starter template) |
 | 02 | [`state-counter`](examples/02_state-counter) | `state`/`state_set` round-trip, counter in hook state |
-| 03 | [`hook-params`](examples/03_hook-params) | `hook_param`-configurable threshold, with a compiled-in default |
+| 03 | [`hook-params`](examples/03_hook-params) | `#[hook_param]`-configurable threshold, with a compiled-in default |
 | 04 | [`errors`](examples/04_errors) | a meaningful `hook_errors!`-based rollback error-code system, matched to `HookReturnCode` |
 | 05 | [`firewall`](examples/05_firewall) | read `otxn_field(sfAccount)` + a hook parameter blacklist → `rollback` |
 | 06 | [`guard-patterns`](examples/06_guard-patterns) | `guard!`/`guard_m!` correctness, choosing `maxiter`, and the array-`==` memcmp-loop pitfall |
@@ -62,6 +65,11 @@ Numbered in suggested reading order — see
 | 14 | [`account-id-macro`](examples/14_account-id-macro) | `rshooks::account_id!`: compile-time r-address → `AccountId` decode |
 | 15 | [`slot-objects`](examples/15_slot-objects) | the typed slot layer's live acceptance harness: account-root walk, native-amount round-trip, parent-clear/child-read |
 | 16 | [`typed-results`](examples/16_typed-results) | typed entry returns (`HookResult`): an idiomatic `?`/`Ok` entry with a `hook_errors!` message clause, alongside a raw `accept!`/`rollback!`-style entry in the same chain |
+| 17 | [`sto-writer`](examples/17_sto-writer) | `rshooks::sto_writer::StoWriter`: a runtime-shaped Remit — a native `sfAmounts` entry always, an issued one when hook parameters supply it — built field-by-field and emitted via `prepare_for_emit()`/`Prepared::emit()` |
+| 18 | [`typed-views`](examples/18_typed-views) | `rshooks::views`: generated, type-checked read views — an incoming-IOU gate reading `tx::Payment`, then `ledger::RippleState`'s freeze flags and `ledger::AccountRoot`'s optional `sfTransferRate`, with a per-read cost table |
+| 19 | [`param-signature`](examples/19_param-signature) | the Hook Parameter Signature Interface: `#[hook(..)]` fn arguments (`increment(account: AccountID, count: UInt16)`) as declared, typed, machine-readable Hook parameters, with generated `sethook.template.json` declarations |
+| 20 | [`state-interface`](examples/20_state-interface) | the Hook State Interface: `#[state_interface(id = .., key(..), value(..))]` chain-struct fields as a declared, typed, machine-readable state schema, with generated value structs and `sethook.template.json` declarations |
+| 21 | [`txn-template-nested`](examples/21_txn-template-nested) | `txn_template!`'s homogeneous indexed array form (`array(sfX) [ Elem: object(sfY) { .. } ; N ]`) and `fixed_vl(sfX, N)` (a compile-time-length-prefixed VL blob), with no `StoWriter` needed |
 | 80 | [`governance`](examples/80_governance) | a two-entry `#[hooks]` **chain** (`govern` + `reward`) porting xahaud's genesis governance hooks, sharing one state schema |
 
 ```sh
@@ -109,8 +117,8 @@ only through unreachable raw-wasm exports the cleaner strips, so none of
 it changes the final wasm's bytes, hash, or instruction count.
 
 See [`examples/README.md`](examples/README.md) for details, including the
-compiler-generated-loop pitfall that used to require `--auto-guard` (none
-of these examples need it any more).
+compiler-generated-loop pitfall and the source-level idioms
+(`rshooks::buf_eq_*`, `HookStatic`) that avoid it.
 
 ## E2E tests
 
@@ -121,11 +129,11 @@ just that the binaries are SetHook-valid. See
 [`docs/E2E-TESTING.md`](docs/E2E-TESTING.md) for the design.
 
 ```sh
-mise run e2e:node-up     # starts a standalone Xahau node (xrpld-netgen; needs Docker)
+mise run e2e:node-up     # starts a standalone Xahau node (xrpld-lab; needs Docker)
 mise run e2e              # builds the examples, then runs the e2e suite against it
 mise run e2e:node-down   # stops it
 ```
 
 `e2e/` is an isolated pnpm package (not part of any Cargo or pnpm
 workspace) using the same stack as this machine's other hook repos:
-vitest + `@transia/hooks-toolkit` + `xahau`.
+vitest + `@xahau/hooks-toolkit` + `xahau`.

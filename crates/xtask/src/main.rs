@@ -6,11 +6,15 @@
 #![allow(clippy::arithmetic_side_effects, clippy::indexing_slicing)]
 #![allow(clippy::print_stderr)]
 
+mod availability;
 mod codegen;
 mod gen_core;
 mod ir;
 mod parse;
+mod protocol_ir;
+mod protocol_parse;
 mod render;
+mod versions;
 
 use clap::{Parser, Subcommand};
 
@@ -29,6 +33,9 @@ enum Command {
         #[arg(long)]
         check: bool,
     },
+    /// Verify every version reference in the repository tracks the root
+    /// workspace's `[workspace.package] version`.
+    CheckVersions,
 }
 
 fn main() {
@@ -36,6 +43,7 @@ fn main() {
     let result = match cli.command {
         Command::GenCore { check: true } => gen_core::run_check(),
         Command::GenCore { check: false } => gen_core::run_update(),
+        Command::CheckVersions => versions::run_check(),
     };
     if let Err(err) = result {
         eprintln!("error: {err:#}");

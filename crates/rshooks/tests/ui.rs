@@ -12,6 +12,21 @@
 //! observe, and `compile_fail` doctests prove only that *something* failed,
 //! not that the caller was told anything useful.
 //!
+//! The Hook Parameter Signature Interface draft (`docs/PARAM_SIGNATURE_DESIGN.md`)
+//! sits behind the `unstable-param-sig-interface` feature, so its fixtures
+//! live outside the always-run `fail`/`pass` directories above, in one of
+//! two feature-conditional directories: with the feature on,
+//! `tests/ui/sig/fail/*.rs` and `tests/ui/sig/pass/*.rs` exercise the
+//! interface's own rejections and its one worked example, against a real
+//! `rshooks::sig`. With the feature off, `tests/ui/no_sig_feature/*.rs`
+//! pins the feature-hint diagnostic a `#[hook(..)]`/`#[cbak(..)]` extra
+//! argument gets instead.
+//!
+//! The Hook State Interface draft (`docs/STATE_INTERFACE_DESIGN.md`) sits
+//! behind the `unstable-state-interface` feature, mirroring the same
+//! feature-conditional split: `tests/ui/si/fail/*.rs`/`tests/ui/si/pass/*.rs`
+//! with the feature on, `tests/ui/no_si_feature/*.rs` with it off.
+//!
 //! What the pinned `.stderr` files are really guarding is the **wording and
 //! the span** of each diagnostic — a vaguer, technically-correct error
 //! would leave the caller staring at a macro expansion they did not write.
@@ -35,4 +50,16 @@ fn ui() {
     let t = trybuild::TestCases::new();
     t.compile_fail("tests/ui/fail/*.rs");
     t.pass("tests/ui/pass/*.rs");
+    if cfg!(feature = "unstable-param-sig-interface") {
+        t.compile_fail("tests/ui/sig/fail/*.rs");
+        t.pass("tests/ui/sig/pass/*.rs");
+    } else {
+        t.compile_fail("tests/ui/no_sig_feature/*.rs");
+    }
+    if cfg!(feature = "unstable-state-interface") {
+        t.compile_fail("tests/ui/si/fail/*.rs");
+        t.pass("tests/ui/si/pass/*.rs");
+    } else {
+        t.compile_fail("tests/ui/no_si_feature/*.rs");
+    }
 }

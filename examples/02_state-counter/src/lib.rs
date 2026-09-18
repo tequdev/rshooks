@@ -25,10 +25,10 @@ impl StateCounter {
     fn main(&self) -> HookResult {
         // Falls back to 0 on any read failure, not just absence — see
         // example 12's `config()` helper for the same masking behavior.
-        let count = self.counter.get().unwrap_or(Some(0)).unwrap_or(0);
+        let count = self.state.counter.get().unwrap_or(Some(0)).unwrap_or(0);
 
         let next = count.wrapping_add(1);
-        if self.counter.set(&next).is_err() {
+        if self.state.counter.set(&next).is_err() {
             rollback!(
                 b"state-counter: state_set failed",
                 StateCounterError::StateSetFailed

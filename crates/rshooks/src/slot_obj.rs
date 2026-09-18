@@ -32,89 +32,85 @@
 //!
 //! A [`SlotObject`] is an **affine** resource: it can be used at most once
 //! in the ways that end its life ([`clear`](SlotObject::clear), a terminal
-//! read, a retype), and it cannot be duplicated. That is not ceremony — a
-//! `Copy` handle plus a consuming `clear` would let a stale copy read or
-//! clear a slot the host has since reassigned to something else entirely,
-//! silently operating on an unrelated object.
+//! read, a retype), and it cannot be duplicated. A `Copy` handle plus a
+//! consuming `clear` would let a stale copy read or clear a slot the host
+//! has since reassigned to something else, silently operating on an
+//! unrelated object.
 //!
-//! There is deliberately **no `Drop`**. Cleanup is fallible (it is a host
-//! call that can report `DOESNT_EXIST`) and would cost instructions on every
-//! exit path a hook has, including the ones that never touched a slot. The
-//! budget is per-execution — 255 slots, all released by the host when the
-//! hook returns — so leaking a slot inside one execution costs nothing but
-//! the slot itself. Affinity is what makes that safe: a leaked handle is
-//! gone from the type system, not floating around able to alias.
+//! There is deliberately no `Drop`: cleanup is fallible (a host call that
+//! can report `DOESNT_EXIST`) and would cost instructions on every exit
+//! path, including ones that never touched a slot. The budget is
+//! per-execution — 255 slots, all released by the host when the hook
+//! returns — so a leaked slot costs nothing but itself, and affinity keeps
+//! a leaked handle from aliasing anything.
 //!
 //! # Terminal reads consume, and do not clear
 //!
 //! [`value`](SlotObject::value), [`as_xfl`](SlotObject::as_xfl),
 //! [`raw`](SlotObject::raw) and [`raw_exact`](SlotObject::raw_exact) take
-//! `self`. The handle is spent; the slot keeps its contents until the hook
-//! ends. That is byte-for-byte the C cost model — a C `slot_subfield`
-//! followed by a `slot()` read leaks the slot identically, and an implicit
-//! clear would tax every read with a host call the C idiom does not pay.
+//! `self`: the handle is spent, but the slot keeps its contents until the
+//! hook ends — the same cost model as C, where a `slot_subfield` followed by
+//! a `slot()` read leaks the slot identically and an implicit clear would
+//! tax every read with a host call the idiom does not pay.
 //!
 //! When a loop would otherwise burn through the 255-slot budget, the
 //! opt-in [`take_value`](SlotObject::take_value) /
 //! [`take_xfl`](SlotObject::take_xfl) /
-//! [`take_raw_exact`](SlotObject::take_raw_exact) family reads *and* clears,
-//! on both the success and the failure path. Budget math: one slot per
-//! `get`, 255 per execution; a 300-iteration loop that derives one child per
-//! iteration must use `take_*` (or clear explicitly) or it will run out.
+//! [`take_raw_exact`](SlotObject::take_raw_exact) /
+//! [`take_raw`](SlotObject::take_raw) family reads *and* clears, on both the
+//! success and failure path. Budget math: one slot per `get`, 255 per
+//! execution; a 300-iteration loop deriving one child per iteration must use
+//! `take_*` (or clear explicitly) or it will run out.
 //!
 //! # Do not mix this with the numbered slot functions
 //!
 //! [`crate::api::slot`]'s numbered functions (`slot_set`, `slot_clear`,
 //! `slot_subfield`, ...) and this module address the same 255 registers.
-//! Calling `slot_clear(3)` while a `SlotObject` happens to hold slot 3 will
-//! corrupt that handle's meaning — the handle stays valid-looking and starts
-//! describing whatever lands there next. This is a **logic** hazard, not a
-//! memory-safety one (no `unsafe` is involved on either side), so it is not
-//! prevented, only documented: pick one layer per hook. The numbered
-//! functions are deliberately out of the prelude and reachable only through
-//! explicit paths (`rshooks::api::slot::slot_clear`,
-//! `rshooks::api::otxn::otxn_slot`) so that mixing them is at least always
-//! visible at the call site.
+//! Calling `slot_clear(3)` while a `SlotObject` holds slot 3 corrupts that
+//! handle's meaning — it stays valid-looking and starts describing whatever
+//! lands there next. This is a logic hazard, not a memory-safety one (no
+//! `unsafe` on either side): pick one layer per hook. The numbered functions
+//! are deliberately out of the prelude, reachable only via explicit paths
+//! (`rshooks::api::slot::slot_clear`, `rshooks::api::otxn::otxn_slot`), so
+//! mixing them stays visible at the call site.
 //!
-//! # Stack buffers and the optimization profile
+//! # Stack buffers, never zero-initialized
 //!
-//! Every **built-in typed decoder** here uses a fixed stack buffer of at most
-//! 48 bytes — the widest thing this layer decodes is an IOU amount, and the
-//! issue path reads 44. At `opt-level` 1–3 rustc lowers a `[0u8; 48]`
-//! zero-init to a handful of inlined stores; below that it can emit a
-//! `memset` call, which is an unguarded loop the Hook API's guard checker
-//! rejects. Examples in this repo build at `opt-level = 3`; a hook crate
-//! that lowers its profile needs to re-check its own output, the same caveat
-//! [`crate::api::keylet`] documents.
-//!
-//! The raw escapes are the caller's responsibility:
-//! [`raw_exact::<N>`](SlotObject::raw_exact) and
-//! [`take_raw_exact::<N>`](SlotObject::take_raw_exact) allocate `[0u8; N]`
-//! for whatever `N` you name, so a large one reintroduces exactly that
-//! `memset` and the guard rejection with it. [`raw`](SlotObject::raw) writes
-//! into a buffer you supply and so has the same property. Keep `N` small, or
-//! check the built output.
+//! Every fixed-size read here — the `Amount`/`Issue` decoders (at most 48
+//! bytes, the widest thing this layer decodes: an IOU amount; the issue path
+//! reads 44), [`raw_exact::<N>`](SlotObject::raw_exact),
+//! [`take_raw_exact::<N>`](SlotObject::take_raw_exact), and the built-in
+//! `u64`/`Hash`/`AccountId`/`CurrencyCode` reads — reads into an
+//! uninitialized scratch buffer: the host always overwrites what it's
+//! handed, and the result is accepted only when it reports writing the
+//! buffer's *entire* length (the `Amount`/`Issue` decoders instead accept
+//! only the reported prefix, since a native/IOU/MPT-shaped value's length
+//! varies), so nothing here is ever read uninitialized. No zero-init, no
+//! `memset` risk at any `N` or optimization level. [`raw`](SlotObject::raw)
+//! and [`take_raw`](SlotObject::take_raw) write into a caller-supplied
+//! buffer, so any zero-init cost there is the caller's own to manage.
 
 use core::marker::PhantomData;
+use core::mem::MaybeUninit;
 
 use crate::api;
 use crate::convert::FixedRead;
-use crate::error::{HookError, Result};
+use crate::error::{HookError, Result, res};
 use crate::types::{
-    AccountId, Amount, CurrencyCode, Hash, IouAmount, Issue, Keylet, NativeAmount, Opaque, SField,
-    STArray, STObject,
+    AccountId, Amount, CurrencyCode, Hash, IouAmount, Issue, IssuedAsset, Keylet, NativeAmount,
+    Opaque, SField, STArray, STObject,
 };
 use crate::xfl::XFL;
 
 /// Sealing module: the traits below carry a supertrait that only this crate
 /// can name, so downstream crates cannot add implementations.
 ///
-/// This is not stylistic. [`Resolve::resolve`] turns a parent slot number
-/// into a child slot number — a downstream implementation could hand back an
-/// arbitrary number and forge a [`SlotObject`] aliasing a slot something
-/// else already owns, defeating the affinity that makes the handles safe in
-/// the first place. Likewise [`CastTargetSealed`] decides which serialized
-/// type IDs a retype accepts; a downstream impl could accept everything.
+/// [`Resolve::resolve`] turns a parent slot number into a child slot
+/// number — a downstream implementation could hand back an arbitrary number
+/// and forge a [`SlotObject`] aliasing a slot something else already owns,
+/// defeating the affinity that makes the handles safe. Likewise
+/// [`CastTargetSealed`] decides which serialized type IDs a retype accepts;
+/// a downstream impl could accept everything.
 mod private {
     use crate::error::Result;
 
@@ -328,23 +324,22 @@ impl<T> SlotObject<T> {
     /// # }
     /// ```
     ///
-    /// The type parameter is [`Opaque`] because the value type is *not*
-    /// statically known here — this is an erased code, good for comparison
-    /// (`SField` equality is on the code alone, across type parameters, so it
-    /// matches a constant of any `T`) and for `.code()` extraction, not for
-    /// deciding how to read the slot. Use [`try_cast`](Self::try_cast) or
+    /// The type parameter is [`Opaque`] because the field code alone does
+    /// not determine the value type — it is erased, good for comparison
+    /// (`SField` equality is on the code alone, so it matches a constant of
+    /// any `T`) and for `.code()` extraction, not for deciding how to read
+    /// the slot. Use [`try_cast`](Self::try_cast) or
     /// [`assume_type`](Self::assume_type) for that.
     ///
-    /// A slot derived by navigation reports the field it came from. A **root**
-    /// slot — `from_otxn`, `from_meta`, `from_keylet`, `from_txn_hash` —
-    /// instead reports a high-level object code, because there is no
-    /// enclosing object it is a field of: the value is still a packed field
-    /// code, but its serialized type ID (`code >> 16`) lands in the
-    /// 10001–10004 range (`sfTransaction`, `sfLedgerEntry`, ...) rather than
-    /// among the ordinary 1–26 type IDs. [`try_cast::<STObject>`](Self::try_cast)
-    /// accepts those codes for exactly that reason; note that a root slot's
-    /// code therefore compares *unequal* to every constant in
-    /// [`crate::sfield`], all of which are ordinary field codes.
+    /// A slot derived by navigation reports the field it came from. A
+    /// **root** slot (`from_otxn`, `from_meta`, `from_keylet`,
+    /// `from_txn_hash`) instead reports a high-level object code, because
+    /// there is no enclosing object it is a field of: its serialized type ID
+    /// (`code >> 16`) lands in the 10001–10004 range (`sfTransaction`,
+    /// `sfLedgerEntry`, ...) rather than the ordinary 1–26 type IDs.
+    /// [`try_cast::<STObject>`](Self::try_cast) accepts those codes for
+    /// exactly that reason, and a root slot's code compares *unequal* to
+    /// every constant in [`crate::sfield`].
     #[inline(always)]
     pub fn field_code(&self) -> Result<SField<Opaque>> {
         api::slot::slot_type(self.no, 0).map(SField::new)
@@ -352,8 +347,8 @@ impl<T> SlotObject<T> {
 
     /// Navigates to a child slot, auto-assigning its number.
     ///
-    /// Borrows: one parent legitimately yields several children, and reading
-    /// two fields of the same object should not require re-loading it. The
+    /// Borrows — one parent can yield several children, and reading two
+    /// fields of the same object should not require re-loading it. The
     /// aliasing hazard affinity guards against is clear-then-reuse, not
     /// several live children.
     ///
@@ -376,6 +371,20 @@ impl<T> SlotObject<T> {
     #[inline(always)]
     pub fn get<K: SlotKey<T>>(&self, key: K) -> Result<SlotObject<K::Out>> {
         <K as private::Resolve>::resolve(key, self.no).map(SlotObject::wrap)
+    }
+
+    /// [`get`](Self::get) for an optional field. Absence is checked on the
+    /// raw host code to avoid the nesting cost of decoding [`HookError`].
+    #[inline(always)]
+    pub(crate) fn get_opt<U>(&self, field: SField<U>) -> Result<Option<SlotObject<U>>>
+    where
+        SField<U>: SlotKey<T>,
+    {
+        let code = api::slot::slot_subfield_raw_code(self.no, field.code(), 0);
+        if code == rshooks_core::DOESNT_EXIST {
+            return Ok(None);
+        }
+        res(code).map(|no| Some(SlotObject::wrap(no as u32)))
     }
 
     /// Releases the slot, consuming the handle.
@@ -401,15 +410,22 @@ impl<T> SlotObject<T> {
         api::slot::slot(buf, self.no)
     }
 
+    /// [`raw`](Self::raw), then best-effort clears the slot on every path.
+    /// The read result takes precedence over a clear failure.
+    #[inline(always)]
+    pub fn take_raw<B: AsMut<[u8]> + ?Sized>(self, buf: &mut B) -> Result<usize> {
+        let no = self.no;
+        let out = api::slot::slot(buf, no);
+        let _ = api::slot::slot_clear(no);
+        out
+    }
+
     /// Reads exactly `N` bytes, erroring if the slot is not exactly that
     /// size. Consumes the handle.
     ///
-    /// `N` is yours to choose, and so is the consequence: this allocates
-    /// `[0u8; N]` on the stack, and a large `N` makes rustc emit a `memset`
-    /// call instead of inlined stores — an unguarded loop the Hook API's
-    /// guard checker rejects. The built-in typed reads all stay at or under
-    /// 48 bytes for that reason; if you need more, check the built output
-    /// (see this module's "Stack buffers" section).
+    /// `N` is yours to choose: this reads into uninitialized scratch, so
+    /// there is no zero-init cost and no `memset` risk at any size (see this
+    /// module's "Stack buffers" section).
     #[inline(always)]
     pub fn raw_exact<const N: usize>(self) -> Result<[u8; N]> {
         let no = self.no;
@@ -417,15 +433,9 @@ impl<T> SlotObject<T> {
     }
 
     /// [`raw_exact`](Self::raw_exact), then clears the slot — on the success
-    /// path *and* the failure path.
-    ///
-    /// The loop-body form: recycling the slot is what keeps a long loop
-    /// inside the 255-slot budget. The clear's own result is discarded,
-    /// because the read's result is the one the caller asked for and a
-    /// failed clear cannot be acted on usefully here.
-    ///
-    /// Same `N` caveat as [`raw_exact`](Self::raw_exact): the buffer is
-    /// yours to size, and a large one reintroduces `memset`.
+    /// path *and* the failure path. The clear's own result is discarded: the
+    /// read's result is the one the caller asked for, and a failed clear
+    /// cannot be acted on usefully here.
     #[inline(always)]
     pub fn take_raw_exact<const N: usize>(self) -> Result<[u8; N]> {
         let no = self.no;
@@ -476,17 +486,23 @@ impl<T> SlotObject<T> {
     }
 }
 
-/// Reads exactly `N` bytes out of `no`, erroring when the slot's size is not
-/// exactly `N`.
-///
-/// Factored out of [`SlotObject::raw_exact`]/[`SlotObject::take_raw_exact`]
-/// so the two share one definition of "exact".
+/// Reads exactly `N` bytes without zero-initializing the host-owned output
+/// buffer. The result is exposed only after the host reports writing all
+/// `N` bytes.
 #[inline(always)]
 fn read_exact_bytes<const N: usize>(no: u32) -> Result<[u8; N]> {
-    let mut buf = [0u8; N];
-    let written = api::slot::slot(&mut buf, no)?;
-    if written == N {
-        Ok(buf)
+    let mut buf = [const { MaybeUninit::<u8>::uninit() }; N];
+    // One compare against the exact expected write count decides success:
+    // a negative error code is never `N`, so the sign test rides along with
+    // the length test instead of branching on its own.
+    let code = api::slot::slot_uninit_raw_code(&mut buf, no);
+    if code == N as i64 {
+        // SAFETY: the host reported writing exactly `N` bytes, so every
+        // byte is initialized; `MaybeUninit<u8>` has the same layout as
+        // `u8`.
+        Ok(unsafe { core::mem::transmute_copy::<[MaybeUninit<u8>; N], [u8; N]>(&buf) })
+    } else if code < 0 {
+        Err(HookError::from(code))
     } else {
         Err(HookError::TooSmall)
     }
@@ -543,18 +559,15 @@ pub enum AmountBytes {
     Iou(IouAmount),
 }
 
-/// A serialized issue, classified by its length.
+/// A serialized issue, classified by its length. `Iou` holds the decoded
+/// asset identity as an [`IssuedAsset`] — the same type
+/// [`IouAmount::asset`] produces from a 48-byte IOU `Amount`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IssueData {
     /// A 20-byte native issue.
     Native,
-    /// A 40-byte IOU issue.
-    Iou {
-        /// The currency code.
-        currency: CurrencyCode,
-        /// The issuing account.
-        issuer: AccountId,
-    },
+    /// A 40-byte IOU issue: currency and issuer.
+    Iou(IssuedAsset),
 }
 
 impl SlotObject<Amount> {
@@ -582,9 +595,8 @@ impl SlotObject<Amount> {
     ///
     /// MPT is out of scope for this layer (see [`AmountBytes`]). This method
     /// does not screen for it: whatever the host does when handed a
-    /// hypothetical future MPT amount — including trapping — is the host's
-    /// behavior, inherited unchanged. Adding a guard would tax every
-    /// ordinary read for a case that cannot arise on Xahau today.
+    /// hypothetical future MPT amount — including trapping — is inherited
+    /// unchanged, since MPT cannot arise on Xahau today.
     #[inline(always)]
     pub fn as_xfl(self) -> Result<XFL> {
         api::float::slot_float(self.no)
@@ -638,8 +650,11 @@ impl SlotObject<Issue> {
 /// Reads and classifies an amount slot.
 #[inline(always)]
 fn decode_amount(no: u32) -> Result<AmountBytes> {
-    let mut buf = [0u8; crate::types::IOU_AMOUNT_LEN];
-    let written = api::slot::slot(&mut buf, no)?;
+    let mut storage = MaybeUninit::<[u8; crate::types::IOU_AMOUNT_LEN]>::uninit();
+    // SAFETY: only the `..written` prefix `api::slot::slot` reports writing
+    // is ever read below.
+    let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
+    let written = api::slot::slot(buf, no)?;
     let bytes = buf.get(..written).ok_or(HookError::TooBig)?;
     classify_amount(bytes)
 }
@@ -648,13 +663,10 @@ fn decode_amount(no: u32) -> Result<AmountBytes> {
 /// anything else → [`HookError::ParseError`].
 ///
 /// Split out of [`decode_amount`] as a pure function so the size contract is
-/// testable without a live host — the stubs cannot populate a slot, so this
-/// is the only way to check the classification directly.
+/// testable without a live host (stubs cannot populate a slot).
 ///
-/// MPT amounts (33 bytes) are **out of scope** for this layer — they need an
-/// amendment Xahau does not have. An unexpected length is an error here, never
-/// a guess: misreading a 33-byte MPT amount as something else would be worse
-/// than refusing it.
+/// MPT amounts (33 bytes, out of scope — they need an amendment Xahau does
+/// not have) are never guessed at; an unexpected length is always an error.
 #[inline(always)]
 pub(crate) fn classify_amount(bytes: &[u8]) -> Result<AmountBytes> {
     match bytes.len() {
@@ -674,17 +686,19 @@ pub(crate) fn classify_amount(bytes: &[u8]) -> Result<AmountBytes> {
 
 /// Reads and classifies an issue slot.
 ///
-/// The buffer is **44** bytes, not the 40 an IOU issue needs, so that a
-/// 44-byte MPT issue is *read* rather than rejected by the host call: with a
-/// 40-byte buffer the host reports `TooSmall` and
-/// [`HookError::ParseError`] — the documented answer for an out-of-scope
-/// encoding — would be unreachable on the real path. 44 is the largest
-/// encoding xahaud's shared code defines for this field, and still well
-/// under the 64-byte zero-init threshold.
+/// The buffer is **44** bytes, not the 40 an IOU issue needs, so a 44-byte
+/// MPT issue is *read* rather than rejected by the host call — with a
+/// 40-byte buffer the host would report `TooSmall` before
+/// [`HookError::ParseError`] (the documented answer for an out-of-scope
+/// encoding) is reachable. 44 is the largest encoding xahaud's shared code
+/// defines for this field.
 #[inline(always)]
 fn decode_issue(no: u32) -> Result<IssueData> {
-    let mut buf = [0u8; ISSUE_MAX_READ_LEN];
-    let written = api::slot::slot(&mut buf, no)?;
+    let mut storage = MaybeUninit::<[u8; ISSUE_MAX_READ_LEN]>::uninit();
+    // SAFETY: only the `..written` prefix `api::slot::slot` reports writing
+    // is ever read below.
+    let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
+    let written = api::slot::slot(buf, no)?;
     let bytes = buf.get(..written).ok_or(HookError::TooBig)?;
     classify_issue(bytes)
 }
@@ -718,10 +732,10 @@ pub(crate) fn classify_issue(bytes: &[u8]) -> Result<IssueData> {
                 .ok_or(HookError::TooSmall)?;
             currency.copy_from_slice(c_src);
             issuer.copy_from_slice(i_src);
-            Ok(IssueData::Iou {
+            Ok(IssueData::Iou(IssuedAsset {
                 currency: CurrencyCode(currency),
                 issuer: AccountId(issuer),
-            })
+            }))
         }
         _ => Err(HookError::ParseError),
     }
@@ -839,8 +853,7 @@ bytes_value!(
 );
 
 /// Silences an unused-import warning in builds where no `value()` body
-/// happens to name `FixedRead`; the trait is part of this module's
-/// documented relationship to `convert` and stays referenced here.
+/// happens to name `FixedRead`.
 const _: () = {
     #[allow(dead_code)]
     fn _assert_fixed_read_is_not_used_on_slots<T: FixedRead>() {}
@@ -862,53 +875,43 @@ const _: () = {
 ///
 /// # What it does that a chain of `?` cannot
 ///
-/// `root.get(a)?.get(b)?.get(c)?` leaks the two intermediate slots: each
-/// temporary handle is dropped without clearing, and (deliberately) nothing
+/// `root.get(a)?.get(b)?.get(c)?` leaks the two intermediate slots — nothing
 /// clears on drop. This macro clears each intermediate as soon as its child
 /// exists, so a 10-hop path costs 1 live slot, not 10.
 ///
-/// The order per hop is `let next = cur.get(k); let _ = cur.clear(); match
-/// next {..}` — the current handle is cleared **unconditionally**, before the
-/// result is inspected, so a hop that fails cannot leak the parent that
-/// produced it. Clearing a parent after deriving a child is sound because
-/// the host copies the parent's storage into the child slot; that is pinned
-/// by a live e2e test, not assumed.
+/// Per hop: `let next = cur.get(k); let _ = cur.clear(); match next {..}` —
+/// the current handle is cleared **unconditionally**, before the result is
+/// inspected, so a failed hop cannot leak its parent. Clearing a parent
+/// after deriving a child is sound because the host copies the parent's
+/// storage into the child slot (pinned by a live e2e test, not assumed).
 ///
-/// The root is *borrowed* and never cleared — it is the caller's handle, and
-/// the caller may well want more children from it. It is evaluated exactly
-/// once.
+/// The root is *borrowed*, never cleared, and evaluated exactly once — it
+/// is the caller's handle, which may still be wanted for more children.
 ///
 /// # Spelling the root
 ///
 /// The root is one token tree: a binding (`signers[..]`) or a parenthesized
 /// expression (`(load_signers()?)[..]`). Rust's macro grammar forbids an
-/// `expr` fragment before `[`, so a bare unparenthesized expression is not
-/// expressible here by anyone — parenthesize it, or bind it to a `let`
-/// first.
+/// `expr` fragment before `[`, so a bare unparenthesized expression cannot
+/// be written here — parenthesize it, or bind it to a `let` first.
 ///
 /// # Path length
 ///
-/// The expansion nests one `match` per hop, but `rshooks-build`'s unnest pass
-/// flattens them: measured block nesting after that pass is **1** at 1, 3
-/// *and* 10 hops, with worst-case instructions growing linearly (46 / 94 /
-/// 255). Depth is not the constraint it looked like on paper.
+/// The expansion nests one `match` per hop, but `rshooks-build`'s unnest
+/// pass flattens them: measured block nesting after that pass is **1** at
+/// 1, 3, and 10 hops, with worst-case instructions growing linearly
+/// (46 / 94 / 255).
 ///
 /// What *does* accumulate is the surrounding code: several multi-hop walks
-/// inlined into one function nest their own `if let`/`match` ladders, and
-/// that is what reaches the guard checker's 32-level limit. `examples/15_slot-objects`
-/// hit 53 that way and came back to 4 by putting each walk in its own
-/// `#[inline(never)]` function — the same escape hatch `examples/81_govern`
-/// uses.
+/// inlined into one function nest their own `if let`/`match` ladders, which
+/// is what reaches the guard checker's 32-level limit.
+/// `examples/15_slot-objects` hit 53 that way and came back to 4 by putting
+/// each walk in its own `#[inline(never)]` function — the same escape hatch
+/// `examples/80_governance`'s `govern` entry uses.
 #[macro_export]
 macro_rules! slot_path {
-    // Entry: bind the root once (by reference — never cleared), then recurse.
-    //
-    // `tt`, not `expr`: Rust does not allow an `expr` fragment to be followed
-    // by `[`, so `$root:expr [..]` cannot be written by anyone. A single
-    // token tree covers the two shapes that matter — a plain binding
-    // (`signers[..]`) and a parenthesized expression (`(make_root()?)[..]`) —
-    // and binding it to `__root` first is what makes "evaluated exactly once"
-    // true for the second.
+    // Entry: bind the root once (by reference — never cleared), then
+    // recurse. `tt`, not `expr` — see "Spelling the root" above.
     ($root:tt $([$key:expr])+) => {{
         let __root = &$root;
         $crate::slot_path!(@hop __root $([$key])+)
@@ -919,8 +922,8 @@ macro_rules! slot_path {
         $cur.get($key)
     };
 
-    // Intermediate hop: derive the child, clear the current handle
-    // unconditionally, then continue only if the child arrived.
+    // Intermediate hop: derive, clear the current handle unconditionally,
+    // then continue only if the child arrived.
     (@hop $cur:ident [$key:expr] $([$rest:expr])+) => {
         match $cur.get($key) {
             ::core::result::Result::Ok(__next) => {
@@ -952,9 +955,8 @@ macro_rules! slot_path {
 mod tests {
     use super::*;
 
-    // The classification contract, checked directly. Host stubs cannot
-    // populate a slot, so the pure functions are the only place the
-    // size rules are observable — which is why they are pure functions.
+    // The classification contract, checked directly (host stubs cannot
+    // populate a slot).
 
     #[test]
     fn amount_sizes_classify_or_error() {
@@ -992,17 +994,15 @@ mod tests {
         issuer.copy_from_slice(buf.get(CUR..IOU).unwrap_or(&[]));
         assert_eq!(
             classify_issue(at(IOU)),
-            Ok(IssueData::Iou {
+            Ok(IssueData::Iou(IssuedAsset {
                 currency: CurrencyCode(currency),
                 issuer: AccountId(issuer),
-            })
+            }))
         );
 
-        // 44 is the MPT issue length. `decode_issue`'s buffer is sized to
-        // read it, so this error is reachable through
-        // `SlotObject<Issue>::value()` rather than being pre-empted by a
-        // `TooSmall` from the host call — which is the whole point of that
-        // buffer being 44 and not 40.
+        // 44 is the MPT issue length; `decode_issue`'s buffer is sized to
+        // reach this classification instead of failing as `TooSmall` in the
+        // host call.
         assert_eq!(classify_issue(&buf), Err(HookError::ParseError));
         assert_eq!(classify_issue(at(0)), Err(HookError::ParseError));
     }
@@ -1010,10 +1010,10 @@ mod tests {
     #[test]
     fn issue_read_buffer_covers_the_out_of_scope_encoding() {
         // A compile-time check, not a runtime one: `assert!` on a constant
-        // comparison is optimized out (and clippy says so). The buffer must
-        // hold a 44-byte MPT issue, or the `ParseError` contract above is
-        // unreachable on the real read path; and it must stay under the
-        // 64-byte zero-init threshold.
+        // comparison is optimized out. The buffer must hold a 44-byte MPT
+        // issue, or the `ParseError` contract above is unreachable on the
+        // real read path, and it must stay under the 64-byte zero-init
+        // threshold.
         const _: () = assert!(ISSUE_MAX_READ_LEN >= 44);
         const _: () = assert!(ISSUE_MAX_READ_LEN <= 48);
     }

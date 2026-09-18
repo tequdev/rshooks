@@ -30,7 +30,7 @@ fn reads(root: SlotObject<STObject>) -> Result<()> {
     let _: Hash = root.get(sfLedgerHash)?.value()?;
     let _: AccountId = root.get(sfAccount)?.value()?;
     let _: AmountBytes = root.get(sfBalance)?.value()?;
-    let _: IssueData = root.get(sfAsset)?.value()?;
+    let _: IssueData = root.get(sfClaimCurrency)?.value()?;
 
     // Borrowing pre-checks compose with a consuming read.
     let amount = root.get(sfBalance)?;
@@ -83,7 +83,7 @@ fn retypes(root: SlotObject<STObject>) -> Result<()> {
     // Checked: any failure consumes the handle and clears the slot.
     let _: SlotObject<STObject> = root.get(sfMemo)?.try_cast::<STObject>()?;
     let _: SlotObject<Amount> = root.get(sfBalance)?.try_cast::<Amount>()?;
-    let _: SlotObject<Issue> = root.get(sfAsset)?.try_cast::<Issue>()?;
+    let _: SlotObject<Issue> = root.get(sfClaimCurrency)?.try_cast::<Issue>()?;
     // Unchecked, const: the escape for a field this layer types `Opaque`.
     let _: SlotObject<CurrencyCode> = root.get(sfTakerPaysCurrency)?.assume_type();
     Ok(())

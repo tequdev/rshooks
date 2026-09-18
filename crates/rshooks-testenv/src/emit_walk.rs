@@ -1,51 +1,195 @@
-//! The emission walker: design §5.6's normative acceptance grammar for a
-//! blob passed to `emit`.
+//! The emission walker: field-sequence parsing shared by `emit`'s
+//! acceptance check (design §5.6's normative grammar) and by
+//! `crate::host::sto`/`crate::host::slots`' raw STObject/slot navigation.
 //!
-//! A canonical serialized-field walk: fields in canonical `(type, field)`
-//! order (strictly increasing — this also rejects a duplicated field),
-//! canonical variable-length prefixes, correct inner-object/array
-//! terminators, no trailing bytes, and a depth limit of 2 (enough for
-//! `EmitDetails`/`Memos`, no general recursion). Required invariants: a
-//! known `TransactionType`, `Sequence == 0`, an empty `SigningPubKey`,
-//! `Fee` present, and an `EmitDetails` field whose bytes are **exactly**
-//! the bytes this invocation's `etxn_details()` returned.
+//! A structural serialized-field walk: fields in **any** order — real
+//! xahaud's raw parse (`STObject::set`; every `sto_*` function goes through
+//! `HookAPI::get_stobject_length`, `HookAPI.cpp:2888-3179`) decodes each
+//! field's own header in turn, never requiring ascending `(type, field)`
+//! order. `crate::host::sto`'s module doc cites `HookAPI::sto_validate`
+//! (`HookAPI.cpp:68-96`) as having "no field-ordering or duplicate-field
+//! check"; this walker (which `sto_validate` calls directly) matches that.
+//! Structural rules enforced: canonical variable-length prefixes, correct
+//! inner-object/array terminators, no trailing bytes, and a recursion-depth
+//! limit of [`STO_MAX_RECURSION_DEPTH`] matching real xahaud's
+//! `get_stobject_length` (`HookAPI.cpp:2901`).
+//! [`validate_emit_blob`] layers additional rules on top for `emit`'s
+//! acceptance grammar — see its own doc comment.
 //!
-//! What this walker does *not* check (documented, design §5.6): fee
-//! sufficiency, ledger-window validity against real ledger progress, and
-//! full STObject codec canonicality beyond the rules above — all e2e-only.
+//! [`validate_emit_blob`] does check fee sufficiency and the
+//! `FirstLedgerSequence`/`LastLedgerSequence` window (against this
+//! harness's own `World` fee/ledger state, matching `HookAPI::emit`'s own
+//! rules 5-7 — see that function's own doc comment). What it does *not*
+//! check: full STObject codec canonicality beyond the structural rules
+//! above, and anything `ripple::preflight` validates beyond field
+//! presence (amount signs, flag combinations, currency/issuer validity,
+//! and so on) — all e2e-only.
+//!
+//! # Order is tolerant everywhere; duplicate tolerance differs by real path
+//!
+//! Every caller below is order-tolerant, but real xahaud's duplicate
+//! handling is *not* uniform across the two host-function families this
+//! walker backs, so this module's tolerance isn't either:
+//!
+//! - [`validate_emit_blob`] (`crate::backend::Backend::emit`) and
+//!   `crate::backend::Backend::prepare` both parse a hook-authored buffer
+//!   through real xahaud's `STObject::set`-family deserialization — `emit`
+//!   via `STTx(SerialIter)` -> `STObject::set` (`STObject.cpp:203`),
+//!   `prepare` via `HookAPI::prepare`'s own `SerialIter`-based construction
+//!   (`HookAPI.cpp:392-396`). `STObject::set` consumes fields in whatever
+//!   order they appear, but afterward sorts every field by code and throws
+//!   `"Duplicate field detected"` if any two share one
+//!   (`STObject.cpp:266-276`). This walker itself stays order/
+//!   duplicate-tolerant (shared with the `sto_*` family below);
+//!   [`validate_emit_blob`] alone layers that duplicate rejection back on,
+//!   recursed into every nested `STI_OBJECT` and `STI_ARRAY` element's own
+//!   body — each object scope (top level, a nested object, one array
+//!   element) has its own independent field-code set, matching
+//!   `STObject::set`'s real per-depth invariant: the same field code may
+//!   repeat across sibling array elements, or between a scope and its
+//!   parent, but not twice within one scope.
+//! - `crate::host::sto::sto_validate`/`sto_subfield`/`sto_subarray`: cited
+//!   above and in `crate::host::sto`'s module doc (`HookAPI::sto_validate`,
+//!   `HookAPI.cpp:68-96`, "no field-ordering or duplicate-field check";
+//!   every other `sto_*` function shares the same underlying parser,
+//!   `HookAPI::get_stobject_length`, `HookAPI.cpp:2888-3179`) — genuinely
+//!   duplicate-tolerant on real xahaud, unlike the `STObject::set` family
+//!   above.
+//! - `crate::otxn::deserialize`/`from_emitted`: parses a blob that already
+//!   passed [`validate_emit_blob`], so tolerates whatever order that
+//!   already accepted.
+//! - `crate::host::slots` (`slot_subfield`/`slot_set`/`otxn_slot`/
+//!   `meta_slot`/`xpop_slot`): root slot content always comes from a real,
+//!   already-canonically-serialized ledger object or transaction (see that
+//!   module's "slot content = value payload" doc section), so this
+//!   walker's order/duplicate tolerance is inert here.
 //!
 //! # P2-D extension: field/array navigation primitives
 //!
-//! `.claude/design/TESTENV_PHASE2_DESIGN.md` §4 ("slot family", "sto_*")
-//! calls for extending this walker with offset exposure rather than forking
-//! a second parser. [`FieldSpan`] (now `pub(crate)` with `pub(crate)`
-//! fields), [`walk_top_level_fields`]/[`walk_object_fields`] (renamed-export
-//! of the existing top-level/nested-object walks), [`walk_array_elements`]
-//! (new — per-element spans, not just a pass/fail skip), and
-//! [`field_value_payload`] (new — the **value-only** payload range a stored
-//! slot or `sto_subfield` reports, VL length-prefix stripped for
-//! VL/AccountID fields) are `crate::host::slots`/`crate::host::sto`'s shared
-//! foundation. See those modules' doc comments for the upstream citations
-//! behind the per-type payload convention `field_value_payload` implements.
+//! [`FieldSpan`], [`walk_top_level_fields`]/[`walk_top_level_fields_or_object`],
+//! [`walk_array_elements`] (per-element spans), and [`field_value_payload`]
+//! (the **value-only** payload range a stored slot or `sto_subfield`
+//! reports, VL length-prefix stripped for VL/AccountID fields) are
+//! `crate::host::slots`/`crate::host::sto`'s shared foundation
+//! (`.claude/design/TESTENV_PHASE2_DESIGN.md` §4 "slot family", "sto_*").
+//! See those modules' doc comments for the upstream citations behind the
+//! per-type payload convention `field_value_payload` implements.
 
 use std::vec::Vec;
 
 use rshooks::tx_type::TxType;
+use rshooks::txn::codec::sti::{STI_ACCOUNT, STI_ARRAY, STI_OBJECT, STI_VL};
+use rshooks::txn::codec::{ARRAY_END_MARKER, MAX_NOPS_PER_CONTAINER, NOP, OBJECT_END_MARKER};
 
-/// The STObject terminator (see [`crate::details::OBJECT_END_MARKER`]).
-const OBJECT_END_MARKER: u8 = 0xE1;
-/// The STArray terminator: `sfArrayEndMarker`'s wire byte (type 15, field 1,
-/// both `< 16` → a single byte `(15 << 4) | 1`).
-const ARRAY_END_MARKER: u8 = 0xF1;
+const SF_TRANSACTION_TYPE: u64 = rshooks::sfield::sfTransactionType.code() as u64;
+const SF_SEQUENCE: u64 = rshooks::sfield::sfSequence.code() as u64;
+const SF_FIRST_LEDGER_SEQUENCE: u64 = rshooks::sfield::sfFirstLedgerSequence.code() as u64;
+const SF_LAST_LEDGER_SEQUENCE: u64 = rshooks::sfield::sfLastLedgerSequence.code() as u64;
+const SF_ACCOUNT_TXN_ID: u64 = rshooks::sfield::sfAccountTxnID.code() as u64;
+const SF_FEE: u64 = rshooks::sfield::sfFee.code() as u64;
+const SF_SIGNING_PUB_KEY: u64 = rshooks::sfield::sfSigningPubKey.code() as u64;
+const SF_TXN_SIGNATURE: u64 = rshooks::sfield::sfTxnSignature.code() as u64;
+const SF_ACCOUNT: u64 = rshooks::sfield::sfAccount.code() as u64;
+const SF_EMIT_DETAILS: u64 = rshooks::sfield::sfEmitDetails.code() as u64;
+const SF_SIGNERS: u64 = rshooks::sfield::sfSigners.code() as u64;
+const SF_TICKET_SEQUENCE: u64 = rshooks::sfield::sfTicketSequence.code() as u64;
 
-const SF_TRANSACTION_TYPE: u64 = sfcode(1, 2);
-const SF_SEQUENCE: u64 = sfcode(2, 4);
-const SF_FEE: u64 = sfcode(6, 8);
-const SF_SIGNING_PUB_KEY: u64 = sfcode(7, 3);
-const SF_EMIT_DETAILS: u64 = sfcode(14, 13);
-
+/// Packs a raw `(type, field)` pair into the `(type << 16) | field` `u64`
+/// code shape [`FieldSpan::code`] and the `SF_*` constants above use —
+/// [`walk_fields`] calls this for every field it decodes; test code also
+/// calls it directly for an ad-hoc/synthetic code with no corresponding
+/// `rshooks::sfield::sfXxx` constant.
 const fn sfcode(ty: u32, field: u32) -> u64 {
     ((ty as u64) << 16) | (field as u64)
+}
+
+/// Selects how [`walk_fields`]/`walk_array_body`/[`walk_array_elements`]
+/// treat a [`NOP`] byte found in a field-header position (between fields
+/// of an object, or between elements of an array — exactly where the
+/// walker is about to decode the next header). Threaded through every
+/// recursive call so each nested object/array gets its own counter, per
+/// real xahaud's per-container-instance budget. [`NOP`]/
+/// [`MAX_NOPS_PER_CONTAINER`] are re-exported from `rshooks::txn::codec`
+/// (`txn_template!`'s own NOP-padding primitives — see that module's doc
+/// comment) rather than redefined here, so the wire-level definition of a
+/// NOP lives in exactly one place.
+///
+/// - [`NopMode::Tolerant`] mirrors `STObject::set`/
+///   `STArray::STArray(SerialIter&)` (see [`NOP`]'s doc comment): a `NOP`
+///   byte is skipped rather than decoded as a field header. One counter
+///   per container instance (object level or array) tallies every NOP
+///   seen, cumulative — not reset by intervening real fields — and the
+///   container fails (`Err(())`) once that counter would exceed
+///   [`MAX_NOPS_PER_CONTAINER`]. Used only where a genuinely NOP-padded,
+///   not-yet-canonicalized, hook-authored blob is being parsed for the
+///   first time: [`validate_emit_blob`]'s own structural check
+///   (`crate::backend::Backend::emit`) and [`canonicalize`]'s internal
+///   walk (`crate::backend::Backend::emit`/`prepare`,
+///   `crate::otxn::deserialize` — see [`canonicalize`]'s doc comment).
+/// - [`NopMode::Strict`] mirrors `HookAPI::get_stobject_length`
+///   (`HookAPI.cpp:2888-3179`), which has no NOP handling at all: a `NOP`
+///   byte decodes as an ordinary `(9, 9)` header, `STI_NUMBER`(9) has no
+///   defined length ([`fixed_len_for_type`]), so it fails exactly like any
+///   other type this walker does not model. Used by every `sto_*`
+///   (`crate::host::sto`) and `slot_*`/`otxn_slot`/`meta_slot`/`xpop_slot`
+///   (`crate::host::slots`) navigation function — their content is either a
+///   hook-authored `sto_*` buffer (real `get_stobject_length` would reject
+///   a NOP there too) or slot content sourced from a
+///   canonically-serialized ledger object/transaction, never NOP-padded —
+///   and also by every walk downstream of a [`canonicalize`] call, once
+///   there:
+///   [`Backend::prepare`](crate::backend::Backend::prepare)'s own
+///   existing-fields walk, [`top_level_transaction_type`] (reads an
+///   already-committed [`crate::world::EmittedTxn`], whose `blob`
+///   [`crate::backend::Backend::emit`] stores in canonical form),
+///   `crate::otxn::deserialize`'s own field walk, and
+///   `crate::otxn::from_emitted`'s `EmitDetails` sub-walk (over bytes
+///   `deserialize`'s canonicalized map already produced). Real xahaud
+///   never re-parses a blob it has already canonicalized once, so none of
+///   these should ever see a NOP again; `Strict` turns "should" into a
+///   defensive assertion rather than silent, cost-free tolerance of a bug
+///   upstream. This is also why a `#[cbak]`'s reconstructed otxn — and
+///   anything derived from it, e.g. a nested `sfAmounts` entry reachable
+///   through `otxn_slot`/`slot_subfield` — is NOP-free at every depth, not
+///   just the top level: `crate::otxn::deserialize` canonicalizes
+///   recursively, not just at the top level.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NopMode {
+    /// No `NOP` byte handling — a `0x99` header fails like any other
+    /// unmodeled type. See this type's doc comment for which callers use
+    /// this.
+    Strict,
+    /// Skip `NOP` bytes in header position, budgeted per container
+    /// instance. See this type's doc comment for which callers use this.
+    Tolerant,
+}
+
+/// Skips a run of zero or more [`NOP`] bytes at `*pos` when `mode` is
+/// [`NopMode::Tolerant`] (a no-op under [`NopMode::Strict`]), incrementing
+/// `*nop_count` (the calling container's own counter) for each one and
+/// failing once that counter would exceed [`MAX_NOPS_PER_CONTAINER`]. Each
+/// skipped NOP's offset is also pushed to `nops` — unused by every caller
+/// except [`canonicalize`], which walks once under [`NopMode::Tolerant`]
+/// and re-serializes `data` with exactly those offsets dropped.
+fn skip_nops(
+    data: &[u8],
+    pos: &mut usize,
+    nop_count: &mut usize,
+    mode: NopMode,
+    nops: &mut Vec<usize>,
+) -> Result<(), ()> {
+    if mode != NopMode::Tolerant {
+        return Ok(());
+    }
+    while data.get(*pos) == Some(&NOP) {
+        nops.push(*pos);
+        *pos = pos.checked_add(1).ok_or(())?;
+        *nop_count = nop_count.checked_add(1).ok_or(())?;
+        if *nop_count > MAX_NOPS_PER_CONTAINER {
+            return Err(());
+        }
+    }
+    Ok(())
 }
 
 /// One field found while walking an object (top-level or nested): its
@@ -163,21 +307,37 @@ fn fixed_len_for_type(ty: u32) -> Option<usize> {
     }
 }
 
-fn dispatch_value(data: &[u8], pos: &mut usize, ty: u32, depth: u32) -> Result<(), ()> {
+/// The recursion-depth bound real xahaud's `HookAPI::get_stobject_length`
+/// enforces (`HookAPI.cpp:2901`: `if (recursion_depth > 10) return
+/// Unexpected(pe_excessive_nesting);`, checked on entry before parsing that
+/// level's field). This walker's `depth` parameter uses the identical
+/// convention — top-level fields parse at `depth == 0`, and each
+/// `STI_OBJECT`(14)/`STI_ARRAY`(15) recursion increments it by one before
+/// parsing the nested body — so the same bound applies unmodified here.
+const STO_MAX_RECURSION_DEPTH: u32 = 10;
+
+fn dispatch_value(
+    data: &[u8],
+    pos: &mut usize,
+    ty: u32,
+    depth: u32,
+    mode: NopMode,
+    nops: &mut Vec<usize>,
+) -> Result<(), ()> {
     match ty {
         6 => skip_amount(data, pos),
         7 | 8 => skip_vl(data, pos),
         14 => {
-            if depth.checked_add(1).ok_or(())? > 2 {
+            if depth.checked_add(1).ok_or(())? > STO_MAX_RECURSION_DEPTH {
                 return Err(());
             }
-            walk_object_body(data, pos, depth.wrapping_add(1)).map(|_| ())
+            walk_object_body(data, pos, depth.wrapping_add(1), mode, nops).map(|_| ())
         }
         15 => {
-            if depth.checked_add(1).ok_or(())? > 2 {
+            if depth.checked_add(1).ok_or(())? > STO_MAX_RECURSION_DEPTH {
                 return Err(());
             }
-            walk_array_body(data, pos, depth.wrapping_add(1))
+            walk_array_body(data, pos, depth.wrapping_add(1), mode, nops)
         }
         other => {
             let len = fixed_len_for_type(other).ok_or(())?;
@@ -187,8 +347,10 @@ fn dispatch_value(data: &[u8], pos: &mut usize, ty: u32, depth: u32) -> Result<(
 }
 
 /// Walks one field sequence (a top-level transaction, or the inside of a
-/// nested object) starting at `*pos`, in canonical strictly-increasing
-/// `(type, field)` order. For a nested object (`in_object == true`),
+/// nested object) starting at `*pos` — real xahaud's raw STObject parse
+/// reads each field sequentially by decoding its own header, independent
+/// of field-code order or repetition (see this module's doc comment); this
+/// walker does the same. For a nested object (`in_object == true`),
 /// consumes through the [`OBJECT_END_MARKER`]; for the top level
 /// (`in_object == false`), consumes until `data.len()` — the "no trailing
 /// bytes" rule is exactly this loop's termination condition.
@@ -197,10 +359,13 @@ fn walk_fields(
     pos: &mut usize,
     depth: u32,
     in_object: bool,
+    mode: NopMode,
+    nops: &mut Vec<usize>,
 ) -> Result<Vec<FieldSpan>, ()> {
     let mut fields = Vec::new();
-    let mut last_code: Option<u64> = None;
+    let mut nop_count = 0usize;
     loop {
+        skip_nops(data, pos, &mut nop_count, mode, nops)?;
         if in_object {
             match data.get(*pos) {
                 Some(&OBJECT_END_MARKER) => {
@@ -217,13 +382,7 @@ fn walk_fields(
         let (ty, field) = decode_header(data, pos)?;
         let value_start = *pos;
         let code = sfcode(ty, field);
-        if let Some(last) = last_code {
-            if code <= last {
-                return Err(()); // out of order, or a duplicate field
-            }
-        }
-        last_code = Some(code);
-        dispatch_value(data, pos, ty, depth)?;
+        dispatch_value(data, pos, ty, depth, mode, nops)?;
         fields.push(FieldSpan {
             code,
             range: (start, *pos),
@@ -237,23 +396,22 @@ pub(crate) fn walk_object_body(
     data: &[u8],
     pos: &mut usize,
     depth: u32,
+    mode: NopMode,
+    nops: &mut Vec<usize>,
 ) -> Result<Vec<FieldSpan>, ()> {
-    walk_fields(data, pos, depth, true)
+    walk_fields(data, pos, depth, true, mode, nops)
 }
 
-/// The STI_OBJECT type code — every STArray element's field header must
-/// decode to this type (rippled's real STArray deserialization requires
-/// each element to be an STObject field, e.g. `sfMemo`/`sfSigner`; nothing
-/// else is a legal array element).
-const STI_OBJECT: u32 = 14;
-
-/// The STI_VL / STI_ACCOUNT type codes — [`field_value_payload`]'s two VL
-/// length-prefix-stripped cases.
-const STI_VL: u32 = 7;
-const STI_ACCOUNT: u32 = 8;
-
-fn walk_array_body(data: &[u8], pos: &mut usize, depth: u32) -> Result<(), ()> {
+fn walk_array_body(
+    data: &[u8],
+    pos: &mut usize,
+    depth: u32,
+    mode: NopMode,
+    nops: &mut Vec<usize>,
+) -> Result<(), ()> {
+    let mut nop_count = 0usize;
     loop {
+        skip_nops(data, pos, &mut nop_count, mode, nops)?;
         match data.get(*pos) {
             Some(&ARRAY_END_MARKER) => {
                 *pos = pos.checked_add(1).ok_or(())?;
@@ -266,7 +424,7 @@ fn walk_array_body(data: &[u8], pos: &mut usize, depth: u32) -> Result<(), ()> {
         if ty != STI_OBJECT {
             return Err(());
         }
-        dispatch_value(data, pos, ty, depth)?;
+        dispatch_value(data, pos, ty, depth, mode, nops)?;
     }
 }
 
@@ -274,17 +432,20 @@ fn walk_array_body(data: &[u8], pos: &mut usize, depth: u32) -> Result<(), ()> {
 /// [`ARRAY_END_MARKER`], with no leading array-type header — the exact
 /// shape a slot's/`sto_subarray`'s array-typed content has, per
 /// `crate::host::slots`'/`crate::host::sto`'s module doc comments) and
-/// returns each element's own `(start, end)` span — header included, footer
+/// returns each element's own `(start, end)` span — header and footer
 /// (`0xE1`, since every element is itself an `STObject`) included: the
 /// "fully formed" convention `sto_subarray`/`slot_subarray` both use.
 /// Requires the whole buffer to parse as element spans with nothing left
 /// over; any parse failure — including a buffer that doesn't end in
 /// [`ARRAY_END_MARKER`] — is `Err(())`, matching [`walk_top_level_fields`]'s
-/// own full-consumption contract for the top-level case.
-pub(crate) fn walk_array_elements(data: &[u8]) -> Result<Vec<(usize, usize)>, ()> {
+/// full-consumption contract for the top-level case.
+pub(crate) fn walk_array_elements(data: &[u8], mode: NopMode) -> Result<Vec<(usize, usize)>, ()> {
     let mut pos = 0usize;
     let mut spans = Vec::new();
+    let mut nop_count = 0usize;
+    let mut nops = Vec::new();
     loop {
+        skip_nops(data, &mut pos, &mut nop_count, mode, &mut nops)?;
         match data.get(pos) {
             Some(&ARRAY_END_MARKER) => {
                 pos = pos.checked_add(1).ok_or(())?;
@@ -302,7 +463,7 @@ pub(crate) fn walk_array_elements(data: &[u8]) -> Result<Vec<(usize, usize)>, ()
         if ty != STI_OBJECT {
             return Err(());
         }
-        dispatch_value(data, &mut pos, ty, 0)?;
+        dispatch_value(data, &mut pos, ty, 0, mode, &mut nops)?;
         spans.push((start, pos));
     }
 }
@@ -313,33 +474,66 @@ pub(crate) fn walk_array_elements(data: &[u8]) -> Result<Vec<(usize, usize)>, ()
 /// `Err(())`. `pub(crate)`-exported for `crate::host::slots`/
 /// `crate::host::sto`'s navigation (P2-D) in addition to this module's own
 /// [`validate_emit_blob`].
-pub(crate) fn walk_top_level_fields(data: &[u8]) -> Result<Vec<FieldSpan>, ()> {
-    walk_top_level(data)
+pub(crate) fn walk_top_level_fields(data: &[u8], mode: NopMode) -> Result<Vec<FieldSpan>, ()> {
+    walk_top_level(data, mode)
 }
 
-/// [`walk_top_level_fields`] when `in_object` is `false`, or
-/// [`walk_object_body`] (depth `0`, a fresh budget — see `crate::host::slots`'
-/// module doc comment for why each slot's own content is parsed with its
-/// own fresh depth budget rather than one shared across slot hops) when
-/// `true`. `crate::host::slots::slot_subfield`'s one call site: a
+/// [`walk_top_level_fields`]'s parse (a fresh depth-`0` budget, `in_object`
+/// selecting whether `data` carries a wrapping terminator) with the
+/// no-terminator/has-terminator choice left to the caller — see
+/// `crate::host::slots`' module doc for why each slot's content is parsed
+/// with its own fresh depth budget rather than one shared across slot hops.
+/// `crate::host::slots::slot_subfield`'s and `crate::otxn`'s call sites: a
 /// [`crate::invocation::SlotKind::Root`] parent has no wrapping terminator
 /// (`in_object = false`); a [`crate::invocation::SlotKind::Object`] parent's
 /// stored bytes already end in `0xE1` (`in_object = true`).
 pub(crate) fn walk_top_level_fields_or_object(
     data: &[u8],
     in_object: bool,
+    mode: NopMode,
 ) -> Result<Vec<FieldSpan>, ()> {
     if in_object {
         let mut pos = 0usize;
-        walk_object_body(data, &mut pos, 0)
+        walk_object_body(data, &mut pos, 0, mode, &mut Vec::new())
     } else {
-        walk_top_level_fields(data)
+        walk_top_level_fields(data, mode)
     }
 }
 
-fn walk_top_level(data: &[u8]) -> Result<Vec<FieldSpan>, ()> {
+fn walk_top_level(data: &[u8], mode: NopMode) -> Result<Vec<FieldSpan>, ()> {
     let mut pos = 0usize;
-    walk_fields(data, &mut pos, 0, false)
+    walk_fields(data, &mut pos, 0, false, mode, &mut Vec::new())
+}
+
+/// Re-serializes `data` (a top-level field sequence, no wrapping header or
+/// terminator) with every header-position [`NOP`] removed at every nesting
+/// level — real xahaud's own effective behavior once a NOP-padded blob has
+/// been parsed through `STObject::set`/`STArray::STArray` and
+/// re-serialized (`emit`'s stored/ledger form, `HookAPI::prepare`'s
+/// returned bytes: see [`NopMode::Tolerant`]'s doc comment). Every real
+/// field's own bytes — header, value, and (for a nested `STI_OBJECT`(14)/
+/// `STI_ARRAY`(15) field) its own terminator — survive unchanged; only NOP
+/// bytes are dropped. One [`walk_fields`] pass under [`NopMode::Tolerant`]
+/// (same grammar, same per-container 63-NOP budget, same `Err(())`
+/// conditions — including a container's 64th NOP) collects each skipped
+/// NOP's offset via [`skip_nops`]'s `nops` output; those offsets are then
+/// the exact positions dropped when copying `data` to the output —
+/// recorded in increasing order since the walk visits every byte strictly
+/// left to right, depth-first.
+pub(crate) fn canonicalize(data: &[u8]) -> Result<Vec<u8>, ()> {
+    let mut pos = 0usize;
+    let mut nops = Vec::new();
+    walk_fields(data, &mut pos, 0, false, NopMode::Tolerant, &mut nops)?;
+    let mut out = Vec::with_capacity(data.len().saturating_sub(nops.len()));
+    let mut nops = nops.into_iter().peekable();
+    for (i, &b) in data.iter().enumerate() {
+        if nops.peek() == Some(&i) {
+            nops.next();
+            continue;
+        }
+        out.push(b);
+    }
+    Ok(out)
 }
 
 fn field_bytes(data: &[u8], range: (usize, usize)) -> Option<&[u8]> {
@@ -351,21 +545,20 @@ fn field_bytes(data: &[u8], range: (usize, usize)) -> Option<&[u8]> {
 /// type except `STI_VL`(7)/`STI_ACCOUNT`(8), where the VL length-prefix
 /// (present in `value_range`, since real wire bytes carry it) is stripped:
 /// a slot's content is exactly what the host's `entry->add(s)` reports for
-/// that field's own value alone (`crate::host::slots`' module doc comment
-/// cites `otxn_field`'s identically-shaped documented behavior — a
-/// `sfAccount` field reads back as exactly its 20 raw bytes, matching
+/// that field's value alone (`crate::host::slots`' module doc cites
+/// `otxn_field`'s identically-shaped documented behavior — a `sfAccount`
+/// field reads back as exactly its 20 raw bytes, matching
 /// `examples/15_slot-objects`' e2e-pinned `check_account_walk`), and
-/// `sto_subfield`'s own "payload" convention strips the same prefix
+/// `sto_subfield`'s "payload" convention strips the same prefix
 /// (`HookAPI::get_stobject_length`'s `payload_start`/`payload_length` are
 /// computed *after* decoding a VL type's own length prefix — see
-/// `crate::host::sto`'s module doc comment for the citation).
+/// `crate::host::sto`'s module doc for the citation).
 ///
 /// Does **not** special-case `STI_ARRAY`(15) into the "fully formed"
-/// (header-included) shape `sto_subfield` itself uses for arrays — callers
-/// that need that (only `sto_subfield`) special-case it themselves using
-/// `field.range` directly; every other caller (slot content, `sto_subarray`
-/// element payloads never call this for VL types at all) wants the uniform
-/// value-only meaning this function gives.
+/// (header-included) shape `sto_subfield` uses for arrays — the one
+/// caller that needs that special-cases it itself using `field.range`
+/// directly; every other caller wants the uniform value-only meaning this
+/// function gives.
 pub(crate) fn field_value_payload(data: &[u8], field: &FieldSpan) -> Result<(usize, usize), ()> {
     let ty = (field.code >> 16) as u32;
     if ty == STI_VL || ty == STI_ACCOUNT {
@@ -380,15 +573,94 @@ pub(crate) fn field_value_payload(data: &[u8], field: &FieldSpan) -> Result<(usi
     Ok(field.value_range)
 }
 
-/// Validates `blob` against the emission grammar. `expected_emit_details`
-/// is the exact bytes this invocation's `etxn_details()` returned (`None`
-/// if it was never called this invocation) — `blob`'s `EmitDetails` field
-/// must match those bytes exactly, header and terminator included.
+/// Rejects a repeated field code within any single object scope — a direct
+/// citation of real xahaud's `STObject::set`, which sorts every
+/// deserialized field by code and throws `"Duplicate field detected"` if
+/// any two share one (`STObject.cpp:266-276`; see this module's doc
+/// comment), applied at every depth `STObject::set` itself recurses into.
+/// `fields` is one scope's own field list (top level, a nested
+/// `STI_OBJECT`'s body, or one `STI_ARRAY` element's body) and `data` is
+/// the byte range that scope's spans index into; each recursive call gets
+/// a fresh scope, so the same field code repeating across sibling array
+/// elements, or between a scope and its parent, is left alone — only two
+/// fields sharing a code within the same scope are rejected. The
+/// underlying field walk itself (shared with `sto_validate`/`sto_subfield`,
+/// whose real host implementation genuinely tolerates a repeat at every
+/// depth) stays permissive; this rejection is layered on top, scoped to
+/// [`validate_emit_blob`]'s callers only.
+fn reject_duplicate_fields(fields: &[FieldSpan], data: &[u8]) -> Result<(), ()> {
+    for (i, f) in fields.iter().enumerate() {
+        let earlier = fields.get(..i).ok_or(())?;
+        if earlier.iter().any(|e| e.code == f.code) {
+            return Err(());
+        }
+    }
+    for f in fields {
+        let ty = (f.code >> 16) as u32;
+        if ty == STI_OBJECT {
+            let body = data.get(f.value_range.0..f.value_range.1).ok_or(())?;
+            let mut pos = 0usize;
+            let nested = walk_fields(body, &mut pos, 0, true, NopMode::Tolerant, &mut Vec::new())?;
+            reject_duplicate_fields(&nested, body)?;
+        } else if ty == STI_ARRAY {
+            let body = data.get(f.value_range.0..f.value_range.1).ok_or(())?;
+            for (start, end) in walk_array_elements(body, NopMode::Tolerant)? {
+                let element = body.get(start..end).ok_or(())?;
+                let mut pos = 0usize;
+                decode_header(element, &mut pos)?;
+                let nested = walk_fields(
+                    element,
+                    &mut pos,
+                    0,
+                    true,
+                    NopMode::Tolerant,
+                    &mut Vec::new(),
+                )?;
+                reject_duplicate_fields(&nested, element)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Validates `blob` against the emission grammar — a port of real xahaud's
+/// `HookAPI::emit` acceptance checks (`Xahau/xahaud` `dev`,
+/// `src/xrpld/app/hook/detail/HookAPI.cpp`, the `stpTrans->isFieldPresent`/
+/// `getField*` block right after the `STTx(SerialIter)` parse, rules 0
+/// through 8 per that function's own enumerating comment). `hook_account`
+/// and `ledger_seq` are the invoking hook's account and the world's current
+/// ledger sequence (rules 0, 5, 6); `min_fee` is this blob's
+/// `etxn_fee_base` result (rule 7, computed by the caller since it needs
+/// `Backend`'s own state); `expected_emit_details` is the exact bytes this
+/// invocation's `etxn_details()` returned (`None` if it was never called
+/// this invocation) — `blob`'s `EmitDetails` field must match those bytes
+/// exactly, header and terminator included (a byte-exact stand-in for rule
+/// 3's per-subfield `EmitGeneration`/`EmitBurden`/`EmitParentTxnID`/
+/// `EmitNonce`/`EmitHookHash` checks, since this harness's `etxn_details()`
+/// already computes the one legal value for each).
+///
+/// What real `HookAPI::emit` also checks that this does **not**:
+/// `hook::canEmit` (this harness's `strict_can_emit` enforces that
+/// separately, above this function — see `crate::env`), the emitted
+/// `Transaction`'s `NEW`-status dedup check (no transaction cache exists in
+/// this harness), and the final `ripple::preflight` call — full per-type
+/// preflight (amount signs, flag combinations, currency/issuer validity,
+/// and so on) is out of scope; [`crate::protocol_formats`]'s required-field
+/// table stands in for the field-presence subset of it.
+///
+/// See [`reject_duplicate_fields`] for the duplicate-field rule this
+/// applies, at every nesting depth — matching `emit`'s own
+/// `STTx(SerialIter)` -> `STObject::set` parse path.
 pub(crate) fn validate_emit_blob(
     blob: &[u8],
     expected_emit_details: Option<&[u8]>,
+    hook_account: &[u8; 20],
+    ledger_seq: u32,
+    min_fee: u64,
 ) -> Result<(), ()> {
-    let fields = walk_top_level(blob)?;
+    let fields = walk_top_level_fields(blob, NopMode::Tolerant)?;
+
+    reject_duplicate_fields(&fields, blob)?;
 
     let tx_type_field = fields
         .iter()
@@ -396,10 +668,18 @@ pub(crate) fn validate_emit_blob(
         .ok_or(())?;
     let tx_type_bytes = field_bytes(blob, tx_type_field.value_range).ok_or(())?;
     let tx_type_arr: [u8; 2] = tx_type_bytes.try_into().map_err(|_| ())?;
-    if matches!(
-        TxType::from(u16::from_be_bytes(tx_type_arr)),
-        TxType::Unknown(_)
-    ) {
+    let tx_type_value = u16::from_be_bytes(tx_type_arr);
+    let tx_type = TxType::from(tx_type_value);
+    if matches!(tx_type, TxType::Unknown(_)) || is_pseudo_tx_type(tx_type) {
+        return Err(());
+    }
+
+    // rule 0: sfAccount must be present and equal the emitting hook's own
+    // account.
+    let account_field = fields.iter().find(|f| f.code == SF_ACCOUNT).ok_or(())?;
+    let (a_start, a_end) = field_value_payload(blob, account_field)?;
+    let account_bytes = blob.get(a_start..a_end).ok_or(())?;
+    if account_bytes != hook_account {
         return Err(());
     }
 
@@ -409,17 +689,33 @@ pub(crate) fn validate_emit_blob(
         return Err(());
     }
 
+    // rule 2: sfSigningPubKey must be present and either empty or 33
+    // zero bytes.
     let spk_field = fields
         .iter()
         .find(|f| f.code == SF_SIGNING_PUB_KEY)
         .ok_or(())?;
     let mut spk_pos = spk_field.value_range.0;
     let spk_len = decode_vl_len(blob, &mut spk_pos)?;
-    if spk_len != 0 {
+    if spk_len != 0 && spk_len != 33 {
         return Err(());
     }
+    if spk_len > 0 {
+        let end = spk_pos.checked_add(spk_len).ok_or(())?;
+        let spk_bytes = blob.get(spk_pos..end).ok_or(())?;
+        if spk_bytes.iter().any(|&b| b != 0) {
+            return Err(());
+        }
+    }
 
-    if !fields.iter().any(|f| f.code == SF_FEE) {
+    // rules 2.a-2.c and 4: none of these fields may be present in an
+    // emitted transaction.
+    if fields.iter().any(|f| {
+        matches!(
+            f.code,
+            SF_SIGNERS | SF_TICKET_SEQUENCE | SF_ACCOUNT_TXN_ID | SF_TXN_SIGNATURE
+        )
+    }) {
         return Err(());
     }
 
@@ -433,7 +729,72 @@ pub(crate) fn validate_emit_blob(
         return Err(());
     }
 
+    // rule 5: sfLastLedgerSequence must be present and within
+    // [ledger_seq + 1, ledger_seq + 5].
+    let lls_field = fields
+        .iter()
+        .find(|f| f.code == SF_LAST_LEDGER_SEQUENCE)
+        .ok_or(())?;
+    let lls_bytes = field_bytes(blob, lls_field.value_range).ok_or(())?;
+    let lls = u32::from_be_bytes(lls_bytes.try_into().map_err(|_| ())?);
+    let min_lls = ledger_seq.checked_add(1).ok_or(())?;
+    let max_lls = ledger_seq.checked_add(5).ok_or(())?;
+    if lls < min_lls || lls > max_lls {
+        return Err(());
+    }
+
+    // rule 6: sfFirstLedgerSequence must be present and <=
+    // sfLastLedgerSequence.
+    let fls_field = fields
+        .iter()
+        .find(|f| f.code == SF_FIRST_LEDGER_SEQUENCE)
+        .ok_or(())?;
+    let fls_bytes = field_bytes(blob, fls_field.value_range).ok_or(())?;
+    let fls = u32::from_be_bytes(fls_bytes.try_into().map_err(|_| ())?);
+    if fls > lls {
+        return Err(());
+    }
+
+    // rule 7: sfFee must be present, a native (XRP) amount, and at least
+    // `min_fee`.
+    let fee_field = fields.iter().find(|f| f.code == SF_FEE).ok_or(())?;
+    let fee_bytes = field_bytes(blob, fee_field.value_range).ok_or(())?;
+    let fee_arr: [u8; 8] = fee_bytes.try_into().map_err(|_| ())?;
+    if fee_arr[0] & 0x80 != 0 {
+        // Non-native (issued-currency) amount: not a legal Fee.
+        return Err(());
+    }
+    let fee_drops = u64::from_be_bytes(fee_arr) & 0x3FFF_FFFF_FFFF_FFFF;
+    if fee_drops < min_fee {
+        return Err(());
+    }
+
+    // Field-presence subset of `ripple::preflight`: every field
+    // `protocol_formats.json` marks `required` for this transaction type
+    // (common fields plus the type's own) must be present.
+    let required =
+        crate::protocol_formats::required_top_level_field_codes(tx_type_value).ok_or(())?;
+    for code in required {
+        if !fields.iter().any(|f| f.code == code) {
+            return Err(());
+        }
+    }
+
     Ok(())
+}
+
+/// The pseudo transaction types real xahaud's `isPseudoTx` rejects before
+/// any other `HookAPI::emit` check (`HookAPI.cpp`'s `isPseudoTx` call,
+/// right after the `STTx` parse) — a hook can never emit one of these.
+fn is_pseudo_tx_type(tx_type: TxType) -> bool {
+    matches!(
+        tx_type,
+        TxType::EnableAmendment
+            | TxType::SetFee
+            | TxType::UNLModify
+            | TxType::EmitFailure
+            | TxType::UNLReport
+    )
 }
 
 /// The `TransactionType` field of a blob that has already passed
@@ -441,7 +802,10 @@ pub(crate) fn validate_emit_blob(
 /// `None` only if the blob is malformed in a way the walker should already
 /// have rejected (defensive).
 pub(crate) fn top_level_transaction_type(blob: &[u8]) -> Option<TxType> {
-    let fields = walk_top_level(blob).ok()?;
+    // `blob` is always a stored `EmittedTxn::blob` — canonical (NOP-free)
+    // by construction, see `NopMode::Strict`'s doc comment — so `Strict` is
+    // both correct and a defensive assertion of that invariant.
+    let fields = walk_top_level(blob, NopMode::Strict).ok()?;
     let field = fields.iter().find(|f| f.code == SF_TRANSACTION_TYPE)?;
     let bytes = field_bytes(blob, field.value_range)?;
     let arr: [u8; 2] = bytes.try_into().ok()?;
@@ -454,21 +818,74 @@ mod tests {
 
     use super::*;
     use crate::details::{EmitDetailsInputs, build_etxn_details};
+    use crate::testutil::{nested_object_chain, sf_flags_bytes, sf_sequence_bytes};
+
+    /// The emitting hook's account, shared by every test below.
+    const HOOK_ACCOUNT: [u8; 20] = [9u8; 20];
+    /// A minimal Payment's `sfDestination` — required by
+    /// `protocol_formats.json`'s Payment format, distinct from
+    /// `HOOK_ACCOUNT`.
+    const DESTINATION: [u8; 20] = [8u8; 20];
+    /// The world's current ledger sequence, shared by every test below.
+    const LEDGER_SEQ: u32 = 100;
+    /// `LEDGER_SEQ + 1`: the only legal `sfFirstLedgerSequence` value below
+    /// (rule 6 only requires `<= sfLastLedgerSequence`, but pinning it here
+    /// keeps every fixture unambiguous).
+    const FIRST_LEDGER_SEQUENCE: u32 = LEDGER_SEQ + 1;
+    /// `LEDGER_SEQ + 5`: the top of rule 5's legal `sfLastLedgerSequence`
+    /// window.
+    const LAST_LEDGER_SEQUENCE: u32 = LEDGER_SEQ + 5;
+    /// The minimum fee `validate_emit_blob`'s caller (`Backend::emit`) would
+    /// compute via `etxn_fee_base` — a fixed stand-in here since this
+    /// module tests the fee *comparison*, not fee computation itself.
+    const MIN_FEE: u64 = 10;
+
+    /// Encodes `drops` as an 8-byte native (XRP) amount: bit 63 clear
+    /// (native), bit 62 set (positive), the value in the low 62 bits,
+    /// big-endian — mirrors `rshooks::txn::encode_native_amount`.
+    fn native_amount(drops: u64) -> [u8; 8] {
+        (0x4000_0000_0000_0000u64 | drops).to_be_bytes()
+    }
 
     /// Builds a minimal, otherwise-valid emitted-Payment blob so each test
-    /// can mutate exactly one thing and re-validate.
-    fn minimal_payment(emit_details: &[u8]) -> Vec<u8> {
+    /// can mutate exactly one thing and re-validate. Every field
+    /// `validate_emit_blob` requires (including `protocol_formats.json`'s
+    /// Payment-specific `sfDestination`) is present and legal against
+    /// `HOOK_ACCOUNT`/`LEDGER_SEQ`/`MIN_FEE` above. `signing_pub_key` is the
+    /// VL length prefix plus payload that goes after the `SigningPubKey`
+    /// (7, 3) header — `&[0x00]` (empty VL) for the ordinary unsigned case,
+    /// or something else for a test that specifically varies this field.
+    fn minimal_payment_with_signing_pub_key(
+        emit_details: &[u8],
+        signing_pub_key: &[u8],
+    ) -> Vec<u8> {
         let mut out = Vec::new();
         out.extend_from_slice(&[0x12, 0x00, 0x00]); // TransactionType = 0 (Payment)
         out.extend_from_slice(&[0x24, 0, 0, 0, 0]); // Sequence = 0
-        out.extend_from_slice(&[0x61, 0x40, 0, 0, 0, 0, 0, 0, 1]); // Amount: native 1 drop
-        out.extend_from_slice(&[0x68, 0x40, 0, 0, 0, 0, 0, 0, 0]); // Fee: native 0 drops
-        out.extend_from_slice(&[0x73, 0x00]); // SigningPubKey: empty VL
-        out.push(0x81);
+        out.push(0x20); // FirstLedgerSequence (2, 26)
+        out.push(26);
+        out.extend_from_slice(&FIRST_LEDGER_SEQUENCE.to_be_bytes());
+        out.push(0x20); // LastLedgerSequence (2, 27)
+        out.push(27);
+        out.extend_from_slice(&LAST_LEDGER_SEQUENCE.to_be_bytes());
+        out.push(0x61); // Amount (6, 1): native 1 drop
+        out.extend_from_slice(&native_amount(1));
+        out.push(0x68); // Fee (6, 8): native, exactly MIN_FEE
+        out.extend_from_slice(&native_amount(MIN_FEE));
+        out.push(0x73); // SigningPubKey (7, 3)
+        out.extend_from_slice(signing_pub_key);
+        out.push(0x81); // Account (8, 1)
         out.push(20);
-        out.extend_from_slice(&[0u8; 20]); // Account
+        out.extend_from_slice(&HOOK_ACCOUNT);
+        out.push(0x83); // Destination (8, 3)
+        out.push(20);
+        out.extend_from_slice(&DESTINATION);
         out.extend_from_slice(emit_details);
         out
+    }
+
+    fn minimal_payment(emit_details: &[u8]) -> Vec<u8> {
+        minimal_payment_with_signing_pub_key(emit_details, &[0x00])
     }
 
     fn details() -> Vec<u8> {
@@ -482,18 +899,28 @@ mod tests {
         })
     }
 
+    fn validate(blob: &[u8], expected_emit_details: Option<&[u8]>) -> Result<(), ()> {
+        validate_emit_blob(
+            blob,
+            expected_emit_details,
+            &HOOK_ACCOUNT,
+            LEDGER_SEQ,
+            MIN_FEE,
+        )
+    }
+
     #[test]
     fn accepts_a_well_formed_blob() {
         let d = details();
         let blob = minimal_payment(&d);
-        assert!(validate_emit_blob(&blob, Some(&d)).is_ok());
+        assert!(validate(&blob, Some(&d)).is_ok());
     }
 
     #[test]
     fn rejects_missing_emit_details_expectation() {
         let d = details();
         let blob = minimal_payment(&d);
-        assert!(validate_emit_blob(&blob, None).is_err());
+        assert!(validate(&blob, None).is_err());
     }
 
     #[test]
@@ -508,7 +935,7 @@ mod tests {
             callback: None,
         });
         let blob = minimal_payment(&d);
-        assert!(validate_emit_blob(&blob, Some(&other)).is_err());
+        assert!(validate(&blob, Some(&other)).is_err());
     }
 
     #[test]
@@ -518,24 +945,152 @@ mod tests {
         if let Some(b) = blob.get_mut(7) {
             *b = 1;
         }
-        assert!(validate_emit_blob(&blob, Some(&d)).is_err());
+        assert!(validate(&blob, Some(&d)).is_err());
+    }
+
+    /// Locates `code`'s value payload range in `blob` and overwrites it with
+    /// `value` — a mutate-one-field helper shared by the tests below that
+    /// need to flip a field sitting past `minimal_payment`'s fixed early
+    /// offsets, without hand-computing byte positions.
+    fn set_field_value(blob: &mut [u8], code: u64, value: &[u8]) {
+        let fields = walk_top_level_fields(blob, NopMode::Tolerant).unwrap();
+        let field = fields.iter().find(|f| f.code == code).unwrap();
+        let (start, end) = field_value_payload(blob, field).unwrap();
+        assert_eq!(end.checked_sub(start).unwrap(), value.len());
+        blob[start..end].copy_from_slice(value);
+    }
+
+    #[test]
+    fn rejects_account_mismatch() {
+        // rule 0: sfAccount must equal the emitting hook's own account.
+        let d = details();
+        let mut blob = minimal_payment(&d);
+        set_field_value(&mut blob, SF_ACCOUNT, &[0xAAu8; 20]);
+        assert!(validate(&blob, Some(&d)).is_err());
+    }
+
+    #[test]
+    fn accepts_a_33_byte_all_zero_signing_pub_key() {
+        // rule 2: an unsigned emitted txn may carry either an empty
+        // SigningPubKey or a 33-byte all-zero one.
+        let d = details();
+        let mut signing_pub_key = vec![33u8]; // VL length prefix
+        signing_pub_key.extend_from_slice(&[0u8; 33]); // 33 all-zero bytes
+        let blob = minimal_payment_with_signing_pub_key(&d, &signing_pub_key);
+        assert!(validate(&blob, Some(&d)).is_ok());
     }
 
     #[test]
     fn rejects_nonempty_signing_pub_key() {
         let d = details();
+        // non-empty, non-zero-length SigningPubKey: VL length 1, byte 0xAB
+        let blob = minimal_payment_with_signing_pub_key(&d, &[1u8, 0xAB]);
+        assert!(validate(&blob, Some(&d)).is_err());
+    }
+
+    #[test]
+    fn rejects_a_signers_field() {
+        // rule 2.a: sfSigners is never allowed in an emitted txn.
+        let d = details();
+        let mut blob = minimal_payment(&d);
+        blob.extend_from_slice(&[0xF3, ARRAY_END_MARKER]); // Signers (15, 3): empty array
+        assert!(validate(&blob, Some(&d)).is_err());
+    }
+
+    #[test]
+    fn rejects_a_ticket_sequence_field() {
+        // rule 2.b: sfTicketSequence is never allowed in an emitted txn.
+        let d = details();
+        let mut blob = minimal_payment(&d);
+        blob.push(0x20); // TicketSequence (2, 41): field >= 16, two-byte header
+        blob.push(41);
+        blob.extend_from_slice(&[0, 0, 0, 1]);
+        assert!(validate(&blob, Some(&d)).is_err());
+    }
+
+    #[test]
+    fn rejects_an_account_txn_id_field() {
+        // rule 2.c: sfAccountTxnID is never allowed in an emitted txn.
+        let d = details();
+        let mut blob = minimal_payment(&d);
+        blob.push(0x59); // AccountTxnID (5, 9)
+        blob.extend_from_slice(&[0u8; 32]);
+        assert!(validate(&blob, Some(&d)).is_err());
+    }
+
+    #[test]
+    fn rejects_a_txn_signature_field() {
+        // rule 4: sfTxnSignature is never allowed in an emitted txn.
+        let d = details();
+        let mut blob = minimal_payment(&d);
+        blob.extend_from_slice(&[0x74, 0x00]); // TxnSignature (7, 4): empty VL
+        assert!(validate(&blob, Some(&d)).is_err());
+    }
+
+    #[test]
+    fn rejects_last_ledger_sequence_at_current_ledger() {
+        // rule 5: sfLastLedgerSequence must be strictly greater than the
+        // current ledger sequence (>= ledger_seq + 1).
+        let d = details();
+        let mut blob = minimal_payment(&d);
+        set_field_value(
+            &mut blob,
+            SF_LAST_LEDGER_SEQUENCE,
+            &LEDGER_SEQ.to_be_bytes(),
+        );
+        assert!(validate(&blob, Some(&d)).is_err());
+    }
+
+    #[test]
+    fn rejects_last_ledger_sequence_past_the_window() {
+        // rule 5: sfLastLedgerSequence must be <= ledger_seq + 5.
+        let d = details();
+        let mut blob = minimal_payment(&d);
+        set_field_value(
+            &mut blob,
+            SF_LAST_LEDGER_SEQUENCE,
+            &(LAST_LEDGER_SEQUENCE + 1).to_be_bytes(),
+        );
+        assert!(validate(&blob, Some(&d)).is_err());
+    }
+
+    #[test]
+    fn rejects_first_ledger_sequence_past_last() {
+        // rule 6: sfFirstLedgerSequence must be <= sfLastLedgerSequence.
+        let d = details();
+        let mut blob = minimal_payment(&d);
+        set_field_value(
+            &mut blob,
+            SF_FIRST_LEDGER_SEQUENCE,
+            &(LAST_LEDGER_SEQUENCE + 1).to_be_bytes(),
+        );
+        assert!(validate(&blob, Some(&d)).is_err());
+    }
+
+    #[test]
+    fn rejects_fee_below_the_minimum() {
+        // rule 7: sfFee must be at least the caller-computed minimum.
+        let d = details();
         let mut out = Vec::new();
         out.extend_from_slice(&[0x12, 0x00, 0x00]);
         out.extend_from_slice(&[0x24, 0, 0, 0, 0]);
-        out.extend_from_slice(&[0x68, 0x40, 0, 0, 0, 0, 0, 0, 0]);
-        out.push(0x73);
-        out.push(1);
-        out.push(0xAB); // non-empty SigningPubKey
+        out.push(0x20);
+        out.push(26);
+        out.extend_from_slice(&FIRST_LEDGER_SEQUENCE.to_be_bytes());
+        out.push(0x20);
+        out.push(27);
+        out.extend_from_slice(&LAST_LEDGER_SEQUENCE.to_be_bytes());
+        out.push(0x68);
+        out.extend_from_slice(&native_amount(MIN_FEE - 1));
+        out.extend_from_slice(&[0x73, 0x00]);
         out.push(0x81);
         out.push(20);
-        out.extend_from_slice(&[0u8; 20]);
+        out.extend_from_slice(&HOOK_ACCOUNT);
+        out.push(0x83);
+        out.push(20);
+        out.extend_from_slice(&DESTINATION);
         out.extend_from_slice(&d);
-        assert!(validate_emit_blob(&out, Some(&d)).is_err());
+        assert!(validate(&out, Some(&d)).is_err());
     }
 
     #[test]
@@ -544,12 +1099,58 @@ mod tests {
         let mut out = Vec::new();
         out.extend_from_slice(&[0x12, 0x00, 0x00]);
         out.extend_from_slice(&[0x24, 0, 0, 0, 0]);
+        out.push(0x20);
+        out.push(26);
+        out.extend_from_slice(&FIRST_LEDGER_SEQUENCE.to_be_bytes());
+        out.push(0x20);
+        out.push(27);
+        out.extend_from_slice(&LAST_LEDGER_SEQUENCE.to_be_bytes());
         out.extend_from_slice(&[0x73, 0x00]);
         out.push(0x81);
         out.push(20);
-        out.extend_from_slice(&[0u8; 20]);
+        out.extend_from_slice(&HOOK_ACCOUNT);
+        out.push(0x83);
+        out.push(20);
+        out.extend_from_slice(&DESTINATION);
         out.extend_from_slice(&d);
-        assert!(validate_emit_blob(&out, Some(&d)).is_err());
+        assert!(validate(&out, Some(&d)).is_err());
+    }
+
+    #[test]
+    fn rejects_a_payment_missing_the_required_destination() {
+        // The field-presence subset of `ripple::preflight`, driven by
+        // `protocol_formats.json`: Payment's own `sfDestination` is
+        // `presence: "required"`.
+        let d = details();
+        let mut out = Vec::new();
+        out.extend_from_slice(&[0x12, 0x00, 0x00]);
+        out.extend_from_slice(&[0x24, 0, 0, 0, 0]);
+        out.push(0x20);
+        out.push(26);
+        out.extend_from_slice(&FIRST_LEDGER_SEQUENCE.to_be_bytes());
+        out.push(0x20);
+        out.push(27);
+        out.extend_from_slice(&LAST_LEDGER_SEQUENCE.to_be_bytes());
+        out.push(0x61);
+        out.extend_from_slice(&native_amount(1));
+        out.push(0x68);
+        out.extend_from_slice(&native_amount(MIN_FEE));
+        out.extend_from_slice(&[0x73, 0x00]);
+        out.push(0x81);
+        out.push(20);
+        out.extend_from_slice(&HOOK_ACCOUNT);
+        out.extend_from_slice(&d);
+        assert!(validate(&out, Some(&d)).is_err());
+    }
+
+    #[test]
+    fn rejects_a_pseudo_transaction_type() {
+        // real xahaud's `isPseudoTx` rejects an emitted SetFee (101)
+        // outright, before any of the field-level rules run.
+        let d = details();
+        let mut blob = minimal_payment(&d);
+        blob[1..3].copy_from_slice(&101u16.to_be_bytes());
+        assert!(validate(&blob, Some(&d)).is_err());
     }
 
     #[test]
@@ -561,34 +1162,116 @@ mod tests {
         if let Some(b) = blob.get_mut(2) {
             *b = 0xFF;
         }
-        assert!(validate_emit_blob(&blob, Some(&d)).is_err());
+        assert!(validate(&blob, Some(&d)).is_err());
     }
 
     #[test]
-    fn rejects_out_of_order_fields() {
+    fn accepts_out_of_order_fields() {
         let d = details();
         let mut out = Vec::new();
-        // Sequence (2,4) placed before TransactionType (1,2): violates
-        // canonical increasing order.
+        // Sequence (2,4) placed before TransactionType (1,2): outside
+        // ascending (type, field) order, which real xahaud does not
+        // require (see this module's doc comment).
         out.extend_from_slice(&[0x24, 0, 0, 0, 0]);
         out.extend_from_slice(&[0x12, 0x00, 0x00]);
-        out.extend_from_slice(&[0x68, 0x40, 0, 0, 0, 0, 0, 0, 0]);
+        out.push(0x20);
+        out.push(26);
+        out.extend_from_slice(&FIRST_LEDGER_SEQUENCE.to_be_bytes());
+        out.push(0x20);
+        out.push(27);
+        out.extend_from_slice(&LAST_LEDGER_SEQUENCE.to_be_bytes());
+        out.push(0x61);
+        out.extend_from_slice(&native_amount(1));
+        out.push(0x68);
+        out.extend_from_slice(&native_amount(MIN_FEE));
         out.extend_from_slice(&[0x73, 0x00]);
+        out.push(0x83);
+        out.push(20);
+        out.extend_from_slice(&DESTINATION);
+        out.push(0x81);
+        out.push(20);
+        out.extend_from_slice(&HOOK_ACCOUNT);
         out.extend_from_slice(&d);
-        assert!(validate_emit_blob(&out, Some(&d)).is_err());
+        assert!(validate(&out, Some(&d)).is_ok());
     }
 
     #[test]
     fn rejects_duplicate_field() {
+        // Citing `STObject::set`'s real "Duplicate field detected" throw —
+        // see `validate_emit_blob`'s doc comment; the underlying walk
+        // itself tolerates a repeat, matching `sto_validate`/`sto_subfield`
+        // (see `walk_top_level_fields_accepts_a_duplicate_field` below).
+        let d = details();
+        let mut blob = minimal_payment(&d);
+        blob.extend_from_slice(&[0x24, 0, 0, 0, 0]); // duplicate Sequence
+        assert!(validate(&blob, Some(&d)).is_err());
+    }
+
+    #[test]
+    fn rejects_a_non_adjacent_duplicate_field() {
+        // The duplicate-Sequence check does not depend on adjacency: every
+        // other field sits between the two Sequence occurrences.
         let d = details();
         let mut out = Vec::new();
-        out.extend_from_slice(&[0x12, 0x00, 0x00]);
-        out.extend_from_slice(&[0x24, 0, 0, 0, 0]);
-        out.extend_from_slice(&[0x24, 0, 0, 0, 0]); // duplicate Sequence
-        out.extend_from_slice(&[0x68, 0x40, 0, 0, 0, 0, 0, 0, 0]);
-        out.extend_from_slice(&[0x73, 0x00]);
-        out.extend_from_slice(&d);
-        assert!(validate_emit_blob(&out, Some(&d)).is_err());
+        out.extend_from_slice(&[0x24, 0, 0, 0, 0]); // Sequence
+        out.extend_from_slice(&minimal_payment(&d)); // every field, including Sequence again
+        assert!(validate(&out, Some(&d)).is_err());
+    }
+
+    #[test]
+    fn rejects_duplicate_field_inside_a_nested_object() {
+        // Two Sequence-coded (2,4) fields inside one nested STObject
+        // (14,9): a repeat within the same object scope is rejected even
+        // though it is nested, matching `STObject::set`'s per-depth
+        // invariant (see `reject_duplicate_fields`'s doc comment).
+        let d = details();
+        let mut blob = minimal_payment(&d);
+        blob.push(0xE9); // nested object field: (14, 9)
+        blob.extend_from_slice(&[0x24, 0, 0, 0, 1]);
+        blob.extend_from_slice(&[0x24, 0, 0, 0, 2]); // duplicate within the nested object
+        blob.push(OBJECT_END_MARKER);
+        assert!(validate(&blob, Some(&d)).is_err());
+    }
+
+    #[test]
+    fn accepts_the_same_field_code_in_two_different_array_elements() {
+        // Each array element is its own object scope: a Sequence-coded
+        // (2,4) field repeating across sibling elements is legal.
+        let d = details();
+        let mut blob = minimal_payment(&d);
+        blob.push(0xFF); // array field: (15, 15)
+        blob.push(0xE2); // element 1 header: (14, 2)
+        blob.extend_from_slice(&[0x24, 0, 0, 0, 1]);
+        blob.push(OBJECT_END_MARKER);
+        blob.push(0xE3); // element 2 header: (14, 3)
+        blob.extend_from_slice(&[0x24, 0, 0, 0, 2]); // same field code as element 1's
+        blob.push(OBJECT_END_MARKER);
+        blob.push(ARRAY_END_MARKER);
+        assert!(validate(&blob, Some(&d)).is_ok());
+    }
+
+    #[test]
+    fn accepts_the_same_field_code_at_top_level_and_inside_a_nested_object() {
+        // A scope's field-code set is independent of its parent's: the
+        // top-level Sequence (2,4) and a Sequence-coded field inside a
+        // nested object (14,9) do not collide.
+        let d = details();
+        let mut blob = minimal_payment(&d);
+        blob.push(0xE9); // nested object field: (14, 9)
+        blob.extend_from_slice(&[0x24, 0, 0, 0, 7]);
+        blob.push(OBJECT_END_MARKER);
+        assert!(validate(&blob, Some(&d)).is_ok());
+    }
+
+    #[test]
+    fn walk_top_level_fields_accepts_a_duplicate_field() {
+        // The general field walk (shared with `sto_validate`/
+        // `sto_subfield`) is more permissive than `validate_emit_blob`'s
+        // own grammar — see this module's doc comment.
+        let data: &[u8] = &[0x24, 0, 0, 0, 1, 0x24, 0, 0, 0, 2];
+        let fields = walk_top_level_fields(data, NopMode::Strict).unwrap();
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].code, fields[1].code);
     }
 
     #[test]
@@ -596,27 +1279,46 @@ mod tests {
         let d = details();
         let mut blob = minimal_payment(&d);
         blob.push(0xFF);
-        assert!(validate_emit_blob(&blob, Some(&d)).is_err());
+        assert!(validate(&blob, Some(&d)).is_err());
     }
 
     #[test]
-    fn rejects_depth_beyond_two() {
-        // Three nested Object-typed (type 14) field headers in a row: an
-        // outer field at top level (depth 0 -> opens depth 1), one nested
-        // inside it (depth 1 -> opens depth 2), and one nested inside that
-        // (depth 2 -> would open depth 3, over the limit). The depth check
-        // fires as soon as the third header's value is dispatched, before
-        // any terminator is needed.
-        let depth_violation: &[u8] = &[
-            0xEE, // top level: (type 14, field 14) -> opens depth 1
-            0xE2, // depth 1:   (type 14, field 2)  -> opens depth 2
-            0xE5, // depth 2:   (type 14, field 5)  -> would open depth 3
-        ];
+    fn accepts_nesting_up_to_the_real_hosts_limit() {
+        // Real xahaud's `get_stobject_length` accepts recursion depths
+        // 0..=10 (`HookAPI.cpp:2901`); depth 3 and depth 10 (the boundary)
+        // must both parse.
+        for depth in [2u32, 3, 10] {
+            let d = details();
+            let mut blob = minimal_payment(&d);
+            blob.extend_from_slice(&nested_object_chain(depth));
+            assert!(
+                validate(&blob, Some(&d)).is_ok(),
+                "depth {depth} should be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_depth_beyond_the_real_hosts_limit() {
+        // A chain of 11 nested Object-typed(14) headers: the 11th would
+        // open recursion depth 11, over `get_stobject_length`'s bound
+        // (`HookAPI.cpp:2901`). The depth check fires as soon as the 11th
+        // header's value is dispatched, before any terminator is needed.
+        let depth_violation: [u8; 11] = [0xE2u8; 11];
 
         let d = details();
         let mut blob = minimal_payment(&d);
-        blob.extend_from_slice(depth_violation);
-        assert!(validate_emit_blob(&blob, Some(&d)).is_err());
+        blob.extend_from_slice(&depth_violation);
+        assert!(validate(&blob, Some(&d)).is_err());
+    }
+
+    #[test]
+    fn walk_top_level_fields_matches_the_same_depth_bound() {
+        // `walk_top_level_fields` (the shared parser `sto_validate`/
+        // `sto_subfield`/`slot_subfield` all call directly) uses the exact
+        // same bound as [`validate_emit_blob`]'s tests above.
+        assert!(walk_top_level_fields(&nested_object_chain(10), NopMode::Strict).is_ok());
+        assert!(walk_top_level_fields(&[0xE2u8; 11], NopMode::Strict).is_err());
     }
 
     #[test]
@@ -627,7 +1329,7 @@ mod tests {
         blob.push(0xE2); // element header: (type 14, field 2) -- STObject
         blob.push(OBJECT_END_MARKER); // empty object body
         blob.push(ARRAY_END_MARKER);
-        assert!(validate_emit_blob(&blob, Some(&d)).is_ok());
+        assert!(validate(&blob, Some(&d)).is_ok());
     }
 
     #[test]
@@ -638,7 +1340,7 @@ mod tests {
         blob.push(0x21); // element header: (type 2, field 1) -- UInt32, not STObject
         blob.extend_from_slice(&[0, 0, 0, 1]);
         blob.push(ARRAY_END_MARKER);
-        assert!(validate_emit_blob(&blob, Some(&d)).is_err());
+        assert!(validate(&blob, Some(&d)).is_err());
     }
 
     #[test]
@@ -662,26 +1364,26 @@ mod tests {
             OBJECT_END_MARKER,
             ARRAY_END_MARKER,
         ];
-        let spans = walk_array_elements(data).unwrap();
+        let spans = walk_array_elements(data, NopMode::Strict).unwrap();
         assert_eq!(spans, vec![(0, 2), (2, 4)]);
     }
 
     #[test]
     fn walk_array_elements_rejects_a_non_object_element() {
         let data: &[u8] = &[0x21, 0, 0, 0, 1, ARRAY_END_MARKER]; // UInt32, not STObject
-        assert!(walk_array_elements(data).is_err());
+        assert!(walk_array_elements(data, NopMode::Strict).is_err());
     }
 
     #[test]
     fn walk_array_elements_rejects_trailing_bytes_after_the_terminator() {
         let data: &[u8] = &[0xE2, OBJECT_END_MARKER, ARRAY_END_MARKER, 0xFF];
-        assert!(walk_array_elements(data).is_err());
+        assert!(walk_array_elements(data, NopMode::Strict).is_err());
     }
 
     #[test]
     fn walk_array_elements_rejects_a_missing_terminator() {
         let data: &[u8] = &[0xE2, OBJECT_END_MARKER];
-        assert!(walk_array_elements(data).is_err());
+        assert!(walk_array_elements(data, NopMode::Strict).is_err());
     }
 
     #[test]
@@ -689,7 +1391,7 @@ mod tests {
         // sfAccount (type 8, field 1) = 0x81, VL-prefixed 20-byte payload.
         let mut data = vec![0x81, 20];
         data.extend_from_slice(&[7u8; 20]);
-        let fields = walk_top_level_fields(&data).unwrap();
+        let fields = walk_top_level_fields(&data, NopMode::Strict).unwrap();
         assert_eq!(fields.len(), 1);
         let (start, end) = field_value_payload(&data, &fields[0]).unwrap();
         assert_eq!((start, end), (2, 22));
@@ -700,14 +1402,14 @@ mod tests {
     fn field_value_payload_leaves_amount_and_object_fields_untouched() {
         // sfFee (type 6, field 8) = 0x68, native amount, 8 raw bytes, no VL.
         let data: &[u8] = &[0x68, 0x40, 0, 0, 0, 0, 0, 0, 5];
-        let fields = walk_top_level_fields(data).unwrap();
+        let fields = walk_top_level_fields(data, NopMode::Strict).unwrap();
         let (start, end) = field_value_payload(data, &fields[0]).unwrap();
         assert_eq!((start, end), (1, 9));
 
         // A nested object field: (type 14, field 2) = 0xE2, empty body,
         // 0xE1 terminator — the terminator stays part of the "value".
         let obj: &[u8] = &[0xE2, OBJECT_END_MARKER];
-        let of = walk_top_level_fields(obj).unwrap();
+        let of = walk_top_level_fields(obj, NopMode::Strict).unwrap();
         let (ostart, oend) = field_value_payload(obj, &of[0]).unwrap();
         assert_eq!((ostart, oend), (1, 2));
     }
@@ -716,13 +1418,261 @@ mod tests {
     fn walk_top_level_fields_or_object_dispatches_on_in_object() {
         let root: &[u8] = &[0x68, 0x40, 0, 0, 0, 0, 0, 0, 5]; // sfFee, no wrapping
         assert_eq!(
-            walk_top_level_fields_or_object(root, false).unwrap().len(),
+            walk_top_level_fields_or_object(root, false, NopMode::Strict)
+                .unwrap()
+                .len(),
             1
         );
         let nested: &[u8] = &[0x24, 0, 0, 0, 1, OBJECT_END_MARKER]; // sfSequence then 0xE1
         assert_eq!(
-            walk_top_level_fields_or_object(nested, true).unwrap().len(),
+            walk_top_level_fields_or_object(nested, true, NopMode::Strict)
+                .unwrap()
+                .len(),
             1
         );
+    }
+
+    // -- NOP handling ([`NopMode`]) --
+
+    #[test]
+    fn strict_mode_still_rejects_a_nop_header() {
+        // A lone NOP byte decodes as an ordinary (9, 9) header under
+        // `NopMode::Strict`; `STI_NUMBER`(9) has no defined length, so the
+        // walk fails — matching `host::sto::sto_validate`'s real-host
+        // parity (see that module's own NOP test).
+        assert!(walk_top_level_fields(&[NOP], NopMode::Strict).is_err());
+        let mut padded = sf_sequence_bytes(1);
+        padded.push(NOP);
+        padded.extend_from_slice(&sf_flags_bytes(2));
+        assert!(walk_top_level_fields(&padded, NopMode::Strict).is_err());
+    }
+
+    #[test]
+    fn tolerant_mode_skips_nops_between_top_level_fields_yielding_the_same_fields() {
+        let plain = {
+            let mut out = sf_flags_bytes(1);
+            out.extend_from_slice(&sf_sequence_bytes(7));
+            out
+        };
+        let padded = {
+            let mut out = vec![NOP, NOP];
+            out.extend_from_slice(&sf_flags_bytes(1));
+            out.push(NOP);
+            out.extend_from_slice(&sf_sequence_bytes(7));
+            out.push(NOP);
+            out
+        };
+
+        let plain_fields = walk_top_level_fields(&plain, NopMode::Tolerant).unwrap();
+        let padded_fields = walk_top_level_fields(&padded, NopMode::Tolerant).unwrap();
+        assert_eq!(plain_fields.len(), padded_fields.len());
+        for (p, q) in plain_fields.iter().zip(padded_fields.iter()) {
+            assert_eq!(p.code, q.code);
+            let (ps, pe) = field_value_payload(&plain, p).unwrap();
+            let (qs, qe) = field_value_payload(&padded, q).unwrap();
+            assert_eq!(plain.get(ps..pe), padded.get(qs..qe));
+        }
+
+        // Strict mode rejects the same padded bytes.
+        assert!(walk_top_level_fields(&padded, NopMode::Strict).is_err());
+    }
+
+    #[test]
+    fn tolerant_mode_skips_nops_between_array_elements_and_inside_an_element_object() {
+        // One array field (type 15, field 15) with two STObject elements:
+        // the first has one scalar field followed by a NOP before its own
+        // `0xE1` (object-level NOP), the two elements are separated by a
+        // NOP (array-level NOP).
+        let data: &[u8] = &[
+            0xFF, // array field header
+            0xE2, // element 0 header (STObject)
+            0x24,
+            0,
+            0,
+            0,
+            7,   // sfSequence = 7
+            NOP, // NOP inside element 0's own body
+            OBJECT_END_MARKER,
+            NOP,  // NOP between array elements
+            0xE3, // element 1 header (STObject), empty body
+            OBJECT_END_MARKER,
+            ARRAY_END_MARKER,
+        ];
+        let fields = walk_top_level_fields(data, NopMode::Tolerant).unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].code, sfcode(15, 15));
+
+        // The same bytes fail under `NopMode::Strict`.
+        assert!(walk_top_level_fields(data, NopMode::Strict).is_err());
+    }
+
+    #[test]
+    fn tolerant_mode_allows_63_nops_in_one_container_and_rejects_the_64th() {
+        let mut ok = vec![NOP; MAX_NOPS_PER_CONTAINER];
+        ok.extend_from_slice(&sf_sequence_bytes(9));
+        assert!(walk_top_level_fields(&ok, NopMode::Tolerant).is_ok());
+
+        let mut too_many = vec![NOP; MAX_NOPS_PER_CONTAINER + 1];
+        too_many.extend_from_slice(&sf_sequence_bytes(9));
+        assert!(walk_top_level_fields(&too_many, NopMode::Tolerant).is_err());
+    }
+
+    #[test]
+    fn tolerant_mode_nop_budget_is_cumulative_not_reset_by_real_fields() {
+        // 20 + 22 + 21 NOPs, split across three runs by two real fields in
+        // between: the counter must accumulate across all three runs
+        // (`20 + 22 + 21 == 63`, exactly at budget) rather than resetting
+        // at each intervening field.
+        let mut ok = vec![NOP; 20];
+        ok.extend_from_slice(&sf_flags_bytes(1));
+        ok.extend_from_slice(&[NOP; 22]);
+        ok.extend_from_slice(&sf_sequence_bytes(7));
+        ok.extend_from_slice(&[NOP; 21]);
+        let fields = walk_top_level_fields(&ok, NopMode::Tolerant).unwrap();
+        assert_eq!(fields.len(), 2);
+
+        // One more NOP anywhere in the same layout (64 total) must fail,
+        // even though no single run exceeds the earlier 63-in-a-row case.
+        let mut too_many = vec![NOP; 20];
+        too_many.extend_from_slice(&sf_flags_bytes(1));
+        too_many.extend_from_slice(&[NOP; 22]);
+        too_many.extend_from_slice(&sf_sequence_bytes(7));
+        too_many.extend_from_slice(&[NOP; 22]);
+        assert!(walk_top_level_fields(&too_many, NopMode::Tolerant).is_err());
+    }
+
+    #[test]
+    fn tolerant_mode_containers_have_independent_nop_budgets() {
+        // 63 NOPs at the top level, plus another 63 inside a nested
+        // object — each container's own counter stays within budget, so
+        // this succeeds even though the combined NOP count (126) would
+        // overflow a single shared counter.
+        let mut data = vec![NOP; MAX_NOPS_PER_CONTAINER];
+        data.push(0xE2); // nested object field header (STObject)
+        data.extend_from_slice(&[NOP; MAX_NOPS_PER_CONTAINER]);
+        data.push(OBJECT_END_MARKER);
+
+        let fields = walk_top_level_fields(&data, NopMode::Tolerant).unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].code, sfcode(14, 2));
+    }
+
+    // -- canonicalize --
+
+    #[test]
+    fn canonicalize_cases() {
+        let plain = {
+            let mut out = sf_flags_bytes(1);
+            out.extend_from_slice(&sf_sequence_bytes(7));
+            out
+        };
+        let padded_top_level = {
+            let mut out = vec![NOP, NOP];
+            out.extend_from_slice(&sf_flags_bytes(1));
+            out.push(NOP);
+            out.extend_from_slice(&sf_sequence_bytes(7));
+            out.push(NOP);
+            out
+        };
+        // `0x99` only means NOP in a field-*header* position; `skip_vl`
+        // consumes a VL field's payload as opaque bytes (the length prefix
+        // already says how many), so a `0x99` inside one is ordinary data,
+        // not a NOP — it must survive canonicalization exactly where it was
+        // written, not be stripped or miscounted.
+        let vl_with_0x99_payload = {
+            let mut out = vec![0x73]; // sfSigningPubKey (7,3): both < 16, one-byte header
+            out.push(3); // one-byte VL length prefix
+            out.extend_from_slice(&[0x99, 0x01, 0x99]); // payload, two 0x99 bytes
+            out
+        };
+        // One array field with two STObject elements, a NOP inside the
+        // first element's own body (object-level) and a NOP between the two
+        // elements (array-level) — both must disappear, independently,
+        // leaving exactly the NOP-free equivalent bytes (hand-pinned). Same
+        // shape as
+        // `tolerant_mode_skips_nops_between_array_elements_and_inside_an_element_object`.
+        let padded_array: &[u8] = &[
+            0xFF, // array field header
+            0xE2, // element 0 header (STObject)
+            0x24,
+            0,
+            0,
+            0,
+            7,   // sfSequence = 7
+            NOP, // NOP inside element 0's own body
+            OBJECT_END_MARKER,
+            NOP,  // NOP between array elements
+            0xE3, // element 1 header (STObject), empty body
+            OBJECT_END_MARKER,
+            ARRAY_END_MARKER,
+        ];
+        let plain_array: &[u8] = &[
+            0xFF, // array field header
+            0xE2, // element 0 header (STObject)
+            0x24,
+            0,
+            0,
+            0,
+            7, // sfSequence = 7
+            OBJECT_END_MARKER,
+            0xE3, // element 1 header (STObject), empty body
+            OBJECT_END_MARKER,
+            ARRAY_END_MARKER,
+        ];
+        let exactly_max_nops = {
+            let mut out = vec![NOP; MAX_NOPS_PER_CONTAINER];
+            out.extend_from_slice(&sf_sequence_bytes(9));
+            out
+        };
+        let one_past_max_nops = {
+            let mut out = vec![NOP; MAX_NOPS_PER_CONTAINER + 1];
+            out.extend_from_slice(&sf_sequence_bytes(9));
+            out
+        };
+        // 63 NOPs at the top level plus another 63 inside a nested object —
+        // both disappear, and the container's own containment (the nested
+        // object's `0xE1`) is preserved. Same shape as
+        // `tolerant_mode_containers_have_independent_nop_budgets`.
+        let independent_budgets = {
+            let mut out = vec![NOP; MAX_NOPS_PER_CONTAINER];
+            out.push(0xE2); // nested object field header (STObject)
+            out.extend_from_slice(&[NOP; MAX_NOPS_PER_CONTAINER]);
+            out.push(OBJECT_END_MARKER);
+            out
+        };
+
+        type Case<'a> = (&'a str, &'a [u8], Result<&'a [u8], &'a ()>);
+        let cases: &[Case<'_>] = &[
+            ("strips_top_level_nops", &padded_top_level, Ok(&plain)),
+            ("already_canonical_bytes_are_unchanged", &plain, Ok(&plain)),
+            (
+                "0x99_inside_a_vl_payload_is_untouched",
+                &vl_with_0x99_payload,
+                Ok(&vl_with_0x99_payload),
+            ),
+            (
+                "strips_nops_between_array_elements_and_inside_an_element_object",
+                padded_array,
+                Ok(plain_array),
+            ),
+            (
+                "allows_exactly_the_max_nops_in_one_container",
+                &exactly_max_nops,
+                Ok(&sf_sequence_bytes(9)),
+            ),
+            (
+                "rejects_one_past_the_max_nops",
+                &one_past_max_nops,
+                Err(&()),
+            ),
+            (
+                "containers_have_independent_nop_budgets",
+                &independent_budgets,
+                Ok(&[0xE2, OBJECT_END_MARKER]),
+            ),
+        ];
+        for &(name, input, expected) in cases {
+            assert_eq!(canonicalize(input).as_deref(), expected, "case: {name}");
+        }
     }
 }

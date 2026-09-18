@@ -16,13 +16,28 @@ members = [
     "14_account-id-macro",
     "15_slot-objects",
     "16_typed-results",
+    "17_sto-writer",
+    "18_typed-views",
+    "19_param-signature",
+    "20_state-interface",
+    "21_txn-template-nested",
+    "22_txn-template-optional",
     "80_governance",
 ]
 
 [workspace.package]
+# Single source of truth for every example crate's version (each member
+# inherits it via `version.workspace = true`); it tracks the root
+# workspace's `[workspace.package] version`, so a release bump touches this
+# one line here instead of every example manifest.
+version = "0.2.1"
 edition = "2024"
 rust-version = "1.85"
 publish = false
+
+[workspace.dependencies]
+rshooks = { path = "../crates/rshooks" }
+rshooks-testenv = { path = "../crates/rshooks-testenv" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
@@ -41,33 +56,10 @@ arithmetic_side_effects = "warn"
 panic = "abort"
 
 [profile.release]
-# `opt-level = 3`, not `"z"` (see docs/DESIGN.md's §2 C6 for the full
-# rationale and measurements): `reward`/`govern` originally needed a
-# per-package `opt-level = 3` override to fit the Hook API's 32-level
-# block/loop/if nesting limit (at `"z"`, LLVM leaves enough dead
-# `HookError`-decoding/error-handling machinery in place that
-# `rshooks-build`'s inlining pass doesn't fit once every function in the
-# crate is inlined into `hook()`). That override is now the workspace
-# default instead, because it also fixes a second, independent problem:
-# `wasm32v1-none`'s LLVM backend only inlines a `[0u8; N]` zero-init as
-# plain stores up to 32 bytes at `"z"`/`"s"`, falling back to a
-# compiler-generated `memset` call (an unguarded loop) above that — at
-# `opt-level = 3` the same threshold is 64 bytes, so any local
-# zero-initialized buffer in the 33..=64 byte range (e.g. a 34-byte
-# `Keylet` scratch) becomes safe by construction instead of needing
-# `--auto-guard` or a hand-rolled `static` workaround. The threshold still
-# exists above 64 bytes at `opt-level = 3` — it only moves, it doesn't
-# disappear — so buffers larger than that (e.g. the 138-byte
-# `EMIT_DETAILS_MAX_LEN`) still need the `static`/`HookStatic` idiom
-# regardless of this setting. Measured impact across all 13 examples: WCE
-# improved in 6, unchanged in 3, and increased only slightly (at most +12
-# instructions / +7%) in the remaining 4 — no example regressed by more
-# than a low double-digit instruction count. One dramatic size/WCE
-# tradeoff stands out (`06_guard-patterns`, whose small `guard!`-bounded
-# loops get fully unrolled: WCE -54%, size +109%) — all 13 stayed well
-# within the 65,535-byte SetHook limit, and the resulting one-time
-# `SetHook` fee delta is small in absolute terms even where size grew
-# (see docs/DESIGN.md C6 for the full before/after table).
+# `opt-level = 3`, not `"z"`: fits the Hook API's block/loop/if nesting
+# limit after inlining and keeps zero-init buffers below the compiler's
+# `memset`-libcall threshold. See docs/DESIGN.md §2 C6 for the rationale
+# and before/after measurements.
 opt-level = 3
 lto = "fat"
 codegen-units = 1

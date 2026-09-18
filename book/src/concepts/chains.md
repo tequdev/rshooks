@@ -87,22 +87,22 @@ pub struct Governance {
 
 #[hooks]
 impl Governance {
-    #[hook(0, name = "govern", on = [Invoke], can_emit = [Invoke, SetHook])]
-    fn govern(&self) -> HookResult { /* ... reads and writes self.reward_rate/self.reward_delay */ }
+    #[hook(0, on = [Invoke], can_emit = [Invoke, SetHook])]
+    fn govern(&self) -> HookResult { /* ... reads and writes self.state.reward_rate/self.state.reward_delay */ }
 
-    #[hook(1, name = "reward", on = [Invoke, ClaimReward], can_emit = [GenesisMint])]
-    fn reward(&self) -> HookResult { /* ... reads self.reward_rate/self.reward_delay */ }
+    #[hook(1, on = [Invoke, ClaimReward], can_emit = [GenesisMint])]
+    fn reward(&self) -> HookResult { /* ... reads self.state.reward_rate/self.state.reward_delay */ }
 }
 ```
 
 Both entries declare a `&self` receiver and reference
-`self.reward_rate`/`self.reward_delay` directly — there is exactly one Rust
+`self.state.reward_rate`/`self.state.reward_delay` directly — there is exactly one Rust
 type for that state entry, so `govern`'s write and `reward`'s read can
 never silently disagree about the key's shape or the value's layout. (The
 real `examples/80_governance` crate's dense `govern`/setup path writes
 `reward_rate`/`reward_delay` through the raw API instead — see "A real
 limit," below, for why — while `reward`'s own two reads still go through
-the typed `self.reward_rate`/`self.reward_delay` accessors shown here; this
+the typed `self.state.reward_rate`/`self.state.reward_delay` accessors shown here; this
 sketch shows the model at its cleanest.)
 
 One nuance worth being precise about: **the struct shares the schema, not
@@ -117,7 +117,8 @@ on the parameter's *shape*, not that they were configured identically.
 
 `rshooks build` compiles a multi-Hook crate once per declared index (see
 [Building a Hook](../getting-started/building.md) for the discovery-plus-
-per-index pipeline), producing, for `Governance` above:
+per-index pipeline), producing, for `Governance` above (with `--out out`
+passed, per [Your First Hook](../getting-started/first-hook.md#what-lands-in-out)):
 
 ```text
 out/current/
@@ -138,10 +139,11 @@ enforces, apply **per index**, not to the crate as a whole. A chain of ten
 entries effectively has ten times the budget of one entry, split across ten
 independent artifacts, rather than one shared pool.
 
-The output directory itself is generation-numbered
-(`out/gen-<N>/`, with `out/current` a symlink to the latest complete,
-validated one) so a build in progress, or one that fails partway through,
-never leaves `current` pointing at a half-written result.
+The output root itself is generation-numbered (`<root>/gen-<N>/`, with
+`<root>/current` a symlink to the latest complete, validated one — `out/`
+above, or `<target>/rshooks/<crate-name>` if `--out` is omitted) so a
+build in progress, or one that fails partway through, never leaves
+`current` pointing at a half-written result.
 
 ## The `SetHook` template: an owned-position patch, not a full chain
 
@@ -235,7 +237,7 @@ write the *same* key/name bytes through the lower-level free functions at
 just the dense call sites:
 
 ```rust,ignore
-// Governance.reward_rate's own declared key is b"RR" — this hits the
+// Governance.state.reward_rate's own declared key is b"RR" — this hits the
 // identical ledger slot, just without going through the typed accessor.
 if state_set(value, b"RR").is_err() {
     GovernError::AssertionFailed.nope(b"Governance: Assertion failed.");
@@ -248,7 +250,7 @@ call-site choice about which API shape to go through, not a second,
 diverging declaration. See [Hook State](../data/state.md) and [Hook and
 Transaction Parameters](../data/parameters.md) for the raw
 `state`/`state_set`/`hook_param`/`otxn_param` layer this falls back to, and
-`examples/80_governance`'s own `README.md` for the full measured numbers
+`examples/80_governance/metrics.json` for the current measured numbers
 behind this section.
 
 ## Where to go next

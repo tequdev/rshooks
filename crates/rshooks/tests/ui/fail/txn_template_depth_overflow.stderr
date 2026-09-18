@@ -1,0 +1,12 @@
+error[E0080]: evaluation panicked: txn_template!: `level10` would nest deeper than STO_WRITER_MAX_DEPTH
+  --> tests/ui/fail/txn_template_depth_overflow.rs:11:1
+   |
+11 | / txn_template! {
+12 | |     struct Remit {
+13 | |         transaction_type = ttREMIT,
+14 | |         sequence: u32_field(sfSequence) = 0,
+...  |
+43 | | }
+   | |_^ evaluation of `_` failed here
+   |
+   = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `txn_template` (in Nightly builds, run with -Z macro-backtrace for more info)
