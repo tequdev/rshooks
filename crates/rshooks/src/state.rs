@@ -525,7 +525,8 @@ fn with_encoded_value<T: ToBytes, R>(value: &T, f: impl FnOnce(&[u8]) -> R) -> R
 /// [`decode_read`]'s doc comment for the `MaybeUninit` scratch buffer.
 #[inline(always)]
 fn state_get_bytes<T: FromBytes>(kbytes: &[u8]) -> Result<Option<T>> {
-    let mut storage = core::mem::MaybeUninit::<[u8; MAX_TYPED_STATE_LEN]>::uninit();
+    let mut storage =
+        core::mem::MaybeUninit::<crate::convert::Scratch<MAX_TYPED_STATE_LEN>>::uninit();
     // SAFETY: see `uninit_slice_mut`'s doc comment; `state_raw_code` cannot
     // report writing more bytes than the buffer it was handed, and
     // `decode_read` only ever reads the `..n` prefix that count reports.
@@ -703,7 +704,8 @@ fn state_foreign_get_bytes<T: FromBytes>(
     namespace: Option<&[u8]>,
     account: Option<&[u8]>,
 ) -> Result<Option<T>> {
-    let mut storage = core::mem::MaybeUninit::<[u8; MAX_TYPED_STATE_LEN]>::uninit();
+    let mut storage =
+        core::mem::MaybeUninit::<crate::convert::Scratch<MAX_TYPED_STATE_LEN>>::uninit();
     // SAFETY: see `uninit_slice_mut`'s doc comment; `state_foreign_raw_code`
     // cannot report writing more bytes than the buffer it was handed, and
     // `decode_read` only ever reads the `..n` prefix that count reports.
