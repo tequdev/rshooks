@@ -277,9 +277,6 @@ pub mod codec {
     /// [`encode_native_amount`]): every canonical `XFL`'s bit pattern is
     /// already a valid `STAmount` issued value.
     #[inline(always)]
-    #[deprecated(
-        note = "unused runtime twin of encode_iou_amount_value_const; call the const form directly"
-    )]
     pub fn encode_iou_amount_value(out: &mut [u8], xfl: XFL) -> Result<()> {
         let dst = out.get_mut(0..8).ok_or(HookError::InvalidArgument)?;
         dst.copy_from_slice(&encode_iou_amount_value_const(xfl));
@@ -699,9 +696,6 @@ pub mod codec {
     ///
     /// Returns [`HookError::InvalidArgument`] if `offset + 4 > bytes.len()`.
     #[inline(always)]
-    #[deprecated(
-        note = "unused runtime twin of a const writer; use write_uint_be in a const context instead"
-    )]
     pub fn write_u32_be(bytes: &mut [u8], offset: usize, value: u32) -> Result<()> {
         let end = offset.checked_add(4).ok_or(HookError::InvalidArgument)?;
         let dst = bytes
@@ -721,9 +715,6 @@ pub mod codec {
     /// Returns [`HookError::InvalidArgument`] if `offset + 20 >
     /// bytes.len()`.
     #[inline(always)]
-    #[deprecated(
-        note = "unused runtime twin of a const writer; use write_const_bytes in a const context instead"
-    )]
     pub fn write_account_id(bytes: &mut [u8], offset: usize, value: &AccountId) -> Result<()> {
         let end = offset
             .checked_add(ACC_ID_LEN)
@@ -1277,7 +1268,6 @@ pub mod codec {
         }
 
         #[test]
-        #[allow(deprecated)]
         fn encode_iou_amount_value_rejects_out_of_bounds() {
             let mut out = [0u8; 7];
             assert_eq!(
@@ -1287,7 +1277,6 @@ pub mod codec {
         }
 
         #[test]
-        #[allow(deprecated)]
         fn encode_iou_amount_value_writes_the_expected_bytes() {
             let mut out = [0u8; 8];
             encode_iou_amount_value(&mut out, XFL::from_raw_bits(0)).expect("8-byte buffer fits");
@@ -1295,7 +1284,6 @@ pub mod codec {
         }
 
         #[test]
-        #[allow(deprecated)]
         fn write_u32_be_rejects_out_of_bounds() {
             let mut buf = [0u8; 2];
             assert_eq!(
@@ -1305,7 +1293,6 @@ pub mod codec {
         }
 
         #[test]
-        #[allow(deprecated)]
         fn write_u32_be_writes_big_endian() {
             let mut buf = [0u8; 4];
             write_u32_be(&mut buf, 0, 0x0102_0304).expect("in bounds");
@@ -1313,7 +1300,6 @@ pub mod codec {
         }
 
         #[test]
-        #[allow(deprecated)]
         fn write_account_id_writes_at_offset() {
             let mut buf = [0u8; 22];
             let id = AccountId([0xAB; ACC_ID_LEN]);
