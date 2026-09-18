@@ -5,9 +5,9 @@
       "artifact": "0.increment.wasm",
       "index": 0,
       "hook_fn": "increment",
-      "bytes": 767,
+      "bytes": 747,
       "wce": {
-        "hook": 210,
+        "hook": 199,
         "cbak": 0
       },
       "max_nesting": 2
