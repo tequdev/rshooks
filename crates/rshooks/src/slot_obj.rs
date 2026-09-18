@@ -650,7 +650,8 @@ impl SlotObject<Issue> {
 /// Reads and classifies an amount slot.
 #[inline(always)]
 fn decode_amount(no: u32) -> Result<AmountBytes> {
-    let mut storage = MaybeUninit::<[u8; crate::types::IOU_AMOUNT_LEN]>::uninit();
+    let mut storage =
+        MaybeUninit::<crate::convert::Scratch<{ crate::types::IOU_AMOUNT_LEN }>>::uninit();
     // SAFETY: only the `..written` prefix `api::slot::slot` reports writing
     // is ever read below.
     let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
@@ -694,7 +695,7 @@ pub(crate) fn classify_amount(bytes: &[u8]) -> Result<AmountBytes> {
 /// defines for this field.
 #[inline(always)]
 fn decode_issue(no: u32) -> Result<IssueData> {
-    let mut storage = MaybeUninit::<[u8; ISSUE_MAX_READ_LEN]>::uninit();
+    let mut storage = MaybeUninit::<crate::convert::Scratch<ISSUE_MAX_READ_LEN>>::uninit();
     // SAFETY: only the `..written` prefix `api::slot::slot` reports writing
     // is ever read below.
     let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };

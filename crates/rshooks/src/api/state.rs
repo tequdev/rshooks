@@ -359,8 +359,8 @@ fn value_or_absent<T>(code: i64, decode: impl FnOnce(i64) -> Result<T>) -> Resul
 #[inline(always)]
 fn state_raw_code_buf<const N: usize, K: AsRef<[u8]> + ?Sized>(
     key: &K,
-) -> (i64, core::mem::MaybeUninit<[u8; N]>) {
-    let mut storage = core::mem::MaybeUninit::<[u8; N]>::uninit();
+) -> (i64, core::mem::MaybeUninit<crate::convert::Scratch<N>>) {
+    let mut storage = core::mem::MaybeUninit::<crate::convert::Scratch<N>>::uninit();
     // SAFETY: every caller only reads `storage` (via `assume_init`) after
     // checking the host reported writing exactly `N` bytes.
     let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
@@ -399,7 +399,7 @@ pub fn state_update_u32<K: AsRef<[u8]> + ?Sized>(
         let written = res(c)? as usize;
         if written == 4 {
             // SAFETY: `written == 4` proves the host wrote all 4 bytes.
-            Ok(u32::from_le_bytes(unsafe { buf.assume_init() }))
+            Ok(u32::from_le_bytes(unsafe { buf.assume_init() }.0))
         } else {
             Err(HookError::TooSmall)
         }
@@ -422,7 +422,7 @@ pub fn state_update_i64<K: AsRef<[u8]> + ?Sized>(
         let written = res(c)? as usize;
         if written == 8 {
             // SAFETY: `written == 8` proves the host wrote all 8 bytes.
-            Ok(i64::from_le_bytes(unsafe { buf.assume_init() }))
+            Ok(i64::from_le_bytes(unsafe { buf.assume_init() }.0))
         } else {
             Err(HookError::TooSmall)
         }
@@ -445,9 +445,9 @@ pub fn state_update_xfl<K: AsRef<[u8]> + ?Sized>(
         let written = res(c)? as usize;
         if written == 8 {
             // SAFETY: `written == 8` proves the host wrote all 8 bytes.
-            Ok(XFL::from_raw_bits(i64::from_le_bytes(unsafe {
-                buf.assume_init()
-            })))
+            Ok(XFL::from_raw_bits(i64::from_le_bytes(
+                unsafe { buf.assume_init() }.0,
+            )))
         } else {
             Err(HookError::TooSmall)
         }

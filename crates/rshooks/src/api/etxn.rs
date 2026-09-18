@@ -119,14 +119,15 @@ pub fn emit<B: AsMut<[u8]> + ?Sized>(out: &mut B, tx_blob: &[u8]) -> Result<usiz
 /// call. Returns the emitted transaction's hash.
 #[inline(always)]
 pub fn emit_buf(tx_blob: &[u8]) -> Result<Hash> {
-    let mut storage = core::mem::MaybeUninit::<[u8; crate::types::HASH_LEN]>::uninit();
+    let mut storage =
+        core::mem::MaybeUninit::<crate::convert::Scratch<{ crate::types::HASH_LEN }>>::uninit();
     // SAFETY: only read via `assume_init` below, once `written == HASH_LEN`
     // proves the host wrote every byte.
     let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
     let written = emit(buf, tx_blob)?;
     if written == crate::types::HASH_LEN {
         // SAFETY: `written == HASH_LEN` proves the host wrote every byte.
-        Ok(Hash(unsafe { storage.assume_init() }))
+        Ok(Hash(unsafe { storage.assume_init() }.0))
     } else {
         Err(HookError::TooSmall)
     }

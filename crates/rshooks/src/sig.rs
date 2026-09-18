@@ -251,14 +251,14 @@ macro_rules! be_int_sig {
 
             #[inline(always)]
             fn read_sig(read: impl FnOnce(&mut [u8]) -> Result<usize>) -> Result<Self> {
-                let mut storage = core::mem::MaybeUninit::<[u8; $len]>::uninit();
+                let mut storage = core::mem::MaybeUninit::<crate::convert::Scratch<$len>>::uninit();
                 // SAFETY: only read via `assume_init` below, once
                 // `written == $len` proves `read` wrote every byte.
                 let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
                 let written = read(buf)?;
                 if written == $len {
                     // SAFETY: `written == $len` proves `read` wrote every byte.
-                    Ok(<$ty>::from_be_bytes(unsafe { storage.assume_init() }))
+                    Ok(<$ty>::from_be_bytes(unsafe { storage.assume_init() }.0))
                 } else {
                     Err(HookError::TooSmall)
                 }
@@ -308,14 +308,14 @@ impl SigParamType for crate::xfl::XFL {
 
     #[inline(always)]
     fn read_sig(read: impl FnOnce(&mut [u8]) -> Result<usize>) -> Result<Self> {
-        let mut storage = core::mem::MaybeUninit::<[u8; 8]>::uninit();
+        let mut storage = core::mem::MaybeUninit::<crate::convert::Scratch<8>>::uninit();
         // SAFETY: only read via `assume_init` below, once `written == 8`
         // proves `read` wrote every byte.
         let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
         let written = read(buf)?;
         if written == 8 {
             // SAFETY: `written == 8` proves `read` wrote every byte.
-            let bytes: [u8; 8] = unsafe { storage.assume_init() };
+            let bytes: [u8; 8] = unsafe { storage.assume_init() }.0;
             Ok(crate::xfl::XFL::from_raw_bits(i64::from_be_bytes(bytes)))
         } else {
             Err(HookError::TooSmall)
@@ -334,7 +334,9 @@ impl SigParamType for AmountBytes {
     /// [`AmountBytes`]'s own doc comment).
     #[inline(always)]
     fn read_sig(read: impl FnOnce(&mut [u8]) -> Result<usize>) -> Result<Self> {
-        let mut storage = core::mem::MaybeUninit::<[u8; crate::types::IOU_AMOUNT_LEN]>::uninit();
+        let mut storage = core::mem::MaybeUninit::<
+            crate::convert::Scratch<{ crate::types::IOU_AMOUNT_LEN }>,
+        >::uninit();
         // SAFETY: only the `..written` prefix `read` reports writing is
         // ever read below.
         let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
@@ -457,7 +459,8 @@ impl SigParamType for IssueBytes {
         const IOU_LEN: usize = CURRENCY_CODE_LEN + ACC_ID_LEN;
         // Buffer is `ISSUE_MAX_READ_LEN` (44), not the 40 an IOU issue
         // needs — see the doc comment above.
-        let mut storage = core::mem::MaybeUninit::<[u8; ISSUE_MAX_READ_LEN]>::uninit();
+        let mut storage =
+            core::mem::MaybeUninit::<crate::convert::Scratch<ISSUE_MAX_READ_LEN>>::uninit();
         // SAFETY: only the `..written` prefix `read` reports writing is
         // ever read below.
         let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
