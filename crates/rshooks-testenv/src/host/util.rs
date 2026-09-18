@@ -59,10 +59,6 @@ pub(crate) fn sha512_half(data: &[u8]) -> [u8; 32] {
     out
 }
 
-pub(crate) fn util_sha512h(data: &[u8]) -> [u8; 32] {
-    sha512_half(data)
-}
-
 // ---------------------------------------------------------------------
 // `util_accid`/`util_raddr` (`HookAPI::util_accid`/`util_raddr` ->
 // `decodeBase58Token`/`encodeBase58Token(TokenType::AccountID)`).
@@ -306,7 +302,7 @@ mod tests {
             0x80, 0x07, 0xd6, 0x20, 0xe4, 0x05, 0x0b, 0x57, 0x15, 0xdc, 0x83, 0xf4, 0xa9, 0x21,
             0xd3, 0x6c, 0xe9, 0xce,
         ];
-        assert_eq!(util_sha512h(b""), expected);
+        assert_eq!(sha512_half(b""), expected);
     }
 
     #[test]
@@ -317,7 +313,7 @@ mod tests {
             0x41, 0x31, 0x12, 0xe6, 0xfa, 0x4e, 0x89, 0xa9, 0x7e, 0xa2, 0x0a, 0x9e, 0xee, 0xe6,
             0x4b, 0x55, 0xd3, 0x9a,
         ];
-        assert_eq!(util_sha512h(b"abc"), expected);
+        assert_eq!(sha512_half(b"abc"), expected);
     }
 
     // -- util_accid/util_raddr round trip --

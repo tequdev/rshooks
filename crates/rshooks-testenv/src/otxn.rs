@@ -6,6 +6,7 @@ use std::vec::Vec;
 
 use rshooks::tx_type::TxType;
 use rshooks::txn::codec::encode_native_amount_const;
+use rshooks::txn::codec::sti::{STI_ACCOUNT, STI_VL};
 
 /// The originating transaction a [`crate::TestEnv`] seeds its invocations
 /// with — backs `otxn_field`/`otxn_type`/`otxn_id`/`otxn_param`. Every field
@@ -91,12 +92,6 @@ impl Otxn {
     }
 }
 
-/// The `STI_VL`/`STI_ACCOUNT` type codes — [`serialize`]'s VL length-prefix
-/// insertion cases, matching `crate::emit_walk::field_value_payload`'s own
-/// stripping rule in reverse.
-const STI_VL: u32 = 7;
-const STI_ACCOUNT: u32 = 8;
-
 /// Builds the canonical serialized field sequence [`crate::host::slots::otxn_slot`]
 /// loads into a root slot (P2-D, `.claude/design/TESTENV_PHASE2_DESIGN.md`
 /// §4 "slot family"): every seeded field in `otxn.fields`, plus a
@@ -122,16 +117,13 @@ pub(crate) fn serialize(otxn: &Otxn) -> Vec<u8> {
     out
 }
 
-/// Writes one field's header (mirrors `rshooks::txn::codec::field_header`'s
-/// 4-case grammar; duplicated here because that function needs a typed
-/// `SField<T>` and this serializer works from raw stored codes) plus its
-/// wire value. Also reused by `crate::backend::Backend::prepare` (P2-D) to
-/// build field bytes `crate::host::sto::sto_emplace` needs for `Sequence`/
-/// `SigningPubKey`/`Account`/`FirstLedgerSequence`/`LastLedgerSequence`/
-/// `Fee`.
-pub(crate) fn write_field(out: &mut Vec<u8>, code: u32, value: &[u8]) {
-    let ty = code >> 16;
-    let field = code & 0xFFFF;
+/// Writes the 1/2/3-byte STObject field header for `(type, field)`
+/// (mirrors `rshooks::txn::codec::field_header`'s 4-case grammar;
+/// duplicated here because that function needs a typed `SField<T>` and this
+/// serializer works from raw stored codes) — also the header-only case
+/// `crate::host::float::write_field_header` wraps for `HookAPI::float_sto`'s
+/// identical layout, adding only its native/"short" no-header sentinels.
+pub(crate) fn write_field_header(out: &mut Vec<u8>, ty: u32, field: u32) {
     if ty < 16 && field < 16 {
         out.push(((ty << 4) | field) as u8);
     } else if ty < 16 {
@@ -145,6 +137,16 @@ pub(crate) fn write_field(out: &mut Vec<u8>, code: u32, value: &[u8]) {
         out.push(ty as u8);
         out.push(field as u8);
     }
+}
+
+/// Writes one field's header plus its wire value. Also reused by
+/// `crate::backend::Backend::prepare` (P2-D) to build field bytes
+/// `crate::host::sto::sto_emplace` needs for `Sequence`/`SigningPubKey`/
+/// `Account`/`FirstLedgerSequence`/`LastLedgerSequence`/`Fee`.
+pub(crate) fn write_field(out: &mut Vec<u8>, code: u32, value: &[u8]) {
+    let ty = code >> 16;
+    let field = code & 0xFFFF;
+    write_field_header(out, ty, field);
     if ty == STI_VL || ty == STI_ACCOUNT {
         write_vl_len(out, value.len());
     }

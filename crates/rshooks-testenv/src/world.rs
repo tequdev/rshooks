@@ -164,11 +164,9 @@ pub(crate) struct World {
     pub(crate) ledger_objects: HashMap<[u8; 34], Vec<u8>>,
     /// The current transaction's metadata, if seeded — backs `meta_slot`.
     /// Builder: [`crate::TestEnv::otxn_meta`].
-    #[allow(dead_code)]
     pub(crate) otxn_meta: Option<Vec<u8>>,
     /// An XPOP's `(transaction, metadata)` pair, if seeded — backs
     /// `xpop_slot`. Builder: [`crate::TestEnv::xpop`].
-    #[allow(dead_code)]
     pub(crate) xpop: Option<(Vec<u8>, Vec<u8>)>,
     /// Parameters written by `hook_param_set` during a *previous*,
     /// already-`accept!`ed invocation — `(hook_hash, name) -> value` — read

@@ -85,6 +85,8 @@ mod invocation;
 mod otxn;
 mod protocol_formats;
 mod protocol_formats_generated;
+#[cfg(test)]
+mod testutil;
 mod world;
 
 pub use env::{CbakOutcome, TestEnv};
