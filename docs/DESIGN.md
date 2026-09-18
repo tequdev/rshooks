@@ -94,8 +94,9 @@ These come from xahaud's SetHook validation (`SetHook.cpp`,
     instruction count. One example stands out as a large outlier
     (`06_guard-patterns`, whose whole point is demonstrating small
     `guard!`-bounded loops: `opt-level = 3` unrolls them, so WCE dropped
-    ~54% while size grew ~109% — see that example's own README for the
-    exact before/after table). Every example stayed comfortably under the
+    ~54% while size grew ~109% — see `book/src/concepts/guards.md`'s
+    `guard!`/`guard_m!` section for that example's own loops). Every
+    example stayed comfortably under the
     65,535-byte limit and `rshooks check` (no unguarded loops, no
     nesting-limit violations) passed for all of them. The one-time
     `SetHook` fee delta (`bytes × 5000` drops) this causes per example is
@@ -338,15 +339,29 @@ src/
 
 ### 5.1 Error model
 
+See `docs/HOOK_ERROR_DESIGN.md` for the full design; the shape:
+
 ```rust
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HookError {
-    OutOfBounds,          // -1
-    InternalError,        // -2
-    TooBig,               // -3
-    /* ... every code from error.h ... */
-    Unknown(i64),         // forward-compat for codes we don't know
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct HookError(i64);
+
+impl HookError {
+    pub const OutOfBounds: HookError = /* -1 */;
+    pub const InternalError: HookError = /* -2 */;
+    /* ... one associated const per code from error.h ... */
+
+    pub const fn code(self) -> i64;       // identity: the raw code
+    pub fn kind(self) -> HookErrorKind;   // the one decode, on demand
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum HookErrorKind {
+    OutOfBounds, InternalError, /* … declaration order … */,
+    Unknown, // any code without a named constant
+}
+
 pub type Result<T> = core::result::Result<T, HookError>;
 
 #[inline(always)]
@@ -355,74 +370,60 @@ fn res(code: i64) -> Result<i64> { if code < 0 { Err(HookError::from(code)) } el
 
 Non-negative returns are payload (usually "bytes written"); negative maps to
 `HookError`. Functions whose success value is meaningful keep it
-(`Ok(len)`, `Ok(slot_no)`, …).
+(`Ok(len)`, `Ok(slot_no)`, …). `HookError` is a transparent wrapper over the
+raw code, not a decoding enum: constructing one and reading the code back
+out (`res`, `HookError::code`) are both the identity, and comparing against
+a named error (`err == HookError::DoesntExist`) is one `i64` equality — no
+decode, no nesting cost, at any call density.
 
-**Nesting-depth rule: at most one specific-`HookError`-variant match site per
-function.** `res`'s `HookError::from(i64)` decode compiles to a wasm
-`br_table` needing roughly one nested `block` per known error code (~40 at
-the time of writing) — but only at a call site that actually inspects
-*which* specific `HookError` variant a failure was (`match ... {
-Err(HookError::Xxx) => ..., ... }`). A call site that only asks "did this
-fail" (`.is_err()`, `Err(_) => ...`, comparing the whole `Result` against
-one `Ok` value) never forces the decode, and the optimizer discards it
-entirely, keeping just the "is the raw code negative" branch. `rshooks-build`'s
-Guard-type pipeline inlines every function in a crate into `hook()`/`cbak()`
-(§6.2c) and then must keep the merged function's block/loop/if nesting under
-the vendored guard checker's 32-level limit (§6.3) — a crate with more than
-one specific-variant match site pays that ~40-block decode's nesting cost
-*at every one of them*, since each is inlined into the same function body.
-In practice this means: default to `Err(_) => ...`/`.is_err()` at every Hook
-API call site, and reserve `Err(HookError::SpecificVariant) => ...` for the
-rare case that genuinely needs to distinguish one failure from another —
-budget for at most one such site per crate before nesting depth becomes a
-build-time concern. See `examples/80_governance`'s README for concrete
-before/after nesting-depth numbers from a real crate, whose `govern`/
-`reward` entries each need exactly one specific-variant match site.
+**Nesting-depth rule (for decode-into-enum functions other than
+`HookError`): at most one specific-variant match site per function.**
+`TxType::from(u16)` (§5, `tx_type.rs`) and `LedgerEntryType::from(u16)`
+compile to wide matches that need roughly one nested `block` per known code
+— but only at a call site that actually inspects *which* specific variant a
+value was (`match ... { TxType::Xxx => ..., ... }`). A call site that only
+asks "is this one specific type" (`otxn_type() == TxType::ClaimReward`, as
+`examples/80_governance`'s `govern`/`reward` entries do) never forces the
+full decode. `rshooks-build`'s Guard-type pipeline inlines every function in
+a crate into `hook()`/`cbak()` (§6.2c) and then must keep the merged
+function's block/loop/if nesting under the vendored guard checker's
+32-level limit (§6.3) — a crate with more than one specific-variant match
+site against the same enum pays that decode's nesting cost *at every one of
+them*, since each is inlined into the same function body. In practice this
+means: default to comparing against one named variant, and budget for at
+most one genuinely exhaustive match site per crate before nesting depth
+becomes a build-time concern. See `examples/80_governance`'s README for
+concrete before/after nesting-depth numbers from a real crate.
 
-The same mechanism applies to any large generated decode-into-enum
-function, not just `HookError::from`: `TxType::from(u16)` (§5, `tx_type.rs`)
-is a ~74-arm match with the identical shape, so comparing `otxn_type()`
-against one specific named `TxType` variant (`otxn_type() == TxType::
-ClaimReward`, as `examples/80_governance`'s `govern`/`reward` entries both
-do) is the `TxType` analogue of a specific-`HookError`-variant match site,
-subject to the same one-per-crate budgeting logic — both entries still
-build within the nesting limit with one of each (one `TxType`-specific
-comparison, plus whatever `HookError`-specific handling each already had),
-but a crate
-piling up several specific-variant comparisons against *either* enum adds
-up against the same 32-level ceiling.
+`HookError::kind()` is the exception this rule does not apply to: it is a
+code-to-kind table lookup (nesting depth 1, not a match arm per code), paid
+only at the call site that asks for it, and safe to call from any number of
+places in the same function.
 
-**rshooks's own internal paths must not use this pattern at all.** The
-budget above ("at most one specific-variant match site per crate") is a
-concession for *hook authors*, who have no cheaper alternative once they
-need to branch on a particular `HookError`. `rshooks` itself is not in
-that position: every one of its host-call wrappers already has the raw,
-undecoded `i64` return code in hand *before* it ever calls `res`/
+**rshooks's own internal raw-code compares are a convention, not a nesting
+necessity.** Every one of `rshooks`'s host-call wrappers already has the
+raw, undecoded `i64` return code in hand *before* it ever calls `res`/
 `HookError::from`, so comparing that code directly against a raw constant
-(`rshooks_core::DOESNT_EXIST`, `rshooks_core::NOT_IMPLEMENTED`, …) needs no
-enum-decode machinery at all — zero specific-variant-match sites, not one.
-`crate::state::decode_read` (shared by `state_get`/`state_foreign_get`)
-and `crate::api::state::value_or_absent` (shared by every
-`state_update_*`) both compare the raw `code` against `rshooks_core::
-DOESNT_EXIST` before any `HookError` is decoded, for exactly this reason —
-the `Err(HookError::from(code))` fallback path is unaffected, since every
-call site still only matches it as a bare `Err(_)`. Concretely: migrating
-`examples/80_governance`'s `reward` entry's `"RR"`/`"RD"` state reads to
-`hook_state!` + `state_get_typed` needs this — without it, that migration
-pushes nesting from 24 to 70 (over the limit); with it, nesting stays at
-24 — see `examples/80_governance/src/lib.rs` for the migrated call site.
-(One further
-wrinkle: the raw-code helpers this needs — `state_raw_code`,
-`state_u64_raw_code`, `state_foreign_raw_code` in
-`crates/rshooks/src/api/state.rs` — are
-*not* called by the existing `state`/`state_u64`/`state_foreign` public
-wrappers, even though the logic is identical; routing those wrappers
-through the new helpers, even with both sides `#[inline(always)]`,
-measurably changed `rshooks-build`'s unnest-pass output for an unrelated
-hook that never touches the new path at all. Each raw-code helper is
-instead an independent duplicate of its wrapper's body — a small amount of
-source duplication traded for a call-graph shape provably identical to
-before the helper existed. See the doc comments on those functions.)
+(`rshooks_core::DOESNT_EXIST`, `rshooks_core::NOT_IMPLEMENTED`, …) skips a
+conversion the comparison does not need — the same one `i64.eq` a
+`HookError` comparison would cost, just without constructing the
+`HookError` first. `crate::state::decode_read` (shared by
+`state_get`/`state_foreign_get`), `crate::api::state::value_or_absent`
+(shared by every `state_update_*`), and every generated view's
+optional-field read all compare the raw `code` against
+`rshooks_core::DOESNT_EXIST` before any `HookError` is constructed, for
+this reason; the `Err(HookError::from(code))` fallback path is unaffected.
+(One further wrinkle, about call-graph shape rather than nesting: the
+raw-code helpers this needs — `state_raw_code`, `state_u64_raw_code`,
+`state_foreign_raw_code` in `crates/rshooks/src/api/state.rs` — are *not*
+called by the existing `state`/`state_u64`/`state_foreign` public wrappers,
+even though the logic is identical; routing those wrappers through the new
+helpers, even with both sides `#[inline(always)]`, measurably changed
+`rshooks-build`'s unnest-pass output for an unrelated hook that never
+touches the new path at all. Each raw-code helper is instead an independent
+duplicate of its wrapper's body — a small amount of source duplication
+traded for a call-graph shape provably identical to before the helper
+existed. See the doc comments on those functions.)
 
 ### 5.2 API wrapper conventions
 
@@ -553,18 +554,22 @@ specifically to hold values that might *be* negative error codes.
 an infallible `Output` for any operator that can fail, since that would
 force a panic (or a silently wrong answer) on the failure path. `XFL`
 implements `core::ops::{Add, Sub, Mul, Div, Neg}`, all with `Output =
-Result<XFL, HookError>` — every one of these, including `Neg`, is a
-fallible host round trip (`float_sum`/`float_multiply`/`float_divide`/
-`float_negate`; `Sub` is `self + (-rhs)?`: one `float_negate` call plus one
-`float_sum` call, since there is no dedicated `float_subtract` function).
-`Neg` and comparison are host round trips rather than local bit
-manipulation on principle, not just for `Neg`/comparison specifically:
-this crate treats the host's `float_*` implementations as the sole
-authority on XFL bit-pattern semantics, and never maintains a parallel
-guest-side reimplementation of them — [`XFL::exponent`]'s local bit-field
-extraction is not an exception to this, since it only unpacks an
-already-host-produced value's fields rather than computing a new,
-independently-derived value the way negation or comparison would.
+Result<XFL, HookError>` — `Add`/`Mul`/`Div`/`Neg` are each a fallible host
+round trip (`float_sum`/`float_multiply`/`float_divide`/`float_negate`,
+respectively). `Sub` is `self + rhs.negated()`: one `float_sum` call, since
+there is no dedicated `float_subtract` function, and `XFL::negated` (unlike
+the `Neg` operator) is a local sign-bit flip, not a `float_negate` round
+trip — the sign of a canonical XFL is a single bit (bit 62), so negating
+one for a subtraction never needs the host. `Neg` and comparison are still
+host round trips rather than local bit manipulation on principle: this
+crate treats the host's `float_*` implementations as the sole authority on
+XFL bit-pattern semantics, and never maintains a parallel guest-side
+reimplementation of them for a value whose fields it does not already hold
+— `XFL::negated`'s bit flip is not an exception to this any more than
+[`XFL::exponent`]'s local bit-field extraction is, since both only
+manipulate an already-host-produced value's existing bits rather than
+computing a new, independently-derived value the way arithmetic or
+comparison would.
 Comparison has named methods (`eq`/`lt`/`gt`/`compare`, all `Result<bool>`
 via `float_compare`) *and* `PartialEq`/`PartialOrd` (`==`/`<`/`>`/...),
 both backed by the same `float_compare` calls — see below for the fallback
@@ -583,7 +588,7 @@ diagnostic, not just reasoned about).
 ```rust
 impl XFL {
     pub fn new(exponent: i32, mantissa: i64) -> Result<XFL>;      // float_set
-    pub fn one() -> XFL;
+    pub const fn one() -> XFL;                                     // fixed bits, no host call
     pub fn unchecked(self) -> XFLUnchecked;                        // zero-cost reinterpret, see below
     pub fn invert(self) -> Result<XFL>;
     pub fn mulratio(self, round_up: bool, num: u32, den: u32) -> Result<XFL>;
@@ -593,9 +598,10 @@ impl XFL {
     pub fn compare(self, rhs: XFL, mode: u32) -> Result<bool>;     // float_compare
     pub fn eq(self, rhs: XFL) -> Result<bool>; pub fn lt(self, rhs: XFL) -> Result<bool>; pub fn gt(self, rhs: XFL) -> Result<bool>;
     pub fn log(self) -> Result<XFL>; pub fn root(self, n: u32) -> Result<XFL>;
+    pub const fn negated(self) -> XFL;                             // sign-bit flip, no host call
 }
 impl core::ops::Add for XFL { type Output = Result<XFL>; ... }   // float_sum
-impl core::ops::Sub for XFL { type Output = Result<XFL>; ... }   // self + (-rhs)?: float_negate + float_sum
+impl core::ops::Sub for XFL { type Output = Result<XFL>; ... }   // self + rhs.negated(): float_sum only
 impl core::ops::Mul for XFL { type Output = Result<XFL>; ... }   // float_multiply
 impl core::ops::Div for XFL { type Output = Result<XFL>; ... }   // float_divide
 impl core::ops::Neg for XFL { type Output = Result<XFL>; ... }   // float_negate -- a host round trip, not a bit flip
@@ -670,7 +676,6 @@ types, N=1/4/8 chained ops):
 | checked `Result`-chain `Mul` | +14 |
 | raw `float_negate`+`float_sum` (baseline) | +5 |
 | `XFLUnchecked` `Sub` chain | +5 (matches raw exactly) |
-| checked `Result`-chain `Sub` | +27 |
 
 `XFLUnchecked`'s marginal cost matches a hand-written raw host-call chain
 exactly for both operators — its performance win over the checked operators
@@ -1352,10 +1357,9 @@ The decisions behind it:
   failed check consumes and clears the slot, like `try_cast`.
 - **Absence is decided on the raw return code.** `soeOPTIONAL`/`soeDEFAULT`
   fields read as `Result<Option<T>>`, with `Ok(None)` decided by comparing
-  the undecoded `i64` against `DOESNT_EXIST` — never by matching
-  `HookError::DoesntExist`, per §5.6's rule for rshooks's own internals. A
-  view emits one optional read per optional field, so a single
-  specific-variant match here would blow the nesting budget on its own.
+  the undecoded `i64` against `DOESNT_EXIST` rather than by constructing a
+  `HookError` and comparing that — the raw code is already in hand at the
+  call site, per §5.1's convention for rshooks's own internals.
   `soeDEFAULT` reads as `Option` too: upstream encodes "may be omitted",
   not a default value.
 - **Slot-backed accessors are get → read → clear.** Every one navigates to
@@ -2098,11 +2102,11 @@ message, or a raw, zero-indirection body.
   `Rollback::from_code` with no match. `?` therefore propagates a
   `hook_errors!` variant — code and message both — straight into a typed
   entry's `Err` side.
-- **Deliberately no `From<HookError> for Rollback`.** `HookError::code()` is
-  a 46-arm re-encode match; a `?`-propagated two-hop conversion measured
-  3.1x the worst-case instructions and +67% the size of a raw-code-check
-  twin (design doc §5, probe P5). The supported pattern is
-  `.map_err(|_| MyError::X)?`, discarding the decoded `HookError`.
+- **Deliberately no `From<HookError> for Rollback`.** A Hook API error code
+  is not the hook's own return code (`docs/HOOK_ERROR_DESIGN.md` §5); an
+  implicit conversion would publish the host's code as the hook's verdict.
+  The supported pattern is `.map_err(|_| MyError::X)?`, discarding the
+  `HookError`.
 - **Migration cost, measured**: `EntryReturn::finish`'s match is dead code
   on any path that always diverges through `accept!`/`rollback!`, so a
   signature-only migration (keeping an entry's raw internals, as

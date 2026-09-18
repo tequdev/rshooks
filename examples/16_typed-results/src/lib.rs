@@ -30,9 +30,10 @@ pub struct TypedResults {
 // inline, the extra call boundary a plain `Result`-returning helper
 // introduces costs a real WCE delta at this call density. Both convert
 // their failure with `.map_err(..)`, never `?` on the raw `HookError` a
-// Hook API call returns directly — see [`rshooks::exit::Rollback`]'s doc
-// comment: `HookError::code()` is a 46-arm re-encode match that does not
-// optimize away through a two-hop `?`.
+// Hook API call returns directly — see `rshooks::exit::Rollback`'s doc
+// comment: a Hook API error code is not this hook's own `DepositError`,
+// so mapping it explicitly at the call site is the only correct
+// conversion.
 #[inline(always)]
 fn read_amount(t: &TypedResults) -> Result<u64, DepositError> {
     let bytes = t

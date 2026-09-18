@@ -23,12 +23,13 @@ macro_rules! word_diff {
 /// body is straight-line code (no loop, no bounds-check panic path)
 /// regardless of optimization level.
 macro_rules! impl_buf_eq {
-    ($name:ident, $n:literal, [ $( $ty:ident [ $($i:literal),+ $(,)? ] ),+ $(,)? ]) => {
+    ($(#[$meta:meta])* $name:ident, $n:literal, [ $( $ty:ident [ $($i:literal),+ $(,)? ] ),+ $(,)? ]) => {
         #[doc = concat!(
             "Loop-free, panic-free equality check for two ", stringify!($n),
             "-byte buffers. See the [module docs](self) for why this exists ",
             "instead of `a == b`."
         )]
+        $(#[$meta])*
         #[inline(always)]
         #[must_use]
         pub fn $name(a: &[u8; $n], b: &[u8; $n]) -> bool {

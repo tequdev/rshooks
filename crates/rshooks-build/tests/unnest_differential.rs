@@ -15,15 +15,7 @@
     clippy::indexing_slicing
 )]
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
-use wasmi::{Caller, Engine, Linker, Module, Store};
-
-/// Host state: the shared call-observation log.
-struct HostState {
-    log: Rc<RefCell<Vec<(i32, i32)>>>,
-}
+mod common;
 
 /// Instantiates `wasm` with the standard `env::obs` stub and calls the named
 /// export with `param`. Returns `Ok(result)` if the call completed normally,
@@ -32,32 +24,8 @@ struct HostState {
 /// message), plus the full `(a, b)` call-observation log recorded up to
 /// that point.
 fn run(wasm: &[u8], export: &str, param: i32) -> (Result<i64, ()>, Vec<(i32, i32)>) {
-    let engine = Engine::default();
-    let module = Module::new(&engine, wasm).expect("fixture is valid wasm");
-    let log = Rc::new(RefCell::new(Vec::new()));
-    let mut store = Store::new(&engine, HostState { log: log.clone() });
-    let mut linker = <Linker<HostState>>::new(&engine);
-    linker
-        .func_wrap(
-            "env",
-            "obs",
-            |caller: Caller<'_, HostState>, a: i32, b: i32| -> i32 {
-                caller.data().log.borrow_mut().push((a, b));
-                a.wrapping_mul(1000).wrapping_add(b)
-            },
-        )
-        .expect("define env::obs");
-    let instance = linker
-        .instantiate(&mut store, &module)
-        .expect("all imports satisfied")
-        .start(&mut store)
-        .expect("no start function to run, or it succeeds");
-    let entry = instance
-        .get_typed_func::<i32, i64>(&store, export)
-        .unwrap_or_else(|_| panic!("`{export}` export with signature (i32) -> i64"));
-    let result = entry.call(&mut store, param).map_err(|_| ());
-    let calls = log.borrow().clone();
-    (result, calls)
+    let (result, calls) = common::run(wasm, export, param, false);
+    (result.map_err(|_| ()), calls)
 }
 
 /// Unnests `wat` source and asserts that every named export behaves

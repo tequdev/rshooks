@@ -492,11 +492,17 @@ impl<T> SlotObject<T> {
 #[inline(always)]
 fn read_exact_bytes<const N: usize>(no: u32) -> Result<[u8; N]> {
     let mut buf = [const { MaybeUninit::<u8>::uninit() }; N];
-    let written = api::slot::slot_uninit(&mut buf, no)?;
-    if written == N {
-        // SAFETY: `written == N` proves every byte is initialized;
-        // `MaybeUninit<u8>` has the same layout as `u8`.
+    // One compare against the exact expected write count decides success:
+    // a negative error code is never `N`, so the sign test rides along with
+    // the length test instead of branching on its own.
+    let code = api::slot::slot_uninit_raw_code(&mut buf, no);
+    if code == N as i64 {
+        // SAFETY: the host reported writing exactly `N` bytes, so every
+        // byte is initialized; `MaybeUninit<u8>` has the same layout as
+        // `u8`.
         Ok(unsafe { core::mem::transmute_copy::<[MaybeUninit<u8>; N], [u8; N]>(&buf) })
+    } else if code < 0 {
+        Err(HookError::from(code))
     } else {
         Err(HookError::TooSmall)
     }
@@ -506,18 +512,11 @@ fn read_exact_bytes<const N: usize>(no: u32) -> Result<[u8; N]> {
 // Container-only operations
 // ---------------------------------------------------------------------------
 
-/// Shared body for `SlotObject::<STArray>::count` and
-/// `SlotObject::<Opaque>::count`.
-#[inline(always)]
-fn slot_element_count(no: u32) -> Result<u32> {
-    api::slot::slot_count(no)
-}
-
 impl SlotObject<STArray> {
     /// The number of elements in the array. Borrows.
     #[inline(always)]
     pub fn count(&self) -> Result<u32> {
-        slot_element_count(self.no)
+        api::slot::slot_count(self.no)
     }
 }
 
@@ -525,7 +524,7 @@ impl SlotObject<Opaque> {
     /// The number of elements, if the slot in fact holds an array. Borrows.
     #[inline(always)]
     pub fn count(&self) -> Result<u32> {
-        slot_element_count(self.no)
+        api::slot::slot_count(self.no)
     }
 
     /// Whether the slot holds a native (XAH) amount, if it holds an amount

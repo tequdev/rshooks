@@ -68,6 +68,7 @@
 /// rule itself is shared with the Hook Parameter Signature Interface — the
 /// one shared copy lives in `crate::interface_name`.
 pub use crate::interface_name::is_valid_name;
+use crate::interface_name::xas010d;
 
 /// Length in bytes of the key's leading State ID byte (§1.6 of the design
 /// doc) — key field encoding starts at this offset.
@@ -112,7 +113,7 @@ pub trait SiFieldType: Sized {
 /// Generates a big-endian [`SiFieldType`] impl for a narrow unsigned
 /// integer, via `$ty::to_be_bytes`/`$ty::from_be_bytes`.
 macro_rules! be_int_si {
-    ($ty:ty, $len:literal, $type_byte:literal) => {
+    ($ty:ty, $len:literal, $type_byte:expr) => {
         impl SiFieldType for $ty {
             const TYPE_BYTE: u8 = $type_byte;
             const WIDTH: usize = $len;
@@ -136,10 +137,10 @@ macro_rules! be_int_si {
     };
 }
 
-be_int_si!(u8, 1, 0x10); // STI_UINT8
-be_int_si!(u16, 2, 0x01); // STI_UINT16
-be_int_si!(u32, 4, 0x02); // STI_UINT32
-be_int_si!(u64, 8, 0x03); // STI_UINT64
+be_int_si!(u8, 1, xas010d::UINT8);
+be_int_si!(u16, 2, xas010d::UINT16);
+be_int_si!(u32, 4, xas010d::UINT32);
+be_int_si!(u64, 8, xas010d::UINT64);
 
 /// Generates a verbatim-bytes [`SiFieldType`] impl for `[u8; $len]` itself or
 /// a `fixed_bytes_type!` newtype (`crate::types`) wrapping it — the
@@ -148,7 +149,7 @@ be_int_si!(u64, 8, 0x03); // STI_UINT64
 /// `AsRef<[u8]>`/`From<[u8; $len]>`, which `[u8; $len]` satisfies trivially
 /// (identity) and every `fixed_bytes_type!` newtype derives.
 macro_rules! array_si {
-    ($ty:ty, $len:literal, $type_byte:literal) => {
+    ($ty:ty, $len:literal, $type_byte:expr) => {
         impl SiFieldType for $ty {
             const TYPE_BYTE: u8 = $type_byte;
             const WIDTH: usize = $len;
@@ -172,12 +173,12 @@ macro_rules! array_si {
     };
 }
 
-array_si!([u8; 16], 16, 0x04); // STI_UINT128
-array_si!([u8; 32], 32, 0x05); // STI_UINT256
-array_si!(crate::types::Hash, 32, 0x05); // STI_UINT256
-array_si!(crate::types::AccountId, 20, 0x08); // STI_ACCOUNT
-array_si!([u8; 20], 20, 0x11); // STI_UINT160
-array_si!(crate::types::CurrencyCode, 20, 0x1A); // STI_CURRENCY
+array_si!([u8; 16], 16, xas010d::UINT128);
+array_si!([u8; 32], 32, xas010d::UINT256);
+array_si!(crate::types::Hash, 32, xas010d::UINT256);
+array_si!(crate::types::AccountId, 20, xas010d::ACCOUNT);
+array_si!([u8; 20], 20, xas010d::UINT160);
+array_si!(crate::types::CurrencyCode, 20, xas010d::CURRENCY);
 
 /// XAS-010d `XFL` — big-endian raw `int64` bit pattern, no validity check.
 ///
@@ -186,7 +187,7 @@ array_si!(crate::types::CurrencyCode, 20, 0x1A); // STI_CURRENCY
 /// crate's own hook-private state convention, the wrong byte order for this
 /// protocol-facing boundary (see the module doc's "Why big-endian" section).
 impl SiFieldType for crate::xfl::XFL {
-    const TYPE_BYTE: u8 = 0x80;
+    const TYPE_BYTE: u8 = xas010d::XFL;
     const WIDTH: usize = 8;
 
     #[inline(always)]

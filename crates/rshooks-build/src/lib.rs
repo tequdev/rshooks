@@ -27,8 +27,6 @@ pub use cleaner::clean;
 pub use fee::{FeeEstimate, estimate_fee};
 pub use flatten::{FlattenReport, flatten};
 pub use guard_native::{GuardVerdict, NativeGuardError, validate_guards_native};
-#[doc(hidden)]
-pub use optimizer::strip_custom_sections;
 pub use unnest::{UnnestReport, unnest};
 pub use validator::{ValidationError, ValidationReport, validate};
 

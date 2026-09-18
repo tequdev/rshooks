@@ -1,12 +1,11 @@
-//! Source-scan test (design §2.1):
-//! [`every_raw_call_site_has_an_enclosing_testenv_guard`] scans every direct
-//! `rshooks_core::<fn>(` call site under `crates/rshooks/src/api/*.rs`
-//! (plus `xfl.rs`/`xfl_unchecked.rs`, and `keylet.rs`'s
-//! `util_keylet_buf(`/`util_keylet(` calls — see [`find_raw_call_in_keylet`])
-//! and requires the literal text `feature = "testenv"` to appear somewhere
-//! in the enclosing `fn`'s body (a brace-depth walk — see
-//! [`fn_body_end_line`]). Deleting an interception block makes this test
-//! fail.
+//! Source-scan test (design §2.1): for each bridged `rshooks::api::*` file,
+//! counts raw `rshooks_core::<fn>(` call sites (source before the file's
+//! own test module) against `feature = "testenv"` cfg-marker occurrences,
+//! and requires the two counts to match exactly — every raw call site has
+//! its own guard, one-to-one. A deleted interception block drops a marker
+//! without dropping its call site, so the counts diverge and this test
+//! catches it. `tests/spy_backend_audit.rs` separately proves the runtime
+//! property (every backend method is actually reached).
 
 #![allow(
     clippy::panic,
@@ -36,186 +35,91 @@ fn rshooks_crate_dir() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../rshooks")
 }
 
-/// Finds the identifier right after a `fn ` keyword occurrence starting at
-/// byte offset `idx` in `line` (`idx` already known to point at `"fn "`),
-/// skipping one leading `$` so a `macro_rules!` body's `fn $name(` still
-/// counts as a fn declaration.
-fn identifier_after(line: &str, idx: usize) -> Option<String> {
-    let rest = line.get(idx + 3..)?;
-    let rest = rest.strip_prefix('$').unwrap_or(rest);
-    let name: String = rest
-        .chars()
-        .take_while(|c| c.is_alphanumeric() || *c == '_')
-        .collect();
-    if name.is_empty() { None } else { Some(name) }
-}
-
-/// Whether `word` occurs in `haystack` as a standalone token (not as a
-/// substring of a longer identifier) — distinguishes a real `#[cfg(test)]`
-/// gate from `#[cfg(feature = "testenv", ...)]`, whose `testenv` would
-/// otherwise falsely match a naive `contains("test")` check.
-fn contains_word(haystack: &str, word: &str) -> bool {
-    let bytes = haystack.as_bytes();
-    let mut start = 0usize;
-    while let Some(rel) = haystack.get(start..).and_then(|s| s.find(word)) {
-        let match_start = start + rel;
-        let match_end = match_start + word.len();
-        let before_ok = match_start == 0
-            || bytes
-                .get(match_start - 1)
-                .is_some_and(|b| !(*b as char).is_alphanumeric() && *b != b'_');
-        let after_ok = match_end >= bytes.len()
-            || bytes
-                .get(match_end)
-                .is_some_and(|b| !(*b as char).is_alphanumeric() && *b != b'_');
-        if before_ok && after_ok {
-            return true;
-        }
-        start = match_start + 1;
+/// Everything before this file's first test module — `#[cfg(test)]` or,
+/// where the whole module is also gated on `feature = "testenv"` (e.g.
+/// `control.rs`'s `testenv_tests`), `#[cfg(all(test, ...))]`. Test code
+/// calls `rshooks_core::` directly with no intercept of its own, and a
+/// `cfg(all(test, feature = "testenv"))` module attribute is not itself an
+/// intercept's guard, so both must be excluded from the counts — otherwise
+/// a file with no plain `#[cfg(test)]` module at all (only the
+/// `cfg(all(test, ...))` one) never gets cut, and that attribute's own
+/// `feature = "testenv"` text inflates `marker_count` enough to mask a
+/// genuinely deleted intercept elsewhere in the file.
+fn source_before_test_module(content: &str) -> &str {
+    let cut = [
+        content.find("\n#[cfg(test)]"),
+        content.find("\n#[cfg(all(test"),
+    ]
+    .into_iter()
+    .flatten()
+    .min();
+    match cut {
+        Some(i) => &content[..i],
+        None => content,
     }
-    false
 }
 
-fn find_fn_name(line: &str) -> Option<String> {
-    let idx = line.find("fn ")?;
-    if idx > 0 {
-        let prev = line.as_bytes().get(idx - 1).copied()?;
-        if (prev as char).is_alphanumeric() || prev == b'_' {
-            return None;
-        }
-    }
-    identifier_after(line, idx)
-}
-
-fn find_raw_call(line: &str) -> Option<String> {
+/// Whether `line` contains a raw `rshooks_core::<ident>(` call site — a
+/// direct function call, not a module-qualified path
+/// (`rshooks_core::backend::with_backend(`, whose next token after
+/// `rshooks_core::` is `backend` followed by `::`, not `(`) or a doc/comment
+/// reference (`` [`rshooks_core::DOESNT_EXIST`] ``, followed by `]`/`` ` ``,
+/// not `(`).
+fn find_raw_call(line: &str) -> bool {
     const NEEDLE: &str = "rshooks_core::";
-    let idx = line.find(NEEDLE)?;
-    let rest = line.get(idx + NEEDLE.len()..)?;
-    let name: String = rest
-        .chars()
-        .take_while(|c| c.is_alphanumeric() || *c == '_')
-        .collect();
-    if name.is_empty() || name == "backend" {
-        return None;
-    }
-    let after = rest.get(name.len()..)?;
-    if after.starts_with('(') {
-        Some(name)
-    } else {
-        None
-    }
+    let Some(idx) = line.find(NEEDLE) else {
+        return false;
+    };
+    let rest = &line[idx + NEEDLE.len()..];
+    let name_len = rest
+        .find(|c: char| !c.is_alphanumeric() && c != '_')
+        .unwrap_or(rest.len());
+    name_len > 0 && rest[name_len..].starts_with('(')
 }
 
-/// `api/keylet.rs`'s 26 typed helpers each have an independent `_into`
-/// twin (see the module doc comment's "`_into` twins" section for why the
-/// two don't delegate to each other) — the by-value form intercepts the
-/// backend with its own real slices before falling through to
-/// `util_keylet_buf`, the `_into` twin before falling through to
-/// `util_keylet`; neither is a bare `rshooks_core::<fn>(` call, so
-/// [`find_raw_call`]'s `"rshooks_core::"` needle never matches either.
-/// This file's raw-call marker for keylet.rs is therefore `util_keylet_buf(`
-/// (by-value) or a bare `util_keylet(` (`_into`) — excluding a
-/// `.util_keylet(` method call (the testenv-only backend dispatch inside
-/// `testenv_keylet` itself, `b.util_keylet(...)`, not a raw host call site)
-/// by requiring the character right before the bare-`util_keylet(` needle
-/// not be an identifier character or `.`.
-fn find_raw_call_in_keylet(line: &str) -> Option<String> {
-    if line.contains("util_keylet_buf(") {
-        return Some("util_keylet_buf".to_string());
-    }
-    const NEEDLE: &str = "util_keylet(";
-    let idx = line.find(NEEDLE)?;
-    let prev_ok = idx == 0
-        || line.as_bytes().get(idx - 1).is_some_and(|b| {
-            let c = *b as char;
-            !c.is_alphanumeric() && c != '_' && c != '.'
-        });
-    if prev_ok {
-        Some("util_keylet".to_string())
-    } else {
-        None
-    }
+/// `api/keylet.rs`'s 26 typed wrappers go through `util_keylet_buf(`/a bare
+/// `util_keylet(` rather than `rshooks_core::<fn>(` directly (see the
+/// module doc comment's "`_into` twins" section) — excluding `.util_keylet(`,
+/// the one method-dispatch call inside `testenv_keylet` itself, not a raw
+/// host call site.
+fn find_raw_call_in_keylet(line: &str) -> bool {
+    line.contains("util_keylet_buf(")
+        || line
+            .find("util_keylet(")
+            .is_some_and(|idx| !line[..idx].ends_with('.'))
 }
 
-/// Brace-depth walk from `start_line` (already known to contain a `fn `
-/// declaration) to the line where that function's body closes. A single
-/// lightweight heuristic — raw `{`/`}` counting, no string/comment
-/// awareness — good enough to bound "the text of this one function", not a
-/// real parser. Stops at the first line where the depth returns to zero
-/// after having gone positive; falls back to the file's last line if the
-/// brace is never closed.
-fn fn_body_end_line(lines: &[&str], start_line: usize) -> usize {
-    let mut depth: i64 = 0;
-    let mut opened = false;
-    for (offset, line) in lines.get(start_line..).unwrap_or(&[]).iter().enumerate() {
-        for ch in line.chars() {
-            match ch {
-                '{' => {
-                    depth += 1;
-                    opened = true;
-                }
-                '}' => depth -= 1,
-                _ => {}
-            }
-        }
-        if opened && depth <= 0 {
-            return start_line + offset;
-        }
-    }
-    lines.len().saturating_sub(1)
-}
-
-/// One raw call site whose enclosing `fn` body carries no `feature =
-/// "testenv"` cfg marker anywhere in it. `(label, fn_name)`, `label`
-/// matching `"api/<file>.rs"` or the bare `xfl.rs`/`xfl_unchecked.rs` name.
-fn find_unbridged_call_sites(api_dir: &Path) -> Vec<(String, String)> {
+fn every_bridged_file_has_matching_markers() -> Vec<(String, usize, usize)> {
     const MARKER: &str = "feature = \"testenv\"";
+    let api_dir = rshooks_crate_dir().join("src/api");
     let mut offenders = Vec::new();
 
-    let mut scan_file = |path: &Path, label: &str, is_keylet: bool| {
-        let content = std::fs::read_to_string(path)
+    let mut check = |path: &Path, label: &str, is_keylet: bool| {
+        let full = std::fs::read_to_string(path)
             .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
-        let lines: Vec<&str> = content.lines().collect();
-        let mut current_fn: Option<String> = None;
-        let mut current_fn_start = 0usize;
-        for (i, line) in lines.iter().enumerate() {
-            let trimmed = line.trim_start();
-            if trimmed.starts_with("#[cfg(") && contains_word(trimmed, "test") {
-                break; // stop at the first test module in this file
-            }
-            if let Some(name) = find_fn_name(trimmed) {
-                current_fn = Some(name);
-                current_fn_start = i;
-            }
-            let raw = if is_keylet {
-                find_raw_call_in_keylet(line)
-            } else {
-                find_raw_call(line)
-            };
-            if raw.is_some()
-                && let Some(f) = &current_fn
-            {
-                let end = fn_body_end_line(&lines, current_fn_start);
-                let body_has_marker = lines
-                    .get(current_fn_start..=end)
-                    .is_some_and(|body| body.iter().any(|l| l.contains(MARKER)));
-                if !body_has_marker {
-                    offenders.push((label.to_string(), f.clone()));
-                }
-            }
+        let content = source_before_test_module(&full);
+        let find = if is_keylet {
+            find_raw_call_in_keylet
+        } else {
+            find_raw_call
+        };
+        let raw_count = content.lines().filter(|l| find(l)).count();
+        let marker_count = content.matches(MARKER).count();
+        if marker_count != raw_count {
+            offenders.push((label.to_string(), raw_count, marker_count));
         }
     };
 
     for file_name in BRIDGED_FAMILY_FILES {
-        scan_file(
+        check(
             &api_dir.join(file_name),
             &format!("api/{file_name}"),
             *file_name == "keylet.rs",
         );
     }
     for file_name in ["xfl.rs", "xfl_unchecked.rs"] {
-        scan_file(
-            &api_dir.parent().unwrap_or(api_dir).join(file_name),
+        check(
+            &api_dir.parent().unwrap_or(&api_dir).join(file_name),
             file_name,
             false,
         );
@@ -226,11 +130,11 @@ fn find_unbridged_call_sites(api_dir: &Path) -> Vec<(String, String)> {
 
 #[test]
 fn every_raw_call_site_has_an_enclosing_testenv_guard() {
-    let crate_dir = rshooks_crate_dir();
-    let offenders = find_unbridged_call_sites(&crate_dir.join("src/api"));
+    let offenders = every_bridged_file_has_matching_markers();
     assert!(
         offenders.is_empty(),
-        "raw rshooks_core call site(s) whose enclosing fn has no `feature = \"testenv\"` cfg \
-         guard anywhere in its body (an interception block may have been deleted): {offenders:#?}"
+        "file(s) whose raw-call-site count and `feature = \"testenv\"` marker count \
+         disagree, as (label, raw_call_count, marker_count) — an interception block may \
+         have been deleted (or a marker added without a matching call site): {offenders:#?}"
     );
 }

@@ -1,0 +1,111 @@
+name: Wasm reproducibility
+
+# Builds every examples/* crate through rshooks-build on each supported
+# host OS / CPU architecture and asserts the produced .wasm bytes are
+# byte-identical across all of them. A hook's HookHash is derived from
+# those bytes, so a host-dependent build would make the same source deploy
+# as a different hook depending on where it was built.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest      # linux x86_64
+          - ubuntu-24.04-arm   # linux aarch64
+          - macos-latest       # macos aarch64
+          - macos-15-intel     # macos x86_64
+          - windows-latest     # windows x86_64
+          - windows-11-arm     # windows aarch64
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain (per rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build rshooks-build (release)
+        run: cargo build -p rshooks-build --release
+
+      - name: Build and check every example
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="target/release/rshooks"
+          [[ -x "$bin.exe" ]] && bin="$bin.exe"
+          for manifest in examples/*/Cargo.toml; do
+            dir="$(dirname "$manifest")"
+            "$bin" build --manifest-path "$manifest" --out "$dir/out"
+            for wasm in "$dir/out/current"/*.wasm; do
+              "$bin" check "$wasm"
+            done
+          done
+
+      - name: Collect wasm digests
+        shell: python
+        run: |
+          import hashlib, pathlib
+          lines = []
+          for wasm in sorted(pathlib.Path("examples").glob("*/out/current/*.wasm")):
+              digest = hashlib.sha256(wasm.read_bytes()).hexdigest()
+              lines.append(f"{digest}  {wasm.parts[1]}/{wasm.name}\n")
+          out = pathlib.Path("digests/${{ matrix.os }}.txt")
+          out.parent.mkdir(exist_ok=True)
+          out.write_text("".join(lines), newline="\n")
+          print("".join(lines), end="")
+
+      - name: Upload wasm digests
+        uses: actions/upload-artifact@v7
+        with:
+          name: wasm-digests-${{ matrix.os }}
+          path: digests/${{ matrix.os }}.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  compare:
+    name: Compare across hosts
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all digests
+        uses: actions/download-artifact@v7
+        with:
+          pattern: wasm-digests-*
+          path: digests
+          merge-multiple: true
+
+      - name: Assert every host produced identical wasm
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd digests
+          ls
+          ref=ubuntu-latest.txt
+          status=0
+          for f in *.txt; do
+            [[ "$f" == "$ref" ]] && continue
+            if diff -u "$ref" "$f"; then
+              echo "OK: $f == $ref"
+            else
+              echo "::error::wasm differs between $ref and $f"
+              status=1
+            fi
+          done
+          exit $status

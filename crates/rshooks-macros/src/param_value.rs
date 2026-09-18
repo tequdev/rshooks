@@ -31,7 +31,10 @@
 //! than through `<Self as ToBytes>::MAX_LEN` — since `Self` has no
 //! `ToBytes` impl to reference.
 
-use crate::shape::{StructShape, max_len_expr, offset_consts, parse_struct, read_body};
+use crate::shape::{
+    StructShape, fixed_read_impl, from_bytes_impl, max_len_expr, offset_consts, parse_struct,
+    read_body,
+};
 use proc_macro::TokenStream;
 
 /// Entry point invoked by `#[proc_macro_derive(ParamValue)]` in `lib.rs`.
@@ -51,46 +54,14 @@ pub(crate) fn generate(shape: &StructShape) -> TokenStream {
     // `Self` has no `ToBytes` impl here, so this sum over each field's own
     // `MAX_LEN` is inlined at every use site instead of referenced via
     // `<Self as ToBytes>::MAX_LEN`.
-    let total_len_expr = max_len_expr(&shape.fields);
+    let total_len_expr = format!("({})", max_len_expr(&shape.fields));
     let offset_consts = offset_consts(&shape.fields);
     let read_body = read_body(&shape.fields);
 
     let src = format!(
-        "
-#[automatically_derived]
-impl ::rshooks::convert::FromBytes for {name} {{
-    #[inline(always)]
-    #[allow(clippy::indexing_slicing)] // fixed, compile-time field offsets (see __OFF_* below); `__src` was already proven to have exactly this many bytes by the `get(..)` check\n\
-    fn read(buf: &[u8]) -> ::rshooks::error::Result<Self> {{
-        let __src = buf.get(..({total_len_expr}))
-            .ok_or(::rshooks::error::HookError::TooSmall)?;
-        {offset_consts}
-        ::core::result::Result::Ok(Self {{
-            {read_body}
-        }})
-    }}
-}}
-
-#[automatically_derived]
-impl ::rshooks::convert::FixedRead for {name} {{
-    #[inline(always)]
-    fn read_exact(
-        read: impl FnOnce(&mut [u8]) -> ::rshooks::error::Result<usize>,
-    ) -> ::rshooks::error::Result<Self> {{
-        let mut __buf = [0u8; {total_len_expr}];
-        let __written = read(&mut __buf)?;
-        if __written == ({total_len_expr}) {{
-            <Self as ::rshooks::convert::FromBytes>::read(&__buf)
-        }} else {{
-            ::core::result::Result::Err(::rshooks::error::HookError::TooSmall)
-        }}
-    }}
-}}
-",
-        name = name,
-        total_len_expr = total_len_expr,
-        offset_consts = offset_consts,
-        read_body = read_body,
+        "{from_bytes}{fixed_read}",
+        from_bytes = from_bytes_impl(name, &total_len_expr, &offset_consts, &read_body),
+        fixed_read = fixed_read_impl(name, &total_len_expr),
     );
     crate::shape::finish(src, shape.name_span, "ParamValue")
 }

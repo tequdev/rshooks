@@ -6,10 +6,10 @@
 //! (`index`/`hook_fn`/`cbak_fn`) and a transcribed `chain` summary.
 
 use anyhow::{Context, Result};
-use serde::{Serialize, Serializer, ser::SerializeMap};
+use serde::Serialize;
 
 use crate::ValidationReport;
-use crate::carriers::{ChainCarrier, ChainDecls, EntryDecl, resolve_trigger_masks};
+use crate::carriers::{ChainCarrier, ChainDecls, EntryDecl, SigParamDecl, resolve_trigger_masks};
 use crate::metadata::{BuilderInfo, WorstCaseExecution, hook_hash, hook_mask, utf8_hex};
 
 /// The built sidecar bytes plus non-fatal warnings (currently: `HookName`
@@ -78,12 +78,44 @@ pub fn build_entry_sidecar_with(
         },
     );
 
+    let masks = resolve_trigger_masks(&entry.on)?;
+    let on = if entry.on.form == "directional" {
+        OnMasks::Directional {
+            incoming: masks.hook_on_incoming,
+            outgoing: masks.hook_on_outgoing,
+        }
+    } else {
+        OnMasks::Single { on: masks.hook_on }
+    };
+
     let document = EntrySidecarDocument {
-        entry: entry.clone(),
-        chain: chain.clone(),
+        index: entry.index,
+        hook_fn: &entry.hook_fn,
+        cbak_fn: entry.cbak_fn.as_deref(),
+        // Intentional duplication: `name` mirrors `hook_fn` (contract §C item 5).
+        name: &entry.hook_fn,
+        description: entry.description.as_deref(),
+        on,
+        hook_can_emit: hook_mask(entry.hook_can_emit.as_deref())?,
+        hook_name: entry.hook_name.as_deref().map(utf8_hex),
+        // Declared signature parameters (`docs/PARAM_SIGNATURE_DESIGN.md`
+        // §1/§4), carried verbatim from the carrier. The key is present iff
+        // the carrier has one, i.e. the hook was built with
+        // `unstable-param-sig-interface`.
+        sig_params: entry.sig_params.as_deref(),
         hook_hash: hook_hash(final_wasm),
         wce,
         builder,
+        human: HumanEntry {
+            on: &entry.on,
+            hook_can_emit: entry.hook_can_emit.as_deref(),
+            hook_name: entry.hook_name.as_deref(),
+        },
+        chain: ChainSummary {
+            struct_name: &chain.struct_name,
+            description: chain.description.as_deref(),
+            decls: &chain.decls,
+        },
     };
 
     let mut bytes =
@@ -93,68 +125,46 @@ pub fn build_entry_sidecar_with(
     Ok(EntrySidecarBuild { bytes, warnings })
 }
 
-struct EntrySidecarDocument {
-    entry: EntryDecl,
-    chain: ChainCarrier,
+#[derive(Serialize)]
+struct EntrySidecarDocument<'a> {
+    index: u8,
+    hook_fn: &'a str,
+    cbak_fn: Option<&'a str>,
+    // Intentional duplication: `name` mirrors `hook_fn` (contract §C item 5).
+    name: &'a str,
+    description: Option<&'a str>,
+    #[serde(flatten)]
+    on: OnMasks,
+    #[serde(rename = "HookCanEmit")]
+    hook_can_emit: Option<String>,
+    #[serde(rename = "HookName")]
+    hook_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sig_params: Option<&'a [SigParamDecl]>,
+    #[serde(rename = "HookHash")]
     hook_hash: String,
+    #[serde(rename = "WCE")]
     wce: WorstCaseExecution,
     builder: BuilderInfo,
+    human: HumanEntry<'a>,
+    chain: ChainSummary<'a>,
 }
 
-impl Serialize for EntrySidecarDocument {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut map = serializer.serialize_map(None)?;
-        map.serialize_entry("index", &self.entry.index)?;
-        map.serialize_entry("hook_fn", &self.entry.hook_fn)?;
-        map.serialize_entry("cbak_fn", &self.entry.cbak_fn)?;
-        // Intentional duplication: `name` mirrors `hook_fn` (contract §C item 5).
-        map.serialize_entry("name", &self.entry.hook_fn)?;
-        map.serialize_entry("description", &self.entry.description)?;
-
-        let masks = resolve_trigger_masks(&self.entry.on).map_err(serde::ser::Error::custom)?;
-        if self.entry.on.form == "directional" {
-            map.serialize_entry("HookOnIncoming", &masks.hook_on_incoming)?;
-            map.serialize_entry("HookOnOutgoing", &masks.hook_on_outgoing)?;
-        } else {
-            map.serialize_entry("HookOn", &masks.hook_on)?;
-        }
-
-        map.serialize_entry(
-            "HookCanEmit",
-            &hook_mask(self.entry.hook_can_emit.as_deref()).map_err(serde::ser::Error::custom)?,
-        )?;
-        map.serialize_entry("HookName", &self.entry.hook_name.as_deref().map(utf8_hex))?;
-        // Declared signature parameters (`docs/PARAM_SIGNATURE_DESIGN.md`
-        // §1/§4), carried verbatim from the carrier. The key is present iff
-        // the carrier has one, i.e. the hook was built with
-        // `unstable-param-sig-interface`.
-        if let Some(sig_params) = &self.entry.sig_params {
-            map.serialize_entry("sig_params", sig_params)?;
-        }
-        map.serialize_entry("HookHash", &self.hook_hash)?;
-        map.serialize_entry("WCE", &self.wce)?;
-        map.serialize_entry("builder", &self.builder)?;
-        map.serialize_entry(
-            "human",
-            &HumanEntry {
-                on: &self.entry.on,
-                hook_can_emit: self.entry.hook_can_emit.as_deref(),
-                hook_name: self.entry.hook_name.as_deref(),
-            },
-        )?;
-        map.serialize_entry(
-            "chain",
-            &ChainSummary {
-                struct_name: &self.chain.struct_name,
-                description: self.chain.description.as_deref(),
-                decls: &self.chain.decls,
-            },
-        )?;
-        map.end()
-    }
+/// The `HookOn`/`HookOnIncoming`+`HookOnOutgoing` trigger-mask fields:
+/// mutually exclusive per [`crate::carriers::resolve_trigger_masks`].
+#[derive(Serialize)]
+#[serde(untagged)]
+enum OnMasks {
+    Directional {
+        #[serde(rename = "HookOnIncoming")]
+        incoming: Option<String>,
+        #[serde(rename = "HookOnOutgoing")]
+        outgoing: Option<String>,
+    },
+    Single {
+        #[serde(rename = "HookOn")]
+        on: Option<String>,
+    },
 }
 
 /// Readable source values corresponding to the raw SetHook fields above.

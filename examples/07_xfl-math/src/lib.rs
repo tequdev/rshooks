@@ -19,8 +19,6 @@ hook_errors! {
         InvalidAmount = 3,
         /// The percentage could not be computed.
         MulratioFailed = 4,
-        /// The minimum share could not be constructed.
-        MinShareConstructFailed = 5,
         /// The share comparison failed.
         ComparisonFailed = 6,
         /// The share is below the minimum.
@@ -31,8 +29,6 @@ hook_errors! {
         RemainingComparisonFailed = 9,
         /// The remaining amount is not positive.
         NotEnoughRemaining = 10,
-        /// The growth factor could not be constructed.
-        GrowthConstructFailed = 11,
         /// The compounded amount is invalid.
         CompoundValidationFailed = 12,
         /// The compounded amount comparison failed.
@@ -77,12 +73,7 @@ impl XflMath {
             )
         };
 
-        let Ok(min_share) = XFL::new(-21, 1_000_000_000_000_000) else {
-            rollback!(
-                b"xfl-math: could not construct min_share",
-                XflMathError::MinShareConstructFailed
-            )
-        };
+        let min_share = XFL!(0.000001);
 
         match share.lt(min_share) {
             Ok(true) => rollback!(
@@ -114,12 +105,7 @@ impl XflMath {
             ),
         }
 
-        let Ok(growth) = XFL::new(-15, 1_010_000_000_000_000) else {
-            rollback!(
-                b"xfl-math: could not construct growth factor",
-                XflMathError::GrowthConstructFailed
-            )
-        };
+        let growth = XFL!(1.01);
         let compounded_raw =
             share.unchecked() * growth.unchecked() * growth.unchecked() * growth.unchecked();
         let Ok(compounded) = compounded_raw.validate() else {

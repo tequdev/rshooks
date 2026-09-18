@@ -109,17 +109,9 @@ pub(crate) fn write_bytes_code(out: &mut [u8], r: BackendResult<Vec<u8>>) -> i64
     }
 }
 
-/// [`write_bytes`] into uninitialized storage. Each byte is initialized
-/// explicitly because the destination must not be reborrowed as `&mut [u8]`.
-#[inline(always)]
-pub(crate) fn write_bytes_uninit(
-    out: &mut [core::mem::MaybeUninit<u8>],
-    r: BackendResult<Vec<u8>>,
-) -> HookResult<usize> {
-    res(write_bytes_uninit_code(out, r)).map(|v| v as usize)
-}
-
-/// Raw-code counterpart to [`write_bytes_uninit`].
+/// [`write_bytes_code`] into uninitialized storage. Each byte is
+/// initialized explicitly because the destination must not be reborrowed as
+/// `&mut [u8]`.
 #[inline(always)]
 pub(crate) fn write_bytes_uninit_code(
     out: &mut [core::mem::MaybeUninit<u8>],
@@ -213,4 +205,20 @@ pub(crate) fn keylet_result(r: BackendResult<[u8; 34]>) -> HookResult<Keylet> {
         Ok(bytes) => Ok(Keylet::from(bytes)),
         Err(code) => Err(HookError::from(code)),
     }
+}
+
+pub(crate) use rshooks_core::backend::KeyletArg;
+
+/// Testenv interception shared by every typed `api::keylet` helper (both
+/// the by-value and `_into` families). Neither `util_keylet_buf` nor
+/// `util_keylet` still has real slices by the time a typed helper calls
+/// it, so interception happens one level up, where `account`/`hash`/...
+/// are still real references; the wasm/no-backend fallback in every typed
+/// helper still calls `util_keylet_buf`/`util_keylet` unchanged.
+#[inline(always)]
+pub(crate) fn keylet_intercept(
+    keylet_type: u32,
+    args: [KeyletArg<'_>; 6],
+) -> Option<HookResult<Keylet>> {
+    rshooks_core::backend::with_backend(|b| b.util_keylet(keylet_type, args)).map(keylet_result)
 }

@@ -7,7 +7,7 @@
       "hook_fn": "main",
       "bytes": 640,
       "wce": {
-        "hook": 127,
+        "hook": 128,
         "cbak": 0
       },
       "max_nesting": 2
