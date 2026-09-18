@@ -1,22 +1,9 @@
-import {
-  ExecutionUtility,
-  StateUtility,
-  Xrpld,
-  clearAllHooks,
-  clearHookState,
-  hexNamespace,
-  readHookBinaryHexFromNS,
-  serverUrl,
-  setHooks,
-  setupClient,
-  teardownClient,
-  type XrplIntegrationTestContext,
-  type iHook,
-} from '@xahau/hooks-toolkit'
-import { calculateHookOn, type TransactionMetadata } from 'xahau'
-import { HookFlags } from 'xahau/dist/npm/models/common/xahau'
+import { ExecutionUtility, StateUtility, Xrpld, hexNamespace } from '@xahau/hooks-toolkit'
+import type { TransactionMetadata } from 'xahau'
+import { installHook } from './harness'
 
 const namespace = 'rshooks-e2e-state-counter'
+const hookNamespace = hexNamespace(namespace)
 const WORST_CASE_INSTRUCTIONS = 254
 
 // Hook state keys are left-padded to 32 bytes by the host.
@@ -26,45 +13,16 @@ const COUNTER_KEY = Buffer.from('counter', 'ascii')
   .padStart(64, '0')
 
 describe('state-counter', () => {
-  let testContext: XrplIntegrationTestContext
-  const hookNamespace = hexNamespace(namespace)
-
-  beforeAll(async () => {
-    testContext = await setupClient(serverUrl)
-
-    const hook: iHook = {
-      CreateCode: readHookBinaryHexFromNS('state_counter', 'wasm'),
-      Flags: HookFlags.hsfOverride,
-      HookOn: calculateHookOn(['Invoke']),
-      HookNamespace: hookNamespace,
-      HookApiVersion: 0,
-    }
-    await setHooks({
-      client: testContext.client,
-      wallet: testContext.hook1,
-      hooks: [{ Hook: hook }],
-    })
-  })
-
-  afterAll(async () => {
+  const getContext = installHook({
+    wasmName: 'state_counter',
+    namespace,
+    hookOn: ['Invoke'],
     // Clear persistent state so reruns start at zero.
-    const clearStateHook: iHook = {
-      Flags: HookFlags.hsfNSDelete,
-      HookNamespace: hookNamespace,
-    }
-    await clearHookState({
-      client: testContext.client,
-      wallet: testContext.hook1,
-      hooks: [{ Hook: clearStateHook }],
-    })
-    await clearAllHooks({
-      client: testContext.client,
-      wallet: testContext.hook1,
-    })
-    await teardownClient(testContext)
+    clearState: true,
   })
 
   const invoke = async () => {
+    const testContext = getContext()
     const response = await Xrpld.submit(testContext.client, {
       tx: {
         TransactionType: 'Invoke',
@@ -96,6 +54,7 @@ describe('state-counter', () => {
   })
 
   it('persists the counter as an 8-byte LE u64 in hook state', async () => {
+    const testContext = getContext()
     const entry = await StateUtility.getHookState(
       testContext.client,
       testContext.hook1.classicAddress,

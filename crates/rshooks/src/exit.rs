@@ -66,12 +66,11 @@ impl Accept {
 /// comment). A raw code is constructed with [`Rollback::from_code`] /
 /// [`Rollback::new`] / `Err(Rollback::from_code(code))` explicitly.
 ///
-/// **Deliberately no `From<HookError> for Rollback`.** [`HookError::code`]
-/// is a 46-arm re-encode match, and a `?`-propagated two-hop `HookError` →
-/// `Rollback` conversion measurably costs more (worst-case instructions and
-/// size) than a raw-code-check twin. Convert explicitly at the call site
-/// instead, discarding the decoded `HookError` and keeping only "some call
-/// failed":
+/// **Deliberately no `From<HookError> for Rollback`.** A Hook API error
+/// code (`-1..=-45`, `-10024`) is not the hook's own return code; a
+/// `?`-propagated `HookError` → `Rollback` conversion would publish the
+/// host's code as the hook's verdict. Convert explicitly at the call site
+/// instead, discarding the `HookError` and keeping only "some call failed":
 ///
 /// ```rust,ignore
 /// let value = some_hook_api_call().map_err(|_| MyError::SomeCallFailed)?;
@@ -80,7 +79,6 @@ impl Accept {
 /// — or fall back to [`crate::accept`]/[`crate::rollback`] directly when a
 /// computed (non-`'static`) message is needed.
 ///
-/// [`HookError::code`]: crate::error::HookError::code
 /// [`hook_errors!`]: crate::hook_errors
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rollback {

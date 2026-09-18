@@ -3,6 +3,10 @@
 //! `float_compare` oracle (`COMPARE_EQUAL`/`COMPARE_GREATER`/`COMPARE_LESS`
 //! against zero), for values only real host arithmetic can produce
 //! (`float_sum`, `float_negate`, `float_multiply`, `float_divide`).
+//!
+//! Also cross-checks the `PartialOrd` operators (`<`, `<=`, `>`, `>=`)
+//! against the same oracle: each resolves to one `float_compare` under the
+//! matching mode.
 
 #![allow(clippy::arithmetic_side_effects, clippy::eq_op, missing_docs)]
 
@@ -56,6 +60,27 @@ impl XflPredicateCheck {
             }
             if value.is_strictly_negative() != oracle_neg {
                 accept!(b"", 300 + idx as i64);
+            }
+        }
+
+        // Each comparison operator resolves to one `float_compare` under
+        // the matching mode: `<` is `COMPARE_LESS`, `<=` adds
+        // `COMPARE_EQUAL`, and the `>` pair mirrors them.
+        for (i, a) in cases.into_iter().enumerate() {
+            for (j, b) in cases.into_iter().enumerate() {
+                let idx = (i * cases.len() + j) as i64;
+                if Ok(a < b) != a.compare(b, COMPARE_LESS) {
+                    accept!(b"", 400 + idx);
+                }
+                if Ok(a <= b) != a.compare(b, COMPARE_LESS | COMPARE_EQUAL) {
+                    accept!(b"", 500 + idx);
+                }
+                if Ok(a > b) != a.compare(b, COMPARE_GREATER) {
+                    accept!(b"", 600 + idx);
+                }
+                if Ok(a >= b) != a.compare(b, COMPARE_GREATER | COMPARE_EQUAL) {
+                    accept!(b"", 700 + idx);
+                }
             }
         }
 
