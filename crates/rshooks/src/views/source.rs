@@ -206,7 +206,8 @@ impl ViewValue for Amount {
 
     #[inline(always)]
     fn read_otxn_opt(field: SField<Self>) -> Result<Option<AmountBytes>> {
-        let mut storage = core::mem::MaybeUninit::<[u8; IOU_AMOUNT_LEN]>::uninit();
+        let mut storage =
+            core::mem::MaybeUninit::<crate::convert::Scratch<IOU_AMOUNT_LEN>>::uninit();
         // SAFETY: only the `..written` prefix `otxn_field_raw_code` reports
         // writing is ever read below.
         let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
@@ -239,8 +240,9 @@ impl ViewValue for Issue {
     /// and report `ParseError` instead of failing early as `TooSmall`.
     #[inline(always)]
     fn read_otxn_opt(field: SField<Self>) -> Result<Option<IssueData>> {
-        let mut storage =
-            core::mem::MaybeUninit::<[u8; crate::slot_obj::ISSUE_MAX_READ_LEN]>::uninit();
+        let mut storage = core::mem::MaybeUninit::<
+            crate::convert::Scratch<{ crate::slot_obj::ISSUE_MAX_READ_LEN }>,
+        >::uninit();
         // SAFETY: only the `..written` prefix `otxn_field_raw_code` reports
         // writing is ever read below.
         let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };

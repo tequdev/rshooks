@@ -194,7 +194,7 @@ pub(crate) fn hook_param_raw_code(buf: &mut [u8], name: &[u8]) -> i64 {
 /// this crate already returns for an undersized destination.
 #[inline(always)]
 pub(crate) fn hook_param_checked_raw_code(out: &mut [u8], name: &[u8]) -> i64 {
-    let mut scratch = MaybeUninit::<[u8; HOOK_PARAM_VALUE_MAX_LEN]>::uninit();
+    let mut scratch = MaybeUninit::<crate::convert::Scratch<HOOK_PARAM_VALUE_MAX_LEN>>::uninit();
     // SAFETY: only read below, over the range `hook_param_raw_code`'s own
     // successful return proves it wrote.
     let buf = unsafe { uninit_slice_mut(&mut scratch) };

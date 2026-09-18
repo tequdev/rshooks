@@ -17,6 +17,96 @@ macro_rules! word_diff {
     };
 }
 
+/// Reads one word-sized chunk (`u64`, `u32`, `u16`, or `u8`) out of `$src`
+/// starting at literal offset `$start` and writes it back into `$dst` at the
+/// same offset, round-tripping through `to_ne_bytes`/`from_ne_bytes` so LLVM
+/// sees the chunk as one word-typed value instead of `N` independent byte
+/// accesses. `$start` is a source-level literal, so every index below is a
+/// constant expression, statically proven in-bounds (panic-free) and
+/// straight-line (loop-free).
+macro_rules! word_copy {
+    ($dst:ident, $src:ident, u64, $start:literal) => {
+        let b = u64::from_ne_bytes([
+            $src[$start],
+            $src[$start + 1],
+            $src[$start + 2],
+            $src[$start + 3],
+            $src[$start + 4],
+            $src[$start + 5],
+            $src[$start + 6],
+            $src[$start + 7],
+        ])
+        .to_ne_bytes();
+        $dst[$start] = b[0];
+        $dst[$start + 1] = b[1];
+        $dst[$start + 2] = b[2];
+        $dst[$start + 3] = b[3];
+        $dst[$start + 4] = b[4];
+        $dst[$start + 5] = b[5];
+        $dst[$start + 6] = b[6];
+        $dst[$start + 7] = b[7];
+    };
+    ($dst:ident, $src:ident, u32, $start:literal) => {
+        let b = u32::from_ne_bytes([
+            $src[$start],
+            $src[$start + 1],
+            $src[$start + 2],
+            $src[$start + 3],
+        ])
+        .to_ne_bytes();
+        $dst[$start] = b[0];
+        $dst[$start + 1] = b[1];
+        $dst[$start + 2] = b[2];
+        $dst[$start + 3] = b[3];
+    };
+    ($dst:ident, $src:ident, u16, $start:literal) => {
+        let b = u16::from_ne_bytes([$src[$start], $src[$start + 1]]).to_ne_bytes();
+        $dst[$start] = b[0];
+        $dst[$start + 1] = b[1];
+    };
+    ($dst:ident, $src:ident, u8, $start:literal) => {
+        $dst[$start] = $src[$start];
+    };
+}
+
+/// Generates a loop-free, panic-free copy function for a `$n`-byte buffer,
+/// moving it as a fixed sequence of contiguous word-sized chunks starting at
+/// literal offsets (see the [module docs](self)) so LLVM sees every access
+/// as word-typed instead of scalarizing a plain `[u8; N]` byte by byte on
+/// `wasm32v1-none`. Every offset is a literal, so the body is straight-line
+/// code (no loop, no bounds-check panic path) regardless of optimization
+/// level.
+macro_rules! impl_buf_copy {
+    ($name:ident, $n:literal, [ $( $ty:ident [ $start:literal ] ),+ $(,)? ]) => {
+        #[doc = concat!(
+            "Loop-free, panic-free word-wise copy of a ", stringify!($n),
+            "-byte buffer. See the [module docs](self) for why this exists ",
+            "instead of a plain array move/`memcpy`."
+        )]
+        #[inline(always)]
+        #[must_use]
+        pub fn $name(src: &[u8; $n]) -> [u8; $n] {
+            let mut dst = [0u8; $n];
+            $( word_copy!(dst, src, $ty, $start); )+
+            dst
+        }
+    };
+}
+
+impl_buf_copy!(buf_copy_8, 8, [u64[0]]);
+impl_buf_copy!(buf_copy_20, 20, [u64[0], u64[8], u32[16]]);
+impl_buf_copy!(buf_copy_32, 32, [u64[0], u64[8], u64[16], u64[24]]);
+impl_buf_copy!(buf_copy_33, 33, [u64[0], u64[8], u64[16], u64[24], u8[32]]);
+impl_buf_copy!(buf_copy_34, 34, [u64[0], u64[8], u64[16], u64[24], u16[32]]);
+impl_buf_copy!(
+    buf_copy_48,
+    48,
+    [u64[0], u64[8], u64[16], u64[24], u64[32], u64[40]]
+);
+// Only the six lengths `rshooks::types`' `fixed_bytes_type!` newtypes use
+// (8/20/32/33/34/48) are provided; extend with another `impl_buf_copy!` call
+// if a new fixed-size newtype needs a different length.
+
 /// Generates a loop-free, panic-free equality function for a `$n`-byte
 /// buffer, comparing it as a fixed sequence of word-sized chunks (see the
 /// [module docs](self)). Every index in every chunk is a literal, so the
@@ -224,6 +314,46 @@ mod tests {
     #[test]
     fn buf_eq_64_matches_slice_eq() {
         check_eq_and_all_single_byte_diffs(buf_eq_64);
+    }
+
+    /// Generic round-trip check shared by the `buf_copy_N` tests below: a
+    /// distinctive, non-repeating pattern must come back unchanged.
+    fn check_copy_round_trips<const N: usize>(copy: fn(&[u8; N]) -> [u8; N]) {
+        let mut src = [0u8; N];
+        for (i, b) in src.iter_mut().enumerate() {
+            *b = (i as u8).wrapping_mul(37).wrapping_add(11);
+        }
+        assert_eq!(copy(&src), src, "buf_copy_{N} must round-trip its input");
+    }
+
+    #[test]
+    fn buf_copy_8_round_trips() {
+        check_copy_round_trips(buf_copy_8);
+    }
+
+    #[test]
+    fn buf_copy_20_round_trips() {
+        check_copy_round_trips(buf_copy_20);
+    }
+
+    #[test]
+    fn buf_copy_32_round_trips() {
+        check_copy_round_trips(buf_copy_32);
+    }
+
+    #[test]
+    fn buf_copy_33_round_trips() {
+        check_copy_round_trips(buf_copy_33);
+    }
+
+    #[test]
+    fn buf_copy_34_round_trips() {
+        check_copy_round_trips(buf_copy_34);
+    }
+
+    #[test]
+    fn buf_copy_48_round_trips() {
+        check_copy_round_trips(buf_copy_48);
     }
 
     #[test]

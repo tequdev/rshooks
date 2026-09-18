@@ -258,7 +258,7 @@ pub const fn padded_bytes<const N: usize>(src: &[u8]) -> [u8; N] {
 /// let padded: [u8; 10] = pad!(b"hello");
 /// assert_eq!(padded, [b'h', b'e', b'l', b'l', b'o', 0, 0, 0, 0, 0]);
 ///
-/// // `StateKey` is a `#[repr(transparent)]` newtype over `[u8; 32]` (see
+/// // `StateKey` is a newtype over `[u8; 32]` (see
 /// // `types.rs`), so `pad!` (which returns a plain `[u8; N]`) is wrapped
 /// // explicitly via the newtype's public tuple field.
 /// const KEY: StateKey = StateKey(pad!(b"counter"));
