@@ -18,7 +18,10 @@ doc comment, "Key length and padding") — the same on-ledger slot a C hook's
 For a hook this small (one `u64`, one key), a hand-rolled raw-buffer read
 would cost about the same as the typed layer's read path (which still goes
 through the generic scratch-buffer machinery `MAX_TYPED_STATE_LEN` sizes);
-see [`metrics.json`](./metrics.json) for current numbers. This example uses
+the write path is cheaper by construction, since it encodes through
+`u64`'s own `ToBytes::with_bytes` into a buffer sized exactly to `u64`,
+not the 32-byte generic scratch buffer the read path pays for. See
+[`metrics.json`](./metrics.json) for current numbers. This example uses
 the typed layer anyway because its purpose is to be the smallest possible
 tutorial for it — see `examples/12_typed-data` for the layer's actual
 selling point, a composite multi-field key/value pair.

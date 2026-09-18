@@ -165,9 +165,7 @@ and is measurably *not*: on this workspace's `opt-level = 3` profile,
 for `me < asset.issuer` (`buf_cmp_20`), because a host call is one
 instruction in the worst-case count while `buf_cmp_20` inlines a
 three-stage comparison ladder. "Fewer host calls" and "fewer instructions"
-are different objectives, and only the second is metered — see the
-example's README ("Fewer host calls is not the same as fewer instructions")
-for the full measurement.
+are different objectives, and only the second is metered.
 
 ## Cost
 

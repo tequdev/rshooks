@@ -24,7 +24,6 @@ the numbering — Cargo package names can't start with a digit, so only the
 directory is prefixed) and matches what its own README, `Cargo.toml`, and
 `use` statements call it.
 
-<!-- ANCHOR: examples-table -->
 | # | example | demonstrates | book chapter |
 |---|---|---|---|
 | 01 | [`accept-all`](01_accept-all) | minimal hook: `accept` everything (starter template) | [Anatomy of a Hook](../book/src/concepts/anatomy.md) |
@@ -48,7 +47,6 @@ directory is prefixed) and matches what its own README, `Cargo.toml`, and
 | 20 | [`state-interface`](20_state-interface) | the Hook State Interface: `#[state_interface(id = .., key(..), value(..))]` chain-struct fields as a declared, typed, machine-readable state schema, with generated value structs and `sethook.template.json` declarations | [Hook State](../book/src/data/state.md#state-interface-typed-on-ledger-schema) |
 | 21 | [`txn-template-nested`](21_txn-template-nested) | `txn_template!`'s homogeneous indexed array form (`array(sfX) [ Elem: object(sfY) { .. } ; N ]`) and `fixed_vl(sfX, N)` (a compile-time-length-prefixed VL blob): a Remit whose two-element `sfAmounts` array (an issued `amount` entry with a baked currency/issuer, repeated) and single-element `sfMemos` array (a fixed-length memo type/data) are declared once and filled at runtime through generated `amounts(index)`/`memos(index) -> Option<Elem<'_>>` accessors, with no `StoWriter` needed | [Emitting Transactions](../book/src/emit/emitting.md) |
 | 22 | [`txn-template-optional`](22_txn-template-optional) | `txn_template!`'s NOP-padded optional field kinds (`docs/NOP_PADDING_DESIGN.md`), written entirely in the inferred style: `optional sfX`, `any_amount` via the `= AnyAmount()` default-shape marker, and an array with one required and one `optional` element, both by position — a single Remit sending one or two amounts, with an optional `DestinationTag`, with per-container 63-NOP budgets checked at compile time | [Emitting Transactions](../book/src/emit/emitting.md) |
-<!-- ANCHOR_END: examples-table -->
 
 ## 80+: Production hooks in Rust
 
@@ -65,11 +63,9 @@ equivalence note against govern.c, and the real Guard-type typed-accessor
 nesting-depth limit discovered while porting them (and its raw-API escape
 hatch).
 
-<!-- ANCHOR: examples-table-80 -->
 | # | example | ports | book chapter |
 |---|---|---|---|
 | 80 | [`governance`](80_governance) | [`hook/genesis/govern.c`](https://raw.githubusercontent.com/Xahau/xahaud/dev/hook/genesis/govern.c) + [`hook/genesis/reward.c`](https://raw.githubusercontent.com/Xahau/xahaud/dev/hook/genesis/reward.c) — the 20-seat L1/L2 governance state machine (`govern`, chain position 0) and the `GenesisMint`-emitting `ClaimReward` payout hook (`reward`, chain position 1) | [Hook Chains](../book/src/concepts/chains.md) |
-<!-- ANCHOR_END: examples-table-80 -->
 
 ## Entry points: `#[hooks]`
 

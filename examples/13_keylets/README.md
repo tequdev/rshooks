@@ -6,19 +6,19 @@ Using `rshooks::api::keylet`'s 26 typed `keylet_xxx` helpers — one per
 `KEYLET_*` constant — in place of the single untyped `util_keylet`. See
 [Keylets](../../book/src/data/keylets.md) for the type-safety rationale,
 the full helper table, and `account_id!`/`CurrencyCode::from_iso`. This
-README covers what that page only summarizes: how 25 of the 26 results get
-independently verified end-to-end, and the one (`KEYLET_TICKET`) that
+README covers what that page only summarizes: how each computed result
+gets independently verified end-to-end, except `KEYLET_TICKET`, which
 doesn't.
 
 ## The hook
 
 Reads the invoking transaction's `sfAccount` (`owner`) and `sfDestination`
-(`dest`), computes 25 of the 26 `KEYLET_*` types from `owner`/`dest` plus a
-handful of fixed test constants (`src/lib.rs`), and writes every 34-byte
-result into this hook's own state, keyed by `KeyletKey` (a `state_keys!`
-enum, variant discriminant = constant value − 1). `accept`s once all 25 are
-written. `KeyletKey::Ticket` stays declared (so no other variant's
-discriminant shifts) but is never computed or stored — see "e2e
+(`dest`), computes every `KEYLET_*` type but `Ticket` from `owner`/`dest`
+plus a handful of fixed test constants (`src/lib.rs`), and writes every
+34-byte result into this hook's own state, keyed by `KeyletKey` (a
+`state_keys!` enum, variant discriminant = constant value − 1). `accept`s
+once they're all written. `KeyletKey::Ticket` stays declared (so no other
+variant's discriminant shifts) but is never computed or stored — see "e2e
 verification scope" below.
 
 Every keylet is computed from inputs fixed at compile time or read
@@ -40,13 +40,13 @@ applies to it, at any `opt-level`.
 ## Expected behavior
 
 - Any `Invoke` addressed to this hook's account succeeds (`accept!`) and
-  writes 25 of the 26 keylets to state (every one but `Ticket`) — there is
-  no rejection path besides the field-missing/state-write-failure edge
-  cases below (both unreachable in ordinary use).
+  writes every keylet but `Ticket` to state — there is no rejection path
+  besides the field-missing/state-write-failure edge cases below (both
+  unreachable in ordinary use).
 - Missing `sfAccount`/`sfDestination` on the originating transaction →
   rollback.
 - A `state_set` failure → rollback.
-- A `keylet_xxx` compute failure (should never happen for the 25 this hook
+- A `keylet_xxx` compute failure (should never happen for any type this hook
   actually calls) → rollback with a code identifying exactly which type
   failed — see `compute`'s own doc comment in `src/lib.rs`. This is how the
   `Ticket` limitation below was actually found and isolated.
@@ -83,12 +83,12 @@ helper stays in `rshooks::api::keylet` regardless (it matches the
 documented argument shape, and a different/future host build may support
 it) — only this example's hook, and its e2e suite, skip exercising it.
 
-### The other 25: two-tier verification
+### The rest: two-tier verification
 
 `e2e/test/keylets.test.ts` independently recomputes each expected keylet
 and compares it byte-for-byte against what this hook actually wrote to
-state, for the 13 types (of the 25 actually computed) where an independent
-computation is available with high confidence:
+state, for the types where an independent computation is available with
+high confidence:
 
 - **Directly via `xahau` npm's own exported hash helpers** (`hashes.
   hashAccountRoot`/`hashSignerListId`/`hashTrustline`/`hashOfferId`/

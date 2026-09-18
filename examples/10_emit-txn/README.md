@@ -8,6 +8,18 @@ Reserving an emission slot, building a `txn_template!`-declared Payment,
 is that page's worked example end to end, including the static-buffer
 idiom the `Payment` template uses and why.
 
+## Specific to this example
+
+The `Payment` template `txn_template!` generates is a byte-exact,
+fixed-offset image of the entire wire-format transaction, filled in by
+`prepare_for_emit()` at the library level — not a pre-image handed to the
+Hook API's own `prepare` host call, which this crate (and `rshooks`'s
+`txn_template!` machinery generally) never calls. It's declared here, in
+the example crate itself, rather than as a `rshooks`-shipped constant,
+because `rshooks` deliberately ships no built-in `PaymentTemplate` type:
+any hook declares its own transaction shape with `txn_template!` directly,
+without waiting on a `rshooks` release for a new field or shape.
+
 ## Build
 
 ```sh

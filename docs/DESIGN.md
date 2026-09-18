@@ -94,8 +94,9 @@ These come from xahaud's SetHook validation (`SetHook.cpp`,
     instruction count. One example stands out as a large outlier
     (`06_guard-patterns`, whose whole point is demonstrating small
     `guard!`-bounded loops: `opt-level = 3` unrolls them, so WCE dropped
-    ~54% while size grew ~109% — see that example's own README for the
-    exact before/after table). Every example stayed comfortably under the
+    ~54% while size grew ~109% — see `book/src/concepts/guards.md`'s
+    `guard!`/`guard_m!` section for that example's own loops). Every
+    example stayed comfortably under the
     65,535-byte limit and `rshooks check` (no unguarded loops, no
     nesting-limit violations) passed for all of them. The one-time
     `SetHook` fee delta (`bytes × 5000` drops) this causes per example is
