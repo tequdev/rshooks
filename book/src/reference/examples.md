@@ -24,8 +24,7 @@ example order, with gaps where an example was retired.
 Unlike `01`–`21` (one concept each, in suggested reading order), the `80`+
 series are behavior-equivalent Rust ports of real, deployed xahaud C hooks —
 read them after `01`–`21`, not instead of them. Each has its own README with
-a full behavior-equivalence table against its C source and a differences
-table for any intentional deviation.
+a behavior-equivalence note against its C source.
 
 {{#include ../../../examples/README.md:examples-table-80}}
 

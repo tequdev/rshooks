@@ -11,22 +11,34 @@ itself and `rshooks::xfl`'s module doc comment for the full API.
 
 ## Specific to this example
 
-This hook stays on the **raw, numbered** slot API deliberately (managing
-its own slot numbers and calling `slot_clear` at the end) rather than the
-typed `SlotObject` layer — see `examples/08_slot-ledger` for the typed
-equivalent, one line shorter and with no slot numbers in sight.
+This hook reads `Amount` through the typed slot layer
+(`SlotObject::from_otxn()` → `.get(sfAmount)` → `.as_xfl()`), the same
+idiom `examples/08_slot-ledger` uses for other fields — no raw slot
+numbers anywhere in this crate.
 
-It also demonstrates a real choice between the `Result`-returning
-comparison methods and the `PartialEq`/`PartialOrd` operators: `.lt()` for
-every comparison that gates a rollback on a value not yet independently
+It demonstrates a real choice between the `Result`-returning comparison
+methods and the `PartialEq`/`PartialOrd` operators: `.lt()` for every
+comparison that gates a rollback on a value not yet independently
 validated, and the `>` operator for exactly one comparison
 (`compounded > remaining`) where both operands are already host-validated
-XFLs with no realistic path to a `float_compare` failure. See the
-in-source comments at each call site for the reasoning.
+XFLs with no realistic path to a `float_compare` failure. See [XFL:
+Decimal Floating Point](../../book/src/data/xfl.md#comparison-methods-and-operators)
+for the full reasoning behind that split.
 
 Failure/rollback codes are declared on `XflMathError` in `src/lib.rs`
-(`rshooks::hook_errors!`) — each variant's doc comment states which step
-it corresponds to.
+(`rshooks::hook_errors!`); the call each variant guards, and the
+`HookError` that triggers it, are:
+
+| variant | guards | typical `HookError` |
+|---|---|---|
+| `OtxnSlotFailed` | `SlotObject::from_otxn()` | — |
+| `NoAmountField` | `.get(sfAmount)` | `DOESNT_EXIST` |
+| `InvalidAmount` | `.as_xfl()` | `NOT_AN_AMOUNT` |
+| `MulratioFailed` | `mulratio` | `XFL_OVERFLOW` |
+| `MinShareConstructFailed`/`GrowthConstructFailed` | `XFL::new` | `MANTISSA_OVERSIZED`/`MANTISSA_UNDERSIZED`/`EXPONENT_OVERSIZED`/`EXPONENT_UNDERSIZED` |
+| `ComparisonFailed`/`RemainingComparisonFailed`/`CompoundComparisonFailed` | `.lt()`/`.compare()` | `INVALID_FLOAT` |
+| `RemainingComputeFailed` | the checked `Sub` operator | `INVALID_FLOAT` |
+| `CompoundValidationFailed` | `XFLUnchecked::validate()` | `INVALID_FLOAT` |
 
 ## Build
 

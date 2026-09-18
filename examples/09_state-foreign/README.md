@@ -14,10 +14,16 @@ Set an `ACCT` Hook parameter (20 raw bytes, the account to read from) when
 installing this Hook — see [Hook and Transaction
 Parameters](../../book/src/data/parameters.md) for the `required`-field
 pattern this uses. On the **target** account, this hook's namespace must
-have a 32-byte state entry keyed by `pad!(b"enabled")` whose first byte is
-nonzero (e.g. set with `state-counter`'s `state_set` pattern, or any
-tooling that can write raw hook state — deployment/state-seeding tooling
-itself is out of scope for this repo, see `docs/DESIGN.md` §1 non-goals).
+have a state entry keyed by `pad!(b"enabled")` whose first byte is nonzero
+(e.g. set with `state-counter`'s `state_set` pattern, or any tooling that
+can write raw hook state — deployment/state-seeding tooling itself is out
+of scope for this repo, see `docs/DESIGN.md` §1 non-goals).
+
+`enabled` is declared `State<[u8; 1]>`, and `[u8; N]`'s `FromBytes` reads
+only a `N`-byte *prefix* of whatever is actually stored, so an
+entry larger than 1 byte decodes fine (only its first byte is read) —
+`ReadFailed` is reserved for a genuinely undersized entry, not an
+oversized one.
 
 ## Build
 

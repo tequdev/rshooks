@@ -36,11 +36,21 @@ for the mechanics.
 code paths (`setup`, `action_seat`, `push_l1_seat_entries`, and `govern`'s
 own top-level reads) read/write the identical key/name bytes through the
 raw `state`/`state_set`/`otxn_param`/`hook_param_exact` API instead of
-those fields' typed accessors — the [book's "A real limit"
+those fields' typed accessors: at this crate's call-site density, the
+typed accessors' force-inlined nesting pushed `govern`'s setup path past
+the Hook API's 32-level structural limit, and reverting just those dense
+call sites to the raw API (same declared key/name bytes, so the schema
+stays centrally documented) is what brought it back under budget. Splitting
+the same reads into separate `#[inline(never)]` helpers was tried first
+and made no difference — the nesting cost comes from call-site density in
+whichever function ends up holding them after the build pipeline's
+force-inlining, not from which function they started in. See the [book's
+"A real limit"
 section](../../book/src/concepts/chains.md#a-real-limit-typed-accessor-density-inside-one-entry)
-covers why. `reward_rate`/`reward_delay` are a partial exception: `reward`
-uses the typed accessors at its own two (read-only) call sites; governance's
-setup still writes the same keys through raw `state_set`, for the same
+for the general mechanism and `metrics.json` for the current numbers.
+`reward_rate`/`reward_delay` are a partial exception: `reward` uses the
+typed accessors at its own two (read-only) call sites; governance's setup
+still writes the same keys through raw `state_set`, for the same
 call-site-density reason as `setup`'s other raw calls.
 
 ## Behavior equivalence

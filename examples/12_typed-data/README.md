@@ -81,11 +81,12 @@ unpaused; a *present* value of the wrong size is a decode failure, not
 [Typed Data with Derives](../../book/src/data/typed-data.md#the-zero-cost-claim-measured-not-assumed)
 covers the derived-vs-hand-packed measurement for this hook's core
 deposit-ledger logic; current numbers live in [`metrics.json`](./metrics.json).
-The one number specific to this README: the `AdminName` composite
-parameter name (as opposed to a plain byte-string tag like `CFG`/`INS`)
-costs +29 worst-case instructions over the same hook without it, since a
-composite name has to actually run its `write()` at runtime — see [Hook
-and Transaction Parameters](../../book/src/data/parameters.md#composite-names-deriveparamname-and-name_by).
+The `AdminName` composite parameter name (as opposed to a plain
+byte-string tag like `CFG`/`INS`) costs strictly more than the plain `CFG`
+tag used elsewhere in this same hook, since a composite name has to
+actually run its `write()` at runtime — see [Hook and Transaction
+Parameters](../../book/src/data/parameters.md#composite-names-deriveparamname-and-name_by)
+for the measured difference.
 
 ## Build
 

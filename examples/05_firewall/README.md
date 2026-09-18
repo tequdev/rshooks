@@ -23,6 +23,11 @@ cargo run -p rshooks-build -- build --manifest-path examples/05_firewall/Cargo.t
 ```
 
 No extra flags needed. Straight-line code: no loop is written in the
-source, and the account comparison is loop-free by construction.
+source, and the account comparison is loop-free by construction. A guard
+bolted onto the `[u8; 20] == [u8; 20]` compiler-generated `bcmp` loop
+instead would need a `maxiter` at least as large as the compared length —
+the CLI only checks guard *shape*, not that the bound actually covers the
+loop, so a wrong bound there would build clean and only surface as a
+runtime `GUARD_VIOLATION`.
 
 Failure/rollback codes are declared on `FirewallError` in `src/lib.rs`.

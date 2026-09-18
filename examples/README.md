@@ -40,7 +40,7 @@ directory is prefixed) and matches what its own README, `Cargo.toml`, and
 | 12 | [`typed-data`](12_typed-data) | `#[derive(HookData)]`: composite (multi-field) state keys/values and `otxn_param`/`hook_param` structs, in place of hand-packed byte buffers | [Typed Data with Derives](../book/src/data/typed-data.md) |
 | 13 | [`keylets`](13_keylets) | `rshooks::api::keylet`'s 26 typed `keylet_xxx` helpers (one per `KEYLET_*` constant), in place of the single untyped `util_keylet` | [Keylets](../book/src/data/keylets.md) |
 | 14 | [`account-id-macro`](14_account-id-macro) | `rshooks::account_id!`: compile-time r-address -> `AccountId` decode, cross-checked against `hook_account`/`util_accid`/`util_raddr` | [Reading the Originating Transaction](../book/src/data/otxn.md) |
-| 15 | [`slot-objects`](15_slot-objects) | the typed slot layer's live acceptance harness: account-root walk, native-amount drops round-trip, parent-clear/child-read, and two 300-iteration loops proving `take_*` recycling and leak-free `slot_path!` failures | [Slots and Ledger Objects](../book/src/data/slots.md) |
+| 15 | [`slot-objects`](15_slot-objects) | the typed slot layer's live acceptance harness: account-root walk, native-amount drops round-trip, parent-clear/child-read, and repeated 260-iteration loops proving `take_*` recycling and leak-free `slot_path!` failures | [Slots and Ledger Objects](../book/src/data/slots.md) |
 | 16 | [`typed-results`](16_typed-results) | typed entry returns (`HookResult`): an idiomatic `?`/`Ok` entry with a `hook_errors!` message clause, alongside a raw `accept!`/`rollback!`-style entry in the same chain | [Accept, Rollback, and Errors](../book/src/concepts/errors.md#typed-entry-returns-hookresult) |
 | 17 | [`sto-writer`](17_sto-writer) | `rshooks::sto_writer::StoWriter`: a runtime-shaped Remit — a native `sfAmounts` entry always, an issued one when hook parameters supply it — built field-by-field and emitted via `prepare_for_emit()`/`Prepared::emit()` (see `22_txn-template-optional` for the fixed-shape, present-or-absent alternative to a conditional entry like this) | [The `StoWriter` API](../book/src/emit/sto-writer.md) |
 | 18 | [`typed-views`](18_typed-views) | `rshooks::views`: generated, type-checked read views — an incoming-IOU gate reading `tx::Payment`, then `ledger::RippleState`'s freeze flags and `ledger::AccountRoot`'s optional `sfTransferRate`, with a per-read cost table | [Typed Views](../book/src/data/views.md) |
@@ -60,10 +60,10 @@ crate declaring both hooks (`govern` at chain position 0, `reward` at
 position 1) against one shared `#[hooks]` struct, so the state layout the
 two genuinely share (the reward rate/delay, the seat/member mapping) is
 declared once instead of duplicated across two crates. See its own README
-for a full behavior-equivalence table against each C source, a differences
-table for any intentional deviation, and its "Toolchain limitation"
-sections documenting the real Guard-type nesting-depth/floating-point
-constraints discovered while porting them.
+for what's actually shared between `govern`/`reward`, a behavior-
+equivalence note against govern.c, and the real Guard-type typed-accessor
+nesting-depth limit discovered while porting them (and its raw-API escape
+hatch).
 
 <!-- ANCHOR: examples-table-80 -->
 | # | example | ports | book chapter |
