@@ -4,6 +4,20 @@
 //! fixed-layout derives, state and parameter declarations, identifier
 //! splicing, and compile-time account-ID decoding. This host-side crate
 //! permits bounded arithmetic used by its parsers and encoders.
+//!
+//! # Why hand-rolled, not `syn`/`quote`
+//!
+//! Every macro here (a derive's named-field struct, [`hooks`]'s
+//! struct/impl grammar, [`account_id`]/[`XFL`]'s single-literal input, ..)
+//! only ever needs to recognize one small, fixed input shape — never a
+//! general Rust-item/type parser — so a bounded-lookahead
+//! token-shape-matching pass handles it without paying `syn`+`quote`'s
+//! compile-time cost on every hook-crate build. `syn` is still a
+//! dependency, used narrowly to parse an already-isolated string/byte-string
+//! literal token (`hooks_shared::parse_string_value`/
+//! `parse_byte_string_value`) — getting escapes and byte-string decoding
+//! right by hand would be its own liability, for no compile-time savings
+//! once the token is already isolated.
 #![allow(clippy::arithmetic_side_effects)]
 
 mod sha256;
@@ -147,14 +161,14 @@ pub fn account_id(input: TokenStream) -> TokenStream {
     }
 
     let span = literal.span();
-    let address = match unquote_str(&literal.to_string()) {
-        Some(s) => s,
-        None => {
-            return err(
-                span,
-                "account_id! expects a single string literal, e.g. account_id!(\"r...\")",
-            );
-        }
+    let address = match hooks_shared::parse_string_value(
+        Some(&[TokenTree::Literal(literal)]),
+        span,
+        "account_id!",
+        "address",
+    ) {
+        Ok(s) => s,
+        Err(e) => return e,
     };
 
     let bytes = match base58::decode(&address) {
@@ -199,19 +213,6 @@ pub fn XFL(input: TokenStream) -> TokenStream {
     xfl_literal::expand(input)
 }
 
-/// Strips a `proc_macro::Literal`'s `to_string()` output down to a plain
-/// Rust `String`, if it is a plain (unprefixed, unsuffixed) string literal —
-/// i.e. exactly `"..."`, escape sequences included verbatim as written
-/// (r-addresses never contain characters needing escaping, so no unescaping
-/// is attempted; a `"..."` string with backslashes would round-trip through
-/// [`base58::decode`] as literal backslash characters, which simply fail to
-/// decode as base58 like any other invalid character). Returns `None` for
-/// anything else (raw strings, byte strings, non-string literals, ...).
-fn unquote_str(text: &str) -> Option<String> {
-    let inner = text.strip_prefix('"')?.strip_suffix('"')?;
-    Some(inner.to_string())
-}
-
 /// Builds a `compile_error!("msg");` item at `span`, so validation failures
 /// surface as a normal, well-located compile error rather than a macro
 /// panic. `pub(crate)` (not private) so [`hook_data`]'s parser can share it.
@@ -247,7 +248,18 @@ pub(crate) fn err(span: Span, msg: &str) -> TokenStream {
 #[doc(hidden)]
 #[proc_macro]
 pub fn paste(input: TokenStream) -> TokenStream {
-    rewrite_stream(input)
+    hooks_shared::map_tokens(input, &|toks| {
+        let Some(TokenTree::Group(group)) = toks.first() else {
+            return None;
+        };
+        if group.delimiter() != Delimiter::Bracket {
+            return None;
+        }
+        let ident = try_concat_marker(group.stream())?;
+        let mut replacement = TokenStream::new();
+        replacement.extend([TokenTree::Ident(ident)]);
+        Some((replacement, 1))
+    })
 }
 
 /// Numbers a `txn_template!` array's elements by position — see
@@ -260,30 +272,6 @@ pub fn paste(input: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn txn_template_index_elements(input: TokenStream) -> TokenStream {
     index_elements::expand(input)
-}
-
-/// Applies [`rewrite_tree`] to every token in `input`.
-fn rewrite_stream(input: TokenStream) -> TokenStream {
-    input.into_iter().map(rewrite_tree).collect()
-}
-
-/// Rewrites a single token: a `[< .. >]` splice marker becomes the
-/// concatenated identifier; any other group is recursed into (with its
-/// delimiter and span preserved); anything else passes through unchanged.
-fn rewrite_tree(tt: TokenTree) -> TokenTree {
-    match tt {
-        TokenTree::Group(group) => {
-            if group.delimiter() == Delimiter::Bracket
-                && let Some(ident) = try_concat_marker(group.stream())
-            {
-                return TokenTree::Ident(ident);
-            }
-            let mut rewritten = Group::new(group.delimiter(), rewrite_stream(group.stream()));
-            rewritten.set_span(group.span());
-            TokenTree::Group(rewritten)
-        }
-        other => other,
-    }
 }
 
 /// If `stream` is shaped exactly like a `< ident ident .. >` splice marker
@@ -335,4 +323,21 @@ fn try_concat_marker(stream: TokenStream) -> Option<Ident> {
         return None;
     }
     Some(Ident::new(&text, Span::call_site()))
+}
+
+/// Test-only helpers shared across this crate's unit tests.
+#[cfg(test)]
+pub(crate) mod test_support {
+    #![allow(clippy::expect_used, clippy::indexing_slicing)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
+
+    /// Decodes a hex string into raw bytes, for pinning a test vector —
+    /// shared by [`crate::sha256`]'s and [`crate::base58`]'s own unit
+    /// tests, which each need a different fixed output width.
+    pub(crate) fn hex_to_bytes(hex: &str) -> Vec<u8> {
+        assert_eq!(hex.len() % 2, 0, "test vector hex must have an even length");
+        (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).expect("valid hex in test vector"))
+            .collect()
+    }
 }

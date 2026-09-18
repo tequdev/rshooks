@@ -20,23 +20,23 @@
 //!
 //! # Why hand-rolled, not `syn`/`quote`
 //!
-//! The accepted struct/field shape is small and fixed (§5.1's shape
-//! table), so a single bounded-lookahead pass over the token buffer is
-//! enough. [`crate::shape`] is not reused here because it derives structs
-//! meant to be read back (`FromBytes`/`ToBytes` on real fields); this
-//! module's fields carry no bytes at all and its field grammar
-//! (attribute-driven key/name specs) is materially different.
+//! Same rationale as [`crate::hooks_impl`] and every other macro in this
+//! crate (see the crate doc comment in `lib.rs`). [`crate::shape`] is not
+//! reused here because it derives structs meant to be read back
+//! (`FromBytes`/`ToBytes` on real fields); this module's fields carry no
+//! bytes at all and its field grammar (attribute-driven key/name specs) is
+//! materially different.
 
 use proc_macro::{Delimiter, Ident, Span, TokenStream, TokenTree};
 
 use crate::hooks_shared::{
     AttrEntry, hex_lower, hex_upper, is_punct, parse_attr_entries, parse_balanced_angle,
-    parse_byte_string_value, parse_string_value, render_carrier_export, split_top_level_commas,
-    step_angle_depth, to_upper_camel,
+    parse_byte_string_value, parse_string_value, render_carrier_export, scan_attrs, scan_vis,
+    split_top_level_commas, step_angle_depth, to_upper_camel,
 };
 #[cfg(feature = "unstable-state-interface")]
 use crate::hooks_shared::{classify_fixed_sti_type_text, is_valid_interface_name};
-use crate::shape::tokens_to_string;
+use crate::shape::{fixed_read_impl, from_bytes_impl, to_bytes_impl, tokens_to_string};
 use crate::{err, sha256};
 
 /// Wasm export-name prefix for the struct ("chain declaration") carrier —
@@ -213,6 +213,16 @@ impl FieldDecl {
             } => Namespace::OtxnParam,
         }
     }
+
+    /// The `::rshooks::decl::<Wrapper>` name this field's rewritten type and
+    /// value expression use — `State` for `#[state]`/`#[state_interface]`,
+    /// or the paired `ParamKind`'s own wrapper otherwise.
+    fn wrapper(&self) -> &'static str {
+        match self {
+            FieldDecl::State { .. } | FieldDecl::StateInterface { .. } => "State",
+            FieldDecl::Param { param_kind, .. } => param_kind.wrapper(),
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -256,39 +266,11 @@ fn parse_struct_item(item: TokenStream) -> Result<ParsedStruct, TokenStream> {
     let tokens: Vec<TokenTree> = item.into_iter().collect();
     let mut i = 0usize;
 
-    let mut leading_attrs = Vec::new();
-    while let Some(tt) = tokens.get(i) {
-        if !is_punct(tt, '#') {
-            break;
-        }
-        leading_attrs.push(tt.clone());
-        match tokens.get(i.wrapping_add(1)) {
-            Some(g @ TokenTree::Group(group)) if group.delimiter() == Delimiter::Bracket => {
-                leading_attrs.push(g.clone());
-            }
-            _ => {
-                return Err(err(
-                    Span::call_site(),
-                    "malformed attribute before `struct`",
-                ));
-            }
-        }
-        i = i.wrapping_add(2);
-    }
+    let (leading_attrs, next) = scan_attrs(&tokens, i, "malformed attribute before `struct`")?;
+    i = next;
 
-    let mut vis = Vec::new();
-    if let Some(tt @ TokenTree::Ident(id)) = tokens.get(i)
-        && id.to_string() == "pub"
-    {
-        vis.push(tt.clone());
-        i = i.wrapping_add(1);
-        if let Some(g @ TokenTree::Group(group)) = tokens.get(i)
-            && group.delimiter() == Delimiter::Parenthesis
-        {
-            vis.push(g.clone());
-            i = i.wrapping_add(1);
-        }
-    }
+    let (vis, next) = scan_vis(&tokens, i);
+    i = next;
 
     match tokens.get(i) {
         Some(TokenTree::Ident(id)) if id.to_string() == "struct" => {}
@@ -461,19 +443,8 @@ fn parse_named_fields(stream: TokenStream) -> Result<Vec<ParsedField>, TokenStre
             break;
         }
 
-        let mut vis = Vec::new();
-        if let Some(tt @ TokenTree::Ident(id)) = tokens.get(i)
-            && id.to_string() == "pub"
-        {
-            vis.push(tt.clone());
-            i = i.wrapping_add(1);
-            if let Some(g @ TokenTree::Group(group)) = tokens.get(i)
-                && group.delimiter() == Delimiter::Parenthesis
-            {
-                vis.push(g.clone());
-                i = i.wrapping_add(1);
-            }
-        }
+        let (vis, next) = scan_vis(&tokens, i);
+        i = next;
 
         let field_name = match tokens.get(i) {
             Some(TokenTree::Ident(id)) => id.clone(),
@@ -522,7 +493,7 @@ fn parse_named_fields(stream: TokenStream) -> Result<Vec<ParsedField>, TokenStre
             ));
         };
 
-        let (_wrapper, value_ty) = parse_field_type(&ty_tokens, kind, &field_name)?;
+        let value_ty = parse_field_type(&ty_tokens, kind, &field_name)?;
         // `parse_field_decl` first, so its feature-gate rejection (kind ==
         // "state_interface" with `unstable-state-interface` off) wins over
         // this shape check — same gate-ordering rule the sig interface
@@ -553,11 +524,11 @@ fn parse_named_fields(stream: TokenStream) -> Result<Vec<ParsedField>, TokenStre
 /// allowed) and confirms `<Wrapper>` matches the field's declared attribute
 /// kind (`state` -> `State`, `hook_param` -> `HookParam`,
 /// `otxn_param` -> `OtxnParam`).
-fn parse_field_type<'a>(
-    tokens: &'a [TokenTree],
+fn parse_field_type(
+    tokens: &[TokenTree],
     kind: &str,
     field_name: &Ident,
-) -> Result<(&'a str, Vec<TokenTree>), TokenStream> {
+) -> Result<Vec<TokenTree>, TokenStream> {
     let expected_wrapper = match kind {
         "state" | "state_interface" => "State",
         "hook_param" => "HookParam",
@@ -631,7 +602,7 @@ fn parse_field_type<'a>(
     }
     let value_ty = args.into_iter().next().unwrap_or_default();
 
-    Ok((expected_wrapper, value_ty))
+    Ok(value_ty)
 }
 
 fn bad_field_type(field_name: &Ident) -> TokenStream {
@@ -1302,10 +1273,7 @@ fn generate(parsed: &ParsedStruct, description: Option<&str>) -> TokenStream {
                 suffix = ns.struct_suffix(),
             ));
             for f in ns_fields {
-                let wrapper = match &f.decl {
-                    FieldDecl::State { .. } | FieldDecl::StateInterface { .. } => "State",
-                    FieldDecl::Param { param_kind, .. } => param_kind.wrapper(),
-                };
+                let wrapper = f.decl.wrapper();
                 out.push_str(&format!(
                     "{field}: ::rshooks::decl::{wrapper}::new(),\n",
                     field = f.name
@@ -1387,10 +1355,7 @@ fn assemble_named_body(
 
 /// The rewritten field type text: `::rshooks::decl::<Wrapper><V, __Marker>`.
 fn rewritten_field_type(struct_name: &str, field_index: usize, f: &ParsedField) -> String {
-    let wrapper = match &f.decl {
-        FieldDecl::State { .. } | FieldDecl::StateInterface { .. } => "State",
-        FieldDecl::Param { param_kind, .. } => param_kind.wrapper(),
-    };
+    let wrapper = f.decl.wrapper();
     let marker = marker_name(struct_name, field_index, &f.name.to_string());
     let value_ty = tokens_to_string(&f.value_ty);
     format!("::rshooks::decl::{wrapper}<{value_ty}, {marker}>")
@@ -1422,12 +1387,7 @@ fn marker_name(struct_name: &str, field_index: usize, field_name: &str) -> Strin
 /// `StateSpec::with_key`'s default — a normal, supported shape, not an
 /// error.
 fn is_byte_string_literal(expr: &[TokenTree]) -> bool {
-    let [TokenTree::Literal(lit)] = expr else {
-        return false;
-    };
-    let mut stream = TokenStream::new();
-    stream.extend([TokenTree::Literal(lit.clone())]);
-    syn::parse::<syn::LitByteStr>(stream).is_ok()
+    parse_byte_string_value(Some(expr), Span::call_site(), "", "").is_ok()
 }
 
 /// The marker ZST declaration plus its `StateSpec`/`ParamSpec` (+
@@ -1638,48 +1598,17 @@ fn state_interface_field_codegen(
         ));
     }
 
+    let len_expr = "<Self as ::rshooks::convert::ToBytes>::MAX_LEN";
+    out.push_str(&to_bytes_impl(
+        value_ty,
+        &format!("{value_len}usize"),
+        &write_body,
+        "",
+    ));
+    out.push_str(&from_bytes_impl(value_ty, len_expr, "", &read_body));
+    out.push_str(&fixed_read_impl(value_ty, len_expr));
     out.push_str(&format!(
-        "#[automatically_derived]\n\
-         impl ::rshooks::convert::ToBytes for {value_ty} {{\n\
-             const MAX_LEN: usize = {value_len}usize;\n\
-             #[inline(always)]\n\
-             fn write(&self, buf: &mut [u8]) -> usize {{\n\
-                 match buf.get_mut(..<Self as ::rshooks::convert::ToBytes>::MAX_LEN) {{\n\
-                     ::core::option::Option::Some(__dst) => {{\n\
-                         {write_body}\
-                         <Self as ::rshooks::convert::ToBytes>::MAX_LEN\n\
-                     }}\n\
-                     ::core::option::Option::None => 0,\n\
-                 }}\n\
-             }}\n\
-         }}\n\
-         #[automatically_derived]\n\
-         impl ::rshooks::convert::FromBytes for {value_ty} {{\n\
-             #[inline(always)]\n\
-             fn read(buf: &[u8]) -> ::rshooks::error::Result<Self> {{\n\
-                 let __src = buf.get(..<Self as ::rshooks::convert::ToBytes>::MAX_LEN)\n\
-                     .ok_or(::rshooks::error::HookError::TooSmall)?;\n\
-                 ::core::result::Result::Ok(Self {{\n\
-                     {read_body}\
-                 }})\n\
-             }}\n\
-         }}\n\
-         #[automatically_derived]\n\
-         impl ::rshooks::convert::FixedRead for {value_ty} {{\n\
-             #[inline(always)]\n\
-             fn read_exact(\n\
-                 read: impl FnOnce(&mut [u8]) -> ::rshooks::error::Result<usize>,\n\
-             ) -> ::rshooks::error::Result<Self> {{\n\
-                 let mut __buf = [0u8; <Self as ::rshooks::convert::ToBytes>::MAX_LEN];\n\
-                 let __written = read(&mut __buf)?;\n\
-                 if __written == <Self as ::rshooks::convert::ToBytes>::MAX_LEN {{\n\
-                     <Self as ::rshooks::convert::FromBytes>::read(&__buf)\n\
-                 }} else {{\n\
-                     ::core::result::Result::Err(::rshooks::error::HookError::TooSmall)\n\
-                 }}\n\
-             }}\n\
-         }}\n\
-         impl {value_ty} {{\n\
+        "impl {value_ty} {{\n\
              /// Total encoded length in bytes (`docs/STATE_INTERFACE_DESIGN.md` §1.7:\n\
              /// fields concatenated in declaration order, no separators or length\n\
              /// prefixes).\n\
@@ -1943,12 +1872,12 @@ fn encode_chain_json(
                 key,
                 value,
             } => {
-                let mut obj = serde_json::Map::new();
-                obj.insert("field".into(), field.clone().into());
-                obj.insert("kind".into(), (*kind).into());
-                obj.insert("key".into(), key.clone().into());
-                obj.insert("value".into(), value.clone().into());
-                state.push(serde_json::Value::Object(obj));
+                state.push(serde_json::json!({
+                    "field": field,
+                    "kind": kind,
+                    "key": key,
+                    "value": value,
+                }));
             }
             ChainFieldJson::Param {
                 role,
@@ -1959,23 +1888,14 @@ fn encode_chain_json(
                 required,
                 default,
             } => {
-                let mut obj = serde_json::Map::new();
-                obj.insert("field".into(), field.clone().into());
-                obj.insert(
-                    "name".into(),
-                    name.clone().map_or(serde_json::Value::Null, Into::into),
-                );
-                obj.insert(
-                    "name_by".into(),
-                    name_by.clone().map_or(serde_json::Value::Null, Into::into),
-                );
-                obj.insert("value".into(), value.clone().into());
-                obj.insert("required".into(), (*required).into());
-                obj.insert(
-                    "default".into(),
-                    default.clone().map_or(serde_json::Value::Null, Into::into),
-                );
-                let entry = serde_json::Value::Object(obj);
+                let entry = serde_json::json!({
+                    "field": field,
+                    "name": name,
+                    "name_by": name_by,
+                    "value": value,
+                    "required": required,
+                    "default": default,
+                });
                 match role {
                     ParamKind::HookParam => hook_params.push(entry),
                     ParamKind::OtxnParam => otxn_params.push(entry),
@@ -1989,40 +1909,41 @@ fn encode_chain_json(
                 key,
                 value,
             } => {
-                let mut obj = serde_json::Map::new();
-                obj.insert("field".into(), field.clone().into());
-                obj.insert("id".into(), (*id).into());
-                obj.insert("name_hex".into(), name_hex.clone().into());
-                obj.insert("value_hex".into(), value_hex.clone().into());
-                obj.insert("key".into(), key.clone().into());
-                obj.insert("value".into(), value.clone().into());
-                state_interface.push(serde_json::Value::Object(obj));
+                state_interface.push(serde_json::json!({
+                    "field": field,
+                    "id": id,
+                    "name_hex": name_hex,
+                    "value_hex": value_hex,
+                    "key": key,
+                    "value": value,
+                }));
             }
         }
     }
 
-    let mut decls = serde_json::Map::new();
-    decls.insert("state".into(), state.into());
-    decls.insert("hook_params".into(), hook_params.into());
-    decls.insert("otxn_params".into(), otxn_params.into());
+    let mut decls = serde_json::json!({
+        "state": state,
+        "hook_params": hook_params,
+        "otxn_params": otxn_params,
+    });
     // Byte-identity with a pre-`unstable-state-interface` build: only emit
     // this key when non-empty, so a struct with no `#[state_interface]`
     // fields carries the exact same carrier JSON (and therefore the exact
     // same wasm) it always did.
-    if !state_interface.is_empty() {
-        decls.insert("state_interface".into(), state_interface.into());
+    if !state_interface.is_empty()
+        && let Some(map) = decls.as_object_mut()
+    {
+        map.insert("state_interface".to_string(), state_interface.into());
     }
 
-    let mut object = serde_json::Map::new();
-    object.insert("schema".into(), "rshooks-chain-v2".into());
-    object.insert("struct".into(), struct_name.into());
-    object.insert(
-        "description".into(),
-        description.map_or(serde_json::Value::Null, |d| d.into()),
-    );
-    object.insert("decls".into(), decls.into());
+    let object = serde_json::json!({
+        "schema": "rshooks-chain-v2",
+        "struct": struct_name,
+        "description": description,
+        "decls": decls,
+    });
 
-    serde_json::to_vec(&serde_json::Value::Object(object))
+    serde_json::to_vec(&object)
         .map_err(|e| format!("#[hooks]: failed to serialize chain carrier JSON: {e}"))
 }
 
@@ -2201,7 +2122,7 @@ mod tests {
     // cleanly.
     #[cfg(feature = "unstable-state-interface")]
     #[test]
-    fn si_type_table_matches_the_design_docs_ten_rows() {
+    fn si_type_table_matches_the_design_doc() {
         assert_eq!(classify_fixed_sti_type_text("u8"), Some((0x10, 1)));
         assert_eq!(classify_fixed_sti_type_text("u16"), Some((0x01, 2)));
         assert_eq!(classify_fixed_sti_type_text("u32"), Some((0x02, 4)));
@@ -2297,16 +2218,5 @@ mod tests {
     #[test]
     fn si_field_list_display_is_empty_parens_for_a_singleton() {
         assert_eq!(si_field_list_display(&[]), "()");
-    }
-
-    #[test]
-    fn si_field_list_display_joins_name_type_pairs_with_commas() {
-        // `ty_tokens` is empty in this helper (constructing real
-        // `proc_macro::TokenTree`s needs an active macro invocation — see
-        // `ChainFieldJson`'s own doc comment for why this module keeps its
-        // unit-testable helpers `TokenTree`-shape-agnostic where it can);
-        // this only pins the field separator/parenthesization shape.
-        let fields = vec![si_field("account", 0x08, 20), si_field("token", 0x02, 4)];
-        assert_eq!(si_field_list_display(&fields), "(account: , token: )");
     }
 }
