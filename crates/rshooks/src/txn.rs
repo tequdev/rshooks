@@ -278,7 +278,6 @@ pub mod codec {
     /// already a valid `STAmount` issued value.
     #[inline(always)]
     #[deprecated(
-        since = "0.2.2",
         note = "unused runtime twin of encode_iou_amount_value_const; call the const form directly"
     )]
     pub fn encode_iou_amount_value(out: &mut [u8], xfl: XFL) -> Result<()> {
@@ -701,8 +700,7 @@ pub mod codec {
     /// Returns [`HookError::InvalidArgument`] if `offset + 4 > bytes.len()`.
     #[inline(always)]
     #[deprecated(
-        since = "0.2.2",
-        note = "unused runtime twin of a const writer; inline the checked slice write directly"
+        note = "unused runtime twin of a const writer; use write_uint_be in a const context instead"
     )]
     pub fn write_u32_be(bytes: &mut [u8], offset: usize, value: u32) -> Result<()> {
         let end = offset.checked_add(4).ok_or(HookError::InvalidArgument)?;
@@ -724,8 +722,7 @@ pub mod codec {
     /// bytes.len()`.
     #[inline(always)]
     #[deprecated(
-        since = "0.2.2",
-        note = "unused runtime twin of a const writer; inline the checked slice write directly"
+        note = "unused runtime twin of a const writer; use write_const_bytes in a const context instead"
     )]
     pub fn write_account_id(bytes: &mut [u8], offset: usize, value: &AccountId) -> Result<()> {
         let end = offset
@@ -1501,6 +1498,9 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 ///         field_name: <kind>,                        // any count/order after this
 ///         field_name: object(sfXxx) { <field>* },     // nested STObject
 ///         field_name: array(sfXxx) [ <element>* ],    // nested STArray
+///         field_name: array(sfXxx) [ Elem: object(sfYxx) { <field>* } ; N ],           // homogeneous, indexed
+///         field_name: array(sfXxx) [ Elem: optional object(sfYxx) { <field>* } ; N ],  // homogeneous, indexed, elements optional
+///         field_name: optional array(sfXxx) [ <element>* ],  // whole array present-or-absent (top level or inside an object only, never an array element)
 ///         field_name: sfXxx,                          // inferred kind, or...
 ///         field_name: sfXxx = <expr>,                 // ...inferred kind with a default
 ///         field_name: sfXxx { <field>* },              // inferred object
@@ -1509,8 +1509,9 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 ///     }
 /// }
 ///
-/// <element> := object(sfXxx) { <field>* }  // objects only, directly in an array, by position
-///            | sfXxx { <field>* }           // inferred object element
+/// <element> := object(sfXxx) { <field>* }           // objects only, directly in an array, by position
+///            | optional object(sfXxx) { <field>* }  // present-or-absent, by position -- the one optional form legal as an array element
+///            | sfXxx { <field>* }                    // inferred object element
 /// ```
 ///
 /// Every scalar field uses one of the uniform kinds in the table below —
@@ -1541,7 +1542,7 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// | `fixed_vl(sfX, N) = e` | VL | VL-prefix(N) + N | zeroed, or the declared `[u8; N]` | `set_x(&[u8; N])` |
 /// | `object(sfX) { .. }` | OBJECT | inner + 1 (`0xE1`) | inner defaults | inner setters, prefixed |
 /// | `array(sfX) [ .. ]` | ARRAY | elements + 1 (`0xF1`) | inner defaults | inner setters, prefixed |
-/// | `optional <scalar_kind>(sfX $(, N)?)` | (of `<scalar_kind>`) | that kind's slot | all [`NOP`](crate::txn::codec::NOP) (absent) | `set_x(<same args as the kind>)`, `clear_x()` |
+/// | `optional <scalar_kind>(sfX $(, N)?)` | (of `<scalar_kind>`) | that kind's slot | all [`NOP`](crate::txn::codec::NOP) (absent) | `set_x(<same args as the kind>)` (argument-less for `optional empty_vl`/`optional native_issue`), `clear_x()` |
 /// | `any_amount(sfX)` | AMOUNT | 1 + 48 | issued zero (as `amount`) | `set_x_native(u64) -> Result<()>`, `set_x_iou(XFL, &CurrencyCode, &AccountId)` |
 /// | `optional any_amount(sfX)` | AMOUNT | 1 + 48 | all NOP (absent) | the two above, plus `clear_x()` |
 /// | `vl(sfX, MAX)` / `vl(sfX, MIN, MAX)` | VL | VL-prefix(MAX) + MAX | prefix(MIN) + MIN zeros + NOP tail | `set_x(&[u8]) -> Result<()>` |
@@ -1660,9 +1661,11 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// byte in a field-header position as a no-op ("NOP"), skipped up to **63
 /// per container instance** (one independent counter per `object`/`array`
 /// level). `txn_template!` uses this to give every kind above an `optional`
-/// form (`no `= default`; `set_x` takes the same arguments as the
-/// non-optional setter and writes header+value together, `clear_x()`
-/// restores the NOP-filled slot), plus two purpose-built kinds: `any_amount`
+/// form (no `= default`; `set_x` takes the same arguments as the
+/// non-optional setter and writes header+value together — an
+/// argument-less `set_x()` for `optional empty_vl`/`optional native_issue`,
+/// whose value is fixed — `clear_x()` restores the NOP-filled slot), plus
+/// two purpose-built kinds: `any_amount`
 /// (a 49-byte native-or-issued slot chosen at runtime,
 /// `set_x_native`/`set_x_iou`) and `vl(sfX, MIN, MAX)` (a runtime-chosen
 /// payload length within a compile-time `MAX`, `set_x(&[u8]) ->
@@ -1740,7 +1743,7 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// `SigningPubKey` are never touched at runtime — their baked defaults are
 /// already correct. `Prepared<'_, Self>` derefs to `Self`, so setters
 /// remain callable afterward; only re-running `prepare_for_emit` itself
-/// refreshes the four emit-plumbing fields again.
+/// refreshes them again.
 ///
 /// # Setter names
 ///
@@ -2070,11 +2073,12 @@ macro_rules! __txn_template_ensure {
 /// `#[doc(hidden)]` but necessarily `#[macro_export]`ed (a macro invoked as
 /// `$crate::name!` from another macro's expansion must be exported). One
 /// `@step` peels one field off `fields = [...]` and recurses; state threads
-/// through named accumulators (`setters`/`init`/`order`/`table`/`prev`/
-/// `emit_region`/`emit_details`/`prefix`/`ctx`/`depth`/`stack`/`mode`/
-/// `nops`), one base case per `mode` tag. See
-/// `docs/TXN_TEMPLATE_FIELDS_DESIGN.md` §3.2 (muncher state, container
-/// nesting) and `docs/NOP_PADDING_DESIGN.md` §3 (`mode`'s
+/// through named accumulators (`setters`/`init`/`buf`/`order`/`table`/
+/// `prev`/`emit_region`/`emit_details`/`prefix`/`ctx`/`depth`/`stack`/
+/// `mode`/`nops`), one base case per `mode` tag. Ascribing `= default` to a
+/// zeroed inferred kind, or omitting it on an integer inferred kind, is a
+/// compile error. See `docs/TXN_TEMPLATE_FIELDS_DESIGN.md` §3.2 (muncher
+/// state, container nesting) and `docs/NOP_PADDING_DESIGN.md` §3 (`mode`'s
 /// `optional`-ancestor tracking, the NOP budget) for what each one carries
 /// and why.
 #[doc(hidden)]
