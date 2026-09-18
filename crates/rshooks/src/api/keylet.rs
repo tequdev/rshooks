@@ -51,7 +51,7 @@
 //! by-value API, and costs a small but measurable amount of extra
 //! worst-case instructions from the added call-graph shape — hence the
 //! two families duplicate the host-call plumbing instead of one calling
-//! the other. `testenv_keylet` (below) is the one piece actually shared
+//! the other. `keylet_intercept` (below) is the one piece actually shared
 //! between them (pure interception-side bookkeeping, no wasm-side cost).
 //! [`keylet_fn`] is the macro that emits both bodies for every type below
 //! that doesn't need type-specific branching (`keylet_skip`'s `Option`
@@ -75,26 +75,6 @@ use rshooks_core::consts::{
     KEYLET_NEGATIVE_UNL, KEYLET_NFT_OFFER, KEYLET_OFFER, KEYLET_OWNER_DIR, KEYLET_PAGE,
     KEYLET_PAYCHAN, KEYLET_QUALITY, KEYLET_SIGNERS, KEYLET_SKIP, KEYLET_TICKET, KEYLET_UNCHECKED,
 };
-
-#[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
-use rshooks_core::backend::KeyletArg;
-
-/// Testenv interception shared by every typed helper below (both families —
-/// see the module doc comment's "`_into` twins" section for why the
-/// by-value and `_into` forms don't call each other but do share this).
-/// Unlike an `_exact`/`_typed` composing helper elsewhere in this crate,
-/// neither `util_keylet_buf` nor `util_keylet` still has real slices by the
-/// time a typed helper calls it, so interception happens here, one level
-/// up, where `account`/`hash`/... are still real references (mirrors
-/// `api::state`'s private `opt_in`/`foreign_target` helpers). The
-/// wasm/no-backend fallback in every typed helper below still calls
-/// `util_keylet_buf`/`util_keylet` unchanged.
-#[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
-#[inline(always)]
-fn testenv_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Option<Result<Keylet>> {
-    rshooks_core::backend::with_backend(|b| b.util_keylet(keylet_type, args))
-        .map(crate::testenv_bridge::keylet_result)
-}
 
 /// Emits a `keylet_xxx`/`keylet_xxx_into` pair from a bare argument list —
 /// the by-value form testenv-intercepts then falls through to
@@ -204,8 +184,11 @@ macro_rules! keylet_fn {
         #[inline(always)]
         pub fn $name($($sig)*) -> Result<Keylet> {
             #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
-            if let Some(r) = testenv_keylet($konst, [$($targ),*]) {
-                return r;
+            {
+                use crate::testenv_bridge::{KeyletArg, keylet_intercept};
+                if let Some(r) = keylet_intercept($konst, [$($targ),*]) {
+                    return r;
+                }
             }
             util_keylet_buf($konst, $($slot),*)
         }
@@ -218,8 +201,11 @@ macro_rules! keylet_fn {
         #[inline(always)]
         pub fn $into_name(out: &mut Keylet, $($sig)*) -> Result<()> {
             #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
-            if let Some(r) = testenv_keylet($konst, [$($targ),*]) {
-                return r.map(|k| *out = k);
+            {
+                use crate::testenv_bridge::{KeyletArg, keylet_intercept};
+                if let Some(r) = keylet_intercept($konst, [$($targ),*]) {
+                    return r.map(|k| *out = k);
+                }
             }
             let _ = util_keylet(out, $konst, $($slot),*)?;
             Ok(())
@@ -287,18 +273,19 @@ fn skip_components(ledger_index: Option<u32>) -> (u32, u32) {
 pub fn keylet_skip(ledger_index: Option<u32>) -> Result<Keylet> {
     let (a, b) = skip_components(ledger_index);
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
-    if let Some(r) = testenv_keylet(
-        KEYLET_SKIP,
-        [
+    {
+        use crate::testenv_bridge::{KeyletArg, keylet_intercept};
+        let args = [
             KeyletArg::Value(a),
             KeyletArg::Value(b),
             KeyletArg::Unused,
             KeyletArg::Unused,
             KeyletArg::Unused,
             KeyletArg::Unused,
-        ],
-    ) {
-        return r;
+        ];
+        if let Some(r) = keylet_intercept(KEYLET_SKIP, args) {
+            return r;
+        }
     }
     util_keylet_buf(KEYLET_SKIP, a, b, 0, 0, 0, 0)
 }
@@ -309,18 +296,19 @@ pub fn keylet_skip(ledger_index: Option<u32>) -> Result<Keylet> {
 pub fn keylet_skip_into(out: &mut Keylet, ledger_index: Option<u32>) -> Result<()> {
     let (a, b) = skip_components(ledger_index);
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
-    if let Some(r) = testenv_keylet(
-        KEYLET_SKIP,
-        [
+    {
+        use crate::testenv_bridge::{KeyletArg, keylet_intercept};
+        let args = [
             KeyletArg::Value(a),
             KeyletArg::Value(b),
             KeyletArg::Unused,
             KeyletArg::Unused,
             KeyletArg::Unused,
             KeyletArg::Unused,
-        ],
-    ) {
-        return r.map(|k| *out = k);
+        ];
+        if let Some(r) = keylet_intercept(KEYLET_SKIP, args) {
+            return r.map(|k| *out = k);
+        }
     }
     let _ = util_keylet(out, KEYLET_SKIP, a, b, 0, 0, 0, 0)?;
     Ok(())
