@@ -112,6 +112,11 @@ macro_rules! keylet_fn {
         $(#[$doc:meta])*
         fn $name:ident($($args:tt)*), $into_name:ident => $konst:ident $(,)?
     ) => {
+        // The two `[() () () () () ()]` lists are remaining-slot counters,
+        // one `()` per unfilled array slot / per unfilled call slot: `@args`
+        // consumes one from each per real argument (two from the call-slot
+        // counter for a `&$ty` argument), then `@pad_targ`/`@pad_slot`
+        // consume the rest one at a time, appending `KeyletArg::Unused`/`0`.
         keylet_fn!(@args
             [$(#[$doc])*] $name $into_name $konst
             [() () () () () ()] [() () () () () ()]

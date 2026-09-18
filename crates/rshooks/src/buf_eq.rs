@@ -83,7 +83,7 @@ impl_buf_eq!(
     ]
 );
 impl_buf_eq!(
-    #[deprecated(since = "0.2.2", note = "backs no type in this crate; unused")]
+    #[deprecated(note = "backs no type in this crate; unused")]
     buf_eq_40,
     40,
     [
@@ -107,7 +107,7 @@ impl_buf_eq!(
     ]
 );
 impl_buf_eq!(
-    #[deprecated(since = "0.2.2", note = "backs no type in this crate; unused")]
+    #[deprecated(note = "backs no type in this crate; unused")]
     buf_eq_64,
     64,
     [

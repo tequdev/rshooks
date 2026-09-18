@@ -239,7 +239,7 @@ pub use rshooks_macros::XFL;
 /// counterpart, [`ParamName`] for the analogous Hook API parameter-*name*
 /// role, and [`ParamValue`] for the analogous parameter-*value* role.
 ///
-/// # Choosing among the four derives
+/// # Choosing among the derives
 ///
 /// [`HookKey`], [`HookData`], [`ParamName`], and [`ParamValue`] all derive
 /// from the same "fixed-offset, named-field struct" shape, differing only in
@@ -249,7 +249,7 @@ pub use rshooks_macros::XFL;
 /// | derive | generates | direction | size bound |
 /// |---|---|---|---|
 /// | `HookKey` | [`convert::ToBytes`] + [`state::StateKeyEncode`] | write-only (locates a state entry) | ≤ 32 bytes, checked at derive time |
-/// | `HookData` | [`convert::ToBytes`] + [`convert::FromBytes`] + [`convert::FixedRead`] + `LEN` | read-write | uncapped |
+/// | `HookData` | [`convert::ToBytes`] + [`convert::FromBytes`] + [`convert::FixedRead`] + `LEN` | read-write | uncapped (see [`state`]'s `MAX_TYPED_STATE_LEN` doc) |
 /// | `ParamName` | [`convert::ToBytes`] only | write-only (locates a parameter) | 1..=32 bytes, checked at derive time |
 /// | `ParamValue` | [`convert::FromBytes`] + [`convert::FixedRead`] (no `LEN`) | read-only | uncapped |
 ///
@@ -628,8 +628,8 @@ pub use rshooks_macros::HookData;
 /// like [`state::TypedStateKey`] pairs a [`HookKey`] type with its value
 /// type.
 ///
-/// See [`HookKey`]'s doc comment ("Choosing among the four derives") for how
-/// `ParamName` compares to [`HookData`]/[`HookKey`]/[`ParamValue`]. Its size
+/// See [the derive comparison table](HookKey#choosing-among-the-derives) for
+/// how `ParamName` compares to [`HookData`]/[`HookKey`]/[`ParamValue`]. Its size
 /// bound is [`convert::PARAM_NAME_MAX_LEN`] — **1 to 32 bytes**
 /// (`hook_api.h`: `TOO_SMALL` below 1, `TOO_BIG` above 32), checked at
 /// derive time: a struct that encodes to 0 or to 33+ bytes fails to compile
@@ -728,8 +728,8 @@ pub use rshooks_macros::ParamName;
 /// [`api::otxn::otxn_param_exact`]). See [`HookData`] for the hook-state
 /// *value* role, and [`ParamName`] for the parameter *name* counterpart.
 ///
-/// See [`HookKey`]'s doc comment ("Choosing among the four derives") for how
-/// `ParamValue` compares to [`HookData`]/[`HookKey`]/[`ParamName`]: this
+/// See [the derive comparison table](HookKey#choosing-among-the-derives) for
+/// how `ParamValue` compares to [`HookData`]/[`HookKey`]/[`ParamName`]: this
 /// hook never writes its *own* parameters (`hook_param_set` writes a
 /// *different* hook's parameter, taking a raw `&[u8]`, not a typed value),
 /// so `ParamValue` generates no [`convert::ToBytes`] and no inherent `LEN`
