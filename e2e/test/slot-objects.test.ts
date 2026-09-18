@@ -177,7 +177,7 @@ describe('slot-objects (typed slot layer)', () => {
     expect(checks & BIT_ROOT_CAST).toBe(BIT_ROOT_CAST)
   })
 
-  it('survives 260 successful three-hop walks without exhausting the slots', () => {
+  it('survives 256 successful three-hop walks without exhausting the slots', () => {
     // Recycle slots to remain below the 255-slot limit.
     expect(checks & BIT_DEEP_LOOP).toBe(BIT_DEEP_LOOP)
     expect(checks & BIT_TAKE_LOOP).toBe(BIT_TAKE_LOOP)
