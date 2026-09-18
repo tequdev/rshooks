@@ -28,6 +28,9 @@ Goals:
 Non-goals:
 
 - Runtime-sized shapes (conditional fields, runtime element counts) — `StoWriter`'s job.
+  (Present-or-absent fields and a runtime-chosen-length `VL` within a fixed `MAX` are no
+  longer out of scope for `txn_template!` as of `docs/NOP_PADDING_DESIGN.md`; only runtime
+  element *counts* remain `StoWriter`'s job.)
 - Any change to `prepare_for_emit`/`Prepared`, to `StoWriter`, or to existing templates'
   bytes (`examples/10_emit-txn` must stay byte-identical; `metrics.json` unchanged).
 
@@ -59,10 +62,21 @@ txn_template! {
   | <name>: empty_vl(sfX)                         // existing
   | <name>: fixed_vl(sfX, N) $(= <[u8; N] expr>)?  // fixed-length VL blob
   | <name>: object(sfX) { <field>* }              // STObject, closed by 0xE1
-  | <name>: array(sfX) [ <element>* ]             // STArray, named elements, closed by 0xF1
+  | <name>: array(sfX) [ <element>* ]             // STArray, positional elements, closed by 0xF1
   | <name>: array(sfX) [ <Elem>: object(sfY) { <field>* } ; <N> ]  // STArray, homogeneous, indexed
+  | <name>: sfX $(= <expr>)?                      // inferred scalar kind (§2.7)
+  | <name>: sfX { <field>* }                      // inferred object
+  | <name>: sfX [ <element>* ]                    // inferred array
+  | <name>: sfX [ <Elem>: sfY { <field>* } ; <N> ] // inferred array, homogeneous, indexed
+  | <name>: sfX = NativeAmount(<u64 drops>)                 // default-shape: infers native_amount (§2.7)
+  | <name>: sfX = IouAmount(<XFL>, <CurrencyCode>, <AccountId>)  // default-shape: infers amount (§2.7)
+  | <name>: sfX = AnyAmount()                     // default-shape: infers any_amount (§2.7), no value
+  | <name>: sfX = []                              // default-shape: infers empty_vl (§2.7)
+  | <name>: sfX = [ <elem>+ ]                     // default-shape: infers fixed_vl, N from the literal (§2.7)
+  | <name>: sfX = *<byte string literal>          // default-shape: infers fixed_vl, N from the literal (§2.7)
 
-<element> := <name>: object(sfX) { <field>* }     // only objects directly inside an array
+<element> := object(sfX) { <field>* }   // only objects directly inside an array, by position
+           | sfX { <field>* }          // inferred object element
 ```
 
 Trailing commas are accepted everywhere a field list is accepted (as today), except after
@@ -71,6 +85,11 @@ error (§4.5).
 
 `<Elem>` names the generated element-view type; `<N>` is a `usize` const expression
 (literal or a named const), at least 1. See §2.5.
+
+An array's own element (only — the homogeneous `<Elem>: ..; N` form is unaffected, its
+`<Elem>` names a view type, never a position) takes no name: it's numbered by its
+zero-based position among every element in the list. `name: object(sfX) { .. }` is a
+compile error — see §2.7.
 
 ### 2.1 Kind table
 
@@ -158,8 +177,8 @@ txn_template! {
         account: account_id(sfAccount),
         destination: account_id(sfDestination),
         amounts: array(sfAmounts) [
-            native: object(sfAmountEntry) { amount: native_amount(sfAmount) = 1 },
-            usd: object(sfAmountEntry) {
+            object(sfAmountEntry) { amount: native_amount(sfAmount) = 1 },
+            object(sfAmountEntry) {
                 amount: amount(sfAmount) = (XFL!(0), USD, USD_ISSUER),
             },
         ],
@@ -167,12 +186,13 @@ txn_template! {
     }
 }
 
-txn.set_amounts_native_amount(5)?;          // native entry, 8-byte store (Result: 62-bit range)
-txn.set_amounts_usd_amount_value(XFL!(1.5)); // issued entry, 8-byte store
+txn.set_amounts_0_amount(5)?;              // first entry, 8-byte store (Result: 62-bit range)
+txn.set_amounts_1_amount_value(XFL!(1.5)); // second entry, 8-byte store
 ```
 
 - Setter names are the `_`-joined declaration path: `set_<outer>_<inner>_<leaf>`. Array
-  elements are named like any other field; the element name is only a path segment.
+  elements take no name; their zero-based position is only a path segment, the same shape
+  as any other field.
 - Array elements are declared one by one. That is what "element count known ahead" means
   here: the shape of every element is fixed, and heterogeneous element shapes (one native
   entry, one issued entry) fall out naturally. A homogeneous, indexed form for the case
@@ -234,10 +254,10 @@ back to back, then `0xF1` — a new `codec::write_repeated` helper (`write_const
 applied `N` times at `Elem::LEN`-sized strides) bakes the `N` copies at compile time.
 
 Nesting depth: a homogeneous array's element counts as **two** levels against
-`STO_WRITER_MAX_DEPTH` (the array itself, then the element), the same as a named array's
-object element — checked once, directly, rather than through two separate nested-entry
-steps. A homogeneous array may itself be declared inside another homogeneous array's
-element (or a named object), to whatever depth that bound allows.
+`STO_WRITER_MAX_DEPTH` (the array itself, then the element), the same as an array's own
+positional object element — checked once, directly, rather than through two separate
+nested-entry steps. A homogeneous array may itself be declared inside another homogeneous
+array's element (or a nested object), to whatever depth that bound allows.
 
 Implementation: the homogeneous-array arm spawns a **second, independent**
 `$crate::__txn_template_step!` invocation for `Elem`, seeded fresh (its own `order`,
@@ -279,6 +299,150 @@ declared default whose length doesn't match `N` is a compile-time type error (`l
 
 Only fixed-length `VL` is covered here — `Vector256`/`PathSet` and a genuinely
 variable-length blob stay deferred (§6).
+
+### 2.7 Inferred kinds
+
+```rust,ignore
+flags: sfFlags = tfCANONICAL,          // infers u32_field
+account: sfAccount,                    // infers account_id
+invoice_id: sfInvoiceID,               // infers hash256
+amounts: sfAmounts [ Entry: sfAmountEntry { amount: amount(sfAmount) }; 2 ],
+memos: sfMemos [ m: sfMemo { memo_type: fixed_vl(sfMemoType, 4) } ],
+```
+
+`macro_rules!` cannot inspect an identifier's STI directly, so inference is dispatched at
+the type level. `sti_of(sfcode)` (already used by every explicit kind's own STI-agreement
+check) is a `const fn`, so `Infer<{ sti_of(sfcode) }>` — a unit struct generic over a
+`u32` const parameter — is a concrete, nameable type from inside the macro. One
+`impl InferKind for Infer<{ STI_X }>` per inferable STI supplies everything a bare
+`field: sfXxx` declaration needs: the setter's value type (an associated GAT,
+`Value<'a>`), the wire size (`LEN`, plus a `PREFIX` for `account_id`'s VL length byte),
+the `FIELDS` kind tag, and the `write` call itself. `INFERABLE`/`HAS_DEFAULT` back the two
+compile-time `assert!`s that reject an ambiguous STI or a default/no-default mismatch. A
+non-inferable STI (`AMOUNT`, `VL`, `ISSUE`, `OBJECT`/`ARRAY` without a body, `PATHSET`,
+`VECTOR256`, `UINT192`, `NUMBER`, `XCHAIN_BRIDGE`) still gets an `impl` — `INFERABLE =
+false`, and `Value<'a> = ExplicitKindRequired` (an empty marker whose name doubles as the
+type-mismatch diagnostic when a default is ascribed to it). `PATHSET`/`VECTOR256`/
+`UINT192`/`NUMBER`/`XCHAIN_BRIDGE` back no `txn_template!` kind at all (explicit or
+inferred) — a field with one of those serialized types needs `StoWriter` directly.
+
+An inferred integer field's default is type-checked directly against the field's integer
+type (`let __v: u32 = <expr>;`, no `as` cast) — stricter than the explicit kind's own `(<expr>)
+as u32` cast, which silently truncates an out-of-range default instead of rejecting it. A
+default that only compiled because of that truncating cast does not compile in the bare
+form.
+
+`object`/`array` inference is a pure token rewrite, not a type-level dispatch: a bare
+`name: sfXxx { .. }`/`name: sfXxx [ .. ]` (or a homogeneous array element's own `Elem: sfY
+{ .. }`) desugars to `name: object(sfXxx) { .. }`/`array(sfXxx) [ .. ]` before
+recursing, so it reuses the existing container arms and their nested-order/depth checks
+unchanged. Desugar arms are generic over `ctx` (they fire in both `obj` and `arr`) and are
+ordered: the container desugars sit right where the analogous explicit-form arm they
+rewrite into does (so a partially-explicit spelling like `array(sfX) [ Elem: sfY { .. } ;
+N ]` — explicit array, inferred element — still resolves), while the two scalar desugar
+arms (with/without default) sit after both `emit_details` arms and before the catch-all,
+so `field: emit_details` keeps matching its own dedicated arm first.
+
+Byte-for-byte identity with the explicit spelling is the whole point: `Infer<STI>`'s
+`KIND`/`LEN`/`PREFIX`/`write` are computed from the exact same `codec` primitives
+(`field_header`, `fixed_field_size`, `write_const_bytes`) the explicit arms call directly,
+so the generated `TEMPLATE`, `FIELDS` row, and setter offset are identical either way — see
+`crates/rshooks/src/txn.rs`'s `mod tests` for the twinned-fixture proofs.
+
+An array's own elements (not the homogeneous `<Elem>: ..; N` form) go through one more
+rewrite ahead of all of the above: `$crate::__txn_template_index_elements!`, a `rshooks-macros`
+proc macro (alongside `$crate::__paste!`), splits the element list on top-level commas and
+prepends `<N>:` — `<N>` the element's zero-based position — to every one of them, before
+splicing the (now numbered) list back into `fields = [ .. ]`. An element already spelled
+`<tt> : ..` is a compile error at that point — array elements are positional only, and an
+explicit name is never an override. Every element arm that captures the position — the
+explicit `object(sfY) { .. }`/`optional object(sfY) { .. }` forms and their inferred-kind
+desugars — takes it as `$name:tt` (an integer literal, not `$name:ident`); the
+`@end_object`/`@end_opt_object`/`@end_array`/`@end_opt_array` arms that later name the
+container in a doc string or a generated method (`stringify!($name)`,
+`[<set_ $prefix $name>]`) do the same, since a bare digit literal stringifies and
+concatenates (via `$crate::__paste!`'s literal-digit support) exactly like an identifier
+does. The homogeneous form is untouched: its `<Elem>` always names a real view type, never a
+position.
+
+#### Default-shape desugar
+
+`native_amount`/`amount`/`empty_vl`/`fixed_vl` cannot infer from the STI alone — `AMOUNT`
+covers both the native and issued wire shapes, `VL` covers both the empty and
+fixed-length ones — so a bare `field: sfXxx = <default>` instead infers the kind from the
+*shape* of `<default>`, purely as a token rewrite ahead of the plain inferred-scalar arm
+(so `$default:expr` there never gets a chance to parse `NativeAmount(500)` as an ordinary,
+unresolvable call expression):
+
+```text
+field: sfXxx = NativeAmount(d)              -> field: native_amount(sfXxx) = d
+field: sfXxx = IouAmount(xfl, cur, iss)      -> field: amount(sfXxx) = (xfl, cur, iss)
+field: sfXxx = AnyAmount()                  -> field: any_amount(sfXxx)
+field: sfXxx = []                           -> field: empty_vl(sfXxx)
+field: sfXxx = [ <elem>+ ]                  -> field: fixed_vl(sfXxx, N) = [ <elem>+ ]
+field: sfXxx = *<byte string literal>       -> field: fixed_vl(sfXxx, N) = *<byte string literal>
+```
+
+`NativeAmount`/`IouAmount`/`AnyAmount` are macro syntax markers matched as literal tokens,
+not real types or functions — nothing named that way needs to exist in scope. `AnyAmount()`
+takes no value: `any_amount` has no baked default to thread through (issued zero, always),
+so its rewrite leaves no `= ..` behind, unlike the other two. `N` in the two array/byte-string
+rewrites is recovered from the default literal itself via a new `codec::array_len<const N:
+usize>(_: &[u8; N]) -> usize { N }`, spliced in as `{ array_len(&[ <elem>+ ]) }`/`{
+array_len(&*<byte string literal>) }` — a block expression, since `fixed_vl`'s own `$n:expr`
+fragment splices into a `[u8; $n]` array-length position. A `fixed_vl` default spelled as a
+named const (`field: sfX = SOME_CONST`) is not one of the literal shapes above, so it
+falls through to the plain inferred-scalar-with-default arm and is rejected there —
+`fixed_vl(sfX, N) = SOME_CONST` (the explicit form, `N` spelled out) is still required,
+since there is no literal to recover `N` from. `issue`/`native_issue`, and a zero-default
+`amount(sfX)` (no `=` at all), are untouched by this desugar — none of the shapes above
+match them.
+
+#### Inferred `optional` forms
+
+`field: optional sfXxx` is `optional <scalar_kind>(sfXxx)`'s (`docs/NOP_PADDING_DESIGN.md`
+§3.1) bare-`sfXxx` twin: `InferKind` gains a second kind tag, `OPTIONAL_KIND` (the
+`codec::KIND_OPTIONAL_*` row for this STI's optional form, `u8::MAX` — unused — for a
+non-inferable one), alongside the existing `KIND`. The setter writes `header + PREFIX +
+value` in one call (mirroring `optional account_id`'s own `PREFIX`-aware setter, generalized
+to any `InferKind`), `clear_x` NOP-fills `fixed_field_size(sfXxx, PREFIX.len() + LEN)`, and
+that same size is the field's worst-case NOP charge to its enclosing container. A
+non-inferable STI names the matching explicit `optional` form in its error message
+(`optional native_amount`/`optional amount`/`any_amount`/`optional any_amount`, `optional
+empty_vl`/`optional fixed_vl`, `optional vl`, `optional native_issue`/`optional issue`) —
+except the three `Amount`-shaped kinds with no baked default, which get their own
+default-shape markers, the `optional` twins of the non-`optional` ones above:
+
+```text
+field: optional sfXxx = AnyAmount()         -> field: optional any_amount(sfXxx)
+field: optional sfXxx = NativeAmount()      -> field: optional native_amount(sfXxx)
+field: optional sfXxx = IouAmount()         -> field: optional amount(sfXxx)
+```
+
+All three take no value, same as the non-`optional` `AnyAmount()` marker: absent is the
+only default an `optional` field has, so there is nothing to thread through even for
+`NativeAmount`/`IouAmount`, unlike their non-`optional` forms above (which do take one).
+
+`optional sfXxx { .. }`/`[ .. ]` and a homogeneous array's `Elem: optional sfY { .. }` are
+pure token rewrites, exactly like their non-`optional` counterparts above: `optional sfXxx {
+.. }` -> `optional object(sfXxx) { .. }` (legal wherever the explicit form is — a
+top-level/nested-object field, or a positional element inside an array), `optional sfXxx
+[ .. ]` -> `optional array(sfXxx) [ .. ]`, and `Elem: optional sfY { .. } ; N` -> `Elem:
+optional object(sfY) { .. } ; N` under either a bare or an explicit outer `array(..)`.
+
+#### Named `optional` containers have no view type
+
+`optional object(sfX) { <field>* }`/`optional array(sfX) [ <element>* ]` (whole-container
+present-or-absent) compile *inline*, exactly like the plain `object`/`array` forms above —
+`<field>*`'s own fields flatten onto the parent as ordinary `set_x_<field>` methods, sharing
+the same order/depth/NOP-budget checks — rather than spawning a separate view type. The only
+addition: the container's slot defaults to absent (`NOP`-filled), and every one of its own
+setters (plus a generated `enable_x(&mut self)`) first ensures it — and every enclosing
+`optional` ancestor — is present, copying in its own baked defaults if not. A generated
+`clear_x(&mut self)` NOP-fills the whole slot back to absent, and `is_x_present(&self) ->
+bool` reads presence without changing it. See `docs/NOP_PADDING_DESIGN.md` §3.3 for exactly
+how the container's own writes are captured into a standalone `const` and the ancestor-
+presence prelude (`$crate::__txn_template_ensure!`) is threaded through `mode`.
 
 ## 3. Implementation
 
@@ -435,9 +599,10 @@ New:
 
 - `Vector256` (`sfURITokenIDs`, `sfHookNamespaces`) and `PathSet` — distinct wire shapes
   from a plain `VL` blob (`Vector256` is a flat run of 32-byte hashes with no per-element
-  header; `PathSet` is its own nested path/step grammar), plus a genuinely variable-length
-  (not fixed-at-declaration) `VL` blob. `fixed_vl(sfX, N)` (§2.6) covers every *fixed*-length
-  `VL` field; these are the remaining VL-family gaps.
+  header; `PathSet` is its own nested path/step grammar). `fixed_vl(sfX, N)` (§2.6) covers
+  every *fixed*-length `VL` field; `vl(sfX, MIN, MAX)`
+  (`docs/NOP_PADDING_DESIGN.md`) covers a runtime-chosen-length one within a compile-time
+  `MAX`; `Vector256`/`PathSet` remain the actual VL-family gaps.
 - `Number` (`sfNumber`), `UInt192` (`sfMPTokenIssuanceID`), `XChainBridge`: no Xahau
   transaction emits them today; add on demand with the `fixed_field_size` pattern.
 - Type-level guard that an `amount` field with the zero default is set before emit (a

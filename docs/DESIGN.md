@@ -878,11 +878,23 @@ things:
    the header),
    `object(sfXxx) { .. }` for a fixed-shape nested `STObject`,
    `array(sfXxx) [ <element>* ]` for a nested `STArray` of individually
-   named, independently shaped elements, or `array(sfXxx) [ Elem:
+   declared, independently shaped elements reached by position, or
+   `array(sfXxx) [ Elem:
    object(sfY) { .. } ; N ]` for a nested `STArray` of `N` identically
    shaped elements reached by runtime index, `emit_details`, plus the
-   leading `transaction_type = ttXXX`); the macro computes cumulative
-   offsets and
+   leading `transaction_type = ttXXX`); a present-or-absent field of any
+   fixed-width kind (`optional <kind>(sfXxx)`), a runtime-chosen
+   native-or-issued `Amount` slot (`any_amount(sfXxx)`, or `optional
+   any_amount(sfXxx)`), a runtime-length `VL` blob within a compile-time
+   `MAX` (`vl(sfXxx, MIN, MAX)`, or `optional vl(..)`), a whole-container
+   present-or-absent `object`/`array` with no view type of its own
+   (`optional object(sfXxx) { .. }`/`optional array(sfXxx) [ .. ]`), and a
+   homogeneous array whose per-element
+   *fields* are `optional` while every element itself stays present
+   (`array(sfXxx) [ Elem: object(sfY) { field: optional .. } ; N ]`) —
+   all NOP-padded (`docs/NOP_PADDING_DESIGN.md`) so absence still costs a
+   compile-time-fixed byte offset, never a runtime-shaped one; the macro
+   computes cumulative offsets and
    total length at compile time, bakes the field headers into a
    `const fn new()` template (⇒ data segment via `HookStatic`), and
    generates typed `set_<field>` setters plus an `emit_details_region()`
@@ -931,17 +943,18 @@ field)` order be checked **per container** — each object's own direct
 fields (and the template's top-level fields) independently, not as one
 flat sequence — while every scalar field rule stays a single macro arm
 needing only `prefix`/`depth` from the muncher's state, not any special
-knowledge of nesting. An array's named elements are not order-checked
+knowledge of nesting. An array's elements are not order-checked
 against each other, since they typically share one repeated `sfcode`
 (every `sfAmounts` element is an `sfAmountEntry`). Nesting depth is
 asserted at compile time against `STO_WRITER_MAX_DEPTH`, the same limit
 `StoWriter`/xahaud's own deserializer enforce; a homogeneous array's
 element counts as two levels against that bound (the array itself, then
-the element), the same as a named array's object element. Setter names
-for a named nested field are the full `_`-joined declaration path
-(`set_amounts_usd_amount`), spliced through the same `$crate::__paste!`
-every top-level setter uses — an array element's declared name is only a
-path segment, not a repetition index.
+the element), the same as an array's own positional object element.
+Setter names for a nested field are the full `_`-joined declaration path
+(`set_amounts_0_amount`), spliced through the same `$crate::__paste!`
+every top-level setter uses — an array element takes no name of its own,
+only its zero-based position, which is just another path segment, not a
+repetition index.
 
 The homogeneous form (`array(sfX) [ Elem: object(sfY) { <field>* } ; N ]`)
 declares one element shape and reserves `N` back-to-back copies of it
@@ -999,6 +1012,16 @@ The base arm then emits const-evaluated checks over the accumulated table
   must have the serialized type (`code >> 16`) its kind expects — this is
   the per-field check `2.` above already flagged, applied uniformly across
   the entire table, nested rows included.
+- **NOP budget**: for every container (the top level, each named
+  `object`/`array`, each homogeneous array, each `optional` view), the
+  worst-case `NOP` count over its direct `optional`/`any_amount`/`vl`
+  children — "everything optional absent at once, every `vl` at `MIN`,
+  every `any_amount` native", the state the host may actually be asked to
+  parse — must be `<= codec::MAX_NOPS_PER_CONTAINER` (63), the same limit
+  xahaud's own `STObject`/`STArray` NOP counter enforces
+  (`docs/NOP_PADDING_DESIGN.md` §1/§3.1/§3.2). An `optional`/`vl`/
+  `any_amount` field whose `sfXxx` code is one of the six required-field
+  codes above is a separate compile error, independent of this budget.
 
 Because detection is by *value*, it is robust to how the constant is
 spelled (qualified paths, aliases). `prepare_for_emit(&mut self) ->
@@ -1822,7 +1845,7 @@ only.
   "WCE": { "hook": 4150, "cbak": 0 },
   "builder": {
     "name": "rshooks-build",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "rustc": "rustc 1.89.0 (29483883e 2025-08-04)",
     "cargo_args": ["rustc", "--release", "--locked", "--target", "wasm32v1-none", "--crate-type", "cdylib"],
     "rustc_args": ["--cfg", "rshooks_entry=\"0\"", "--check-cfg", "cfg(rshooks_entry,values(\"0\",\"1\",\"2\",\"3\",\"4\",\"5\",\"6\",\"7\",\"8\",\"9\"))", "-C", "link-arg=-zstack-size=131072"],

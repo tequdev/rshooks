@@ -4,14 +4,14 @@ version = 4
 
 [[package]]
 name = "accept-all"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "rshooks",
 ]
 
 [[package]]
 name = "account-id-macro"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "rshooks",
 ]
@@ -188,7 +188,7 @@ dependencies = [
 
 [[package]]
 name = "emit-txn"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "rshooks",
  "rshooks-testenv",
@@ -202,7 +202,7 @@ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
 name = "errors"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "rshooks",
 ]
@@ -225,7 +225,7 @@ checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
 
 [[package]]
 name = "firewall"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "rshooks",
 ]
@@ -254,7 +254,7 @@ dependencies = [
 
 [[package]]
 name = "governance"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "rshooks",
 ]
@@ -272,7 +272,7 @@ dependencies = [
 
 [[package]]
 name = "guard-patterns"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "rshooks",
 ]
@@ -294,7 +294,7 @@ dependencies = [
 
 [[package]]
 name = "hook-params"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "rshooks",
 ]
@@ -330,7 +330,7 @@ dependencies = [
 
 [[package]]
 name = "keylets"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "rshooks",
  "rshooks-testenv",
@@ -357,7 +357,7 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "param-signature"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "rshooks",
 ]
@@ -420,7 +420,7 @@ dependencies = [
 
 [[package]]
 name = "rshooks"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "rshooks-core",
  "rshooks-macros",
@@ -428,11 +428,11 @@ dependencies = [
 
 [[package]]
 name = "rshooks-core"
-version = "0.2.0"
+version = "0.2.1"
 
 [[package]]
 name = "rshooks-macros"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "proc-macro-crate",
  "serde_json",
@@ -441,7 +441,7 @@ dependencies = [
 
 [[package]]
 name = "rshooks-testenv"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ed25519-dalek",
  "k256",
@@ -544,7 +544,7 @@ dependencies = [
 
 [[package]]
 name = "slot-ledger"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "rshooks",
  "rshooks-testenv",
@@ -552,7 +552,7 @@ dependencies = [
 
 [[package]]
 name = "slot-objects"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "rshooks",
  "rshooks-testenv",
@@ -571,7 +571,7 @@ dependencies = [
 
 [[package]]
 name = "state-counter"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "rshooks",
  "rshooks-testenv",
@@ -579,21 +579,21 @@ dependencies = [
 
 [[package]]
 name = "state-foreign"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "rshooks",
 ]
 
 [[package]]
 name = "state-interface"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "rshooks",
 ]
 
 [[package]]
 name = "sto-writer"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "rshooks",
  "rshooks-testenv",
@@ -659,7 +659,15 @@ dependencies = [
 
 [[package]]
 name = "txn-template-nested"
-version = "0.2.0"
+version = "0.2.1"
+dependencies = [
+ "rshooks",
+ "rshooks-testenv",
+]
+
+[[package]]
+name = "txn-template-optional"
+version = "0.2.1"
 dependencies = [
  "rshooks",
  "rshooks-testenv",
@@ -667,7 +675,7 @@ dependencies = [
 
 [[package]]
 name = "typed-data"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "rshooks",
  "rshooks-testenv",
@@ -675,7 +683,7 @@ dependencies = [
 
 [[package]]
 name = "typed-results"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "rshooks",
  "rshooks-testenv",
@@ -683,7 +691,7 @@ dependencies = [
 
 [[package]]
 name = "typed-views"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "rshooks",
  "rshooks-testenv",
@@ -725,7 +733,7 @@ dependencies = [
 
 [[package]]
 name = "xfl-math"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "rshooks",
  "rshooks-testenv",

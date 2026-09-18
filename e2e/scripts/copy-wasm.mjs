@@ -1,7 +1,7 @@
 // Wires rshooks-build's example outputs into the place
-// `@transia/hooks-toolkit`'s `readHookBinaryHexFromNS(name, 'wasm')` reads
+// `@xahau/hooks-toolkit`'s `readHookBinaryHexFromNS(name, 'wasm')` reads
 // from: `${process.cwd()}/build/<name>.wasm` (see
-// node_modules/@transia/hooks-toolkit/dist/npm/src/utils.js). Copying
+// node_modules/@xahau/hooks-toolkit/dist/npm/src/utils.js). Copying
 // keeps every test's Hook-building code on the toolkit's own file-reading
 // helper instead of bypassing it.
 //

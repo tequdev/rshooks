@@ -5,7 +5,7 @@ members = ["crates/*"]
 [workspace.package]
 edition = "2024"
 rust-version = "1.88"
-version = "0.2.0"
+version = "0.2.1"
 license = "MIT"
 repository = "https://github.com/tequdev/rshooks"
 readme = "README.md"
@@ -14,9 +14,9 @@ readme = "README.md"
 # Inter-crate dependencies inherit these entries (`{ workspace = true }`), so
 # the published version requirement lives next to `workspace.package.version`.
 # `cargo xtask check-versions` fails when the two drift apart.
-rshooks-core = { path = "crates/rshooks-core", version = "0.2.0" }
-rshooks-macros = { path = "crates/rshooks-macros", version = "0.2.0" }
-rshooks = { path = "crates/rshooks", version = "0.2.0" }
+rshooks-core = { path = "crates/rshooks-core", version = "0.2.1" }
+rshooks-macros = { path = "crates/rshooks-macros", version = "0.2.1" }
+rshooks = { path = "crates/rshooks", version = "0.2.1" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
@@ -29,3 +29,12 @@ expect_used = "deny"
 panic = "deny"
 indexing_slicing = "deny"
 arithmetic_side_effects = "warn"
+
+# Binaryen (vendored C++ behind `wasm-opt`) inherits the dev profile's
+# `debug = true` as `-g`, which makes host debug info the bulk of its build
+# output. It only runs as an optimizer, so it is never debugged from here.
+[profile.dev.package.wasm-opt-sys]
+debug = false
+
+[profile.dev.package.wasm-opt-cxx-sys]
+debug = false

@@ -417,6 +417,18 @@ impl HostBackend for Backend {
         };
         // Real `HookAPI::emit` rule 7 rejects outright if its own
         // `etxn_fee_base` call fails (`minfee < 0` -> `EMISSION_FAILURE`).
+        //
+        // Both `emit` and `etxn_fee_base` parse the blob through
+        // `STTx(SerialIter&)` on the real host, so a NOP-padded blob's
+        // ledger-stored (re-serialized) form is already NOP-free (design
+        // §1) — `EmittedTxn::blob` must match that, both so two emissions
+        // differing only in padding are indistinguishable (and hash
+        // identically) and so anything derived from a stored `EmittedTxn`
+        // (`top_level_transaction_type`, `crate::otxn::from_emitted`) never
+        // has to special-case a NOP that real xahaud would already have
+        // dropped. `canonicalize` failing here after `validate_emit_blob`
+        // already succeeded would mean the two disagree about what's
+        // parseable — defensive, not expected to be reachable.
         let fee_base = self.etxn_fee_base(tx_blob);
         let validation = if fee_base < 0 {
             Err(())
@@ -428,12 +440,13 @@ impl HostBackend for Backend {
                 ledger_seq,
                 fee_base as u64,
             )
+            .and_then(|()| crate::emit_walk::canonicalize(tx_blob))
         };
         match validation {
-            Ok(()) => {
-                let hash = deterministic_hash(tx_blob);
+            Ok(canonical) => {
+                let hash = deterministic_hash(&canonical);
                 self.ctx.borrow_mut().record_emitted(EmittedTxn {
-                    blob: tx_blob.to_vec(),
+                    blob: canonical,
                     hash,
                 });
                 Ok(hash)
@@ -808,8 +821,21 @@ impl HostBackend for Backend {
     fn prepare(&self, template: &[u8]) -> Result<Vec<u8>, i64> {
         self.ctx.borrow().require_reserved()?;
 
-        let existing = crate::emit_walk::walk_top_level_fields(template)
+        // Real `HookAPI::prepare` parses `template` through `STObject::set`
+        // (tolerant of header-position NOPs, see
+        // `crate::emit_walk::NopMode::Tolerant`'s doc comment) and every
+        // later step — the `emplace_value`/`sto_emplace` pipeline below —
+        // goes through the strict `sto_*` family, which must never see a
+        // NOP. `canonicalize` bridges the two: it parses tolerantly once,
+        // up front, and hands the rest of this function a NOP-free
+        // template, exactly the canonical (re-serialized) form real
+        // xahaud's own tolerant parse produces.
+        let template = crate::emit_walk::canonicalize(template)
             .map_err(|()| rshooks_core::INVALID_ARGUMENT)?;
+
+        let existing =
+            crate::emit_walk::walk_top_level_fields(&template, crate::emit_walk::NopMode::Strict)
+                .map_err(|()| rshooks_core::INVALID_ARGUMENT)?;
         let has = |code: u32| existing.iter().any(|f| f.code == u64::from(code));
 
         let (hook_account, ledger_seq) = {
@@ -818,7 +844,7 @@ impl HostBackend for Backend {
         };
 
         let mut blob = emplace_value(
-            template,
+            &template,
             rshooks::sfield::sfSequence.code(),
             &0u32.to_be_bytes(),
         )?;
@@ -1170,7 +1196,9 @@ mod tests {
         assert!(backend.emit(&prepared).is_ok());
 
         // Account is always set to the hook's own account.
-        let fields = crate::emit_walk::walk_top_level_fields(&prepared).unwrap();
+        let fields =
+            crate::emit_walk::walk_top_level_fields(&prepared, crate::emit_walk::NopMode::Tolerant)
+                .unwrap();
         let account_code = u64::from(rshooks::sfield::sfAccount.code());
         let account_field = fields.iter().find(|f| f.code == account_code).unwrap();
         let (start, end) = crate::emit_walk::field_value_payload(&prepared, account_field).unwrap();
@@ -1188,6 +1216,56 @@ mod tests {
     }
 
     #[test]
+    fn prepare_strips_nops_from_a_nop_padded_template() {
+        // A NOP-padded template — real `HookAPI::prepare` parses this
+        // tolerantly (`STObject::set`) and returns a canonical, NOP-free
+        // blob; `prepare` must match that via `crate::emit_walk::canonicalize`
+        // rather than handing NOP-padded bytes to the strict `sto_*`
+        // pipeline (which would reject them with `PARSE_ERROR`).
+        let (world, ctx, backend) = fresh();
+        world.borrow_mut().hook_account = [7u8; 20];
+        world.borrow_mut().ledger_seq = 100;
+        ctx.borrow_mut().reserve(1).unwrap();
+
+        let mut padded = vec![rshooks::txn::codec::NOP, rshooks::txn::codec::NOP];
+        padded.extend_from_slice(&minimal_emittable_payment_template());
+        padded.push(rshooks::txn::codec::NOP);
+
+        let prepared = backend.prepare(&padded).unwrap();
+
+        // No header-position NOP survives: a `NopMode::Strict` walk (which
+        // fails on any `0x99` header) succeeds on the returned bytes.
+        assert!(
+            crate::emit_walk::walk_top_level_fields(&prepared, crate::emit_walk::NopMode::Strict)
+                .is_ok(),
+            "prepare's output must be canonical (NOP-free): {prepared:02x?}"
+        );
+
+        // Round-trip: `prepare`'s NOP-free output is accepted by `emit`,
+        // and matches the plain (never-padded) template's own prepared
+        // bytes exactly except for the `EmitDetails` region (a fresh
+        // nonce per `prepare` call — see `InvocationContext::next_details_nonce`).
+        assert!(backend.emit(&prepared).is_ok());
+        let plain_prepared = backend
+            .prepare(&minimal_emittable_payment_template())
+            .unwrap();
+        let ed_code = u64::from(rshooks::sfield::sfEmitDetails.code());
+        let strip_emit_details = |blob: &[u8]| -> Vec<u8> {
+            let fields =
+                crate::emit_walk::walk_top_level_fields(blob, crate::emit_walk::NopMode::Strict)
+                    .unwrap();
+            let ed = fields.iter().find(|f| f.code == ed_code).unwrap();
+            let mut out = blob[..ed.range.0].to_vec();
+            out.extend_from_slice(&blob[ed.range.1..]);
+            out
+        };
+        assert_eq!(
+            strip_emit_details(&prepared),
+            strip_emit_details(&plain_prepared)
+        );
+    }
+
+    #[test]
     fn prepare_does_not_overwrite_an_already_present_ledger_window() {
         let (world, ctx, backend) = fresh();
         world.borrow_mut().ledger_seq = 100;
@@ -1202,7 +1280,9 @@ mod tests {
         template.extend_from_slice(&999u32.to_be_bytes());
 
         let prepared = backend.prepare(&template).unwrap();
-        let fields = crate::emit_walk::walk_top_level_fields(&prepared).unwrap();
+        let fields =
+            crate::emit_walk::walk_top_level_fields(&prepared, crate::emit_walk::NopMode::Tolerant)
+                .unwrap();
         let fls_code = u64::from(rshooks::sfield::sfFirstLedgerSequence.code());
         let fls_field = fields.iter().find(|f| f.code == fls_code).unwrap();
         let (s, e) = crate::emit_walk::field_value_payload(&prepared, fls_field).unwrap();
@@ -1220,7 +1300,9 @@ mod tests {
         template.extend_from_slice(&42u32.to_be_bytes());
 
         let prepared = backend.prepare(&template).unwrap();
-        let fields = crate::emit_walk::walk_top_level_fields(&prepared).unwrap();
+        let fields =
+            crate::emit_walk::walk_top_level_fields(&prepared, crate::emit_walk::NopMode::Tolerant)
+                .unwrap();
         let seq_code = u64::from(rshooks::sfield::sfSequence.code());
         let matches: Vec<_> = fields.iter().filter(|f| f.code == seq_code).collect();
         // Exactly one Sequence field survives (no duplicate from the

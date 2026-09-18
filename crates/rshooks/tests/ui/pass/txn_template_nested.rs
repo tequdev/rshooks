@@ -1,6 +1,7 @@
 //! A `Remit`-shaped template exercising nested `object`/`array` fields end
 //! to end: it compiles, and its nested setter (named by its full
-//! `_`-joined declaration path) is reachable and callable.
+//! `_`-joined declaration path, its array element's position standing in
+//! for a field name) is reachable and callable.
 
 use rshooks::prelude::*;
 use rshooks::txn_template;
@@ -15,7 +16,7 @@ txn_template! {
         signing_pub_key: empty_vl(sfSigningPubKey),
         account: account_id(sfAccount),
         amounts: array(sfAmounts) [
-            entry: object(sfAmountEntry) {
+            object(sfAmountEntry) {
                 amount: native_amount(sfAmount) = 1,
             },
         ],
@@ -25,6 +26,6 @@ txn_template! {
 
 fn main() {
     let mut txn = Remit::new();
-    txn.set_amounts_entry_amount(5).expect("5 drops is in range");
+    txn.set_amounts_0_amount(5).expect("5 drops is in range");
     let _ = &txn;
 }

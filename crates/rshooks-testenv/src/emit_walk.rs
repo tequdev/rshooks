@@ -78,6 +78,7 @@
 use std::vec::Vec;
 
 use rshooks::tx_type::TxType;
+use rshooks::txn::codec::{MAX_NOPS_PER_CONTAINER, NOP};
 
 /// The STObject terminator (see [`crate::details::OBJECT_END_MARKER`]).
 const OBJECT_END_MARKER: u8 = 0xE1;
@@ -100,6 +101,85 @@ const SF_TICKET_SEQUENCE: u64 = sfcode(2, 41);
 
 const fn sfcode(ty: u32, field: u32) -> u64 {
     ((ty as u64) << 16) | (field as u64)
+}
+
+/// Selects how [`walk_fields`]/`walk_array_body`/[`walk_array_elements`]
+/// treat a [`NOP`] byte found in a field-header position (between fields
+/// of an object, or between elements of an array — exactly where the
+/// walker is about to decode the next header). Threaded through every
+/// recursive call so each nested object/array gets its own counter, per
+/// real xahaud's per-container-instance budget. [`NOP`]/
+/// [`MAX_NOPS_PER_CONTAINER`] are re-exported from `rshooks::txn::codec`
+/// (`txn_template!`'s own NOP-padding primitives — see that module's doc
+/// comment) rather than redefined here, so the wire-level definition of a
+/// NOP lives in exactly one place.
+///
+/// - [`NopMode::Tolerant`] mirrors `STObject::set`/
+///   `STArray::STArray(SerialIter&)` (see [`NOP`]'s doc comment): a `NOP`
+///   byte is skipped rather than decoded as a field header. One counter
+///   per container instance (object level or array) tallies every NOP
+///   seen, cumulative — not reset by intervening real fields — and the
+///   container fails (`Err(())`) once that counter would exceed
+///   [`MAX_NOPS_PER_CONTAINER`]. Used only where a genuinely NOP-padded,
+///   not-yet-canonicalized, hook-authored blob is being parsed for the
+///   first time: [`validate_emit_blob`]'s own structural check
+///   (`crate::backend::Backend::emit`) and [`canonicalize`]'s internal
+///   walk (`crate::backend::Backend::emit`/`prepare`,
+///   `crate::otxn::deserialize` — see [`canonicalize`]'s doc comment).
+/// - [`NopMode::Strict`] mirrors `HookAPI::get_stobject_length`
+///   (`HookAPI.cpp:2888-3179`), which has no NOP handling at all: a `NOP`
+///   byte decodes as an ordinary `(9, 9)` header, `STI_NUMBER`(9) has no
+///   defined length ([`fixed_len_for_type`]), so it fails exactly like any
+///   other type this walker does not model. Used by every `sto_*`
+///   (`crate::host::sto`) and `slot_*`/`otxn_slot`/`meta_slot`/`xpop_slot`
+///   (`crate::host::slots`) navigation function — their content is either a
+///   hook-authored `sto_*` buffer (real `get_stobject_length` would reject
+///   a NOP there too) or slot content sourced from a
+///   canonically-serialized ledger object/transaction, never NOP-padded —
+///   and also by every walk downstream of a [`canonicalize`] call, once
+///   there:
+///   [`Backend::prepare`](crate::backend::Backend::prepare)'s own
+///   existing-fields walk, [`top_level_transaction_type`] (reads an
+///   already-committed [`crate::world::EmittedTxn`], whose `blob`
+///   [`crate::backend::Backend::emit`] stores in canonical form),
+///   `crate::otxn::deserialize`'s own field walk, and
+///   `crate::otxn::from_emitted`'s `EmitDetails` sub-walk (over bytes
+///   `deserialize`'s canonicalized map already produced). Real xahaud
+///   never re-parses a blob it has already canonicalized once, so none of
+///   these should ever see a NOP again; `Strict` turns "should" into a
+///   defensive assertion rather than silent, cost-free tolerance of a bug
+///   upstream. This is also why a `#[cbak]`'s reconstructed otxn — and
+///   anything derived from it, e.g. a nested `sfAmounts` entry reachable
+///   through `otxn_slot`/`slot_subfield` — is NOP-free at every depth, not
+///   just the top level: `crate::otxn::deserialize` canonicalizes
+///   recursively, not just at the top level.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NopMode {
+    /// No `NOP` byte handling — a `0x99` header fails like any other
+    /// unmodeled type. See this type's doc comment for which callers use
+    /// this.
+    Strict,
+    /// Skip `NOP` bytes in header position, budgeted per container
+    /// instance. See this type's doc comment for which callers use this.
+    Tolerant,
+}
+
+/// Skips a run of zero or more [`NOP`] bytes at `*pos` when `mode` is
+/// [`NopMode::Tolerant`] (a no-op under [`NopMode::Strict`]), incrementing
+/// `*nop_count` (the calling container's own counter) for each one and
+/// failing once that counter would exceed [`MAX_NOPS_PER_CONTAINER`].
+fn skip_nops(data: &[u8], pos: &mut usize, nop_count: &mut usize, mode: NopMode) -> Result<(), ()> {
+    if mode != NopMode::Tolerant {
+        return Ok(());
+    }
+    while data.get(*pos) == Some(&NOP) {
+        *pos = pos.checked_add(1).ok_or(())?;
+        *nop_count = nop_count.checked_add(1).ok_or(())?;
+        if *nop_count > MAX_NOPS_PER_CONTAINER {
+            return Err(());
+        }
+    }
+    Ok(())
 }
 
 /// One field found while walking an object (top-level or nested): its
@@ -226,7 +306,13 @@ fn fixed_len_for_type(ty: u32) -> Option<usize> {
 /// parsing the nested body — so the same bound applies unmodified here.
 const STO_MAX_RECURSION_DEPTH: u32 = 10;
 
-fn dispatch_value(data: &[u8], pos: &mut usize, ty: u32, depth: u32) -> Result<(), ()> {
+fn dispatch_value(
+    data: &[u8],
+    pos: &mut usize,
+    ty: u32,
+    depth: u32,
+    mode: NopMode,
+) -> Result<(), ()> {
     match ty {
         6 => skip_amount(data, pos),
         7 | 8 => skip_vl(data, pos),
@@ -234,13 +320,13 @@ fn dispatch_value(data: &[u8], pos: &mut usize, ty: u32, depth: u32) -> Result<(
             if depth.checked_add(1).ok_or(())? > STO_MAX_RECURSION_DEPTH {
                 return Err(());
             }
-            walk_fields(data, pos, depth.wrapping_add(1), true).map(|_| ())
+            walk_object_body(data, pos, depth.wrapping_add(1), mode).map(|_| ())
         }
         15 => {
             if depth.checked_add(1).ok_or(())? > STO_MAX_RECURSION_DEPTH {
                 return Err(());
             }
-            walk_array_body(data, pos, depth.wrapping_add(1))
+            walk_array_body(data, pos, depth.wrapping_add(1), mode)
         }
         other => {
             let len = fixed_len_for_type(other).ok_or(())?;
@@ -262,9 +348,12 @@ fn walk_fields(
     pos: &mut usize,
     depth: u32,
     in_object: bool,
+    mode: NopMode,
 ) -> Result<Vec<FieldSpan>, ()> {
     let mut fields = Vec::new();
+    let mut nop_count = 0usize;
     loop {
+        skip_nops(data, pos, &mut nop_count, mode)?;
         if in_object {
             match data.get(*pos) {
                 Some(&OBJECT_END_MARKER) => {
@@ -281,7 +370,7 @@ fn walk_fields(
         let (ty, field) = decode_header(data, pos)?;
         let value_start = *pos;
         let code = sfcode(ty, field);
-        dispatch_value(data, pos, ty, depth)?;
+        dispatch_value(data, pos, ty, depth, mode)?;
         fields.push(FieldSpan {
             code,
             range: (start, *pos),
@@ -289,6 +378,15 @@ fn walk_fields(
         });
     }
     Ok(fields)
+}
+
+pub(crate) fn walk_object_body(
+    data: &[u8],
+    pos: &mut usize,
+    depth: u32,
+    mode: NopMode,
+) -> Result<Vec<FieldSpan>, ()> {
+    walk_fields(data, pos, depth, true, mode)
 }
 
 /// The STI_OBJECT type code — every STArray element's field header must
@@ -306,8 +404,10 @@ const STI_ARRAY: u32 = 15;
 const STI_VL: u32 = 7;
 const STI_ACCOUNT: u32 = 8;
 
-fn walk_array_body(data: &[u8], pos: &mut usize, depth: u32) -> Result<(), ()> {
+fn walk_array_body(data: &[u8], pos: &mut usize, depth: u32, mode: NopMode) -> Result<(), ()> {
+    let mut nop_count = 0usize;
     loop {
+        skip_nops(data, pos, &mut nop_count, mode)?;
         match data.get(*pos) {
             Some(&ARRAY_END_MARKER) => {
                 *pos = pos.checked_add(1).ok_or(())?;
@@ -320,7 +420,7 @@ fn walk_array_body(data: &[u8], pos: &mut usize, depth: u32) -> Result<(), ()> {
         if ty != STI_OBJECT {
             return Err(());
         }
-        dispatch_value(data, pos, ty, depth)?;
+        dispatch_value(data, pos, ty, depth, mode)?;
     }
 }
 
@@ -335,10 +435,12 @@ fn walk_array_body(data: &[u8], pos: &mut usize, depth: u32) -> Result<(), ()> {
 /// over; any parse failure — including a buffer that doesn't end in
 /// [`ARRAY_END_MARKER`] — is `Err(())`, matching [`walk_top_level_fields`]'s
 /// full-consumption contract for the top-level case.
-pub(crate) fn walk_array_elements(data: &[u8]) -> Result<Vec<(usize, usize)>, ()> {
+pub(crate) fn walk_array_elements(data: &[u8], mode: NopMode) -> Result<Vec<(usize, usize)>, ()> {
     let mut pos = 0usize;
     let mut spans = Vec::new();
+    let mut nop_count = 0usize;
     loop {
+        skip_nops(data, &mut pos, &mut nop_count, mode)?;
         match data.get(pos) {
             Some(&ARRAY_END_MARKER) => {
                 pos = pos.checked_add(1).ok_or(())?;
@@ -356,7 +458,7 @@ pub(crate) fn walk_array_elements(data: &[u8]) -> Result<Vec<(usize, usize)>, ()
         if ty != STI_OBJECT {
             return Err(());
         }
-        dispatch_value(data, &mut pos, ty, 0)?;
+        dispatch_value(data, &mut pos, ty, 0, mode)?;
         spans.push((start, pos));
     }
 }
@@ -367,9 +469,8 @@ pub(crate) fn walk_array_elements(data: &[u8]) -> Result<Vec<(usize, usize)>, ()
 /// `Err(())`. `pub(crate)`-exported for `crate::host::slots`/
 /// `crate::host::sto`'s navigation (P2-D) in addition to this module's own
 /// [`validate_emit_blob`].
-pub(crate) fn walk_top_level_fields(data: &[u8]) -> Result<Vec<FieldSpan>, ()> {
-    let mut pos = 0usize;
-    walk_fields(data, &mut pos, 0, false)
+pub(crate) fn walk_top_level_fields(data: &[u8], mode: NopMode) -> Result<Vec<FieldSpan>, ()> {
+    walk_top_level(data, mode)
 }
 
 /// [`walk_top_level_fields`]'s parse (a fresh depth-`0` budget, `in_object`
@@ -384,9 +485,151 @@ pub(crate) fn walk_top_level_fields(data: &[u8]) -> Result<Vec<FieldSpan>, ()> {
 pub(crate) fn walk_top_level_fields_or_object(
     data: &[u8],
     in_object: bool,
+    mode: NopMode,
 ) -> Result<Vec<FieldSpan>, ()> {
+    if in_object {
+        let mut pos = 0usize;
+        walk_object_body(data, &mut pos, 0, mode)
+    } else {
+        walk_top_level_fields(data, mode)
+    }
+}
+
+fn walk_top_level(data: &[u8], mode: NopMode) -> Result<Vec<FieldSpan>, ()> {
     let mut pos = 0usize;
-    walk_fields(data, &mut pos, 0, in_object)
+    walk_fields(data, &mut pos, 0, false, mode)
+}
+
+/// Re-serializes `data` (a top-level field sequence, no wrapping header or
+/// terminator) with every header-position [`NOP`] removed at every nesting
+/// level — real xahaud's own effective behavior once a NOP-padded blob has
+/// been parsed through `STObject::set`/`STArray::STArray` and
+/// re-serialized (`emit`'s stored/ledger form, `HookAPI::prepare`'s
+/// returned bytes: see [`NopMode::Tolerant`]'s doc comment). Every real
+/// field's own bytes — header, value, and (for a nested `STI_OBJECT`(14)/
+/// `STI_ARRAY`(15) field) its own terminator — survive unchanged; only NOP
+/// bytes are dropped. Structurally equivalent to [`walk_top_level_fields`]
+/// under [`NopMode::Tolerant`] (same grammar, same per-container 63-NOP
+/// budget, same `Err(())` conditions — including a container's 64th NOP)
+/// except that it *emits* the canonical bytes instead of a [`FieldSpan`]
+/// list.
+pub(crate) fn canonicalize(data: &[u8]) -> Result<Vec<u8>, ()> {
+    let mut out = Vec::with_capacity(data.len());
+    let mut pos = 0usize;
+    canonicalize_fields(data, &mut pos, 0, false, &mut out)?;
+    Ok(out)
+}
+
+/// [`canonicalize`]'s field-sequence pass — mirrors [`walk_fields`] one to
+/// one (same loop shape, same NOP-skip/terminator/depth rules), copying
+/// each real field's header verbatim via [`canonicalize_value`] rather than
+/// recording a [`FieldSpan`].
+fn canonicalize_fields(
+    data: &[u8],
+    pos: &mut usize,
+    depth: u32,
+    in_object: bool,
+    out: &mut Vec<u8>,
+) -> Result<(), ()> {
+    let mut nop_count = 0usize;
+    loop {
+        skip_nops(data, pos, &mut nop_count, NopMode::Tolerant)?;
+        if in_object {
+            match data.get(*pos) {
+                Some(&OBJECT_END_MARKER) => {
+                    *pos = pos.checked_add(1).ok_or(())?;
+                    out.push(OBJECT_END_MARKER);
+                    break;
+                }
+                None => return Err(()),
+                _ => {}
+            }
+        } else if *pos >= data.len() {
+            break;
+        }
+        let start = *pos;
+        let (ty, _field) = decode_header(data, pos)?;
+        out.extend_from_slice(data.get(start..*pos).ok_or(())?);
+        canonicalize_value(data, pos, ty, depth, out)?;
+    }
+    Ok(())
+}
+
+/// [`canonicalize`]'s value pass — mirrors [`dispatch_value`] one to one:
+/// a scalar/amount/VL value's bytes are copied verbatim (they cannot
+/// themselves contain a header-position NOP), a nested `STI_OBJECT`(14)
+/// recurses into [`canonicalize_fields`], a nested `STI_ARRAY`(15)
+/// recurses into [`canonicalize_array_body`].
+fn canonicalize_value(
+    data: &[u8],
+    pos: &mut usize,
+    ty: u32,
+    depth: u32,
+    out: &mut Vec<u8>,
+) -> Result<(), ()> {
+    match ty {
+        6 => {
+            let start = *pos;
+            skip_amount(data, pos)?;
+            out.extend_from_slice(data.get(start..*pos).ok_or(())?);
+            Ok(())
+        }
+        7 | 8 => {
+            let start = *pos;
+            skip_vl(data, pos)?;
+            out.extend_from_slice(data.get(start..*pos).ok_or(())?);
+            Ok(())
+        }
+        14 => {
+            if depth.checked_add(1).ok_or(())? > STO_MAX_RECURSION_DEPTH {
+                return Err(());
+            }
+            canonicalize_fields(data, pos, depth.wrapping_add(1), true, out)
+        }
+        15 => {
+            if depth.checked_add(1).ok_or(())? > STO_MAX_RECURSION_DEPTH {
+                return Err(());
+            }
+            canonicalize_array_body(data, pos, depth.wrapping_add(1), out)
+        }
+        other => {
+            let len = fixed_len_for_type(other).ok_or(())?;
+            let start = *pos;
+            skip_fixed(data, pos, len)?;
+            out.extend_from_slice(data.get(start..*pos).ok_or(())?);
+            Ok(())
+        }
+    }
+}
+
+/// [`canonicalize`]'s array-body pass — mirrors [`walk_array_body`] one to
+/// one.
+fn canonicalize_array_body(
+    data: &[u8],
+    pos: &mut usize,
+    depth: u32,
+    out: &mut Vec<u8>,
+) -> Result<(), ()> {
+    let mut nop_count = 0usize;
+    loop {
+        skip_nops(data, pos, &mut nop_count, NopMode::Tolerant)?;
+        match data.get(*pos) {
+            Some(&ARRAY_END_MARKER) => {
+                *pos = pos.checked_add(1).ok_or(())?;
+                out.push(ARRAY_END_MARKER);
+                return Ok(());
+            }
+            None => return Err(()),
+            _ => {}
+        }
+        let start = *pos;
+        let (ty, _field) = decode_header(data, pos)?;
+        if ty != STI_OBJECT {
+            return Err(());
+        }
+        out.extend_from_slice(data.get(start..*pos).ok_or(())?);
+        canonicalize_value(data, pos, ty, depth, out)?;
+    }
 }
 
 fn field_bytes(data: &[u8], range: (usize, usize)) -> Option<&[u8]> {
@@ -453,15 +696,15 @@ fn reject_duplicate_fields(fields: &[FieldSpan], data: &[u8]) -> Result<(), ()> 
         if ty == STI_OBJECT {
             let body = data.get(f.value_range.0..f.value_range.1).ok_or(())?;
             let mut pos = 0usize;
-            let nested = walk_fields(body, &mut pos, 0, true)?;
+            let nested = walk_fields(body, &mut pos, 0, true, NopMode::Tolerant)?;
             reject_duplicate_fields(&nested, body)?;
         } else if ty == STI_ARRAY {
             let body = data.get(f.value_range.0..f.value_range.1).ok_or(())?;
-            for (start, end) in walk_array_elements(body)? {
+            for (start, end) in walk_array_elements(body, NopMode::Tolerant)? {
                 let element = body.get(start..end).ok_or(())?;
                 let mut pos = 0usize;
                 decode_header(element, &mut pos)?;
-                let nested = walk_fields(element, &mut pos, 0, true)?;
+                let nested = walk_fields(element, &mut pos, 0, true, NopMode::Tolerant)?;
                 reject_duplicate_fields(&nested, element)?;
             }
         }
@@ -504,7 +747,7 @@ pub(crate) fn validate_emit_blob(
     ledger_seq: u32,
     min_fee: u64,
 ) -> Result<(), ()> {
-    let fields = walk_top_level_fields(blob)?;
+    let fields = walk_top_level_fields(blob, NopMode::Tolerant)?;
 
     reject_duplicate_fields(&fields, blob)?;
 
@@ -648,7 +891,10 @@ fn is_pseudo_tx_type(tx_type: TxType) -> bool {
 /// `None` only if the blob is malformed in a way the walker should already
 /// have rejected (defensive).
 pub(crate) fn top_level_transaction_type(blob: &[u8]) -> Option<TxType> {
-    let fields = walk_top_level_fields(blob).ok()?;
+    // `blob` is always a stored `EmittedTxn::blob` — canonical (NOP-free)
+    // by construction, see `NopMode::Strict`'s doc comment — so `Strict` is
+    // both correct and a defensive assertion of that invariant.
+    let fields = walk_top_level(blob, NopMode::Strict).ok()?;
     let field = fields.iter().find(|f| f.code == SF_TRANSACTION_TYPE)?;
     let bytes = field_bytes(blob, field.value_range)?;
     let arr: [u8; 2] = bytes.try_into().ok()?;
@@ -784,7 +1030,7 @@ mod tests {
     /// need to flip a field sitting past `minimal_payment`'s fixed early
     /// offsets, without hand-computing byte positions.
     fn set_field_value(blob: &mut [u8], code: u64, value: &[u8]) {
-        let fields = walk_top_level_fields(blob).unwrap();
+        let fields = walk_top_level_fields(blob, NopMode::Tolerant).unwrap();
         let field = fields.iter().find(|f| f.code == code).unwrap();
         let (start, end) = field_value_payload(blob, field).unwrap();
         assert_eq!(end.checked_sub(start).unwrap(), value.len());
@@ -1139,7 +1385,7 @@ mod tests {
         // `sto_subfield`) is more permissive than `validate_emit_blob`'s
         // own grammar — see this module's doc comment.
         let data: &[u8] = &[0x24, 0, 0, 0, 1, 0x24, 0, 0, 0, 2];
-        let fields = walk_top_level_fields(data).unwrap();
+        let fields = walk_top_level_fields(data, NopMode::Strict).unwrap();
         assert_eq!(fields.len(), 2);
         assert_eq!(fields[0].code, fields[1].code);
     }
@@ -1202,8 +1448,8 @@ mod tests {
         // `walk_top_level_fields` (the shared parser `sto_validate`/
         // `sto_subfield`/`slot_subfield` all call directly) uses the exact
         // same bound as [`validate_emit_blob`]'s tests above.
-        assert!(walk_top_level_fields(&nested_object_chain(10)).is_ok());
-        assert!(walk_top_level_fields(&[0xE2u8; 11]).is_err());
+        assert!(walk_top_level_fields(&nested_object_chain(10), NopMode::Strict).is_ok());
+        assert!(walk_top_level_fields(&[0xE2u8; 11], NopMode::Strict).is_err());
     }
 
     #[test]
@@ -1249,26 +1495,26 @@ mod tests {
             OBJECT_END_MARKER,
             ARRAY_END_MARKER,
         ];
-        let spans = walk_array_elements(data).unwrap();
+        let spans = walk_array_elements(data, NopMode::Strict).unwrap();
         assert_eq!(spans, vec![(0, 2), (2, 4)]);
     }
 
     #[test]
     fn walk_array_elements_rejects_a_non_object_element() {
         let data: &[u8] = &[0x21, 0, 0, 0, 1, ARRAY_END_MARKER]; // UInt32, not STObject
-        assert!(walk_array_elements(data).is_err());
+        assert!(walk_array_elements(data, NopMode::Strict).is_err());
     }
 
     #[test]
     fn walk_array_elements_rejects_trailing_bytes_after_the_terminator() {
         let data: &[u8] = &[0xE2, OBJECT_END_MARKER, ARRAY_END_MARKER, 0xFF];
-        assert!(walk_array_elements(data).is_err());
+        assert!(walk_array_elements(data, NopMode::Strict).is_err());
     }
 
     #[test]
     fn walk_array_elements_rejects_a_missing_terminator() {
         let data: &[u8] = &[0xE2, OBJECT_END_MARKER];
-        assert!(walk_array_elements(data).is_err());
+        assert!(walk_array_elements(data, NopMode::Strict).is_err());
     }
 
     #[test]
@@ -1276,7 +1522,7 @@ mod tests {
         // sfAccount (type 8, field 1) = 0x81, VL-prefixed 20-byte payload.
         let mut data = vec![0x81, 20];
         data.extend_from_slice(&[7u8; 20]);
-        let fields = walk_top_level_fields(&data).unwrap();
+        let fields = walk_top_level_fields(&data, NopMode::Strict).unwrap();
         assert_eq!(fields.len(), 1);
         let (start, end) = field_value_payload(&data, &fields[0]).unwrap();
         assert_eq!((start, end), (2, 22));
@@ -1287,14 +1533,14 @@ mod tests {
     fn field_value_payload_leaves_amount_and_object_fields_untouched() {
         // sfFee (type 6, field 8) = 0x68, native amount, 8 raw bytes, no VL.
         let data: &[u8] = &[0x68, 0x40, 0, 0, 0, 0, 0, 0, 5];
-        let fields = walk_top_level_fields(data).unwrap();
+        let fields = walk_top_level_fields(data, NopMode::Strict).unwrap();
         let (start, end) = field_value_payload(data, &fields[0]).unwrap();
         assert_eq!((start, end), (1, 9));
 
         // A nested object field: (type 14, field 2) = 0xE2, empty body,
         // 0xE1 terminator — the terminator stays part of the "value".
         let obj: &[u8] = &[0xE2, OBJECT_END_MARKER];
-        let of = walk_top_level_fields(obj).unwrap();
+        let of = walk_top_level_fields(obj, NopMode::Strict).unwrap();
         let (ostart, oend) = field_value_payload(obj, &of[0]).unwrap();
         assert_eq!((ostart, oend), (1, 2));
     }
@@ -1303,13 +1549,255 @@ mod tests {
     fn walk_top_level_fields_or_object_dispatches_on_in_object() {
         let root: &[u8] = &[0x68, 0x40, 0, 0, 0, 0, 0, 0, 5]; // sfFee, no wrapping
         assert_eq!(
-            walk_top_level_fields_or_object(root, false).unwrap().len(),
+            walk_top_level_fields_or_object(root, false, NopMode::Strict)
+                .unwrap()
+                .len(),
             1
         );
         let nested: &[u8] = &[0x24, 0, 0, 0, 1, OBJECT_END_MARKER]; // sfSequence then 0xE1
         assert_eq!(
-            walk_top_level_fields_or_object(nested, true).unwrap().len(),
+            walk_top_level_fields_or_object(nested, true, NopMode::Strict)
+                .unwrap()
+                .len(),
             1
         );
+    }
+
+    // -- NOP handling ([`NopMode`]) --
+
+    #[test]
+    fn strict_mode_still_rejects_a_nop_header() {
+        // A lone NOP byte decodes as an ordinary (9, 9) header under
+        // `NopMode::Strict`; `STI_NUMBER`(9) has no defined length, so the
+        // walk fails — matching `host::sto::sto_validate`'s real-host
+        // parity (see that module's own NOP test).
+        assert!(walk_top_level_fields(&[NOP], NopMode::Strict).is_err());
+        let mut padded = sf_sequence_bytes(1);
+        padded.push(NOP);
+        padded.extend_from_slice(&sf_flags_bytes(2));
+        assert!(walk_top_level_fields(&padded, NopMode::Strict).is_err());
+    }
+
+    /// `sfSequence(2,4) = v`.
+    fn sf_sequence_bytes(v: u32) -> Vec<u8> {
+        let mut out = vec![0x24];
+        out.extend_from_slice(&v.to_be_bytes());
+        out
+    }
+
+    /// `sfFlags(2,2) = v`.
+    fn sf_flags_bytes(v: u32) -> Vec<u8> {
+        let mut out = vec![0x22];
+        out.extend_from_slice(&v.to_be_bytes());
+        out
+    }
+
+    #[test]
+    fn tolerant_mode_skips_nops_between_top_level_fields_yielding_the_same_fields() {
+        let plain = {
+            let mut out = sf_flags_bytes(1);
+            out.extend_from_slice(&sf_sequence_bytes(7));
+            out
+        };
+        let padded = {
+            let mut out = vec![NOP, NOP];
+            out.extend_from_slice(&sf_flags_bytes(1));
+            out.push(NOP);
+            out.extend_from_slice(&sf_sequence_bytes(7));
+            out.push(NOP);
+            out
+        };
+
+        let plain_fields = walk_top_level_fields(&plain, NopMode::Tolerant).unwrap();
+        let padded_fields = walk_top_level_fields(&padded, NopMode::Tolerant).unwrap();
+        assert_eq!(plain_fields.len(), padded_fields.len());
+        for (p, q) in plain_fields.iter().zip(padded_fields.iter()) {
+            assert_eq!(p.code, q.code);
+            let (ps, pe) = field_value_payload(&plain, p).unwrap();
+            let (qs, qe) = field_value_payload(&padded, q).unwrap();
+            assert_eq!(plain.get(ps..pe), padded.get(qs..qe));
+        }
+
+        // Strict mode rejects the same padded bytes.
+        assert!(walk_top_level_fields(&padded, NopMode::Strict).is_err());
+    }
+
+    #[test]
+    fn tolerant_mode_skips_nops_between_array_elements_and_inside_an_element_object() {
+        // One array field (type 15, field 15) with two STObject elements:
+        // the first has one scalar field followed by a NOP before its own
+        // `0xE1` (object-level NOP), the two elements are separated by a
+        // NOP (array-level NOP).
+        let data: &[u8] = &[
+            0xFF, // array field header
+            0xE2, // element 0 header (STObject)
+            0x24,
+            0,
+            0,
+            0,
+            7,   // sfSequence = 7
+            NOP, // NOP inside element 0's own body
+            OBJECT_END_MARKER,
+            NOP,  // NOP between array elements
+            0xE3, // element 1 header (STObject), empty body
+            OBJECT_END_MARKER,
+            ARRAY_END_MARKER,
+        ];
+        let fields = walk_top_level_fields(data, NopMode::Tolerant).unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].code, sfcode(15, 15));
+
+        // The same bytes fail under `NopMode::Strict`.
+        assert!(walk_top_level_fields(data, NopMode::Strict).is_err());
+    }
+
+    #[test]
+    fn tolerant_mode_allows_63_nops_in_one_container_and_rejects_the_64th() {
+        let mut ok = vec![NOP; MAX_NOPS_PER_CONTAINER];
+        ok.extend_from_slice(&sf_sequence_bytes(9));
+        assert!(walk_top_level_fields(&ok, NopMode::Tolerant).is_ok());
+
+        let mut too_many = vec![NOP; MAX_NOPS_PER_CONTAINER + 1];
+        too_many.extend_from_slice(&sf_sequence_bytes(9));
+        assert!(walk_top_level_fields(&too_many, NopMode::Tolerant).is_err());
+    }
+
+    #[test]
+    fn tolerant_mode_nop_budget_is_cumulative_not_reset_by_real_fields() {
+        // 20 + 22 + 21 NOPs, split across three runs by two real fields in
+        // between: the counter must accumulate across all three runs
+        // (`20 + 22 + 21 == 63`, exactly at budget) rather than resetting
+        // at each intervening field.
+        let mut ok = vec![NOP; 20];
+        ok.extend_from_slice(&sf_flags_bytes(1));
+        ok.extend_from_slice(&[NOP; 22]);
+        ok.extend_from_slice(&sf_sequence_bytes(7));
+        ok.extend_from_slice(&[NOP; 21]);
+        let fields = walk_top_level_fields(&ok, NopMode::Tolerant).unwrap();
+        assert_eq!(fields.len(), 2);
+
+        // One more NOP anywhere in the same layout (64 total) must fail,
+        // even though no single run exceeds the earlier 63-in-a-row case.
+        let mut too_many = vec![NOP; 20];
+        too_many.extend_from_slice(&sf_flags_bytes(1));
+        too_many.extend_from_slice(&[NOP; 22]);
+        too_many.extend_from_slice(&sf_sequence_bytes(7));
+        too_many.extend_from_slice(&[NOP; 22]);
+        assert!(walk_top_level_fields(&too_many, NopMode::Tolerant).is_err());
+    }
+
+    #[test]
+    fn tolerant_mode_containers_have_independent_nop_budgets() {
+        // 63 NOPs at the top level, plus another 63 inside a nested
+        // object — each container's own counter stays within budget, so
+        // this succeeds even though the combined NOP count (126) would
+        // overflow a single shared counter.
+        let mut data = vec![NOP; MAX_NOPS_PER_CONTAINER];
+        data.push(0xE2); // nested object field header (STObject)
+        data.extend_from_slice(&[NOP; MAX_NOPS_PER_CONTAINER]);
+        data.push(OBJECT_END_MARKER);
+
+        let fields = walk_top_level_fields(&data, NopMode::Tolerant).unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].code, sfcode(14, 2));
+    }
+
+    // -- canonicalize --
+
+    #[test]
+    fn canonicalize_strips_top_level_nops_leaving_the_plain_fields_bytes() {
+        let plain = {
+            let mut out = sf_flags_bytes(1);
+            out.extend_from_slice(&sf_sequence_bytes(7));
+            out
+        };
+        let padded = {
+            let mut out = vec![NOP, NOP];
+            out.extend_from_slice(&sf_flags_bytes(1));
+            out.push(NOP);
+            out.extend_from_slice(&sf_sequence_bytes(7));
+            out.push(NOP);
+            out
+        };
+        assert_eq!(canonicalize(&padded).unwrap(), plain);
+        // Already-canonical bytes canonicalize to themselves.
+        assert_eq!(canonicalize(&plain).unwrap(), plain);
+    }
+
+    #[test]
+    fn canonicalize_leaves_a_0x99_byte_inside_a_vl_payload_untouched() {
+        // `0x99` only means NOP in a field-*header* position; `skip_vl`
+        // consumes a VL field's payload as opaque bytes (the length
+        // prefix already says how many), so a `0x99` inside one is
+        // ordinary data, not a NOP -- it must survive canonicalization
+        // exactly where it was written, not be stripped or miscounted.
+        let mut data = vec![0x73]; // sfSigningPubKey (7,3): both < 16, one-byte header
+        data.push(3); // one-byte VL length prefix
+        data.extend_from_slice(&[0x99, 0x01, 0x99]); // payload, two 0x99 bytes
+        assert_eq!(canonicalize(&data).unwrap(), data);
+    }
+
+    #[test]
+    fn canonicalize_strips_nops_between_array_elements_and_inside_an_element_object() {
+        // Same shape as
+        // `tolerant_mode_skips_nops_between_array_elements_and_inside_an_element_object`:
+        // one array field with two STObject elements, a NOP inside the
+        // first element's own body (object-level) and a NOP between the
+        // two elements (array-level) — both must disappear, independently,
+        // leaving exactly the NOP-free equivalent bytes (hand-pinned).
+        let padded: &[u8] = &[
+            0xFF, // array field header
+            0xE2, // element 0 header (STObject)
+            0x24,
+            0,
+            0,
+            0,
+            7,   // sfSequence = 7
+            NOP, // NOP inside element 0's own body
+            OBJECT_END_MARKER,
+            NOP,  // NOP between array elements
+            0xE3, // element 1 header (STObject), empty body
+            OBJECT_END_MARKER,
+            ARRAY_END_MARKER,
+        ];
+        let expected: &[u8] = &[
+            0xFF, // array field header
+            0xE2, // element 0 header (STObject)
+            0x24,
+            0,
+            0,
+            0,
+            7, // sfSequence = 7
+            OBJECT_END_MARKER,
+            0xE3, // element 1 header (STObject), empty body
+            OBJECT_END_MARKER,
+            ARRAY_END_MARKER,
+        ];
+        assert_eq!(canonicalize(padded).unwrap(), expected);
+    }
+
+    #[test]
+    fn canonicalize_allows_63_nops_in_one_container_and_rejects_the_64th() {
+        let mut ok = vec![NOP; MAX_NOPS_PER_CONTAINER];
+        ok.extend_from_slice(&sf_sequence_bytes(9));
+        assert_eq!(canonicalize(&ok).unwrap(), sf_sequence_bytes(9));
+
+        let mut too_many = vec![NOP; MAX_NOPS_PER_CONTAINER + 1];
+        too_many.extend_from_slice(&sf_sequence_bytes(9));
+        assert!(canonicalize(&too_many).is_err());
+    }
+
+    #[test]
+    fn canonicalize_containers_have_independent_nop_budgets() {
+        // Same shape as `tolerant_mode_containers_have_independent_nop_budgets`:
+        // 63 NOPs at the top level plus another 63 inside a nested object —
+        // both disappear, and the container's own containment (the nested
+        // object's `0xE1`) is preserved.
+        let mut data = vec![NOP; MAX_NOPS_PER_CONTAINER];
+        data.push(0xE2); // nested object field header (STObject)
+        data.extend_from_slice(&[NOP; MAX_NOPS_PER_CONTAINER]);
+        data.push(OBJECT_END_MARKER);
+
+        assert_eq!(canonicalize(&data).unwrap(), [0xE2, OBJECT_END_MARKER]);
     }
 }

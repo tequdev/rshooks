@@ -1,0 +1,25 @@
+error[E0080]: evaluation panicked: txn_template!: `sequence` is declared as `optional u32_field`, but it is one of the six emit-plumbing fields (Sequence/FirstLedgerSequence/LastLedgerSequence/Fee/SigningPubKey/Account), which prepare_for_emit requires to be present with a fixed, immediately-readable value -- it can never be optional, `vl`, or `any_amount`
+  --> tests/ui/fail/txn_template_optional_plumbing_field.rs:8:1
+   |
+8  | / txn_template! {
+9  | |     struct Remit {
+10 | |         transaction_type = ttREMIT,
+11 | |         sequence: optional u32_field(sfSequence),
+...  |
+19 | | }
+   | |_^ evaluation of `_` failed here
+   |
+   = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `txn_template` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0080]: evaluation panicked: txn_template!: `sfSequence` must be declared as `u32_field(sfSequence)` — prepare_for_emit would corrupt the template with any other kind
+  --> tests/ui/fail/txn_template_optional_plumbing_field.rs:8:1
+   |
+8  | / txn_template! {
+9  | |     struct Remit {
+10 | |         transaction_type = ttREMIT,
+11 | |         sequence: optional u32_field(sfSequence),
+...  |
+19 | | }
+   | |_^ evaluation of `_` failed here
+   |
+   = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `txn_template` (in Nightly builds, run with -Z macro-backtrace for more info)
