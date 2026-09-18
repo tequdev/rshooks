@@ -239,29 +239,31 @@ pub use rshooks_macros::XFL;
 /// counterpart, [`ParamName`] for the analogous Hook API parameter-*name*
 /// role, and [`ParamValue`] for the analogous parameter-*value* role.
 ///
-/// # Why a separate derive from [`HookData`]
+/// # Choosing among the derives
 ///
-/// A key and a value share the same "fixed-offset, named-field struct"
-/// shape but play different roles:
+/// [`HookKey`], [`HookData`], [`ParamName`], and [`ParamValue`] all derive
+/// from the same "fixed-offset, named-field struct" shape, differing only in
+/// which impls they generate, which direction data flows, and whether their
+/// encoded length is bounded:
 ///
-/// - A key is only ever **encoded outward** — handed to `state`/
-///   `state_foreign` to *locate* an entry — never read back and decoded as
-///   itself. `HookKey` reflects that by generating only
-///   [`convert::ToBytes`] plus [`state::StateKeyEncode`]: no `FromBytes`,
-///   no `FixedRead`, no inherent `LEN` const.
-/// - A key's real encoded length must fit within the Hook API's 32-byte key
-///   space (a value has no size cap, beyond this crate's own
-///   `MAX_TYPED_STATE_LEN` convenience limit — see [`state`]'s module doc).
-///   `HookKey` checks that bound **at derive time**: a struct that encodes
-///   to 33+ bytes fails to compile at its own definition. The encoded key
-///   sent to the host is **not** locally zero-padded — it is exactly the
-///   struct's own length, e.g. 2 bytes for `{ tag: u8, small: u8 }`; the
-///   host itself left-pads a key shorter than 32 bytes (see [`state`]'s
-///   module doc, "Key length and padding").
-/// - Only a `#[derive(HookKey)]` struct, a [`state_keys!`](crate::state_keys)
-///   enum, or [`types::StateKey`] itself implements
-///   [`state::StateKeyEncode`] — an ordinary `#[derive(HookData)]` value
-///   struct does not automatically qualify as a key.
+/// | derive | generates | direction | size bound |
+/// |---|---|---|---|
+/// | `HookKey` | [`convert::ToBytes`] + [`state::StateKeyEncode`] | write-only (locates a state entry) | ≤ 32 bytes, checked at derive time |
+/// | `HookData` | [`convert::ToBytes`] + [`convert::FromBytes`] + [`convert::FixedRead`] + `LEN` | read-write | uncapped (see [`state`]'s `MAX_TYPED_STATE_LEN` doc) |
+/// | `ParamName` | [`convert::ToBytes`] only | write-only (locates a parameter) | 1..=32 bytes, checked at derive time |
+/// | `ParamValue` | [`convert::FromBytes`] + [`convert::FixedRead`] (no `LEN`) | read-only | uncapped |
+///
+/// A `HookKey`'s real encoded length is **not** locally zero-padded — it is
+/// exactly the struct's own length, e.g. 2 bytes for `{ tag: u8, small: u8
+/// }`; the host itself left-pads a key shorter than 32 bytes (see
+/// [`state`]'s module doc, "Key length and padding"). Only a
+/// `#[derive(HookKey)]` struct, a [`state_keys!`](crate::state_keys) enum, or
+/// [`types::StateKey`] itself implements [`state::StateKeyEncode`] — an
+/// ordinary `#[derive(HookData)]` value struct does not automatically
+/// qualify as a key. `HookKey` pairs with a value type via
+/// [`state::TypedStateKey`]; `ParamName` pairs with a value type via
+/// [`convert::TypedParamName`] the same way (see [`state::TypedStateKey`]'s
+/// doc comment for that pairing's own comparison table).
 ///
 /// # Grammar
 ///
@@ -626,26 +628,12 @@ pub use rshooks_macros::HookData;
 /// like [`state::TypedStateKey`] pairs a [`HookKey`] type with its value
 /// type.
 ///
-/// # Relationship to [`HookData`]
-///
-/// A hook-state value and a Hook API parameter *name* share the same
-/// "fixed-offset struct" shape but are different concepts — `ParamName` is
-/// deliberately narrower than `HookData`, not an alias for it:
-///
-/// - A parameter name is only ever **written** (handed to
-///   `hook_param`/`otxn_param` to locate a value) — never read back and
-///   decoded as itself. `ParamName` reflects that by generating only
-///   [`convert::ToBytes`]: no [`convert::FromBytes`], no
-///   [`convert::FixedRead`], no inherent `LEN` const.
-/// - A parameter name has its own length bound the Hook API enforces —
-///   [`convert::PARAM_NAME_MAX_LEN`], **1 to 32 bytes** (`hook_api.h`:
-///   `TOO_SMALL` below 1, `TOO_BIG` above 32) — the same upper bound a hook
-///   state key's real encoded length is checked against (see [`HookKey`]),
-///   while a state *value* has no size cap at all. `ParamName` checks this
-///   **at derive time**: a struct that encodes to 0 or to 33+ bytes fails
-///   to compile at its own definition (contrast [`HookKey`]'s check, which
-///   only has an upper bound — a key may be shorter than 32 bytes, but a
-///   parameter name may not be shorter than 1 byte).
+/// See [the derive comparison table](HookKey#choosing-among-the-derives) for
+/// how `ParamName` compares to [`HookData`]/[`HookKey`]/[`ParamValue`]. Its size
+/// bound is [`convert::PARAM_NAME_MAX_LEN`] — **1 to 32 bytes**
+/// (`hook_api.h`: `TOO_SMALL` below 1, `TOO_BIG` above 32), checked at
+/// derive time: a struct that encodes to 0 or to 33+ bytes fails to compile
+/// at its own definition.
 ///
 /// # Grammar
 ///
@@ -740,18 +728,15 @@ pub use rshooks_macros::ParamName;
 /// [`api::otxn::otxn_param_exact`]). See [`HookData`] for the hook-state
 /// *value* role, and [`ParamName`] for the parameter *name* counterpart.
 ///
-/// # Why this derive generates no [`convert::ToBytes`]
-///
-/// A parameter value is only ever **read back and decoded** — this hook
-/// never writes its *own* parameters (`hook_param_set` writes a *different*
-/// hook's parameter, taking a raw `&[u8]`, not a typed value). `ParamValue`
-/// reflects that by generating only [`convert::FromBytes`]/
-/// [`convert::FixedRead`]: no [`convert::ToBytes`], no inherent `LEN` const.
-/// A consequence: a `#[derive(ParamValue)]` struct cannot be used as a
-/// [`HookKey`]/[`ParamName`] field, nor as a hook-state value with
-/// [`state::state_set_loose`] — both need `ToBytes`, which this derive
-/// deliberately does not provide (use [`HookData`] for a struct that needs
-/// to go both directions).
+/// See [the derive comparison table](HookKey#choosing-among-the-derives) for
+/// how `ParamValue` compares to [`HookData`]/[`HookKey`]/[`ParamName`]: this
+/// hook never writes its *own* parameters (`hook_param_set` writes a
+/// *different* hook's parameter, taking a raw `&[u8]`, not a typed value),
+/// so `ParamValue` generates no [`convert::ToBytes`] and no inherent `LEN`
+/// const — a consequence is that a `#[derive(ParamValue)]` struct cannot be
+/// used as a [`HookKey`]/[`ParamName`] field, nor as a hook-state value with
+/// [`state::state_set_loose`] (use [`HookData`] for a struct that needs to
+/// go both directions).
 ///
 /// # Grammar
 ///
@@ -851,6 +836,12 @@ pub use rshooks_macros::ParamValue;
 #[doc(hidden)]
 pub use rshooks_macros::paste as __paste;
 
+// `txn_template!`'s named-array elements are numbered by position through
+// `$crate::__txn_template_index_elements!`; re-export it (hidden) at the
+// crate root for the same reason as `__paste!` above.
+#[doc(hidden)]
+pub use rshooks_macros::txn_template_index_elements as __txn_template_index_elements;
+
 /// Common imports for hook developers: `use rshooks::prelude::*;` pulls in
 /// the `api::*` wrapper functions, the typed slot layer
 /// ([`slot_obj::SlotObject`] and the generated [`sfield`] constants), the
@@ -901,7 +892,7 @@ pub mod prelude {
     pub use crate::buf_eq::*;
     pub use crate::convert::{FixedRead, FromBytes, ToBytes, TypedParamName};
     pub use crate::decl::{HookParam, OtxnParam, State};
-    pub use crate::error::{HookError, Result};
+    pub use crate::error::{HookError, HookErrorKind, Result};
     pub use crate::exit::{Accept, HookResult, Rollback};
     pub use crate::ledger_entry_type::LedgerEntryType;
     pub use crate::macros::no_unroll;

@@ -1,6 +1,6 @@
 # Multi-Hook Struct API Design Document (v0.2.0)
 
-Status: design draft (no implementation yet — design only)
+Status: current specification for the shipped `#[hooks]` chain declaration model
 
 Target: rshooks v0.2.0 (breaking changes permitted)
 
@@ -545,21 +545,15 @@ absence from bad data**:
 
 ### 5.7 Entry function signatures
 
-Entries inside the impl are **associated functions that take no `self`**,
-with the same signature as today, `fn() -> i64` (likewise for `cbak`).
-Writing `self` by mistake produces a dedicated "Hook entrypoints are
-stateless associated functions" diagnostic (§4.4).
-
-> **r5 revision**: the paragraph above reflects the original (r4) text. r5
-> revised this so that a `&self` receiver (`fn(&self) -> i64`) is also
-> accepted — see [HOOKS_SELF_RECEIVER_DESIGN.md](./HOOKS_SELF_RECEIVER_DESIGN.md)
-> for the details, semantics, and diagnostic wording.
->
-> **r6 revision**: `&self` is now REQUIRED on every entry (and every
-> `#[cbak]`); the no-receiver form is an error. This is a breaking change
-> that was folded into this feature branch before its merge into v0.2.0 —
-> see [HOOKS_SELF_RECEIVER_DESIGN.md](./HOOKS_SELF_RECEIVER_DESIGN.md) §1,
-> §3.1, §6.4, §7, and §8 for the final decision and its rationale.
+Entries inside the impl require a `&self` receiver: `fn(&self) -> i64`
+(likewise for `cbak`). No receiver, `self`/`mut self`/`&'a self`/type-ascribed
+`self: T`, and `&mut self` are all rejected — chain handles are zero-sized
+and immutable; ledger state is accessed through the handle, not by mutating
+the struct. Helpers (unattributed associated functions in the same impl)
+accept either no receiver or `&self`; the rejected forms above are errors
+there too. See
+[HOOKS_SELF_RECEIVER_DESIGN.md](./HOOKS_SELF_RECEIVER_DESIGN.md) for the
+receiver-classification table and diagnostic wording.
 
 ## 6. Implementation-level technical considerations
 

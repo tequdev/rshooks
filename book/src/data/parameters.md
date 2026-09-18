@@ -248,9 +248,9 @@ to compile before it's ever used.
 Because `AdminName` is composite rather than a fixed byte string, its
 name-encoding has to actually run at runtime — laying `section` and
 `field` out into a small buffer sized exactly to `AdminName::MAX_LEN`.
-`examples/12_typed-data`'s README measures this directly: +29 worst-case
-instructions over the same hook without the composite name, versus the
-near-zero cost of the plain `CFG` tag used elsewhere in that same hook.
+Measured on `examples/12_typed-data`: +29 worst-case instructions over the
+same hook without the composite name, versus the near-zero cost of the
+plain `CFG` tag used elsewhere in that same hook.
 
 ## Signature parameters (fn arguments)
 

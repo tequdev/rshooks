@@ -165,6 +165,17 @@ fn require_unused(arg: &KeyletArg<'_>) -> Result<(), i64> {
     }
 }
 
+/// Every arg from `n` (inclusive) through the trailing `f` slot must be
+/// [`require_unused`] — most keylet types only consume a leading prefix of
+/// the six `a..f` args and reject anything past it.
+#[allow(clippy::indexing_slicing)] // every call site passes a fixed `n <= 6` literal against the fixed 6-element `args` array
+fn unused_from(args: &[KeyletArg<'_>; 6], n: usize) -> Result<(), i64> {
+    for a in &args[n..6] {
+        require_unused(a)?;
+    }
+    Ok(())
+}
+
 /// The `UInt32or256` shape `OFFER`/`CHECK`/`ESCROW`/`NFT_OFFER`/`PAYCHAN`
 /// take for their sequence component: a bare `u32` (hashed as 4 big-endian
 /// bytes) or a 32-byte hash (hashed verbatim). Every typed wrapper in
@@ -192,9 +203,7 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
         // `keylet_hook`: [Bytes(account:20), Unused x5].
         KEYLET_HOOK => {
             let account = bytes_exact(&args[0], 20)?;
-            for a in &args[1..6] {
-                require_unused(a)?;
-            }
+            unused_from(&args, 1)?;
             Ok(keylet(lt::HOOK, index_hash(space::HOOK, &[account])))
         }
 
@@ -203,9 +212,7 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
             let account = bytes_exact(&args[0], 20)?;
             let key = bytes_exact(&args[1], 32)?;
             let ns = bytes_exact(&args[2], 32)?;
-            for a in &args[3..6] {
-                require_unused(a)?;
-            }
+            unused_from(&args, 3)?;
             Ok(keylet(
                 lt::HOOK_STATE,
                 index_hash(space::HOOK_STATE, &[account, key, ns]),
@@ -215,9 +222,7 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
         // `keylet_account`: [Bytes(account:20), Unused x5].
         KEYLET_ACCOUNT => {
             let account = bytes_exact(&args[0], 20)?;
-            for a in &args[1..6] {
-                require_unused(a)?;
-            }
+            unused_from(&args, 1)?;
             Ok(keylet(
                 lt::ACCOUNT_ROOT,
                 index_hash(space::ACCOUNT, &[account]),
@@ -226,9 +231,7 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
 
         // `keylet_amendments`: [Unused x6].
         KEYLET_AMENDMENTS => {
-            for a in &args {
-                require_unused(a)?;
-            }
+            unused_from(&args, 0)?;
             Ok(keylet(lt::AMENDMENTS, index_hash(space::AMENDMENTS, &[])))
         }
 
@@ -236,9 +239,7 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
         // verbatim, *not* hashed (`keylet::child`).
         KEYLET_CHILD => {
             let hash = bytes_exact(&args[0], 32)?;
-            for a in &args[1..6] {
-                require_unused(a)?;
-            }
+            unused_from(&args, 1)?;
             let mut key = [0u8; 32];
             key.copy_from_slice(hash);
             Ok(keylet(lt::CHILD, key))
@@ -249,9 +250,7 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
         KEYLET_SKIP => {
             let ledger = require_value(&args[0])?;
             let flag = require_value(&args[1])?;
-            for a in &args[2..6] {
-                require_unused(a)?;
-            }
+            unused_from(&args, 2)?;
             let key = match flag {
                 0 => index_hash(space::SKIP_LIST, &[]),
                 1 => {
@@ -265,9 +264,7 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
 
         // `keylet_fees`: [Unused x6].
         KEYLET_FEES => {
-            for a in &args {
-                require_unused(a)?;
-            }
+            unused_from(&args, 0)?;
             Ok(keylet(
                 lt::FEE_SETTINGS,
                 index_hash(space::FEE_SETTINGS, &[]),
@@ -276,9 +273,7 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
 
         // `keylet_negative_unl`: [Unused x6].
         KEYLET_NEGATIVE_UNL => {
-            for a in &args {
-                require_unused(a)?;
-            }
+            unused_from(&args, 0)?;
             Ok(keylet(
                 lt::NEGATIVE_UNL,
                 index_hash(space::NEGATIVE_UNL, &[]),
@@ -292,9 +287,7 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
             let a = bytes_exact(&args[0], 20)?;
             let b = bytes_exact(&args[1], 20)?;
             let currency = bytes_exact(&args[2], 20)?;
-            for a in &args[3..6] {
-                require_unused(a)?;
-            }
+            unused_from(&args, 3)?;
             let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
             Ok(keylet(
                 lt::RIPPLE_STATE,
@@ -306,9 +299,7 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
         KEYLET_OFFER => {
             let account = bytes_exact(&args[0], 20)?;
             let seq = seq_or_hash_bytes(&args[1])?;
-            for a in &args[2..6] {
-                require_unused(a)?;
-            }
+            unused_from(&args, 2)?;
             Ok(keylet(
                 lt::OFFER,
                 index_hash(space::OFFER, &[account, &seq]),
@@ -324,9 +315,7 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
             let dir = bytes_exact(&args[0], 34)?;
             let high = require_value(&args[1])?;
             let low = require_value(&args[2])?;
-            for a in &args[3..6] {
-                require_unused(a)?;
-            }
+            unused_from(&args, 3)?;
             if dir[0] != 0x00 || dir[1] != 0x64 {
                 return Err(INVALID_ARGUMENT);
             }
@@ -339,9 +328,7 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
 
         // `keylet_emitted_dir`: [Unused x6].
         KEYLET_EMITTED_DIR => {
-            for a in &args {
-                require_unused(a)?;
-            }
+            unused_from(&args, 0)?;
             Ok(keylet(lt::DIR_NODE, index_hash(space::EMITTED_DIR, &[])))
         }
 
@@ -355,9 +342,7 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
         // `signers(account, page)`).
         KEYLET_SIGNERS => {
             let account = bytes_exact(&args[0], 20)?;
-            for a in &args[1..6] {
-                require_unused(a)?;
-            }
+            unused_from(&args, 1)?;
             Ok(keylet(
                 lt::SIGNER_LIST,
                 index_hash(space::SIGNER_LIST, &[account, &0u32.to_be_bytes()]),
@@ -368,9 +353,7 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
         KEYLET_CHECK => {
             let account = bytes_exact(&args[0], 20)?;
             let seq = seq_or_hash_bytes(&args[1])?;
-            for a in &args[2..6] {
-                require_unused(a)?;
-            }
+            unused_from(&args, 2)?;
             Ok(keylet(
                 lt::CHECK,
                 index_hash(space::CHECK, &[account, &seq]),
@@ -381,9 +364,7 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
         KEYLET_DEPOSIT_PREAUTH => {
             let owner = bytes_exact(&args[0], 20)?;
             let authorized = bytes_exact(&args[1], 20)?;
-            for a in &args[2..6] {
-                require_unused(a)?;
-            }
+            unused_from(&args, 2)?;
             Ok(keylet(
                 lt::DEPOSIT_PREAUTH,
                 index_hash(space::DEPOSIT_PREAUTH, &[owner, authorized]),
@@ -395,9 +376,7 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
         // (`0`).
         KEYLET_UNCHECKED => {
             let hash = bytes_exact(&args[0], 32)?;
-            for a in &args[1..6] {
-                require_unused(a)?;
-            }
+            unused_from(&args, 1)?;
             let mut key = [0u8; 32];
             key.copy_from_slice(hash);
             Ok(keylet(lt::ANY, key))
@@ -406,9 +385,7 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
         // `keylet_owner_dir`: [Bytes(account:20), Unused x5].
         KEYLET_OWNER_DIR => {
             let account = bytes_exact(&args[0], 20)?;
-            for a in &args[1..6] {
-                require_unused(a)?;
-            }
+            unused_from(&args, 1)?;
             Ok(keylet(
                 lt::DIR_NODE,
                 index_hash(space::OWNER_DIR, &[account]),
@@ -422,9 +399,7 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
             let root = bytes_exact(&args[0], 32)?;
             let high = require_value(&args[1])?;
             let low = require_value(&args[2])?;
-            for a in &args[3..6] {
-                require_unused(a)?;
-            }
+            unused_from(&args, 3)?;
             let index = (u64::from(high) << 32) | u64::from(low);
             let key = if index == 0 {
                 let mut k = [0u8; 32];
@@ -440,9 +415,7 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
         KEYLET_ESCROW => {
             let account = bytes_exact(&args[0], 20)?;
             let seq = seq_or_hash_bytes(&args[1])?;
-            for a in &args[2..6] {
-                require_unused(a)?;
-            }
+            unused_from(&args, 2)?;
             Ok(keylet(
                 lt::ESCROW,
                 index_hash(space::ESCROW, &[account, &seq]),
@@ -462,9 +435,7 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
                 return Err(INVALID_ARGUMENT);
             }
             let seq = seq_or_hash_bytes(&args[2])?;
-            for a in &args[3..6] {
-                require_unused(a)?;
-            }
+            unused_from(&args, 3)?;
             Ok(keylet(
                 lt::PAYCHAN,
                 index_hash(space::PAYMENT_CHANNEL, &[src, dst, &seq]),
@@ -475,9 +446,7 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
         // [Bytes(hash:32), Unused x5].
         KEYLET_EMITTED => {
             let hash = bytes_exact(&args[0], 32)?;
-            for a in &args[1..6] {
-                require_unused(a)?;
-            }
+            unused_from(&args, 1)?;
             Ok(keylet(
                 lt::EMITTED_TXN,
                 index_hash(space::EMITTED_TXN, &[hash]),
@@ -488,9 +457,7 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
         KEYLET_NFT_OFFER => {
             let account = bytes_exact(&args[0], 20)?;
             let seq = seq_or_hash_bytes(&args[1])?;
-            for a in &args[2..6] {
-                require_unused(a)?;
-            }
+            unused_from(&args, 2)?;
             Ok(keylet(
                 lt::NFTOKEN_OFFER,
                 index_hash(space::NFTOKEN_OFFER, &[account, &seq]),
@@ -500,9 +467,7 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
         // `keylet_hook_definition`: [Bytes(hash:32), Unused x5].
         KEYLET_HOOK_DEFINITION => {
             let hash = bytes_exact(&args[0], 32)?;
-            for a in &args[1..6] {
-                require_unused(a)?;
-            }
+            unused_from(&args, 1)?;
             Ok(keylet(
                 lt::HOOK_DEFINITION,
                 index_hash(space::HOOK_DEFINITION, &[hash]),
@@ -513,9 +478,7 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
         KEYLET_HOOK_STATE_DIR => {
             let account = bytes_exact(&args[0], 20)?;
             let ns = bytes_exact(&args[1], 32)?;
-            for a in &args[2..6] {
-                require_unused(a)?;
-            }
+            unused_from(&args, 2)?;
             Ok(keylet(
                 lt::DIR_NODE,
                 index_hash(space::HOOK_STATE_DIR, &[account, ns]),
@@ -530,9 +493,7 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
         KEYLET_CRON => {
             let account = bytes_exact(&args[0], 20)?;
             let start_time = require_value(&args[1])?;
-            for a in &args[2..6] {
-                require_unused(a)?;
-            }
+            unused_from(&args, 2)?;
             let ns = index_hash(space::CRON, &[]);
             let ts_be = start_time.to_be_bytes();
             let acc_hash = index_hash(space::CRON, &[&ts_be, account]);

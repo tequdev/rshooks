@@ -17,13 +17,8 @@ use rshooks::sfield::{
     sfEmitBurden, sfEmitCallback, sfEmitDetails, sfEmitGeneration, sfEmitHookHash, sfEmitNonce,
     sfEmitParentTxnID,
 };
-use rshooks::txn::codec::field_header;
+use rshooks::txn::codec::{OBJECT_END_MARKER, field_header};
 use rshooks::types::SField;
-
-/// The STObject terminator every nested object's serialization ends with
-/// (`sfObjectEndMarker`'s wire byte: type 14, field 1, both `< 16` → a
-/// single byte `(14 << 4) | 1`).
-pub(crate) const OBJECT_END_MARKER: u8 = 0xE1;
 
 /// The inputs this invocation's `etxn_details()` computes from — see
 /// [`crate::backend::Backend::etxn_details`].

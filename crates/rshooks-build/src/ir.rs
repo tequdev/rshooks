@@ -224,81 +224,39 @@ pub(crate) fn parse(wasm: &[u8]) -> Result<ParsedModule<'_>> {
     Ok(m)
 }
 
+/// A [`Reencode`] with every type conversion left at its library default and
+/// no index remapping; a stand-in receiver for the `wasmparser` ->
+/// `wasm-encoder` type converters below. Reference types, `v128`, and other
+/// post-MVP encodings pass through unrejected here: `validator::mvp_features`
+/// is the authoritative WASM-MVP gate, run over the pipeline's final output.
+struct PlainReencoder;
+
+impl Reencode for PlainReencoder {
+    type Error = core::convert::Infallible;
+}
+
 /// Converts a `wasmparser` value type to the `wasm-encoder` equivalent.
-/// Reference types and `v128` are rejected: they are outside the WASM MVP
-/// (and thus outside what a SetHook-legal module may use).
 pub(crate) fn conv_valtype(v: wasmparser::ValType) -> Result<wasm_encoder::ValType> {
-    match v {
-        wasmparser::ValType::I32 => Ok(wasm_encoder::ValType::I32),
-        wasmparser::ValType::I64 => Ok(wasm_encoder::ValType::I64),
-        wasmparser::ValType::F32 => Ok(wasm_encoder::ValType::F32),
-        wasmparser::ValType::F64 => Ok(wasm_encoder::ValType::F64),
-        wasmparser::ValType::V128 => bail!("unsupported value type: v128 (SIMD is not MVP)"),
-        wasmparser::ValType::Ref(_) => {
-            bail!("unsupported value type: reference type (not MVP)")
-        }
-    }
+    Ok(PlainReencoder.val_type(v)?)
 }
 
-/// Converts a `wasmparser::FuncType` into `wasm-encoder` param/result vectors.
-pub(crate) fn conv_functype(
-    ft: &wasmparser::FuncType,
-) -> Result<(Vec<wasm_encoder::ValType>, Vec<wasm_encoder::ValType>)> {
-    let params = ft
-        .params()
-        .iter()
-        .copied()
-        .map(conv_valtype)
-        .collect::<Result<Vec<_>>>()?;
-    let results = ft
-        .results()
-        .iter()
-        .copied()
-        .map(conv_valtype)
-        .collect::<Result<Vec<_>>>()?;
-    Ok((params, results))
+/// Converts a `wasmparser::FuncType` into its `wasm-encoder` equivalent.
+pub(crate) fn conv_functype(ft: &wasmparser::FuncType) -> Result<wasm_encoder::FuncType> {
+    Ok(PlainReencoder.func_type(ft.clone())?)
 }
 
-pub(crate) fn conv_memtype(m: wasmparser::MemoryType) -> wasm_encoder::MemoryType {
-    wasm_encoder::MemoryType {
-        minimum: m.initial,
-        maximum: m.maximum,
-        memory64: m.memory64,
-        shared: m.shared,
-        page_size_log2: m.page_size_log2,
-    }
+pub(crate) fn conv_memtype(m: wasmparser::MemoryType) -> Result<wasm_encoder::MemoryType> {
+    Ok(PlainReencoder.memory_type(m)?)
 }
 
 pub(crate) fn conv_globaltype(g: wasmparser::GlobalType) -> Result<wasm_encoder::GlobalType> {
-    Ok(wasm_encoder::GlobalType {
-        val_type: conv_valtype(g.content_type)?,
-        mutable: g.mutable,
-        shared: g.shared,
-    })
+    Ok(PlainReencoder.global_type(g)?)
 }
 
-/// Converts a `wasmparser::TableType` into a `wasm-encoder` entity type.
-/// Only `funcref`/`externref` element types are supported (anything else is
-/// outside the WASM MVP).
-pub(crate) fn conv_tabletype(t: wasmparser::TableType) -> Result<wasm_encoder::EntityType> {
-    let element_type = match t.element_type.heap_type() {
-        wasmparser::HeapType::Abstract {
-            shared: false,
-            ty: wasmparser::AbstractHeapType::Func,
-        } => wasm_encoder::RefType::FUNCREF,
-        wasmparser::HeapType::Abstract {
-            shared: false,
-            ty: wasmparser::AbstractHeapType::Extern,
-        } => wasm_encoder::RefType::EXTERNREF,
-        _ => bail!("unsupported table element type (only funcref/externref are supported)"),
-    };
-    Ok(wasm_encoder::EntityType::Table(wasm_encoder::TableType {
-        element_type,
-        table64: t.table64,
-        minimum: t.initial,
-        maximum: t.maximum,
-        shared: t.shared,
-    }))
+/// Converts a `wasmparser::TableType` into its `wasm-encoder` equivalent
+/// (every call site accepts `impl Into<wasm_encoder::EntityType>`).
+pub(crate) fn conv_tabletype(t: wasmparser::TableType) -> Result<wasm_encoder::TableType> {
+    Ok(PlainReencoder.table_type(t)?)
 }
 
 /// References collected from a single function body: which functions it
@@ -514,12 +472,21 @@ pub(crate) fn out_edges(m: &ParsedModule, idx: u32) -> Vec<u32> {
     }
 }
 
-/// DFS-based cycle detection over the direct-call graph (imports are leaves
-/// with no out-edges). Returns one cycle (as a `Vec` of function indices) if
-/// any exists. Used by the validator (recursion is a hard error) and by the
-/// flatten pass (its inlining algorithm requires the call graph to be a DAG,
-/// checked *before* flattening — see `docs/DESIGN.md` §6.2b).
-pub(crate) fn find_call_cycle(m: &ParsedModule) -> Option<Vec<u32>> {
+/// Iterative DFS (to avoid unbounded recursion on adversarial input) over
+/// the graph with nodes `0..total` and edges from `out_edges`, visiting only
+/// nodes in `start_range` as roots. `Ok` is every visited node in
+/// post-order (every edge `u -> v` has `v` before `u`, so this is a valid
+/// reverse topological order when the graph is a DAG); `Err` is the first
+/// cycle found, as a path that starts and ends at the repeated node.
+///
+/// Shared by [`find_call_cycle`] (recursion is a hard error, checked both
+/// pre- and post-flatten) and the flatten pass's own topological order over
+/// the (by then already cycle-checked) defined-function subgraph.
+pub(crate) fn topo_sort_or_cycle(
+    total: u32,
+    start_range: std::ops::Range<u32>,
+    mut out_edges: impl FnMut(u32) -> Vec<u32>,
+) -> Result<Vec<u32>, Vec<u32>> {
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum Color {
         White,
@@ -527,9 +494,9 @@ pub(crate) fn find_call_cycle(m: &ParsedModule) -> Option<Vec<u32>> {
         Black,
     }
 
-    let total = m.total_funcs();
     let mut color = vec![Color::White; total as usize];
     let mut path: Vec<u32> = Vec::new();
+    let mut order: Vec<u32> = Vec::new();
 
     let get = |color: &[Color], idx: u32| color.get(idx as usize).copied().unwrap_or(Color::Black);
     let set = |color: &mut [Color], idx: u32, c: Color| {
@@ -538,12 +505,11 @@ pub(crate) fn find_call_cycle(m: &ParsedModule) -> Option<Vec<u32>> {
         }
     };
 
-    // Iterative DFS to avoid unbounded recursion on adversarial input.
-    for start in 0..total {
+    for start in start_range {
         if get(&color, start) != Color::White {
             continue;
         }
-        let mut stack: Vec<(u32, Vec<u32>)> = vec![(start, out_edges(m, start))];
+        let mut stack: Vec<(u32, Vec<u32>)> = vec![(start, out_edges(start))];
         set(&mut color, start, Color::Gray);
         path.push(start);
         while let Some((node, edges)) = stack.last_mut() {
@@ -553,25 +519,36 @@ pub(crate) fn find_call_cycle(m: &ParsedModule) -> Option<Vec<u32>> {
                     Color::White => {
                         set(&mut color, next, Color::Gray);
                         path.push(next);
-                        let next_edges = out_edges(m, next);
+                        let next_edges = out_edges(next);
                         stack.push((next, next_edges));
                     }
                     Color::Gray => {
                         let cycle_start = path.iter().position(|&p| p == next).unwrap_or(0);
                         let mut cycle = path.get(cycle_start..).unwrap_or(&[]).to_vec();
                         cycle.push(next);
-                        return Some(cycle);
+                        return Err(cycle);
                     }
                     Color::Black => {}
                 }
             } else {
                 set(&mut color, node, Color::Black);
                 path.pop();
+                order.push(node);
                 stack.pop();
             }
         }
     }
-    None
+    Ok(order)
+}
+
+/// DFS-based cycle detection over the direct-call graph (imports are leaves
+/// with no out-edges). Returns one cycle (as a `Vec` of function indices) if
+/// any exists. Used by the validator (recursion is a hard error) and by the
+/// flatten pass (its inlining algorithm requires the call graph to be a DAG,
+/// checked *before* flattening — see `docs/DESIGN.md` §6.2b).
+pub(crate) fn find_call_cycle(m: &ParsedModule) -> Option<Vec<u32>> {
+    let total = m.total_funcs();
+    topo_sort_or_cycle(total, 0..total, |idx| out_edges(m, idx)).err()
 }
 
 /// Tracks `block`/`loop`/`if` nesting depth across a stream of operators fed

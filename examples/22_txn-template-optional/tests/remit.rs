@@ -81,14 +81,14 @@ fn destination_tag_absent_by_default_present_when_supplied() {
     );
 }
 
-/// `amounts` (`sfAmounts [ first: sfAmountEntry { .. }, second: optional
-/// Second: sfAmountEntry { .. } ]`) always carries `first`: exactly one
-/// element with `AMT2` absent, exactly two once it enables `second`.
-/// Counted by the array's own `0xE1` element terminators between
-/// `sfAmounts`'s header and its closing `0xF1` (`AmountEntry` has no
-/// nested `object`/`array` of its own, so every `0xE1` in that span is
-/// one element's terminator, not a false match from an unrelated field
-/// elsewhere in the blob).
+/// `amounts` (`sfAmounts [ sfAmountEntry { .. }, optional sfAmountEntry
+/// { .. } ]`, elements numbered `0`/`1` by position) always carries
+/// `amounts.0`: exactly one element with `AMT2` absent, exactly
+/// two once it enables `amounts.1`. Counted by the array's own `0xE1`
+/// element terminators between `sfAmounts`'s header and its closing
+/// `0xF1` (`AmountEntry` has no nested `object`/`array` of its own, so
+/// every `0xE1` in that span is one element's terminator, not a false
+/// match from an unrelated field elsewhere in the blob).
 #[test]
 fn amounts_has_one_element_absent_two_present() {
     let (amounts_hdr, amounts_hdr_len) = codec::field_header(sfAmounts);
@@ -104,7 +104,7 @@ fn amounts_has_one_element_absent_two_present() {
         1,
         "{blob:02x?}"
     );
-    // `first` defaults to the native 1-drop amount (`AMT1` absent).
+    // `amounts.0` defaults to the native 1-drop amount (`AMT1` absent).
     let mut expected_first = Vec::new();
     expected_first.extend_from_slice(&amount_hdr[..amount_hdr_len]);
     let mut native_value = 1u64.to_be_bytes();
@@ -113,7 +113,7 @@ fn amounts_has_one_element_absent_two_present() {
     assert!(
         blob.windows(expected_first.len())
             .any(|w| w == expected_first.as_slice()),
-        "first's native 1-drop amount not found: {blob:02x?}"
+        "amounts.0's native 1-drop amount not found: {blob:02x?}"
     );
 
     let present = env().hook_param(b"AMT2", &5u64.to_be_bytes());
@@ -128,13 +128,13 @@ fn amounts_has_one_element_absent_two_present() {
     );
 }
 
-/// With `ISSUER` present, both `first` and (once `AMT2` enables it)
-/// `second` switch to the 48-byte issued form (`USD`, the supplied
+/// With `ISSUER` present, both element `0` and (once `AMT2` enables it)
+/// element `1` switch to the 48-byte issued form (`USD`, the supplied
 /// issuer) instead of the native form: the whole 48-byte value region
 /// fills exactly (no leftover `NOP`s, unlike the native form's 40
 /// trailing ones), and the currency/issuer bytes match exactly.
 #[test]
-fn issuer_present_writes_both_amounts_issued() {
+fn issuer_present_writes_both_amounts_iou() {
     let (amount_hdr, amount_hdr_len) = codec::field_header(sfAmount);
     let issuer = [9u8; 20];
     let mut currency = [0u8; 20];
@@ -151,8 +151,8 @@ fn issuer_present_writes_both_amounts_issued() {
     let mut expected_tail = Vec::new();
     expected_tail.extend_from_slice(&currency);
     expected_tail.extend_from_slice(&issuer);
-    // Both `first` and `second` are the issued form: currency/issuer
-    // (the value's own encoding is exercised byte-exactly by
+    // Both `amounts.0` and `amounts.1` are the issued form: currency/
+    // issuer (the value's own encoding is exercised byte-exactly by
     // `crates/rshooks/src/txn.rs`'s `encode_iou_amount_value_const`
     // tests) appear twice, immediately after an `sfAmount` header, with
     // no `0x99` anywhere in either 48-byte region.
@@ -162,7 +162,7 @@ fn issuer_present_writes_both_amounts_issued() {
         .count();
     assert_eq!(
         occurrences, 2,
-        "expected both first and second issued (USD, the supplied issuer): {blob:02x?}"
+        "expected both amounts.0 and amounts.1 issued (USD, the supplied issuer): {blob:02x?}"
     );
 }
 

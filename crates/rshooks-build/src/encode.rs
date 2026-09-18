@@ -15,8 +15,7 @@ pub(crate) fn encode_type_section(
 ) -> Result<wasm_encoder::TypeSection> {
     let mut sec = wasm_encoder::TypeSection::new();
     for ty in types {
-        let (params, results) = ir::conv_functype(ty)?;
-        sec.ty().function(params, results);
+        sec.ty().func_type(&ir::conv_functype(ty)?);
     }
     Ok(sec)
 }
@@ -47,7 +46,7 @@ pub(crate) fn encode_import_section(
                 sec.import(imp.module, imp.name, ir::conv_tabletype(t)?);
             }
             wasmparser::TypeRef::Memory(mt) => {
-                sec.import(imp.module, imp.name, ir::conv_memtype(mt));
+                sec.import(imp.module, imp.name, ir::conv_memtype(mt)?);
             }
             wasmparser::TypeRef::Global(gt) => {
                 sec.import(imp.module, imp.name, ir::conv_globaltype(gt)?);
@@ -66,12 +65,12 @@ pub(crate) fn encode_import_section(
 /// Encodes a memory section from `memories`, in order.
 pub(crate) fn encode_memory_section(
     memories: &[wasmparser::MemoryType],
-) -> wasm_encoder::MemorySection {
+) -> Result<wasm_encoder::MemorySection> {
     let mut sec = wasm_encoder::MemorySection::new();
     for &mem in memories {
-        sec.memory(ir::conv_memtype(mem));
+        sec.memory(ir::conv_memtype(mem)?);
     }
-    sec
+    Ok(sec)
 }
 
 /// Encodes a global section from `globals`, in order, remapping each

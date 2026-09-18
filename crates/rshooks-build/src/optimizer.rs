@@ -58,10 +58,7 @@ pub fn optimize(wasm: &[u8]) -> Result<Vec<u8>> {
 /// and `producers`) removed, preserving every other section byte-for-byte
 /// and in order. See the module doc comment for why this must run before
 /// `wasm-opt`.
-///
-/// `pub` (but `#[doc(hidden)]`) only so integration tests can build the same
-/// custom-section-free fixtures the native guard checker requires.
-pub fn strip_custom_sections(wasm: &[u8]) -> Result<Vec<u8>> {
+pub(crate) fn strip_custom_sections(wasm: &[u8]) -> Result<Vec<u8>> {
     let mut module = wasm_encoder::Module::new();
     for payload in wasmparser::Parser::new(0).parse_all(wasm) {
         let payload = payload.context("parsing wasm module for custom-section stripping")?;
@@ -80,8 +77,13 @@ pub fn strip_custom_sections(wasm: &[u8]) -> Result<Vec<u8>> {
 }
 
 #[cfg(test)]
+#[path = "../tests/common/mod.rs"]
+mod test_common;
+
+#[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used, clippy::indexing_slicing)]
 mod tests {
+    use super::test_common::{append_custom_section, target_features_payload};
     use super::*;
 
     #[test]
@@ -126,47 +128,6 @@ mod tests {
             }
         }
         assert!(has_memory_export, "memory export must survive optimization");
-    }
-
-    fn write_leb128(mut n: u64, out: &mut Vec<u8>) {
-        loop {
-            let byte = (n & 0x7f) as u8;
-            n >>= 7;
-            if n == 0 {
-                out.push(byte);
-                break;
-            }
-            out.push(byte | 0x80);
-        }
-    }
-
-    /// Appends a raw custom section (id 0) to an existing wasm binary.
-    fn append_custom_section(wasm: &[u8], name: &str, payload: &[u8]) -> Vec<u8> {
-        let mut content = Vec::new();
-        write_leb128(name.len() as u64, &mut content);
-        content.extend_from_slice(name.as_bytes());
-        content.extend_from_slice(payload);
-
-        let mut out = wasm.to_vec();
-        out.push(0x00);
-        write_leb128(content.len() as u64, &mut out);
-        out.extend_from_slice(&content);
-        out
-    }
-
-    /// Encodes a `target_features` custom-section payload (the
-    /// `wasm-features-section` proposal's format: a feature count followed
-    /// by one `(prefix, name)` entry per feature) declaring each of
-    /// `features` as required (`+`).
-    fn target_features_payload(features: &[&str]) -> Vec<u8> {
-        let mut payload = Vec::new();
-        write_leb128(features.len() as u64, &mut payload);
-        for feature in features {
-            payload.push(b'+');
-            write_leb128(feature.len() as u64, &mut payload);
-            payload.extend_from_slice(feature.as_bytes());
-        }
-        payload
     }
 
     /// A `target_features` section declaring `+sign-ext` must not cause

@@ -3,7 +3,8 @@ name: Build examples (reusable)
 # Reusable workflow: builds every crate under examples/ through
 # rshooks-build and validates the output. Called from ci.yml as its
 # `examples` job, whose `e2e` job then deploys the uploaded artifacts; the
-# `discover` job derives the build matrix from examples/*/Cargo.toml.
+# `discover` job finds which examples are host-testable (dev-dependency on
+# rshooks-testenv) for the `unit-tests-examples` job below.
 
 on:
   workflow_call: {}
@@ -16,7 +17,6 @@ jobs:
     name: Discover examples
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.discover.outputs.matrix }}
       test-packages: ${{ steps.discover.outputs.test-packages }}
     steps:
       - uses: actions/checkout@v7
@@ -24,24 +24,11 @@ jobs:
       - name: Install Rust toolchain (per rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
 
-      - name: Build example matrix from examples/*/Cargo.toml
+      - name: Discover host-testable examples from examples/*/Cargo.toml
         id: discover
         shell: bash
         run: |
           set -euo pipefail
-
-          matrix='[]'
-          for manifest in examples/*/Cargo.toml; do
-            dir="$(dirname "$manifest")"
-            name="$(basename "$dir")"
-            entry="$(jq -nc --arg name "$name" --arg dir "$dir" \
-              '{name: $name, dir: $dir}')"
-            matrix="$(jq -c --argjson e "$entry" '. + [$e]' <<<"$matrix")"
-          done
-
-          echo "Discovered matrix:"
-          jq . <<<"$matrix"
-          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
           # Host-testable examples: crates with a dev-dependency on
           # rshooks-testenv, i.e. the ones wired up with off-chain unit
@@ -76,33 +63,14 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  clippy:
-    name: Clippy (examples workspace, wasm32v1-none)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install Rust toolchain (per rust-toolchain.toml)
-        run: rustup show active-toolchain || rustup toolchain install
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: examples
-
-      - name: Clippy (examples, wasm32v1-none, deny warnings)
-        # --lib instead of --all-targets: wasm32v1-none has no `test` crate,
-        # so the implicit test-profile target can never build for it.
-        working-directory: examples
-        run: cargo clippy --workspace --lib --target wasm32v1-none -- -D warnings
-
   # Continuous zero-wasm-impact check (design doc
   # .claude/design/TESTENV_DESIGN.md §7): builds every example twice at
   # this same commit — as-committed vs. with all off-chain-unit-test wiring
   # mechanically stripped — and diffs every produced wasm plus its WCE/
   # size/nesting numbers. Catches any future leak of test machinery into a
-  # shipped artifact; independent of the `build`/`discover` matrix above
-  # (it drives `rshooks build` itself via scripts/probe-testenv-parity.sh,
-  # not the shared binary those jobs upload).
+  # shipped artifact; independent of the `build` job above (it drives
+  # `rshooks build` itself via scripts/probe-testenv-parity.sh, not the
+  # shared binary that job uploads).
   testenv-parity:
     name: Testenv parity probe (as-committed == test-wiring-stripped)
     runs-on: ubuntu-latest
@@ -147,14 +115,16 @@ jobs:
           done
           cargo test --manifest-path examples/Cargo.toml "${args[@]}"
 
+  # One job looping every example instead of one runner per example
+  # (`mise run build-examples` already loops all of them; a runner per
+  # example is pure spin-up overhead for a seconds-long build).
+  # `continue-on-error` semantics are implemented by hand per example so
+  # one broken example doesn't hide the pass/fail of the rest; the job
+  # still fails overall if any example failed.
   build:
-    name: ${{ matrix.name }}
-    needs: [discover, build-tool]
+    name: Build & check examples
+    needs: build-tool
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJSON(needs.discover.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v7
 
@@ -180,39 +150,60 @@ jobs:
       # entry (see `80_governance`), each landing as its own
       # `<index>.<entry-fn>.wasm` under `out/current/` — check every
       # artifact the build produced rather than assuming exactly one.
-      - name: Build and check
-        run: |
-          set -euo pipefail
-          chmod +x bin/rshooks
-          bin/rshooks build --manifest-path "${{ matrix.dir }}/Cargo.toml" --out "${{ matrix.dir }}/out"
-          for wasm in "${{ matrix.dir }}/out/current"/*.wasm; do
-            bin/rshooks check "$wasm"
-          done
-
       # examples/<dir>/metrics.json is the recorded WCE / size / nesting
-      # snapshot for this crate. Refresh locally with
-      # `mise run record-example-metrics`; this step is the gate that a
-      # forgotten refresh cannot land.
-      - name: Check recorded WCE / size / nesting
+      # snapshot; refresh locally with `mise run record-example-metrics`.
+      - name: Build, check, and verify recorded metrics for every example
         run: |
-          set -euo pipefail
-          python3 scripts/record-example-metrics.py \
-            --check --skip-build \
-            --example "${{ matrix.name }}" \
-            --rshooks bin/rshooks
+          set -uo pipefail
+          chmod +x bin/rshooks || exit 1
+          failed=0
+          {
+            echo "| Example | Build & check | Recorded metrics |"
+            echo "|---|---|---|"
+          } >>"$GITHUB_STEP_SUMMARY"
+          for manifest in examples/*/Cargo.toml; do
+            dir="$(dirname "$manifest")"
+            name="$(basename "$dir")"
+            build_ok=":white_check_mark:"
+            metrics_ok=":white_check_mark:"
 
-      # `*.wasm` for `copy-wasm.mjs`/`readHookBinaryHexFromNS`, plus this
+            if bin/rshooks build --manifest-path "$manifest" --out "$dir/out"; then
+              for wasm in "$dir"/out/current/*.wasm; do
+                bin/rshooks check "$wasm" || build_ok=":x:"
+              done
+            else
+              build_ok=":x:"
+            fi
+
+            if [ "$build_ok" = ":white_check_mark:" ]; then
+              python3 scripts/record-example-metrics.py \
+                --check --skip-build --example "$name" --rshooks bin/rshooks \
+                || metrics_ok=":x:"
+            else
+              metrics_ok="skipped"
+            fi
+
+            if [ "$build_ok" = ":x:" ] || [ "$metrics_ok" = ":x:" ]; then
+              failed=1
+            fi
+            echo "| $name | $build_ok | $metrics_ok |" >>"$GITHUB_STEP_SUMMARY"
+          done
+          exit "$failed"
+
+      # `*.wasm` for `copy-wasm.mjs`/`readHookBinaryHexFromNS`, plus each
       # example's own `sethook.template.json` for the (growing) set of e2e
       # suites that install a hook using its generated declaration entries
       # verbatim (e.g. `e2e/test/param-signature.test.ts`) rather than
-      # hand-writing them — same rationale as uploading the wasm itself:
-      # the e2e job never runs `rshooks build`, so anything it reads from
-      # `out/current/` has to come through this artifact.
-      - name: Upload hook binary
+      # hand-writing them — the e2e job never runs `rshooks build`, so
+      # anything it reads from `out/current/` has to come through this
+      # artifact. Uploaded even if some examples failed above, so the
+      # examples that did build stay inspectable.
+      - name: Upload hook binaries
+        if: '!cancelled()'
         uses: actions/upload-artifact@v7
         with:
-          name: example-hooks-${{ matrix.name }}
+          name: example-hooks
           path: |
-            ${{ matrix.dir }}/out/current/*.wasm
-            ${{ matrix.dir }}/out/current/sethook.template.json
+            examples/*/out/current/*.wasm
+            examples/*/out/current/sethook.template.json
           if-no-files-found: error

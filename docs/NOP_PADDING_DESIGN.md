@@ -99,10 +99,10 @@ Non-goals:
   | <name>: optional sfX [ <element>* ]                   // == optional array(sfX) [ .. ]
   | <name>: sfX [ <Elem>: optional sfY { <field>* } ; <N> ]  // == array(sfX) [ Elem: optional object(sfY) { .. } ; N ]
 
-<element> := <name>: object(sfX) { <field>* }
-           | <name>: sfX { <field>* }                    // inferred: == object(sfX) { .. }
-           | <name>: optional object(sfX) { <field>* }
-           | <name>: optional sfX { <field>* }            // inferred: == optional object(sfX) { .. }
+<element> := object(sfX) { <field>* }
+           | sfX { <field>* }                  // inferred: == object(sfX) { .. }
+           | optional object(sfX) { <field>* }
+           | optional sfX { <field>* }          // inferred: == optional object(sfX) { .. }
 
 <scalar_kind> := u8_field | u16_field | u32_field | u64_field | hash128 | hash160 | hash256
                | currency | native_amount | amount | native_issue | issue | account_id
@@ -115,6 +115,14 @@ parentheses — none of these three kinds has a baked default to carry, so there
 to thread through even under `optional`). `optional native_issue`/`optional empty_vl` are
 allowed: the value is fixed, so the setter takes no argument and just makes the field
 present.
+
+An array's own element (`optional` or not) takes no name: it's numbered by its zero-based
+position among every element in the list, so `amounts: sfAmounts [ sfAmountEntry { .. },
+optional sfAmountEntry { .. } ]` reaches its second (`optional`) entry as
+`set_amounts_1_amount_native`/`_iou`,
+`enable_amounts_1`/`clear_amounts_1`/`is_amounts_1_present` —
+`docs/TXN_TEMPLATE_FIELDS_DESIGN.md` §2.7 has the full mechanism
+(`$crate::__txn_template_index_elements!`).
 
 **Inferred spellings.** Every `optional` form above has a bare-`sfX` twin, on the same terms
 `docs/TXN_TEMPLATE_FIELDS_DESIGN.md` §2.7 already gives the non-`optional` kinds: the kind is
@@ -135,7 +143,7 @@ spelling differs.
 | kind | slot bytes | baked default | worst-case NOPs charged to the enclosing container | setters |
 |---|---|---|---|---|
 | `optional <scalar>(sfX)` | that kind's header + value | all NOPs | slot bytes | `set_x(<same args as the kind>)`, `clear_x()` |
-| `any_amount(sfX)` | header + 48 | header + issued zero (48 bytes) | 40 | `set_x_native(u64) -> Result<()>`, `set_x_issued(XFL, &CurrencyCode, &AccountId)` |
+| `any_amount(sfX)` | header + 48 | header + issued zero (48 bytes) | 40 | `set_x_native(u64) -> Result<()>`, `set_x_iou(XFL, &CurrencyCode, &AccountId)` |
 | `optional any_amount(sfX)` | header + 48 | all NOPs | header + 48 | the two above, plus `clear_x()` |
 | `vl(sfX, MIN, MAX)` | header + `vl_length_prefix(MAX)` + MAX | header + prefix(MIN) + MIN zero bytes + NOPs | `slot(MAX).saturating_sub(slot(MIN))` where `slot(n) = prefix_len(n) + n` | `set_x(&[u8]) -> Result<()>` (length must be in `[MIN, MAX]`, else `HookError::InvalidArgument`) — call at most once per hook execution, see §3.1.1 |
 | `optional vl(sfX, MIN, MAX)` | as above | all NOPs | slot bytes | `set_x(&[u8]) -> Result<()>`, `clear_x()` — same once-per-execution rule |
@@ -284,7 +292,7 @@ by the `optional object`/`optional array` push arms above for the recursion into
 `$($inner)*`, and otherwise threaded completely unchanged through every other arm (already
 `mode = $mode:tt`, a single opaque `tt`, everywhere but the handful of spawn/base-case sites
 that need to read or extend it). Every generated *value*-writing setter (`set_x`/`set_x_
-native`/`set_x_issued`/etc., not `clear_x`, which is already correct regardless of an
+native`/`set_x_iou`/etc., not `clear_x`, which is already correct regardless of an
 ancestor's presence) begins with `$crate::__txn_template_ensure!($mode, self.bytes);` — a new
 `#[doc(hidden)]` macro that, per `(offset, slot_const)` pair, copies `slot_const`'s bytes into
 `self.bytes` at that offset *only if* the slot is still absent (its first byte is a NOP) —
@@ -354,11 +362,11 @@ decoding, `otxn::from_emitted`, `emitted()` inspection), **strict** (today's beh
   sending one or two amounts with an `optional` `DestinationTag`), written entirely in the
   inferred style (§3.3) — explicit only where a kind cannot infer (`any_amount`, via the `=
   AnyAmount()` default-shape marker).
-  `amounts` is a named array with one required and one `optional` element (`first:
-  sfAmountEntry { amount: sfAmount = AnyAmount() }`, `second: optional sfAmountEntry
-  { .. }`, its own `amount` field a plain `set_amounts_second_amount_native`/`_issued` pair
-  directly on `Remit`) — the motivating case for a named array over a homogeneous one: one
-  required entry
+  `amounts` is an array with one required and one `optional` element, both numbered by
+  position (`sfAmountEntry { amount: sfAmount = AnyAmount() }`, `optional sfAmountEntry
+  { .. }`, its own `amount` field a plain `set_amounts_1_amount_native`/`_iou` pair
+  directly on `Remit`) — the motivating case for a positional array over a homogeneous
+  one: one required entry
   (`remit` always writes a real, constructible amount into it — never left at `any_amount`'s
   raw issued-zero encoding default) and one that may or may not be there; two fully
   `optional` 52-byte `sfAmountEntry` elements would not fit one array's 63-NOP budget, but one

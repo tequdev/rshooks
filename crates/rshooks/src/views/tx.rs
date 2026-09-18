@@ -3,7 +3,7 @@
 //!
 //! Each is named exactly as upstream names the type ([`Payment`],
 //! [`EscrowCreate`], …) and is generic over
-//! [`FieldSource`](crate::views::source::FieldSource), so the same struct
+//! [`FieldSource`], so the same struct
 //! reads the originating transaction directly
 //! ([`OtxnSource`](crate::views::source::OtxnSource), via `Xxx::otxn()`) or
 //! an already-loaded transaction slot
@@ -13,11 +13,15 @@
 //!
 //! A field the format declares `soeREQUIRED` reads as `Result<T>`; one
 //! declared `soeOPTIONAL` or `soeDEFAULT` reads as `Result<Option<T>>`,
-//! with absence reported as `Ok(None)`. A field whose serialized type this
-//! crate models no typed read for is reachable as raw wire bytes through a
-//! `…_into` accessor. `STObject`/`STArray` fields have that too, plus a
-//! `…_slot` child-slot accessor on the slot-backed views only — navigating
-//! into a container is something `otxn_field` cannot do.
+//! with absence reported as `Ok(None)` either way — `soeDEFAULT` says only
+//! that upstream may omit the field from the wire form, not what value to
+//! substitute for it. A field whose serialized type this crate models no
+//! typed read for is reachable as raw wire bytes through a `…_into`
+//! accessor. `STObject`/`STArray` fields have that too, plus a `…_slot`
+//! child-slot accessor on the slot-backed views only — navigating into a
+//! container is something `otxn_field` cannot do; the returned
+//! [`SlotObject`] is still owned by the caller and must be cleared or
+//! consumed, per its own documentation.
 //!
 //! The fields every transaction carries (`sfAccount`, `sfFee`, `sfMemos`, …)
 //! are served once, as [`TransactionCommonFields`] default methods — plus
@@ -29,7 +33,10 @@
 //! See [`crate::views`] for when to reach for a view at all, and
 //! [`crate::views::source`] for what one costs.
 
-use crate::views::source::FieldSource as _;
+use crate::error::Result;
+use crate::slot_obj::SlotObject;
+use crate::types::STObject;
+use crate::views::source::FieldSource;
 
 /// Accessors shared by every generated transaction view.
 ///
@@ -38,7 +45,7 @@ use crate::views::source::FieldSource as _;
 pub trait TransactionCommonFields {
     /// The backing source used by this transaction view.
     #[doc(hidden)]
-    type Source: crate::views::source::FieldSource;
+    type Source: FieldSource;
 
     /// Returns the backing field source.
     #[doc(hidden)]
@@ -46,200 +53,131 @@ pub trait TransactionCommonFields {
 
     /// `sfTransactionType` — UInt16, `soeREQUIRED`.
     #[inline(always)]
-    fn transaction_type(&self) -> crate::error::Result<u16> {
+    fn transaction_type(&self) -> Result<u16> {
         self.field_source().read(crate::sfield::sfTransactionType)
     }
 
     /// `sfFlags` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    fn flags(&self) -> crate::error::Result<Option<u32>> {
+    fn flags(&self) -> Result<Option<u32>> {
         self.field_source().read_opt(crate::sfield::sfFlags)
     }
 
     /// `sfSourceTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    fn source_tag(&self) -> crate::error::Result<Option<u32>> {
+    fn source_tag(&self) -> Result<Option<u32>> {
         self.field_source().read_opt(crate::sfield::sfSourceTag)
     }
 
     /// `sfAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    fn account(&self) -> crate::error::Result<crate::types::AccountId> {
+    fn account(&self) -> Result<crate::types::AccountId> {
         self.field_source().read(crate::sfield::sfAccount)
     }
 
     /// `sfSequence` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    fn sequence(&self) -> crate::error::Result<u32> {
+    fn sequence(&self) -> Result<u32> {
         self.field_source().read(crate::sfield::sfSequence)
     }
 
     /// `sfPreviousTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    fn previous_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    fn previous_txn_id(&self) -> Result<Option<crate::types::Hash>> {
         self.field_source().read_opt(crate::sfield::sfPreviousTxnID)
     }
 
     /// `sfLastLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    fn last_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+    fn last_ledger_sequence(&self) -> Result<Option<u32>> {
         self.field_source()
             .read_opt(crate::sfield::sfLastLedgerSequence)
     }
 
     /// `sfAccountTxnID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    fn account_txn_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    fn account_txn_id(&self) -> Result<Option<crate::types::Hash>> {
         self.field_source().read_opt(crate::sfield::sfAccountTxnID)
     }
 
     /// `sfFee` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    fn fee(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    fn fee(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.field_source().read(crate::sfield::sfFee)
     }
 
     /// `sfOperationLimit` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    fn operation_limit(&self) -> crate::error::Result<Option<u32>> {
+    fn operation_limit(&self) -> Result<Option<u32>> {
         self.field_source()
             .read_opt(crate::sfield::sfOperationLimit)
     }
 
     /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `memos_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    fn memos_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    fn memos_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.field_source()
             .read_raw_opt(crate::sfield::sfMemos.code(), out)
     }
 
     /// `sfSigningPubKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.field_source()
             .read_raw(crate::sfield::sfSigningPubKey.code(), out)
     }
 
     /// `sfTicketSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    fn ticket_sequence(&self) -> crate::error::Result<Option<u32>> {
+    fn ticket_sequence(&self) -> Result<Option<u32>> {
         self.field_source()
             .read_opt(crate::sfield::sfTicketSequence)
     }
 
     /// `sfTxnSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    fn txn_signature_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.field_source()
             .read_raw_opt(crate::sfield::sfTxnSignature.code(), out)
     }
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signers_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    fn signers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    fn signers_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.field_source()
             .read_raw_opt(crate::sfield::sfSigners.code(), out)
     }
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `emit_details_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    fn emit_details_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    fn emit_details_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.field_source()
             .read_raw_opt(crate::sfield::sfEmitDetails.code(), out)
     }
 
     /// `sfFirstLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    fn first_ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+    fn first_ledger_sequence(&self) -> Result<Option<u32>> {
         self.field_source()
             .read_opt(crate::sfield::sfFirstLedgerSequence)
     }
 
     /// `sfNetworkID` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    fn network_id(&self) -> crate::error::Result<Option<u32>> {
+    fn network_id(&self) -> Result<Option<u32>> {
         self.field_source().read_opt(crate::sfield::sfNetworkID)
     }
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hook_parameters_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    fn hook_parameters_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.field_source()
             .read_raw_opt(crate::sfield::sfHookParameters.code(), out)
     }
 
     /// `sfHookName` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    fn hook_name_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    fn hook_name_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.field_source()
             .read_raw_opt(crate::sfield::sfHookName.code(), out)
     }
@@ -250,51 +188,27 @@ pub trait TransactionCommonSlotFields:
     TransactionCommonFields<Source = crate::views::source::SlotSource>
 {
     /// `sfMemos` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    fn memos_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+    fn memos_slot(&self) -> Result<Option<SlotObject<crate::types::STArray>>> {
         self.field_source().subobject_opt(crate::sfield::sfMemos)
     }
 
     /// `sfSigners` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    fn signers_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+    fn signers_slot(&self) -> Result<Option<SlotObject<crate::types::STArray>>> {
         self.field_source().subobject_opt(crate::sfield::sfSigners)
     }
 
     /// `sfEmitDetails` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    fn emit_details_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+    fn emit_details_slot(&self) -> Result<Option<SlotObject<STObject>>> {
         self.field_source()
             .subobject_opt(crate::sfield::sfEmitDetails)
     }
 
     /// `sfHookParameters` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    fn hook_parameters_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+    fn hook_parameters_slot(&self) -> Result<Option<SlotObject<crate::types::STArray>>> {
         self.field_source()
             .subobject_opt(crate::sfield::sfHookParameters)
     }
@@ -306,14 +220,14 @@ impl<T> TransactionCommonSlotFields for T where
 }
 
 /// View of the `Payment` transaction (`ttPAYMENT`, type code 0).
-pub struct Payment<S: crate::views::source::FieldSource> {
+pub struct Payment<S: FieldSource> {
     src: S,
 }
 
 impl Payment<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `Payment`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttPAYMENT).map(|src| Self { src })
     }
 }
@@ -322,9 +236,7 @@ impl Payment<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttPAYMENT`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -335,88 +247,69 @@ impl Payment<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> Payment<S> {
+impl<S: FieldSource> Payment<S> {
     /// `sfDestination` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn destination(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfDestination)
     }
 
     /// `sfAmount` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn amount(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfAmount)
     }
 
     /// `sfSendMax` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn send_max(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn send_max(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfSendMax)
     }
 
     /// `sfPaths` — PathSet, `soeDEFAULT`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when omitted; `soeDEFAULT` defines no value to substitute.
     #[inline(always)]
-    pub fn paths_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn paths_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src.read_raw_opt(crate::sfield::sfPaths.code(), out)
     }
 
     /// `sfInvoiceID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn invoice_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn invoice_id(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfInvoiceID)
     }
 
     /// `sfDestinationTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn destination_tag(&self) -> crate::error::Result<Option<u32>> {
+    pub fn destination_tag(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfDestinationTag)
     }
 
     /// `sfDeliverMin` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn deliver_min(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn deliver_min(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfDeliverMin)
     }
 
     /// `sfCredentialIDs` — Vector256, `soeOPTIONAL`.
     ///
     /// Dormant field; requires the `all-amendments` feature.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[cfg(feature = "all-amendments")]
     #[inline(always)]
     pub fn credential_ids_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfCredentialIDs.code(), out)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for Payment<S> {
+impl<S: FieldSource> TransactionCommonFields for Payment<S> {
     type Source = S;
 
     #[inline(always)]
@@ -426,14 +319,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for Payment<S
 }
 
 /// View of the `EscrowCreate` transaction (`ttESCROW_CREATE`, type code 1).
-pub struct EscrowCreate<S: crate::views::source::FieldSource> {
+pub struct EscrowCreate<S: FieldSource> {
     src: S,
 }
 
 impl EscrowCreate<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `EscrowCreate`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttESCROW_CREATE).map(|src| Self { src })
     }
 }
@@ -442,9 +335,7 @@ impl EscrowCreate<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttESCROW_CREATE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -455,64 +346,51 @@ impl EscrowCreate<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> EscrowCreate<S> {
+impl<S: FieldSource> EscrowCreate<S> {
     /// `sfDestination` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn destination(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfDestination)
     }
 
     /// `sfAmount` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn amount(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfAmount)
     }
 
     /// `sfCondition` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn condition_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn condition_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfCondition.code(), out)
     }
 
     /// `sfCancelAfter` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn cancel_after(&self) -> crate::error::Result<Option<u32>> {
+    pub fn cancel_after(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfCancelAfter)
     }
 
     /// `sfFinishAfter` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn finish_after(&self) -> crate::error::Result<Option<u32>> {
+    pub fn finish_after(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfFinishAfter)
     }
 
     /// `sfDestinationTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn destination_tag(&self) -> crate::error::Result<Option<u32>> {
+    pub fn destination_tag(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfDestinationTag)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for EscrowCreate<S> {
+impl<S: FieldSource> TransactionCommonFields for EscrowCreate<S> {
     type Source = S;
 
     #[inline(always)]
@@ -522,14 +400,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for EscrowCre
 }
 
 /// View of the `EscrowFinish` transaction (`ttESCROW_FINISH`, type code 2).
-pub struct EscrowFinish<S: crate::views::source::FieldSource> {
+pub struct EscrowFinish<S: FieldSource> {
     src: S,
 }
 
 impl EscrowFinish<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `EscrowFinish`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttESCROW_FINISH).map(|src| Self { src })
     }
 }
@@ -538,9 +416,7 @@ impl EscrowFinish<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttESCROW_FINISH`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -551,58 +427,40 @@ impl EscrowFinish<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> EscrowFinish<S> {
+impl<S: FieldSource> EscrowFinish<S> {
     /// `sfOwner` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn owner(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfOwner)
     }
 
     /// `sfOfferSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn offer_sequence(&self) -> crate::error::Result<Option<u32>> {
+    pub fn offer_sequence(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfOfferSequence)
     }
 
     /// `sfEscrowID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn escrow_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn escrow_id(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfEscrowID)
     }
 
     /// `sfFulfillment` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn fulfillment_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn fulfillment_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfFulfillment.code(), out)
     }
 
     /// `sfCondition` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn condition_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn condition_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfCondition.code(), out)
     }
@@ -610,22 +468,18 @@ impl<S: crate::views::source::FieldSource> EscrowFinish<S> {
     /// `sfCredentialIDs` — Vector256, `soeOPTIONAL`.
     ///
     /// Dormant field; requires the `all-amendments` feature.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[cfg(feature = "all-amendments")]
     #[inline(always)]
     pub fn credential_ids_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfCredentialIDs.code(), out)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for EscrowFinish<S> {
+impl<S: FieldSource> TransactionCommonFields for EscrowFinish<S> {
     type Source = S;
 
     #[inline(always)]
@@ -635,14 +489,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for EscrowFin
 }
 
 /// View of the `AccountSet` transaction (`ttACCOUNT_SET`, type code 3).
-pub struct AccountSet<S: crate::views::source::FieldSource> {
+pub struct AccountSet<S: FieldSource> {
     src: S,
 }
 
 impl AccountSet<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `AccountSet`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttACCOUNT_SET).map(|src| Self { src })
     }
 }
@@ -651,9 +505,7 @@ impl AccountSet<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttACCOUNT_SET`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -664,119 +516,82 @@ impl AccountSet<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> AccountSet<S> {
+impl<S: FieldSource> AccountSet<S> {
     /// `sfEmailHash` — Hash128, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn email_hash_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn email_hash_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfEmailHash.code(), out)
     }
 
     /// `sfWalletLocator` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn wallet_locator(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn wallet_locator(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfWalletLocator)
     }
 
     /// `sfWalletSize` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn wallet_size(&self) -> crate::error::Result<Option<u32>> {
+    pub fn wallet_size(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfWalletSize)
     }
 
     /// `sfMessageKey` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn message_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn message_key_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfMessageKey.code(), out)
     }
 
     /// `sfDomain` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn domain_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn domain_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src.read_raw_opt(crate::sfield::sfDomain.code(), out)
     }
 
     /// `sfTransferRate` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn transfer_rate(&self) -> crate::error::Result<Option<u32>> {
+    pub fn transfer_rate(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfTransferRate)
     }
 
     /// `sfSetFlag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn set_flag(&self) -> crate::error::Result<Option<u32>> {
+    pub fn set_flag(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfSetFlag)
     }
 
     /// `sfClearFlag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn clear_flag(&self) -> crate::error::Result<Option<u32>> {
+    pub fn clear_flag(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfClearFlag)
     }
 
     /// `sfTickSize` — UInt8, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn tick_size(&self) -> crate::error::Result<Option<u8>> {
+    pub fn tick_size(&self) -> Result<Option<u8>> {
         self.src.read_opt(crate::sfield::sfTickSize)
     }
 
     /// `sfNFTokenMinter` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn nftoken_minter(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn nftoken_minter(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfNFTokenMinter)
     }
 
     /// `sfHookStateScale` — UInt16, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn hook_state_scale(&self) -> crate::error::Result<Option<u16>> {
+    pub fn hook_state_scale(&self) -> Result<Option<u16>> {
         self.src.read_opt(crate::sfield::sfHookStateScale)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for AccountSet<S> {
+impl<S: FieldSource> TransactionCommonFields for AccountSet<S> {
     type Source = S;
 
     #[inline(always)]
@@ -786,14 +601,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for AccountSe
 }
 
 /// View of the `EscrowCancel` transaction (`ttESCROW_CANCEL`, type code 4).
-pub struct EscrowCancel<S: crate::views::source::FieldSource> {
+pub struct EscrowCancel<S: FieldSource> {
     src: S,
 }
 
 impl EscrowCancel<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `EscrowCancel`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttESCROW_CANCEL).map(|src| Self { src })
     }
 }
@@ -802,9 +617,7 @@ impl EscrowCancel<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttESCROW_CANCEL`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -815,36 +628,32 @@ impl EscrowCancel<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> EscrowCancel<S> {
+impl<S: FieldSource> EscrowCancel<S> {
     /// `sfOwner` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn owner(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfOwner)
     }
 
     /// `sfOfferSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn offer_sequence(&self) -> crate::error::Result<Option<u32>> {
+    pub fn offer_sequence(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfOfferSequence)
     }
 
     /// `sfEscrowID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn escrow_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn escrow_id(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfEscrowID)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for EscrowCancel<S> {
+impl<S: FieldSource> TransactionCommonFields for EscrowCancel<S> {
     type Source = S;
 
     #[inline(always)]
@@ -854,14 +663,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for EscrowCan
 }
 
 /// View of the `SetRegularKey` transaction (`ttREGULAR_KEY_SET`, type code 5).
-pub struct SetRegularKey<S: crate::views::source::FieldSource> {
+pub struct SetRegularKey<S: FieldSource> {
     src: S,
 }
 
 impl SetRegularKey<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `SetRegularKey`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttREGULAR_KEY_SET).map(|src| Self { src })
     }
 }
@@ -870,9 +679,7 @@ impl SetRegularKey<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttREGULAR_KEY_SET`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -883,22 +690,20 @@ impl SetRegularKey<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> SetRegularKey<S> {
+impl<S: FieldSource> SetRegularKey<S> {
     /// `sfRegularKey` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn regular_key(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn regular_key(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfRegularKey)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for SetRegularKey<S> {
+impl<S: FieldSource> TransactionCommonFields for SetRegularKey<S> {
     type Source = S;
 
     #[inline(always)]
@@ -908,14 +713,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for SetRegula
 }
 
 /// View of the `OfferCreate` transaction (`ttOFFER_CREATE`, type code 7).
-pub struct OfferCreate<S: crate::views::source::FieldSource> {
+pub struct OfferCreate<S: FieldSource> {
     src: S,
 }
 
 impl OfferCreate<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `OfferCreate`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttOFFER_CREATE).map(|src| Self { src })
     }
 }
@@ -924,9 +729,7 @@ impl OfferCreate<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttOFFER_CREATE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -937,50 +740,44 @@ impl OfferCreate<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> OfferCreate<S> {
+impl<S: FieldSource> OfferCreate<S> {
     /// `sfTakerPays` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn taker_pays(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn taker_pays(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfTakerPays)
     }
 
     /// `sfTakerGets` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn taker_gets(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn taker_gets(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfTakerGets)
     }
 
     /// `sfExpiration` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn expiration(&self) -> crate::error::Result<Option<u32>> {
+    pub fn expiration(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfExpiration)
     }
 
     /// `sfOfferSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn offer_sequence(&self) -> crate::error::Result<Option<u32>> {
+    pub fn offer_sequence(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfOfferSequence)
     }
 
     /// `sfOfferID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn offer_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn offer_id(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfOfferID)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for OfferCreate<S> {
+impl<S: FieldSource> TransactionCommonFields for OfferCreate<S> {
     type Source = S;
 
     #[inline(always)]
@@ -990,14 +787,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for OfferCrea
 }
 
 /// View of the `OfferCancel` transaction (`ttOFFER_CANCEL`, type code 8).
-pub struct OfferCancel<S: crate::views::source::FieldSource> {
+pub struct OfferCancel<S: FieldSource> {
     src: S,
 }
 
 impl OfferCancel<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `OfferCancel`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttOFFER_CANCEL).map(|src| Self { src })
     }
 }
@@ -1006,9 +803,7 @@ impl OfferCancel<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttOFFER_CANCEL`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -1019,30 +814,26 @@ impl OfferCancel<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> OfferCancel<S> {
+impl<S: FieldSource> OfferCancel<S> {
     /// `sfOfferSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn offer_sequence(&self) -> crate::error::Result<Option<u32>> {
+    pub fn offer_sequence(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfOfferSequence)
     }
 
     /// `sfOfferID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn offer_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn offer_id(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfOfferID)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for OfferCancel<S> {
+impl<S: FieldSource> TransactionCommonFields for OfferCancel<S> {
     type Source = S;
 
     #[inline(always)]
@@ -1052,14 +843,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for OfferCanc
 }
 
 /// View of the `TicketCreate` transaction (`ttTICKET_CREATE`, type code 10).
-pub struct TicketCreate<S: crate::views::source::FieldSource> {
+pub struct TicketCreate<S: FieldSource> {
     src: S,
 }
 
 impl TicketCreate<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `TicketCreate`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttTICKET_CREATE).map(|src| Self { src })
     }
 }
@@ -1068,9 +859,7 @@ impl TicketCreate<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttTICKET_CREATE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -1081,20 +870,20 @@ impl TicketCreate<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> TicketCreate<S> {
+impl<S: FieldSource> TicketCreate<S> {
     /// `sfTicketCount` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn ticket_count(&self) -> crate::error::Result<u32> {
+    pub fn ticket_count(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfTicketCount)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for TicketCreate<S> {
+impl<S: FieldSource> TransactionCommonFields for TicketCreate<S> {
     type Source = S;
 
     #[inline(always)]
@@ -1104,14 +893,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for TicketCre
 }
 
 /// View of the `SignerListSet` transaction (`ttSIGNER_LIST_SET`, type code 12).
-pub struct SignerListSet<S: crate::views::source::FieldSource> {
+pub struct SignerListSet<S: FieldSource> {
     src: S,
 }
 
 impl SignerListSet<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `SignerListSet`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttSIGNER_LIST_SET).map(|src| Self { src })
     }
 }
@@ -1120,9 +909,7 @@ impl SignerListSet<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttSIGNER_LIST_SET`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -1133,47 +920,36 @@ impl SignerListSet<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfSignerEntries` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn signer_entries_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+    pub fn signer_entries_slot(&self) -> Result<Option<SlotObject<crate::types::STArray>>> {
         self.src.subobject_opt(crate::sfield::sfSignerEntries)
     }
 }
 
-impl<S: crate::views::source::FieldSource> SignerListSet<S> {
+impl<S: FieldSource> SignerListSet<S> {
     /// `sfSignerQuorum` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn signer_quorum(&self) -> crate::error::Result<u32> {
+    pub fn signer_quorum(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfSignerQuorum)
     }
 
     /// `sfSignerEntries` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `signer_entries_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
     pub fn signer_entries_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfSignerEntries.code(), out)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for SignerListSet<S> {
+impl<S: FieldSource> TransactionCommonFields for SignerListSet<S> {
     type Source = S;
 
     #[inline(always)]
@@ -1183,14 +959,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for SignerLis
 }
 
 /// View of the `PaymentChannelCreate` transaction (`ttPAYCHAN_CREATE`, type code 13).
-pub struct PaymentChannelCreate<S: crate::views::source::FieldSource> {
+pub struct PaymentChannelCreate<S: FieldSource> {
     src: S,
 }
 
 impl PaymentChannelCreate<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `PaymentChannelCreate`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttPAYCHAN_CREATE).map(|src| Self { src })
     }
 }
@@ -1199,9 +975,7 @@ impl PaymentChannelCreate<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttPAYCHAN_CREATE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -1212,59 +986,50 @@ impl PaymentChannelCreate<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> PaymentChannelCreate<S> {
+impl<S: FieldSource> PaymentChannelCreate<S> {
     /// `sfDestination` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn destination(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfDestination)
     }
 
     /// `sfAmount` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn amount(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfAmount)
     }
 
     /// `sfSettleDelay` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn settle_delay(&self) -> crate::error::Result<u32> {
+    pub fn settle_delay(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfSettleDelay)
     }
 
     /// `sfPublicKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfPublicKey.code(), out)
     }
 
     /// `sfCancelAfter` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn cancel_after(&self) -> crate::error::Result<Option<u32>> {
+    pub fn cancel_after(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfCancelAfter)
     }
 
     /// `sfDestinationTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn destination_tag(&self) -> crate::error::Result<Option<u32>> {
+    pub fn destination_tag(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfDestinationTag)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for PaymentChannelCreate<S> {
+impl<S: FieldSource> TransactionCommonFields for PaymentChannelCreate<S> {
     type Source = S;
 
     #[inline(always)]
@@ -1274,14 +1039,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for PaymentCh
 }
 
 /// View of the `PaymentChannelFund` transaction (`ttPAYCHAN_FUND`, type code 14).
-pub struct PaymentChannelFund<S: crate::views::source::FieldSource> {
+pub struct PaymentChannelFund<S: FieldSource> {
     src: S,
 }
 
 impl PaymentChannelFund<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `PaymentChannelFund`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttPAYCHAN_FUND).map(|src| Self { src })
     }
 }
@@ -1290,9 +1055,7 @@ impl PaymentChannelFund<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttPAYCHAN_FUND`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -1303,34 +1066,32 @@ impl PaymentChannelFund<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> PaymentChannelFund<S> {
+impl<S: FieldSource> PaymentChannelFund<S> {
     /// `sfChannel` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn channel(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn channel(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfChannel)
     }
 
     /// `sfAmount` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn amount(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfAmount)
     }
 
     /// `sfExpiration` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn expiration(&self) -> crate::error::Result<Option<u32>> {
+    pub fn expiration(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfExpiration)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for PaymentChannelFund<S> {
+impl<S: FieldSource> TransactionCommonFields for PaymentChannelFund<S> {
     type Source = S;
 
     #[inline(always)]
@@ -1340,14 +1101,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for PaymentCh
 }
 
 /// View of the `PaymentChannelClaim` transaction (`ttPAYCHAN_CLAIM`, type code 15).
-pub struct PaymentChannelClaim<S: crate::views::source::FieldSource> {
+pub struct PaymentChannelClaim<S: FieldSource> {
     src: S,
 }
 
 impl PaymentChannelClaim<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `PaymentChannelClaim`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttPAYCHAN_CLAIM).map(|src| Self { src })
     }
 }
@@ -1356,9 +1117,7 @@ impl PaymentChannelClaim<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttPAYCHAN_CLAIM`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -1369,58 +1128,40 @@ impl PaymentChannelClaim<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> PaymentChannelClaim<S> {
+impl<S: FieldSource> PaymentChannelClaim<S> {
     /// `sfChannel` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn channel(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn channel(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfChannel)
     }
 
     /// `sfAmount` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn amount(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfAmount)
     }
 
     /// `sfBalance` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn balance(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn balance(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfBalance)
     }
 
     /// `sfSignature` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn signature_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfSignature.code(), out)
     }
 
     /// `sfPublicKey` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfPublicKey.code(), out)
     }
@@ -1428,22 +1169,18 @@ impl<S: crate::views::source::FieldSource> PaymentChannelClaim<S> {
     /// `sfCredentialIDs` — Vector256, `soeOPTIONAL`.
     ///
     /// Dormant field; requires the `all-amendments` feature.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[cfg(feature = "all-amendments")]
     #[inline(always)]
     pub fn credential_ids_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfCredentialIDs.code(), out)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for PaymentChannelClaim<S> {
+impl<S: FieldSource> TransactionCommonFields for PaymentChannelClaim<S> {
     type Source = S;
 
     #[inline(always)]
@@ -1453,14 +1190,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for PaymentCh
 }
 
 /// View of the `CheckCreate` transaction (`ttCHECK_CREATE`, type code 16).
-pub struct CheckCreate<S: crate::views::source::FieldSource> {
+pub struct CheckCreate<S: FieldSource> {
     src: S,
 }
 
 impl CheckCreate<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `CheckCreate`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttCHECK_CREATE).map(|src| Self { src })
     }
 }
@@ -1469,9 +1206,7 @@ impl CheckCreate<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttCHECK_CREATE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -1482,50 +1217,44 @@ impl CheckCreate<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> CheckCreate<S> {
+impl<S: FieldSource> CheckCreate<S> {
     /// `sfDestination` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn destination(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfDestination)
     }
 
     /// `sfSendMax` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn send_max(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn send_max(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfSendMax)
     }
 
     /// `sfExpiration` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn expiration(&self) -> crate::error::Result<Option<u32>> {
+    pub fn expiration(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfExpiration)
     }
 
     /// `sfDestinationTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn destination_tag(&self) -> crate::error::Result<Option<u32>> {
+    pub fn destination_tag(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfDestinationTag)
     }
 
     /// `sfInvoiceID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn invoice_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn invoice_id(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfInvoiceID)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for CheckCreate<S> {
+impl<S: FieldSource> TransactionCommonFields for CheckCreate<S> {
     type Source = S;
 
     #[inline(always)]
@@ -1535,14 +1264,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for CheckCrea
 }
 
 /// View of the `CheckCash` transaction (`ttCHECK_CASH`, type code 17).
-pub struct CheckCash<S: crate::views::source::FieldSource> {
+pub struct CheckCash<S: FieldSource> {
     src: S,
 }
 
 impl CheckCash<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `CheckCash`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttCHECK_CASH).map(|src| Self { src })
     }
 }
@@ -1551,9 +1280,7 @@ impl CheckCash<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttCHECK_CASH`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -1564,36 +1291,32 @@ impl CheckCash<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> CheckCash<S> {
+impl<S: FieldSource> CheckCash<S> {
     /// `sfCheckID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn check_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn check_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfCheckID)
     }
 
     /// `sfAmount` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn amount(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfAmount)
     }
 
     /// `sfDeliverMin` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn deliver_min(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn deliver_min(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfDeliverMin)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for CheckCash<S> {
+impl<S: FieldSource> TransactionCommonFields for CheckCash<S> {
     type Source = S;
 
     #[inline(always)]
@@ -1603,14 +1326,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for CheckCash
 }
 
 /// View of the `CheckCancel` transaction (`ttCHECK_CANCEL`, type code 18).
-pub struct CheckCancel<S: crate::views::source::FieldSource> {
+pub struct CheckCancel<S: FieldSource> {
     src: S,
 }
 
 impl CheckCancel<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `CheckCancel`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttCHECK_CANCEL).map(|src| Self { src })
     }
 }
@@ -1619,9 +1342,7 @@ impl CheckCancel<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttCHECK_CANCEL`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -1632,20 +1353,20 @@ impl CheckCancel<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> CheckCancel<S> {
+impl<S: FieldSource> CheckCancel<S> {
     /// `sfCheckID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn check_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn check_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfCheckID)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for CheckCancel<S> {
+impl<S: FieldSource> TransactionCommonFields for CheckCancel<S> {
     type Source = S;
 
     #[inline(always)]
@@ -1655,14 +1376,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for CheckCanc
 }
 
 /// View of the `DepositPreauth` transaction (`ttDEPOSIT_PREAUTH`, type code 19).
-pub struct DepositPreauth<S: crate::views::source::FieldSource> {
+pub struct DepositPreauth<S: FieldSource> {
     src: S,
 }
 
 impl DepositPreauth<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `DepositPreauth`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttDEPOSIT_PREAUTH).map(|src| Self { src })
     }
 }
@@ -1671,9 +1392,7 @@ impl DepositPreauth<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttDEPOSIT_PREAUTH`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -1684,86 +1403,62 @@ impl DepositPreauth<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAuthorizeCredentials` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn authorize_credentials_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+    pub fn authorize_credentials_slot(&self) -> Result<Option<SlotObject<crate::types::STArray>>> {
         self.src
             .subobject_opt(crate::sfield::sfAuthorizeCredentials)
     }
 
     /// `sfUnauthorizeCredentials` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
     pub fn unauthorize_credentials_slot(
         &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+    ) -> Result<Option<SlotObject<crate::types::STArray>>> {
         self.src
             .subobject_opt(crate::sfield::sfUnauthorizeCredentials)
     }
 }
 
-impl<S: crate::views::source::FieldSource> DepositPreauth<S> {
+impl<S: FieldSource> DepositPreauth<S> {
     /// `sfAuthorize` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn authorize(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn authorize(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfAuthorize)
     }
 
     /// `sfUnauthorize` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn unauthorize(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn unauthorize(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfUnauthorize)
     }
 
     /// `sfAuthorizeCredentials` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `authorize_credentials_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
     pub fn authorize_credentials_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfAuthorizeCredentials.code(), out)
     }
 
     /// `sfUnauthorizeCredentials` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `unauthorize_credentials_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
     pub fn unauthorize_credentials_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfUnauthorizeCredentials.code(), out)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for DepositPreauth<S> {
+impl<S: FieldSource> TransactionCommonFields for DepositPreauth<S> {
     type Source = S;
 
     #[inline(always)]
@@ -1773,14 +1468,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for DepositPr
 }
 
 /// View of the `TrustSet` transaction (`ttTRUST_SET`, type code 20).
-pub struct TrustSet<S: crate::views::source::FieldSource> {
+pub struct TrustSet<S: FieldSource> {
     src: S,
 }
 
 impl TrustSet<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `TrustSet`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttTRUST_SET).map(|src| Self { src })
     }
 }
@@ -1789,9 +1484,7 @@ impl TrustSet<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttTRUST_SET`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -1802,38 +1495,32 @@ impl TrustSet<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> TrustSet<S> {
+impl<S: FieldSource> TrustSet<S> {
     /// `sfLimitAmount` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn limit_amount(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn limit_amount(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfLimitAmount)
     }
 
     /// `sfQualityIn` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn quality_in(&self) -> crate::error::Result<Option<u32>> {
+    pub fn quality_in(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfQualityIn)
     }
 
     /// `sfQualityOut` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn quality_out(&self) -> crate::error::Result<Option<u32>> {
+    pub fn quality_out(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfQualityOut)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for TrustSet<S> {
+impl<S: FieldSource> TransactionCommonFields for TrustSet<S> {
     type Source = S;
 
     #[inline(always)]
@@ -1843,14 +1530,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for TrustSet<
 }
 
 /// View of the `AccountDelete` transaction (`ttACCOUNT_DELETE`, type code 21).
-pub struct AccountDelete<S: crate::views::source::FieldSource> {
+pub struct AccountDelete<S: FieldSource> {
     src: S,
 }
 
 impl AccountDelete<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `AccountDelete`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttACCOUNT_DELETE).map(|src| Self { src })
     }
 }
@@ -1859,9 +1546,7 @@ impl AccountDelete<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttACCOUNT_DELETE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -1872,45 +1557,39 @@ impl AccountDelete<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> AccountDelete<S> {
+impl<S: FieldSource> AccountDelete<S> {
     /// `sfDestination` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn destination(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfDestination)
     }
 
     /// `sfDestinationTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn destination_tag(&self) -> crate::error::Result<Option<u32>> {
+    pub fn destination_tag(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfDestinationTag)
     }
 
     /// `sfCredentialIDs` — Vector256, `soeOPTIONAL`.
     ///
     /// Dormant field; requires the `all-amendments` feature.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[cfg(feature = "all-amendments")]
     #[inline(always)]
     pub fn credential_ids_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfCredentialIDs.code(), out)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for AccountDelete<S> {
+impl<S: FieldSource> TransactionCommonFields for AccountDelete<S> {
     type Source = S;
 
     #[inline(always)]
@@ -1920,14 +1599,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for AccountDe
 }
 
 /// View of the `SetHook` transaction (`ttHOOK_SET`, type code 22).
-pub struct SetHook<S: crate::views::source::FieldSource> {
+pub struct SetHook<S: FieldSource> {
     src: S,
 }
 
 impl SetHook<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `SetHook`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttHOOK_SET).map(|src| Self { src })
     }
 }
@@ -1936,9 +1615,7 @@ impl SetHook<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttHOOK_SET`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -1949,33 +1626,26 @@ impl SetHook<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfHooks` — STArray, `soeREQUIRED`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     #[inline(always)]
-    pub fn hooks_slot(
-        &self,
-    ) -> crate::error::Result<crate::slot_obj::SlotObject<crate::types::STArray>> {
+    pub fn hooks_slot(&self) -> Result<SlotObject<crate::types::STArray>> {
         self.src.subobject(crate::sfield::sfHooks)
     }
 }
 
-impl<S: crate::views::source::FieldSource> SetHook<S> {
+impl<S: FieldSource> SetHook<S> {
     /// `sfHooks` — STArray, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `hooks_slot` on a slot-backed view to navigate the container.
     #[inline(always)]
-    pub fn hooks_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> crate::error::Result<usize> {
+    pub fn hooks_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfHooks.code(), out)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for SetHook<S> {
+impl<S: FieldSource> TransactionCommonFields for SetHook<S> {
     type Source = S;
 
     #[inline(always)]
@@ -1988,7 +1658,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for SetHook<S
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct NFTokenMint<S: crate::views::source::FieldSource> {
+pub struct NFTokenMint<S: FieldSource> {
     src: S,
 }
 
@@ -1996,7 +1666,7 @@ pub struct NFTokenMint<S: crate::views::source::FieldSource> {
 impl NFTokenMint<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `NFTokenMint`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttNFTOKEN_MINT).map(|src| Self { src })
     }
 }
@@ -2006,9 +1676,7 @@ impl NFTokenMint<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttNFTOKEN_MINT`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -2019,75 +1687,58 @@ impl NFTokenMint<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> NFTokenMint<S> {
+impl<S: FieldSource> NFTokenMint<S> {
     /// `sfNFTokenTaxon` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn nftoken_taxon(&self) -> crate::error::Result<u32> {
+    pub fn nftoken_taxon(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfNFTokenTaxon)
     }
 
     /// `sfTransferFee` — UInt16, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn transfer_fee(&self) -> crate::error::Result<Option<u16>> {
+    pub fn transfer_fee(&self) -> Result<Option<u16>> {
         self.src.read_opt(crate::sfield::sfTransferFee)
     }
 
     /// `sfIssuer` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn issuer(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn issuer(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfIssuer)
     }
 
     /// `sfURI` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn uri_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn uri_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src.read_raw_opt(crate::sfield::sfURI.code(), out)
     }
 
     /// `sfAmount` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn amount(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfAmount)
     }
 
     /// `sfDestination` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn destination(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfDestination)
     }
 
     /// `sfExpiration` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn expiration(&self) -> crate::error::Result<Option<u32>> {
+    pub fn expiration(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfExpiration)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for NFTokenMint<S> {
+impl<S: FieldSource> TransactionCommonFields for NFTokenMint<S> {
     type Source = S;
 
     #[inline(always)]
@@ -2100,7 +1751,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for NFTokenMi
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct NFTokenBurn<S: crate::views::source::FieldSource> {
+pub struct NFTokenBurn<S: FieldSource> {
     src: S,
 }
 
@@ -2108,7 +1759,7 @@ pub struct NFTokenBurn<S: crate::views::source::FieldSource> {
 impl NFTokenBurn<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `NFTokenBurn`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttNFTOKEN_BURN).map(|src| Self { src })
     }
 }
@@ -2118,9 +1769,7 @@ impl NFTokenBurn<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttNFTOKEN_BURN`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -2131,30 +1780,28 @@ impl NFTokenBurn<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> NFTokenBurn<S> {
+impl<S: FieldSource> NFTokenBurn<S> {
     /// `sfNFTokenID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn nftoken_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn nftoken_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfNFTokenID)
     }
 
     /// `sfOwner` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn owner(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn owner(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfOwner)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for NFTokenBurn<S> {
+impl<S: FieldSource> TransactionCommonFields for NFTokenBurn<S> {
     type Source = S;
 
     #[inline(always)]
@@ -2167,7 +1814,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for NFTokenBu
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct NFTokenCreateOffer<S: crate::views::source::FieldSource> {
+pub struct NFTokenCreateOffer<S: FieldSource> {
     src: S,
 }
 
@@ -2175,7 +1822,7 @@ pub struct NFTokenCreateOffer<S: crate::views::source::FieldSource> {
 impl NFTokenCreateOffer<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `NFTokenCreateOffer`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttNFTOKEN_CREATE_OFFER)
             .map(|src| Self { src })
     }
@@ -2186,9 +1833,7 @@ impl NFTokenCreateOffer<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttNFTOKEN_CREATE_OFFER`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -2199,52 +1844,46 @@ impl NFTokenCreateOffer<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> NFTokenCreateOffer<S> {
+impl<S: FieldSource> NFTokenCreateOffer<S> {
     /// `sfNFTokenID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn nftoken_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn nftoken_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfNFTokenID)
     }
 
     /// `sfAmount` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn amount(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfAmount)
     }
 
     /// `sfDestination` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn destination(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfDestination)
     }
 
     /// `sfOwner` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn owner(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn owner(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfOwner)
     }
 
     /// `sfExpiration` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn expiration(&self) -> crate::error::Result<Option<u32>> {
+    pub fn expiration(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfExpiration)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for NFTokenCreateOffer<S> {
+impl<S: FieldSource> TransactionCommonFields for NFTokenCreateOffer<S> {
     type Source = S;
 
     #[inline(always)]
@@ -2257,7 +1896,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for NFTokenCr
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct NFTokenCancelOffer<S: crate::views::source::FieldSource> {
+pub struct NFTokenCancelOffer<S: FieldSource> {
     src: S,
 }
 
@@ -2265,7 +1904,7 @@ pub struct NFTokenCancelOffer<S: crate::views::source::FieldSource> {
 impl NFTokenCancelOffer<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `NFTokenCancelOffer`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttNFTOKEN_CANCEL_OFFER)
             .map(|src| Self { src })
     }
@@ -2276,9 +1915,7 @@ impl NFTokenCancelOffer<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttNFTOKEN_CANCEL_OFFER`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -2289,28 +1926,23 @@ impl NFTokenCancelOffer<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> NFTokenCancelOffer<S> {
+impl<S: FieldSource> NFTokenCancelOffer<S> {
     /// `sfNFTokenOffers` — Vector256, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn nftoken_offers_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn nftoken_offers_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src
             .read_raw(crate::sfield::sfNFTokenOffers.code(), out)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for NFTokenCancelOffer<S> {
+impl<S: FieldSource> TransactionCommonFields for NFTokenCancelOffer<S> {
     type Source = S;
 
     #[inline(always)]
@@ -2323,7 +1955,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for NFTokenCa
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct NFTokenAcceptOffer<S: crate::views::source::FieldSource> {
+pub struct NFTokenAcceptOffer<S: FieldSource> {
     src: S,
 }
 
@@ -2331,7 +1963,7 @@ pub struct NFTokenAcceptOffer<S: crate::views::source::FieldSource> {
 impl NFTokenAcceptOffer<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `NFTokenAcceptOffer`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttNFTOKEN_ACCEPT_OFFER)
             .map(|src| Self { src })
     }
@@ -2342,9 +1974,7 @@ impl NFTokenAcceptOffer<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttNFTOKEN_ACCEPT_OFFER`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -2355,40 +1985,34 @@ impl NFTokenAcceptOffer<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> NFTokenAcceptOffer<S> {
+impl<S: FieldSource> NFTokenAcceptOffer<S> {
     /// `sfNFTokenBuyOffer` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn nftoken_buy_offer(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn nftoken_buy_offer(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfNFTokenBuyOffer)
     }
 
     /// `sfNFTokenSellOffer` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn nftoken_sell_offer(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn nftoken_sell_offer(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfNFTokenSellOffer)
     }
 
     /// `sfNFTokenBrokerFee` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn nftoken_broker_fee(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn nftoken_broker_fee(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfNFTokenBrokerFee)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for NFTokenAcceptOffer<S> {
+impl<S: FieldSource> TransactionCommonFields for NFTokenAcceptOffer<S> {
     type Source = S;
 
     #[inline(always)]
@@ -2398,14 +2022,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for NFTokenAc
 }
 
 /// View of the `Clawback` transaction (`ttCLAWBACK`, type code 30).
-pub struct Clawback<S: crate::views::source::FieldSource> {
+pub struct Clawback<S: FieldSource> {
     src: S,
 }
 
 impl Clawback<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `Clawback`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttCLAWBACK).map(|src| Self { src })
     }
 }
@@ -2414,9 +2038,7 @@ impl Clawback<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttCLAWBACK`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -2427,28 +2049,26 @@ impl Clawback<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> Clawback<S> {
+impl<S: FieldSource> Clawback<S> {
     /// `sfAmount` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn amount(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfAmount)
     }
 
     /// `sfHolder` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn holder(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn holder(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfHolder)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for Clawback<S> {
+impl<S: FieldSource> TransactionCommonFields for Clawback<S> {
     type Source = S;
 
     #[inline(always)]
@@ -2461,7 +2081,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for Clawback<
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct AMMClawback<S: crate::views::source::FieldSource> {
+pub struct AMMClawback<S: FieldSource> {
     src: S,
 }
 
@@ -2469,7 +2089,7 @@ pub struct AMMClawback<S: crate::views::source::FieldSource> {
 impl AMMClawback<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `AMMClawback`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttAMM_CLAWBACK).map(|src| Self { src })
     }
 }
@@ -2479,9 +2099,7 @@ impl AMMClawback<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttAMM_CLAWBACK`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -2492,42 +2110,40 @@ impl AMMClawback<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> AMMClawback<S> {
+impl<S: FieldSource> AMMClawback<S> {
     /// `sfHolder` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn holder(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn holder(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfHolder)
     }
 
     /// `sfAsset` — Issue, `soeREQUIRED`.
     #[inline(always)]
-    pub fn asset(&self) -> crate::error::Result<crate::slot_obj::IssueData> {
+    pub fn asset(&self) -> Result<crate::slot_obj::IssueData> {
         self.src.read(crate::sfield::sfAsset)
     }
 
     /// `sfAsset2` — Issue, `soeREQUIRED`.
     #[inline(always)]
-    pub fn asset2(&self) -> crate::error::Result<crate::slot_obj::IssueData> {
+    pub fn asset2(&self) -> Result<crate::slot_obj::IssueData> {
         self.src.read(crate::sfield::sfAsset2)
     }
 
     /// `sfAmount` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn amount(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfAmount)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for AMMClawback<S> {
+impl<S: FieldSource> TransactionCommonFields for AMMClawback<S> {
     type Source = S;
 
     #[inline(always)]
@@ -2540,7 +2156,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for AMMClawba
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct AMMCreate<S: crate::views::source::FieldSource> {
+pub struct AMMCreate<S: FieldSource> {
     src: S,
 }
 
@@ -2548,7 +2164,7 @@ pub struct AMMCreate<S: crate::views::source::FieldSource> {
 impl AMMCreate<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `AMMCreate`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttAMM_CREATE).map(|src| Self { src })
     }
 }
@@ -2558,9 +2174,7 @@ impl AMMCreate<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttAMM_CREATE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -2571,34 +2185,34 @@ impl AMMCreate<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> AMMCreate<S> {
+impl<S: FieldSource> AMMCreate<S> {
     /// `sfAmount` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn amount(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfAmount)
     }
 
     /// `sfAmount2` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn amount2(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn amount2(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfAmount2)
     }
 
     /// `sfTradingFee` — UInt16, `soeREQUIRED`.
     #[inline(always)]
-    pub fn trading_fee(&self) -> crate::error::Result<u16> {
+    pub fn trading_fee(&self) -> Result<u16> {
         self.src.read(crate::sfield::sfTradingFee)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for AMMCreate<S> {
+impl<S: FieldSource> TransactionCommonFields for AMMCreate<S> {
     type Source = S;
 
     #[inline(always)]
@@ -2611,7 +2225,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for AMMCreate
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct AMMDeposit<S: crate::views::source::FieldSource> {
+pub struct AMMDeposit<S: FieldSource> {
     src: S,
 }
 
@@ -2619,7 +2233,7 @@ pub struct AMMDeposit<S: crate::views::source::FieldSource> {
 impl AMMDeposit<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `AMMDeposit`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttAMM_DEPOSIT).map(|src| Self { src })
     }
 }
@@ -2629,9 +2243,7 @@ impl AMMDeposit<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttAMM_DEPOSIT`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -2642,68 +2254,58 @@ impl AMMDeposit<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> AMMDeposit<S> {
+impl<S: FieldSource> AMMDeposit<S> {
     /// `sfAsset` — Issue, `soeREQUIRED`.
     #[inline(always)]
-    pub fn asset(&self) -> crate::error::Result<crate::slot_obj::IssueData> {
+    pub fn asset(&self) -> Result<crate::slot_obj::IssueData> {
         self.src.read(crate::sfield::sfAsset)
     }
 
     /// `sfAsset2` — Issue, `soeREQUIRED`.
     #[inline(always)]
-    pub fn asset2(&self) -> crate::error::Result<crate::slot_obj::IssueData> {
+    pub fn asset2(&self) -> Result<crate::slot_obj::IssueData> {
         self.src.read(crate::sfield::sfAsset2)
     }
 
     /// `sfAmount` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn amount(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfAmount)
     }
 
     /// `sfAmount2` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn amount2(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn amount2(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfAmount2)
     }
 
     /// `sfEPrice` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn e_price(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn e_price(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfEPrice)
     }
 
     /// `sfLPTokenOut` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn lp_token_out(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn lp_token_out(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfLPTokenOut)
     }
 
     /// `sfTradingFee` — UInt16, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn trading_fee(&self) -> crate::error::Result<Option<u16>> {
+    pub fn trading_fee(&self) -> Result<Option<u16>> {
         self.src.read_opt(crate::sfield::sfTradingFee)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for AMMDeposit<S> {
+impl<S: FieldSource> TransactionCommonFields for AMMDeposit<S> {
     type Source = S;
 
     #[inline(always)]
@@ -2716,7 +2318,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for AMMDeposi
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct AMMWithdraw<S: crate::views::source::FieldSource> {
+pub struct AMMWithdraw<S: FieldSource> {
     src: S,
 }
 
@@ -2724,7 +2326,7 @@ pub struct AMMWithdraw<S: crate::views::source::FieldSource> {
 impl AMMWithdraw<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `AMMWithdraw`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttAMM_WITHDRAW).map(|src| Self { src })
     }
 }
@@ -2734,9 +2336,7 @@ impl AMMWithdraw<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttAMM_WITHDRAW`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -2747,60 +2347,52 @@ impl AMMWithdraw<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> AMMWithdraw<S> {
+impl<S: FieldSource> AMMWithdraw<S> {
     /// `sfAsset` — Issue, `soeREQUIRED`.
     #[inline(always)]
-    pub fn asset(&self) -> crate::error::Result<crate::slot_obj::IssueData> {
+    pub fn asset(&self) -> Result<crate::slot_obj::IssueData> {
         self.src.read(crate::sfield::sfAsset)
     }
 
     /// `sfAsset2` — Issue, `soeREQUIRED`.
     #[inline(always)]
-    pub fn asset2(&self) -> crate::error::Result<crate::slot_obj::IssueData> {
+    pub fn asset2(&self) -> Result<crate::slot_obj::IssueData> {
         self.src.read(crate::sfield::sfAsset2)
     }
 
     /// `sfAmount` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn amount(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfAmount)
     }
 
     /// `sfAmount2` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn amount2(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn amount2(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfAmount2)
     }
 
     /// `sfEPrice` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn e_price(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn e_price(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfEPrice)
     }
 
     /// `sfLPTokenIn` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn lp_token_in(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn lp_token_in(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfLPTokenIn)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for AMMWithdraw<S> {
+impl<S: FieldSource> TransactionCommonFields for AMMWithdraw<S> {
     type Source = S;
 
     #[inline(always)]
@@ -2813,7 +2405,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for AMMWithdr
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct AMMVote<S: crate::views::source::FieldSource> {
+pub struct AMMVote<S: FieldSource> {
     src: S,
 }
 
@@ -2821,7 +2413,7 @@ pub struct AMMVote<S: crate::views::source::FieldSource> {
 impl AMMVote<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `AMMVote`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttAMM_VOTE).map(|src| Self { src })
     }
 }
@@ -2831,9 +2423,7 @@ impl AMMVote<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttAMM_VOTE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -2844,34 +2434,34 @@ impl AMMVote<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> AMMVote<S> {
+impl<S: FieldSource> AMMVote<S> {
     /// `sfAsset` — Issue, `soeREQUIRED`.
     #[inline(always)]
-    pub fn asset(&self) -> crate::error::Result<crate::slot_obj::IssueData> {
+    pub fn asset(&self) -> Result<crate::slot_obj::IssueData> {
         self.src.read(crate::sfield::sfAsset)
     }
 
     /// `sfAsset2` — Issue, `soeREQUIRED`.
     #[inline(always)]
-    pub fn asset2(&self) -> crate::error::Result<crate::slot_obj::IssueData> {
+    pub fn asset2(&self) -> Result<crate::slot_obj::IssueData> {
         self.src.read(crate::sfield::sfAsset2)
     }
 
     /// `sfTradingFee` — UInt16, `soeREQUIRED`.
     #[inline(always)]
-    pub fn trading_fee(&self) -> crate::error::Result<u16> {
+    pub fn trading_fee(&self) -> Result<u16> {
         self.src.read(crate::sfield::sfTradingFee)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for AMMVote<S> {
+impl<S: FieldSource> TransactionCommonFields for AMMVote<S> {
     type Source = S;
 
     #[inline(always)]
@@ -2884,7 +2474,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for AMMVote<S
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct AMMBid<S: crate::views::source::FieldSource> {
+pub struct AMMBid<S: FieldSource> {
     src: S,
 }
 
@@ -2892,7 +2482,7 @@ pub struct AMMBid<S: crate::views::source::FieldSource> {
 impl AMMBid<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `AMMBid`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttAMM_BID).map(|src| Self { src })
     }
 }
@@ -2902,9 +2492,7 @@ impl AMMBid<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttAMM_BID`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -2915,71 +2503,56 @@ impl AMMBid<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAuthAccounts` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn auth_accounts_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+    pub fn auth_accounts_slot(&self) -> Result<Option<SlotObject<crate::types::STArray>>> {
         self.src.subobject_opt(crate::sfield::sfAuthAccounts)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> AMMBid<S> {
+impl<S: FieldSource> AMMBid<S> {
     /// `sfAsset` — Issue, `soeREQUIRED`.
     #[inline(always)]
-    pub fn asset(&self) -> crate::error::Result<crate::slot_obj::IssueData> {
+    pub fn asset(&self) -> Result<crate::slot_obj::IssueData> {
         self.src.read(crate::sfield::sfAsset)
     }
 
     /// `sfAsset2` — Issue, `soeREQUIRED`.
     #[inline(always)]
-    pub fn asset2(&self) -> crate::error::Result<crate::slot_obj::IssueData> {
+    pub fn asset2(&self) -> Result<crate::slot_obj::IssueData> {
         self.src.read(crate::sfield::sfAsset2)
     }
 
     /// `sfBidMin` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn bid_min(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn bid_min(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfBidMin)
     }
 
     /// `sfBidMax` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn bid_max(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn bid_max(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfBidMax)
     }
 
     /// `sfAuthAccounts` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `auth_accounts_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
     pub fn auth_accounts_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfAuthAccounts.code(), out)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for AMMBid<S> {
+impl<S: FieldSource> TransactionCommonFields for AMMBid<S> {
     type Source = S;
 
     #[inline(always)]
@@ -2992,7 +2565,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for AMMBid<S>
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct AMMDelete<S: crate::views::source::FieldSource> {
+pub struct AMMDelete<S: FieldSource> {
     src: S,
 }
 
@@ -3000,7 +2573,7 @@ pub struct AMMDelete<S: crate::views::source::FieldSource> {
 impl AMMDelete<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `AMMDelete`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttAMM_DELETE).map(|src| Self { src })
     }
 }
@@ -3010,9 +2583,7 @@ impl AMMDelete<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttAMM_DELETE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -3023,28 +2594,28 @@ impl AMMDelete<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> AMMDelete<S> {
+impl<S: FieldSource> AMMDelete<S> {
     /// `sfAsset` — Issue, `soeREQUIRED`.
     #[inline(always)]
-    pub fn asset(&self) -> crate::error::Result<crate::slot_obj::IssueData> {
+    pub fn asset(&self) -> Result<crate::slot_obj::IssueData> {
         self.src.read(crate::sfield::sfAsset)
     }
 
     /// `sfAsset2` — Issue, `soeREQUIRED`.
     #[inline(always)]
-    pub fn asset2(&self) -> crate::error::Result<crate::slot_obj::IssueData> {
+    pub fn asset2(&self) -> Result<crate::slot_obj::IssueData> {
         self.src.read(crate::sfield::sfAsset2)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for AMMDelete<S> {
+impl<S: FieldSource> TransactionCommonFields for AMMDelete<S> {
     type Source = S;
 
     #[inline(always)]
@@ -3054,14 +2625,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for AMMDelete
 }
 
 /// View of the `URITokenMint` transaction (`ttURITOKEN_MINT`, type code 45).
-pub struct URITokenMint<S: crate::views::source::FieldSource> {
+pub struct URITokenMint<S: FieldSource> {
     src: S,
 }
 
 impl URITokenMint<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `URITokenMint`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttURITOKEN_MINT).map(|src| Self { src })
     }
 }
@@ -3070,9 +2641,7 @@ impl URITokenMint<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttURITOKEN_MINT`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -3083,46 +2652,38 @@ impl URITokenMint<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> URITokenMint<S> {
+impl<S: FieldSource> URITokenMint<S> {
     /// `sfURI` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn uri_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> crate::error::Result<usize> {
+    pub fn uri_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfURI.code(), out)
     }
 
     /// `sfDigest` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn digest(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn digest(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfDigest)
     }
 
     /// `sfAmount` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn amount(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfAmount)
     }
 
     /// `sfDestination` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn destination(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfDestination)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for URITokenMint<S> {
+impl<S: FieldSource> TransactionCommonFields for URITokenMint<S> {
     type Source = S;
 
     #[inline(always)]
@@ -3132,14 +2693,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for URITokenM
 }
 
 /// View of the `URITokenBurn` transaction (`ttURITOKEN_BURN`, type code 46).
-pub struct URITokenBurn<S: crate::views::source::FieldSource> {
+pub struct URITokenBurn<S: FieldSource> {
     src: S,
 }
 
 impl URITokenBurn<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `URITokenBurn`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttURITOKEN_BURN).map(|src| Self { src })
     }
 }
@@ -3148,9 +2709,7 @@ impl URITokenBurn<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttURITOKEN_BURN`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -3161,20 +2720,20 @@ impl URITokenBurn<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> URITokenBurn<S> {
+impl<S: FieldSource> URITokenBurn<S> {
     /// `sfURITokenID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn uri_token_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn uri_token_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfURITokenID)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for URITokenBurn<S> {
+impl<S: FieldSource> TransactionCommonFields for URITokenBurn<S> {
     type Source = S;
 
     #[inline(always)]
@@ -3184,14 +2743,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for URITokenB
 }
 
 /// View of the `URITokenBuy` transaction (`ttURITOKEN_BUY`, type code 47).
-pub struct URITokenBuy<S: crate::views::source::FieldSource> {
+pub struct URITokenBuy<S: FieldSource> {
     src: S,
 }
 
 impl URITokenBuy<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `URITokenBuy`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttURITOKEN_BUY).map(|src| Self { src })
     }
 }
@@ -3200,9 +2759,7 @@ impl URITokenBuy<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttURITOKEN_BUY`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -3213,26 +2770,26 @@ impl URITokenBuy<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> URITokenBuy<S> {
+impl<S: FieldSource> URITokenBuy<S> {
     /// `sfURITokenID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn uri_token_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn uri_token_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfURITokenID)
     }
 
     /// `sfAmount` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn amount(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfAmount)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for URITokenBuy<S> {
+impl<S: FieldSource> TransactionCommonFields for URITokenBuy<S> {
     type Source = S;
 
     #[inline(always)]
@@ -3242,14 +2799,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for URITokenB
 }
 
 /// View of the `URITokenCreateSellOffer` transaction (`ttURITOKEN_CREATE_SELL_OFFER`, type code 48).
-pub struct URITokenCreateSellOffer<S: crate::views::source::FieldSource> {
+pub struct URITokenCreateSellOffer<S: FieldSource> {
     src: S,
 }
 
 impl URITokenCreateSellOffer<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `URITokenCreateSellOffer`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttURITOKEN_CREATE_SELL_OFFER)
             .map(|src| Self { src })
     }
@@ -3259,9 +2816,7 @@ impl URITokenCreateSellOffer<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttURITOKEN_CREATE_SELL_OFFER`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -3272,34 +2827,32 @@ impl URITokenCreateSellOffer<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> URITokenCreateSellOffer<S> {
+impl<S: FieldSource> URITokenCreateSellOffer<S> {
     /// `sfURITokenID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn uri_token_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn uri_token_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfURITokenID)
     }
 
     /// `sfAmount` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn amount(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfAmount)
     }
 
     /// `sfDestination` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn destination(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfDestination)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for URITokenCreateSellOffer<S> {
+impl<S: FieldSource> TransactionCommonFields for URITokenCreateSellOffer<S> {
     type Source = S;
 
     #[inline(always)]
@@ -3309,14 +2862,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for URITokenC
 }
 
 /// View of the `URITokenCancelSellOffer` transaction (`ttURITOKEN_CANCEL_SELL_OFFER`, type code 49).
-pub struct URITokenCancelSellOffer<S: crate::views::source::FieldSource> {
+pub struct URITokenCancelSellOffer<S: FieldSource> {
     src: S,
 }
 
 impl URITokenCancelSellOffer<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `URITokenCancelSellOffer`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttURITOKEN_CANCEL_SELL_OFFER)
             .map(|src| Self { src })
     }
@@ -3326,9 +2879,7 @@ impl URITokenCancelSellOffer<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttURITOKEN_CANCEL_SELL_OFFER`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -3339,20 +2890,20 @@ impl URITokenCancelSellOffer<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> URITokenCancelSellOffer<S> {
+impl<S: FieldSource> URITokenCancelSellOffer<S> {
     /// `sfURITokenID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn uri_token_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn uri_token_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfURITokenID)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for URITokenCancelSellOffer<S> {
+impl<S: FieldSource> TransactionCommonFields for URITokenCancelSellOffer<S> {
     type Source = S;
 
     #[inline(always)]
@@ -3365,7 +2916,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for URITokenC
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct XChainCreateClaimID<S: crate::views::source::FieldSource> {
+pub struct XChainCreateClaimID<S: FieldSource> {
     src: S,
 }
 
@@ -3373,7 +2924,7 @@ pub struct XChainCreateClaimID<S: crate::views::source::FieldSource> {
 impl XChainCreateClaimID<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `XChainCreateClaimID`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttXCHAIN_CREATE_CLAIM_ID)
             .map(|src| Self { src })
     }
@@ -3384,9 +2935,7 @@ impl XChainCreateClaimID<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttXCHAIN_CREATE_CLAIM_ID`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -3397,39 +2946,34 @@ impl XChainCreateClaimID<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> XChainCreateClaimID<S> {
+impl<S: FieldSource> XChainCreateClaimID<S> {
     /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfXChainBridge.code(), out)
     }
 
     /// `sfSignatureReward` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn signature_reward(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn signature_reward(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfSignatureReward)
     }
 
     /// `sfOtherChainSource` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn other_chain_source(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn other_chain_source(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfOtherChainSource)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for XChainCreateClaimID<S> {
+impl<S: FieldSource> TransactionCommonFields for XChainCreateClaimID<S> {
     type Source = S;
 
     #[inline(always)]
@@ -3442,7 +2986,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for XChainCre
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct XChainCommit<S: crate::views::source::FieldSource> {
+pub struct XChainCommit<S: FieldSource> {
     src: S,
 }
 
@@ -3450,7 +2994,7 @@ pub struct XChainCommit<S: crate::views::source::FieldSource> {
 impl XChainCommit<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `XChainCommit`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttXCHAIN_COMMIT).map(|src| Self { src })
     }
 }
@@ -3460,9 +3004,7 @@ impl XChainCommit<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttXCHAIN_COMMIT`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -3473,47 +3015,40 @@ impl XChainCommit<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> XChainCommit<S> {
+impl<S: FieldSource> XChainCommit<S> {
     /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfXChainBridge.code(), out)
     }
 
     /// `sfXChainClaimID` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn xchain_claim_id(&self) -> crate::error::Result<u64> {
+    pub fn xchain_claim_id(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfXChainClaimID)
     }
 
     /// `sfAmount` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn amount(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfAmount)
     }
 
     /// `sfOtherChainDestination` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn other_chain_destination(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn other_chain_destination(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfOtherChainDestination)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for XChainCommit<S> {
+impl<S: FieldSource> TransactionCommonFields for XChainCommit<S> {
     type Source = S;
 
     #[inline(always)]
@@ -3526,7 +3061,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for XChainCom
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct XChainClaim<S: crate::views::source::FieldSource> {
+pub struct XChainClaim<S: FieldSource> {
     src: S,
 }
 
@@ -3534,7 +3069,7 @@ pub struct XChainClaim<S: crate::views::source::FieldSource> {
 impl XChainClaim<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `XChainClaim`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttXCHAIN_CLAIM).map(|src| Self { src })
     }
 }
@@ -3544,9 +3079,7 @@ impl XChainClaim<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttXCHAIN_CLAIM`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -3557,53 +3090,46 @@ impl XChainClaim<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> XChainClaim<S> {
+impl<S: FieldSource> XChainClaim<S> {
     /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfXChainBridge.code(), out)
     }
 
     /// `sfXChainClaimID` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn xchain_claim_id(&self) -> crate::error::Result<u64> {
+    pub fn xchain_claim_id(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfXChainClaimID)
     }
 
     /// `sfDestination` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn destination(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfDestination)
     }
 
     /// `sfDestinationTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn destination_tag(&self) -> crate::error::Result<Option<u32>> {
+    pub fn destination_tag(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfDestinationTag)
     }
 
     /// `sfAmount` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn amount(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfAmount)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for XChainClaim<S> {
+impl<S: FieldSource> TransactionCommonFields for XChainClaim<S> {
     type Source = S;
 
     #[inline(always)]
@@ -3616,7 +3142,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for XChainCla
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct XChainAccountCreateCommit<S: crate::views::source::FieldSource> {
+pub struct XChainAccountCreateCommit<S: FieldSource> {
     src: S,
 }
 
@@ -3624,7 +3150,7 @@ pub struct XChainAccountCreateCommit<S: crate::views::source::FieldSource> {
 impl XChainAccountCreateCommit<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `XChainAccountCreateCommit`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttXCHAIN_ACCOUNT_CREATE_COMMIT)
             .map(|src| Self { src })
     }
@@ -3635,9 +3161,7 @@ impl XChainAccountCreateCommit<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttXCHAIN_ACCOUNT_CREATE_COMMIT`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -3648,47 +3172,40 @@ impl XChainAccountCreateCommit<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> XChainAccountCreateCommit<S> {
+impl<S: FieldSource> XChainAccountCreateCommit<S> {
     /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfXChainBridge.code(), out)
     }
 
     /// `sfDestination` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn destination(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfDestination)
     }
 
     /// `sfAmount` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn amount(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfAmount)
     }
 
     /// `sfSignatureReward` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn signature_reward(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn signature_reward(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfSignatureReward)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields
-    for XChainAccountCreateCommit<S>
-{
+impl<S: FieldSource> TransactionCommonFields for XChainAccountCreateCommit<S> {
     type Source = S;
 
     #[inline(always)]
@@ -3701,7 +3218,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct XChainAddClaimAttestation<S: crate::views::source::FieldSource> {
+pub struct XChainAddClaimAttestation<S: FieldSource> {
     src: S,
 }
 
@@ -3709,7 +3226,7 @@ pub struct XChainAddClaimAttestation<S: crate::views::source::FieldSource> {
 impl XChainAddClaimAttestation<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `XChainAddClaimAttestation`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttXCHAIN_ADD_CLAIM_ATTESTATION)
             .map(|src| Self { src })
     }
@@ -3720,9 +3237,7 @@ impl XChainAddClaimAttestation<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttXCHAIN_ADD_CLAIM_ATTESTATION`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -3733,95 +3248,76 @@ impl XChainAddClaimAttestation<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> XChainAddClaimAttestation<S> {
+impl<S: FieldSource> XChainAddClaimAttestation<S> {
     /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfXChainBridge.code(), out)
     }
 
     /// `sfAttestationSignerAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn attestation_signer_account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn attestation_signer_account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAttestationSignerAccount)
     }
 
     /// `sfPublicKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfPublicKey.code(), out)
     }
 
     /// `sfSignature` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn signature_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfSignature.code(), out)
     }
 
     /// `sfOtherChainSource` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn other_chain_source(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn other_chain_source(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfOtherChainSource)
     }
 
     /// `sfAmount` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn amount(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfAmount)
     }
 
     /// `sfAttestationRewardAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn attestation_reward_account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn attestation_reward_account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAttestationRewardAccount)
     }
 
     /// `sfWasLockingChainSend` — UInt8, `soeREQUIRED`.
     #[inline(always)]
-    pub fn was_locking_chain_send(&self) -> crate::error::Result<u8> {
+    pub fn was_locking_chain_send(&self) -> Result<u8> {
         self.src.read(crate::sfield::sfWasLockingChainSend)
     }
 
     /// `sfXChainClaimID` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn xchain_claim_id(&self) -> crate::error::Result<u64> {
+    pub fn xchain_claim_id(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfXChainClaimID)
     }
 
     /// `sfDestination` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn destination(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfDestination)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields
-    for XChainAddClaimAttestation<S>
-{
+impl<S: FieldSource> TransactionCommonFields for XChainAddClaimAttestation<S> {
     type Source = S;
 
     #[inline(always)]
@@ -3834,7 +3330,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct XChainAddAccountCreateAttestation<S: crate::views::source::FieldSource> {
+pub struct XChainAddAccountCreateAttestation<S: FieldSource> {
     src: S,
 }
 
@@ -3842,7 +3338,7 @@ pub struct XChainAddAccountCreateAttestation<S: crate::views::source::FieldSourc
 impl XChainAddAccountCreateAttestation<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `XChainAddAccountCreateAttestation`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttXCHAIN_ADD_ACCOUNT_CREATE_ATTESTATION)
             .map(|src| Self { src })
     }
@@ -3853,9 +3349,7 @@ impl XChainAddAccountCreateAttestation<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttXCHAIN_ADD_ACCOUNT_CREATE_ATTESTATION`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -3866,99 +3360,82 @@ impl XChainAddAccountCreateAttestation<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> XChainAddAccountCreateAttestation<S> {
+impl<S: FieldSource> XChainAddAccountCreateAttestation<S> {
     /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfXChainBridge.code(), out)
     }
 
     /// `sfAttestationSignerAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn attestation_signer_account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn attestation_signer_account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAttestationSignerAccount)
     }
 
     /// `sfPublicKey` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfPublicKey.code(), out)
     }
 
     /// `sfSignature` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn signature_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn signature_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfSignature.code(), out)
     }
 
     /// `sfOtherChainSource` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn other_chain_source(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn other_chain_source(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfOtherChainSource)
     }
 
     /// `sfAmount` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn amount(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfAmount)
     }
 
     /// `sfAttestationRewardAccount` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn attestation_reward_account(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn attestation_reward_account(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfAttestationRewardAccount)
     }
 
     /// `sfWasLockingChainSend` — UInt8, `soeREQUIRED`.
     #[inline(always)]
-    pub fn was_locking_chain_send(&self) -> crate::error::Result<u8> {
+    pub fn was_locking_chain_send(&self) -> Result<u8> {
         self.src.read(crate::sfield::sfWasLockingChainSend)
     }
 
     /// `sfXChainAccountCreateCount` — UInt64, `soeREQUIRED`.
     #[inline(always)]
-    pub fn xchain_account_create_count(&self) -> crate::error::Result<u64> {
+    pub fn xchain_account_create_count(&self) -> Result<u64> {
         self.src.read(crate::sfield::sfXChainAccountCreateCount)
     }
 
     /// `sfDestination` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn destination(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfDestination)
     }
 
     /// `sfSignatureReward` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn signature_reward(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn signature_reward(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfSignatureReward)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields
-    for XChainAddAccountCreateAttestation<S>
-{
+impl<S: FieldSource> TransactionCommonFields for XChainAddAccountCreateAttestation<S> {
     type Source = S;
 
     #[inline(always)]
@@ -3971,7 +3448,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct XChainModifyBridge<S: crate::views::source::FieldSource> {
+pub struct XChainModifyBridge<S: FieldSource> {
     src: S,
 }
 
@@ -3979,7 +3456,7 @@ pub struct XChainModifyBridge<S: crate::views::source::FieldSource> {
 impl XChainModifyBridge<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `XChainModifyBridge`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttXCHAIN_MODIFY_BRIDGE)
             .map(|src| Self { src })
     }
@@ -3990,9 +3467,7 @@ impl XChainModifyBridge<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttXCHAIN_MODIFY_BRIDGE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -4003,45 +3478,34 @@ impl XChainModifyBridge<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> XChainModifyBridge<S> {
+impl<S: FieldSource> XChainModifyBridge<S> {
     /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfXChainBridge.code(), out)
     }
 
     /// `sfSignatureReward` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn signature_reward(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn signature_reward(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfSignatureReward)
     }
 
     /// `sfMinAccountCreateAmount` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn min_account_create_amount(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn min_account_create_amount(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfMinAccountCreateAmount)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for XChainModifyBridge<S> {
+impl<S: FieldSource> TransactionCommonFields for XChainModifyBridge<S> {
     type Source = S;
 
     #[inline(always)]
@@ -4054,7 +3518,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for XChainMod
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct XChainCreateBridge<S: crate::views::source::FieldSource> {
+pub struct XChainCreateBridge<S: FieldSource> {
     src: S,
 }
 
@@ -4062,7 +3526,7 @@ pub struct XChainCreateBridge<S: crate::views::source::FieldSource> {
 impl XChainCreateBridge<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `XChainCreateBridge`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttXCHAIN_CREATE_BRIDGE)
             .map(|src| Self { src })
     }
@@ -4073,9 +3537,7 @@ impl XChainCreateBridge<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttXCHAIN_CREATE_BRIDGE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -4086,43 +3548,34 @@ impl XChainCreateBridge<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> XChainCreateBridge<S> {
+impl<S: FieldSource> XChainCreateBridge<S> {
     /// `sfXChainBridge` — XChainBridge, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn xchain_bridge_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfXChainBridge.code(), out)
     }
 
     /// `sfSignatureReward` — Amount, `soeREQUIRED`.
     #[inline(always)]
-    pub fn signature_reward(&self) -> crate::error::Result<crate::slot_obj::AmountBytes> {
+    pub fn signature_reward(&self) -> Result<crate::slot_obj::AmountBytes> {
         self.src.read(crate::sfield::sfSignatureReward)
     }
 
     /// `sfMinAccountCreateAmount` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn min_account_create_amount(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn min_account_create_amount(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfMinAccountCreateAmount)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for XChainCreateBridge<S> {
+impl<S: FieldSource> TransactionCommonFields for XChainCreateBridge<S> {
     type Source = S;
 
     #[inline(always)]
@@ -4135,7 +3588,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for XChainCre
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct DIDSet<S: crate::views::source::FieldSource> {
+pub struct DIDSet<S: FieldSource> {
     src: S,
 }
 
@@ -4143,7 +3596,7 @@ pub struct DIDSet<S: crate::views::source::FieldSource> {
 impl DIDSet<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `DIDSet`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttDID_SET).map(|src| Self { src })
     }
 }
@@ -4153,9 +3606,7 @@ impl DIDSet<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttDID_SET`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -4166,56 +3617,35 @@ impl DIDSet<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> DIDSet<S> {
+impl<S: FieldSource> DIDSet<S> {
     /// `sfDIDDocument` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn did_document_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn did_document_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfDIDDocument.code(), out)
     }
 
     /// `sfURI` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn uri_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn uri_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src.read_raw_opt(crate::sfield::sfURI.code(), out)
     }
 
     /// `sfData` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn data_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn data_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src.read_raw_opt(crate::sfield::sfData.code(), out)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for DIDSet<S> {
+impl<S: FieldSource> TransactionCommonFields for DIDSet<S> {
     type Source = S;
 
     #[inline(always)]
@@ -4228,7 +3658,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for DIDSet<S>
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct DIDDelete<S: crate::views::source::FieldSource> {
+pub struct DIDDelete<S: FieldSource> {
     src: S,
 }
 
@@ -4236,7 +3666,7 @@ pub struct DIDDelete<S: crate::views::source::FieldSource> {
 impl DIDDelete<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `DIDDelete`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttDID_DELETE).map(|src| Self { src })
     }
 }
@@ -4246,9 +3676,7 @@ impl DIDDelete<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttDID_DELETE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -4259,16 +3687,16 @@ impl DIDDelete<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> DIDDelete<S> {}
+impl<S: FieldSource> DIDDelete<S> {}
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for DIDDelete<S> {
+impl<S: FieldSource> TransactionCommonFields for DIDDelete<S> {
     type Source = S;
 
     #[inline(always)]
@@ -4278,14 +3706,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for DIDDelete
 }
 
 /// View of the `OracleSet` transaction (`ttORACLE_SET`, type code 60).
-pub struct OracleSet<S: crate::views::source::FieldSource> {
+pub struct OracleSet<S: FieldSource> {
     src: S,
 }
 
 impl OracleSet<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `OracleSet`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttORACLE_SET).map(|src| Self { src })
     }
 }
@@ -4294,9 +3722,7 @@ impl OracleSet<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttORACLE_SET`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -4307,89 +3733,58 @@ impl OracleSet<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfPriceDataSeries` — STArray, `soeREQUIRED`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     #[inline(always)]
-    pub fn price_data_series_slot(
-        &self,
-    ) -> crate::error::Result<crate::slot_obj::SlotObject<crate::types::STArray>> {
+    pub fn price_data_series_slot(&self) -> Result<SlotObject<crate::types::STArray>> {
         self.src.subobject(crate::sfield::sfPriceDataSeries)
     }
 }
 
-impl<S: crate::views::source::FieldSource> OracleSet<S> {
+impl<S: FieldSource> OracleSet<S> {
     /// `sfOracleDocumentID` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn oracle_document_id(&self) -> crate::error::Result<u32> {
+    pub fn oracle_document_id(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfOracleDocumentID)
     }
 
     /// `sfProvider` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn provider_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn provider_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src.read_raw_opt(crate::sfield::sfProvider.code(), out)
     }
 
     /// `sfURI` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn uri_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn uri_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src.read_raw_opt(crate::sfield::sfURI.code(), out)
     }
 
     /// `sfAssetClass` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn asset_class_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn asset_class_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfAssetClass.code(), out)
     }
 
     /// `sfLastUpdateTime` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn last_update_time(&self) -> crate::error::Result<u32> {
+    pub fn last_update_time(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfLastUpdateTime)
     }
 
     /// `sfPriceDataSeries` — STArray, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `price_data_series_slot` on a slot-backed view to navigate the container.
     #[inline(always)]
-    pub fn price_data_series_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn price_data_series_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src
             .read_raw(crate::sfield::sfPriceDataSeries.code(), out)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for OracleSet<S> {
+impl<S: FieldSource> TransactionCommonFields for OracleSet<S> {
     type Source = S;
 
     #[inline(always)]
@@ -4399,14 +3794,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for OracleSet
 }
 
 /// View of the `OracleDelete` transaction (`ttORACLE_DELETE`, type code 61).
-pub struct OracleDelete<S: crate::views::source::FieldSource> {
+pub struct OracleDelete<S: FieldSource> {
     src: S,
 }
 
 impl OracleDelete<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `OracleDelete`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttORACLE_DELETE).map(|src| Self { src })
     }
 }
@@ -4415,9 +3810,7 @@ impl OracleDelete<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttORACLE_DELETE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -4428,20 +3821,20 @@ impl OracleDelete<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> OracleDelete<S> {
+impl<S: FieldSource> OracleDelete<S> {
     /// `sfOracleDocumentID` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn oracle_document_id(&self) -> crate::error::Result<u32> {
+    pub fn oracle_document_id(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfOracleDocumentID)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for OracleDelete<S> {
+impl<S: FieldSource> TransactionCommonFields for OracleDelete<S> {
     type Source = S;
 
     #[inline(always)]
@@ -4454,7 +3847,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for OracleDel
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct LedgerStateFix<S: crate::views::source::FieldSource> {
+pub struct LedgerStateFix<S: FieldSource> {
     src: S,
 }
 
@@ -4462,7 +3855,7 @@ pub struct LedgerStateFix<S: crate::views::source::FieldSource> {
 impl LedgerStateFix<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `LedgerStateFix`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttLEDGER_STATE_FIX).map(|src| Self { src })
     }
 }
@@ -4472,9 +3865,7 @@ impl LedgerStateFix<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttLEDGER_STATE_FIX`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -4485,30 +3876,28 @@ impl LedgerStateFix<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> LedgerStateFix<S> {
+impl<S: FieldSource> LedgerStateFix<S> {
     /// `sfLedgerFixType` — UInt16, `soeREQUIRED`.
     #[inline(always)]
-    pub fn ledger_fix_type(&self) -> crate::error::Result<u16> {
+    pub fn ledger_fix_type(&self) -> Result<u16> {
         self.src.read(crate::sfield::sfLedgerFixType)
     }
 
     /// `sfOwner` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn owner(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn owner(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfOwner)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for LedgerStateFix<S> {
+impl<S: FieldSource> TransactionCommonFields for LedgerStateFix<S> {
     type Source = S;
 
     #[inline(always)]
@@ -4521,7 +3910,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for LedgerSta
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct MPTokenIssuanceCreate<S: crate::views::source::FieldSource> {
+pub struct MPTokenIssuanceCreate<S: FieldSource> {
     src: S,
 }
 
@@ -4529,7 +3918,7 @@ pub struct MPTokenIssuanceCreate<S: crate::views::source::FieldSource> {
 impl MPTokenIssuanceCreate<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `MPTokenIssuanceCreate`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttMPTOKEN_ISSUANCE_CREATE)
             .map(|src| Self { src })
     }
@@ -4540,9 +3929,7 @@ impl MPTokenIssuanceCreate<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttMPTOKEN_ISSUANCE_CREATE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -4553,54 +3940,44 @@ impl MPTokenIssuanceCreate<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> MPTokenIssuanceCreate<S> {
+impl<S: FieldSource> MPTokenIssuanceCreate<S> {
     /// `sfAssetScale` — UInt8, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn asset_scale(&self) -> crate::error::Result<Option<u8>> {
+    pub fn asset_scale(&self) -> Result<Option<u8>> {
         self.src.read_opt(crate::sfield::sfAssetScale)
     }
 
     /// `sfTransferFee` — UInt16, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn transfer_fee(&self) -> crate::error::Result<Option<u16>> {
+    pub fn transfer_fee(&self) -> Result<Option<u16>> {
         self.src.read_opt(crate::sfield::sfTransferFee)
     }
 
     /// `sfMaximumAmount` — UInt64, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn maximum_amount(&self) -> crate::error::Result<Option<u64>> {
+    pub fn maximum_amount(&self) -> Result<Option<u64>> {
         self.src.read_opt(crate::sfield::sfMaximumAmount)
     }
 
     /// `sfMPTokenMetadata` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
     pub fn mptoken_metadata_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfMPTokenMetadata.code(), out)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for MPTokenIssuanceCreate<S> {
+impl<S: FieldSource> TransactionCommonFields for MPTokenIssuanceCreate<S> {
     type Source = S;
 
     #[inline(always)]
@@ -4613,7 +3990,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for MPTokenIs
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct MPTokenIssuanceDestroy<S: crate::views::source::FieldSource> {
+pub struct MPTokenIssuanceDestroy<S: FieldSource> {
     src: S,
 }
 
@@ -4621,7 +3998,7 @@ pub struct MPTokenIssuanceDestroy<S: crate::views::source::FieldSource> {
 impl MPTokenIssuanceDestroy<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `MPTokenIssuanceDestroy`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttMPTOKEN_ISSUANCE_DESTROY)
             .map(|src| Self { src })
     }
@@ -4632,9 +4009,7 @@ impl MPTokenIssuanceDestroy<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttMPTOKEN_ISSUANCE_DESTROY`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -4645,28 +4020,23 @@ impl MPTokenIssuanceDestroy<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> MPTokenIssuanceDestroy<S> {
+impl<S: FieldSource> MPTokenIssuanceDestroy<S> {
     /// `sfMPTokenIssuanceID` — UInt192, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn mptoken_issuance_id_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn mptoken_issuance_id_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src
             .read_raw(crate::sfield::sfMPTokenIssuanceID.code(), out)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for MPTokenIssuanceDestroy<S> {
+impl<S: FieldSource> TransactionCommonFields for MPTokenIssuanceDestroy<S> {
     type Source = S;
 
     #[inline(always)]
@@ -4679,7 +4049,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for MPTokenIs
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct MPTokenIssuanceSet<S: crate::views::source::FieldSource> {
+pub struct MPTokenIssuanceSet<S: FieldSource> {
     src: S,
 }
 
@@ -4687,7 +4057,7 @@ pub struct MPTokenIssuanceSet<S: crate::views::source::FieldSource> {
 impl MPTokenIssuanceSet<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `MPTokenIssuanceSet`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttMPTOKEN_ISSUANCE_SET)
             .map(|src| Self { src })
     }
@@ -4698,9 +4068,7 @@ impl MPTokenIssuanceSet<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttMPTOKEN_ISSUANCE_SET`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -4711,36 +4079,29 @@ impl MPTokenIssuanceSet<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> MPTokenIssuanceSet<S> {
+impl<S: FieldSource> MPTokenIssuanceSet<S> {
     /// `sfMPTokenIssuanceID` — UInt192, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn mptoken_issuance_id_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn mptoken_issuance_id_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src
             .read_raw(crate::sfield::sfMPTokenIssuanceID.code(), out)
     }
 
     /// `sfHolder` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn holder(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn holder(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfHolder)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for MPTokenIssuanceSet<S> {
+impl<S: FieldSource> TransactionCommonFields for MPTokenIssuanceSet<S> {
     type Source = S;
 
     #[inline(always)]
@@ -4753,7 +4114,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for MPTokenIs
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct MPTokenAuthorize<S: crate::views::source::FieldSource> {
+pub struct MPTokenAuthorize<S: FieldSource> {
     src: S,
 }
 
@@ -4761,7 +4122,7 @@ pub struct MPTokenAuthorize<S: crate::views::source::FieldSource> {
 impl MPTokenAuthorize<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `MPTokenAuthorize`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttMPTOKEN_AUTHORIZE)
             .map(|src| Self { src })
     }
@@ -4772,9 +4133,7 @@ impl MPTokenAuthorize<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttMPTOKEN_AUTHORIZE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -4785,36 +4144,29 @@ impl MPTokenAuthorize<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> MPTokenAuthorize<S> {
+impl<S: FieldSource> MPTokenAuthorize<S> {
     /// `sfMPTokenIssuanceID` — UInt192, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn mptoken_issuance_id_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn mptoken_issuance_id_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src
             .read_raw(crate::sfield::sfMPTokenIssuanceID.code(), out)
     }
 
     /// `sfHolder` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn holder(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn holder(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfHolder)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for MPTokenAuthorize<S> {
+impl<S: FieldSource> TransactionCommonFields for MPTokenAuthorize<S> {
     type Source = S;
 
     #[inline(always)]
@@ -4827,7 +4179,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for MPTokenAu
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct CredentialCreate<S: crate::views::source::FieldSource> {
+pub struct CredentialCreate<S: FieldSource> {
     src: S,
 }
 
@@ -4835,7 +4187,7 @@ pub struct CredentialCreate<S: crate::views::source::FieldSource> {
 impl CredentialCreate<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `CredentialCreate`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttCREDENTIAL_CREATE)
             .map(|src| Self { src })
     }
@@ -4846,9 +4198,7 @@ impl CredentialCreate<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttCREDENTIAL_CREATE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -4859,55 +4209,41 @@ impl CredentialCreate<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> CredentialCreate<S> {
+impl<S: FieldSource> CredentialCreate<S> {
     /// `sfSubject` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn subject(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn subject(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfSubject)
     }
 
     /// `sfCredentialType` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn credential_type_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn credential_type_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src
             .read_raw(crate::sfield::sfCredentialType.code(), out)
     }
 
     /// `sfExpiration` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn expiration(&self) -> crate::error::Result<Option<u32>> {
+    pub fn expiration(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfExpiration)
     }
 
     /// `sfURI` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn uri_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn uri_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src.read_raw_opt(crate::sfield::sfURI.code(), out)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for CredentialCreate<S> {
+impl<S: FieldSource> TransactionCommonFields for CredentialCreate<S> {
     type Source = S;
 
     #[inline(always)]
@@ -4920,7 +4256,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for Credentia
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct CredentialAccept<S: crate::views::source::FieldSource> {
+pub struct CredentialAccept<S: FieldSource> {
     src: S,
 }
 
@@ -4928,7 +4264,7 @@ pub struct CredentialAccept<S: crate::views::source::FieldSource> {
 impl CredentialAccept<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `CredentialAccept`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttCREDENTIAL_ACCEPT)
             .map(|src| Self { src })
     }
@@ -4939,9 +4275,7 @@ impl CredentialAccept<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttCREDENTIAL_ACCEPT`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -4952,34 +4286,29 @@ impl CredentialAccept<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> CredentialAccept<S> {
+impl<S: FieldSource> CredentialAccept<S> {
     /// `sfIssuer` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn issuer(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn issuer(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfIssuer)
     }
 
     /// `sfCredentialType` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn credential_type_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn credential_type_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src
             .read_raw(crate::sfield::sfCredentialType.code(), out)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for CredentialAccept<S> {
+impl<S: FieldSource> TransactionCommonFields for CredentialAccept<S> {
     type Source = S;
 
     #[inline(always)]
@@ -4992,7 +4321,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for Credentia
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct CredentialDelete<S: crate::views::source::FieldSource> {
+pub struct CredentialDelete<S: FieldSource> {
     src: S,
 }
 
@@ -5000,7 +4329,7 @@ pub struct CredentialDelete<S: crate::views::source::FieldSource> {
 impl CredentialDelete<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `CredentialDelete`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttCREDENTIAL_DELETE)
             .map(|src| Self { src })
     }
@@ -5011,9 +4340,7 @@ impl CredentialDelete<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttCREDENTIAL_DELETE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -5024,44 +4351,35 @@ impl CredentialDelete<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> CredentialDelete<S> {
+impl<S: FieldSource> CredentialDelete<S> {
     /// `sfSubject` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn subject(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn subject(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfSubject)
     }
 
     /// `sfIssuer` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn issuer(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn issuer(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfIssuer)
     }
 
     /// `sfCredentialType` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn credential_type_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn credential_type_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src
             .read_raw(crate::sfield::sfCredentialType.code(), out)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for CredentialDelete<S> {
+impl<S: FieldSource> TransactionCommonFields for CredentialDelete<S> {
     type Source = S;
 
     #[inline(always)]
@@ -5074,7 +4392,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for Credentia
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct NFTokenModify<S: crate::views::source::FieldSource> {
+pub struct NFTokenModify<S: FieldSource> {
     src: S,
 }
 
@@ -5082,7 +4400,7 @@ pub struct NFTokenModify<S: crate::views::source::FieldSource> {
 impl NFTokenModify<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `NFTokenModify`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttNFTOKEN_MODIFY).map(|src| Self { src })
     }
 }
@@ -5092,9 +4410,7 @@ impl NFTokenModify<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttNFTOKEN_MODIFY`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -5105,43 +4421,34 @@ impl NFTokenModify<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> NFTokenModify<S> {
+impl<S: FieldSource> NFTokenModify<S> {
     /// `sfNFTokenID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn nftoken_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn nftoken_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfNFTokenID)
     }
 
     /// `sfOwner` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn owner(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn owner(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfOwner)
     }
 
     /// `sfURI` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn uri_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn uri_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src.read_raw_opt(crate::sfield::sfURI.code(), out)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for NFTokenModify<S> {
+impl<S: FieldSource> TransactionCommonFields for NFTokenModify<S> {
     type Source = S;
 
     #[inline(always)]
@@ -5154,7 +4461,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for NFTokenMo
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct PermissionedDomainSet<S: crate::views::source::FieldSource> {
+pub struct PermissionedDomainSet<S: FieldSource> {
     src: S,
 }
 
@@ -5162,7 +4469,7 @@ pub struct PermissionedDomainSet<S: crate::views::source::FieldSource> {
 impl PermissionedDomainSet<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `PermissionedDomainSet`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttPERMISSIONED_DOMAIN_SET)
             .map(|src| Self { src })
     }
@@ -5173,9 +4480,7 @@ impl PermissionedDomainSet<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttPERMISSIONED_DOMAIN_SET`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -5186,47 +4491,35 @@ impl PermissionedDomainSet<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAcceptedCredentials` — STArray, `soeREQUIRED`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     #[inline(always)]
-    pub fn accepted_credentials_slot(
-        &self,
-    ) -> crate::error::Result<crate::slot_obj::SlotObject<crate::types::STArray>> {
+    pub fn accepted_credentials_slot(&self) -> Result<SlotObject<crate::types::STArray>> {
         self.src.subobject(crate::sfield::sfAcceptedCredentials)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> PermissionedDomainSet<S> {
+impl<S: FieldSource> PermissionedDomainSet<S> {
     /// `sfDomainID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn domain_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn domain_id(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfDomainID)
     }
 
     /// `sfAcceptedCredentials` — STArray, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `accepted_credentials_slot` on a slot-backed view to navigate the container.
     #[inline(always)]
-    pub fn accepted_credentials_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn accepted_credentials_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src
             .read_raw(crate::sfield::sfAcceptedCredentials.code(), out)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for PermissionedDomainSet<S> {
+impl<S: FieldSource> TransactionCommonFields for PermissionedDomainSet<S> {
     type Source = S;
 
     #[inline(always)]
@@ -5239,7 +4532,7 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for Permissio
 ///
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
-pub struct PermissionedDomainDelete<S: crate::views::source::FieldSource> {
+pub struct PermissionedDomainDelete<S: FieldSource> {
     src: S,
 }
 
@@ -5247,7 +4540,7 @@ pub struct PermissionedDomainDelete<S: crate::views::source::FieldSource> {
 impl PermissionedDomainDelete<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `PermissionedDomainDelete`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttPERMISSIONED_DOMAIN_DELETE)
             .map(|src| Self { src })
     }
@@ -5258,9 +4551,7 @@ impl PermissionedDomainDelete<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttPERMISSIONED_DOMAIN_DELETE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -5271,22 +4562,22 @@ impl PermissionedDomainDelete<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> PermissionedDomainDelete<S> {
+impl<S: FieldSource> PermissionedDomainDelete<S> {
     /// `sfDomainID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn domain_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn domain_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfDomainID)
     }
 }
 
 #[cfg(feature = "all-amendments")]
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for PermissionedDomainDelete<S> {
+impl<S: FieldSource> TransactionCommonFields for PermissionedDomainDelete<S> {
     type Source = S;
 
     #[inline(always)]
@@ -5296,14 +4587,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for Permissio
 }
 
 /// View of the `Cron` transaction (`ttCRON`, type code 92).
-pub struct Cron<S: crate::views::source::FieldSource> {
+pub struct Cron<S: FieldSource> {
     src: S,
 }
 
 impl Cron<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `Cron`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttCRON).map(|src| Self { src })
     }
 }
@@ -5312,9 +4603,7 @@ impl Cron<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttCRON`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -5325,26 +4614,26 @@ impl Cron<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> Cron<S> {
+impl<S: FieldSource> Cron<S> {
     /// `sfOwner` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn owner(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn owner(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfOwner)
     }
 
     /// `sfLedgerSequence` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn ledger_sequence(&self) -> crate::error::Result<u32> {
+    pub fn ledger_sequence(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfLedgerSequence)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for Cron<S> {
+impl<S: FieldSource> TransactionCommonFields for Cron<S> {
     type Source = S;
 
     #[inline(always)]
@@ -5354,14 +4643,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for Cron<S> {
 }
 
 /// View of the `CronSet` transaction (`ttCRON_SET`, type code 93).
-pub struct CronSet<S: crate::views::source::FieldSource> {
+pub struct CronSet<S: FieldSource> {
     src: S,
 }
 
 impl CronSet<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `CronSet`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttCRON_SET).map(|src| Self { src })
     }
 }
@@ -5370,9 +4659,7 @@ impl CronSet<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttCRON_SET`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -5383,38 +4670,32 @@ impl CronSet<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> CronSet<S> {
+impl<S: FieldSource> CronSet<S> {
     /// `sfDelaySeconds` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn delay_seconds(&self) -> crate::error::Result<Option<u32>> {
+    pub fn delay_seconds(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfDelaySeconds)
     }
 
     /// `sfRepeatCount` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn repeat_count(&self) -> crate::error::Result<Option<u32>> {
+    pub fn repeat_count(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfRepeatCount)
     }
 
     /// `sfStartTime` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn start_time(&self) -> crate::error::Result<Option<u32>> {
+    pub fn start_time(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfStartTime)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for CronSet<S> {
+impl<S: FieldSource> TransactionCommonFields for CronSet<S> {
     type Source = S;
 
     #[inline(always)]
@@ -5424,14 +4705,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for CronSet<S
 }
 
 /// View of the `SetRemarks` transaction (`ttREMARKS_SET`, type code 94).
-pub struct SetRemarks<S: crate::views::source::FieldSource> {
+pub struct SetRemarks<S: FieldSource> {
     src: S,
 }
 
 impl SetRemarks<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `SetRemarks`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttREMARKS_SET).map(|src| Self { src })
     }
 }
@@ -5440,9 +4721,7 @@ impl SetRemarks<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttREMARKS_SET`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -5453,42 +4732,32 @@ impl SetRemarks<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfRemarks` — STArray, `soeREQUIRED`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     #[inline(always)]
-    pub fn remarks_slot(
-        &self,
-    ) -> crate::error::Result<crate::slot_obj::SlotObject<crate::types::STArray>> {
+    pub fn remarks_slot(&self) -> Result<SlotObject<crate::types::STArray>> {
         self.src.subobject(crate::sfield::sfRemarks)
     }
 }
 
-impl<S: crate::views::source::FieldSource> SetRemarks<S> {
+impl<S: FieldSource> SetRemarks<S> {
     /// `sfObjectID` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn object_id(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn object_id(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfObjectID)
     }
 
     /// `sfRemarks` — STArray, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `remarks_slot` on a slot-backed view to navigate the container.
     #[inline(always)]
-    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn remarks_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfRemarks.code(), out)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for SetRemarks<S> {
+impl<S: FieldSource> TransactionCommonFields for SetRemarks<S> {
     type Source = S;
 
     #[inline(always)]
@@ -5498,14 +4767,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for SetRemark
 }
 
 /// View of the `Remit` transaction (`ttREMIT`, type code 95).
-pub struct Remit<S: crate::views::source::FieldSource> {
+pub struct Remit<S: FieldSource> {
     src: S,
 }
 
 impl Remit<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `Remit`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttREMIT).map(|src| Self { src })
     }
 }
@@ -5514,9 +4783,7 @@ impl Remit<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttREMIT`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -5527,124 +4794,82 @@ impl Remit<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfAmounts` — STArray, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn amounts_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STArray>>> {
+    pub fn amounts_slot(&self) -> Result<Option<SlotObject<crate::types::STArray>>> {
         self.src.subobject_opt(crate::sfield::sfAmounts)
     }
 
     /// `sfMintURIToken` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn mint_uri_token_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+    pub fn mint_uri_token_slot(&self) -> Result<Option<SlotObject<STObject>>> {
         self.src.subobject_opt(crate::sfield::sfMintURIToken)
     }
 }
 
-impl<S: crate::views::source::FieldSource> Remit<S> {
+impl<S: FieldSource> Remit<S> {
     /// `sfDestination` — AccountID, `soeREQUIRED`.
     #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<crate::types::AccountId> {
+    pub fn destination(&self) -> Result<crate::types::AccountId> {
         self.src.read(crate::sfield::sfDestination)
     }
 
     /// `sfAmounts` — STArray, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `amounts_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn amounts_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn amounts_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src.read_raw_opt(crate::sfield::sfAmounts.code(), out)
     }
 
     /// `sfURITokenIDs` — Vector256, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
     pub fn uri_token_ids_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfURITokenIDs.code(), out)
     }
 
     /// `sfMintURIToken` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `mint_uri_token_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
     pub fn mint_uri_token_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfMintURIToken.code(), out)
     }
 
     /// `sfInvoiceID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn invoice_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn invoice_id(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfInvoiceID)
     }
 
     /// `sfDestinationTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn destination_tag(&self) -> crate::error::Result<Option<u32>> {
+    pub fn destination_tag(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfDestinationTag)
     }
 
     /// `sfBlob` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn blob_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn blob_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src.read_raw_opt(crate::sfield::sfBlob.code(), out)
     }
 
     /// `sfInform` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn inform(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn inform(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfInform)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for Remit<S> {
+impl<S: FieldSource> TransactionCommonFields for Remit<S> {
     type Source = S;
 
     #[inline(always)]
@@ -5654,14 +4879,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for Remit<S> 
 }
 
 /// View of the `GenesisMint` transaction (`ttGENESIS_MINT`, type code 96).
-pub struct GenesisMint<S: crate::views::source::FieldSource> {
+pub struct GenesisMint<S: FieldSource> {
     src: S,
 }
 
 impl GenesisMint<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `GenesisMint`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttGENESIS_MINT).map(|src| Self { src })
     }
 }
@@ -5670,9 +4895,7 @@ impl GenesisMint<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttGENESIS_MINT`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -5683,36 +4906,26 @@ impl GenesisMint<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfGenesisMints` — STArray, `soeREQUIRED`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
     #[inline(always)]
-    pub fn genesis_mints_slot(
-        &self,
-    ) -> crate::error::Result<crate::slot_obj::SlotObject<crate::types::STArray>> {
+    pub fn genesis_mints_slot(&self) -> Result<SlotObject<crate::types::STArray>> {
         self.src.subobject(crate::sfield::sfGenesisMints)
     }
 }
 
-impl<S: crate::views::source::FieldSource> GenesisMint<S> {
+impl<S: FieldSource> GenesisMint<S> {
     /// `sfGenesisMints` — STArray, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `genesis_mints_slot` on a slot-backed view to navigate the container.
     #[inline(always)]
-    pub fn genesis_mints_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn genesis_mints_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfGenesisMints.code(), out)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for GenesisMint<S> {
+impl<S: FieldSource> TransactionCommonFields for GenesisMint<S> {
     type Source = S;
 
     #[inline(always)]
@@ -5722,14 +4935,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for GenesisMi
 }
 
 /// View of the `Import` transaction (`ttIMPORT`, type code 97).
-pub struct Import<S: crate::views::source::FieldSource> {
+pub struct Import<S: FieldSource> {
     src: S,
 }
 
 impl Import<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `Import`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttIMPORT).map(|src| Self { src })
     }
 }
@@ -5738,9 +4951,7 @@ impl Import<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttIMPORT`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -5751,30 +4962,26 @@ impl Import<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> Import<S> {
+impl<S: FieldSource> Import<S> {
     /// `sfBlob` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn blob_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> crate::error::Result<usize> {
+    pub fn blob_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src.read_raw(crate::sfield::sfBlob.code(), out)
     }
 
     /// `sfIssuer` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn issuer(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn issuer(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfIssuer)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for Import<S> {
+impl<S: FieldSource> TransactionCommonFields for Import<S> {
     type Source = S;
 
     #[inline(always)]
@@ -5784,14 +4991,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for Import<S>
 }
 
 /// View of the `ClaimReward` transaction (`ttCLAIM_REWARD`, type code 98).
-pub struct ClaimReward<S: crate::views::source::FieldSource> {
+pub struct ClaimReward<S: FieldSource> {
     src: S,
 }
 
 impl ClaimReward<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `ClaimReward`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttCLAIM_REWARD).map(|src| Self { src })
     }
 }
@@ -5800,9 +5007,7 @@ impl ClaimReward<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttCLAIM_REWARD`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -5813,30 +5018,26 @@ impl ClaimReward<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> ClaimReward<S> {
+impl<S: FieldSource> ClaimReward<S> {
     /// `sfIssuer` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn issuer(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn issuer(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfIssuer)
     }
 
     /// `sfClaimCurrency` — Issue, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn claim_currency(&self) -> crate::error::Result<Option<crate::slot_obj::IssueData>> {
+    pub fn claim_currency(&self) -> Result<Option<crate::slot_obj::IssueData>> {
         self.src.read_opt(crate::sfield::sfClaimCurrency)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for ClaimReward<S> {
+impl<S: FieldSource> TransactionCommonFields for ClaimReward<S> {
     type Source = S;
 
     #[inline(always)]
@@ -5846,14 +5047,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for ClaimRewa
 }
 
 /// View of the `Invoke` transaction (`ttINVOKE`, type code 99).
-pub struct Invoke<S: crate::views::source::FieldSource> {
+pub struct Invoke<S: FieldSource> {
     src: S,
 }
 
 impl Invoke<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `Invoke`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttINVOKE).map(|src| Self { src })
     }
 }
@@ -5862,9 +5063,7 @@ impl Invoke<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttINVOKE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -5875,51 +5074,38 @@ impl Invoke<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> Invoke<S> {
+impl<S: FieldSource> Invoke<S> {
     /// `sfBlob` — Blob, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn blob_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    pub fn blob_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
         self.src.read_raw_opt(crate::sfield::sfBlob.code(), out)
     }
 
     /// `sfDestination` — AccountID, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn destination(&self) -> crate::error::Result<Option<crate::types::AccountId>> {
+    pub fn destination(&self) -> Result<Option<crate::types::AccountId>> {
         self.src.read_opt(crate::sfield::sfDestination)
     }
 
     /// `sfInvoiceID` — Hash256, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn invoice_id(&self) -> crate::error::Result<Option<crate::types::Hash>> {
+    pub fn invoice_id(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfInvoiceID)
     }
 
     /// `sfDestinationTag` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn destination_tag(&self) -> crate::error::Result<Option<u32>> {
+    pub fn destination_tag(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfDestinationTag)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for Invoke<S> {
+impl<S: FieldSource> TransactionCommonFields for Invoke<S> {
     type Source = S;
 
     #[inline(always)]
@@ -5929,14 +5115,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for Invoke<S>
 }
 
 /// View of the `EnableAmendment` transaction (`ttAMENDMENT`, type code 100).
-pub struct EnableAmendment<S: crate::views::source::FieldSource> {
+pub struct EnableAmendment<S: FieldSource> {
     src: S,
 }
 
 impl EnableAmendment<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `EnableAmendment`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttAMENDMENT).map(|src| Self { src })
     }
 }
@@ -5945,9 +5131,7 @@ impl EnableAmendment<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttAMENDMENT`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -5958,26 +5142,26 @@ impl EnableAmendment<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> EnableAmendment<S> {
+impl<S: FieldSource> EnableAmendment<S> {
     /// `sfLedgerSequence` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn ledger_sequence(&self) -> crate::error::Result<u32> {
+    pub fn ledger_sequence(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfLedgerSequence)
     }
 
     /// `sfAmendment` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn amendment(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn amendment(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfAmendment)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for EnableAmendment<S> {
+impl<S: FieldSource> TransactionCommonFields for EnableAmendment<S> {
     type Source = S;
 
     #[inline(always)]
@@ -5987,14 +5171,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for EnableAme
 }
 
 /// View of the `SetFee` transaction (`ttFEE`, type code 101).
-pub struct SetFee<S: crate::views::source::FieldSource> {
+pub struct SetFee<S: FieldSource> {
     src: S,
 }
 
 impl SetFee<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `SetFee`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttFEE).map(|src| Self { src })
     }
 }
@@ -6003,9 +5187,7 @@ impl SetFee<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttFEE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -6016,80 +5198,62 @@ impl SetFee<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> SetFee<S> {
+impl<S: FieldSource> SetFee<S> {
     /// `sfLedgerSequence` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn ledger_sequence(&self) -> crate::error::Result<Option<u32>> {
+    pub fn ledger_sequence(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfLedgerSequence)
     }
 
     /// `sfBaseFee` — UInt64, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn base_fee(&self) -> crate::error::Result<Option<u64>> {
+    pub fn base_fee(&self) -> Result<Option<u64>> {
         self.src.read_opt(crate::sfield::sfBaseFee)
     }
 
     /// `sfReferenceFeeUnits` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn reference_fee_units(&self) -> crate::error::Result<Option<u32>> {
+    pub fn reference_fee_units(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfReferenceFeeUnits)
     }
 
     /// `sfReserveBase` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn reserve_base(&self) -> crate::error::Result<Option<u32>> {
+    pub fn reserve_base(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfReserveBase)
     }
 
     /// `sfReserveIncrement` — UInt32, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn reserve_increment(&self) -> crate::error::Result<Option<u32>> {
+    pub fn reserve_increment(&self) -> Result<Option<u32>> {
         self.src.read_opt(crate::sfield::sfReserveIncrement)
     }
 
     /// `sfBaseFeeDrops` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn base_fee_drops(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn base_fee_drops(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfBaseFeeDrops)
     }
 
     /// `sfReserveBaseDrops` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn reserve_base_drops(&self) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn reserve_base_drops(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfReserveBaseDrops)
     }
 
     /// `sfReserveIncrementDrops` — Amount, `soeOPTIONAL`.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn reserve_increment_drops(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::AmountBytes>> {
+    pub fn reserve_increment_drops(&self) -> Result<Option<crate::slot_obj::AmountBytes>> {
         self.src.read_opt(crate::sfield::sfReserveIncrementDrops)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for SetFee<S> {
+impl<S: FieldSource> TransactionCommonFields for SetFee<S> {
     type Source = S;
 
     #[inline(always)]
@@ -6099,14 +5263,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for SetFee<S>
 }
 
 /// View of the `UNLModify` transaction (`ttUNL_MODIFY`, type code 102).
-pub struct UNLModify<S: crate::views::source::FieldSource> {
+pub struct UNLModify<S: FieldSource> {
     src: S,
 }
 
 impl UNLModify<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `UNLModify`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttUNL_MODIFY).map(|src| Self { src })
     }
 }
@@ -6115,9 +5279,7 @@ impl UNLModify<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttUNL_MODIFY`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -6128,38 +5290,33 @@ impl UNLModify<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> UNLModify<S> {
+impl<S: FieldSource> UNLModify<S> {
     /// `sfUNLModifyDisabling` — UInt8, `soeREQUIRED`.
     #[inline(always)]
-    pub fn unl_modify_disabling(&self) -> crate::error::Result<u8> {
+    pub fn unl_modify_disabling(&self) -> Result<u8> {
         self.src.read(crate::sfield::sfUNLModifyDisabling)
     }
 
     /// `sfLedgerSequence` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn ledger_sequence(&self) -> crate::error::Result<u32> {
+    pub fn ledger_sequence(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfLedgerSequence)
     }
 
     /// `sfUNLModifyValidator` — Blob, `soeREQUIRED`.
-    ///
-    /// Writes the raw wire bytes to `out`.
     #[inline(always)]
-    pub fn unl_modify_validator_into<B: AsMut<[u8]> + ?Sized>(
-        &self,
-        out: &mut B,
-    ) -> crate::error::Result<usize> {
+    pub fn unl_modify_validator_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
         self.src
             .read_raw(crate::sfield::sfUNLModifyValidator.code(), out)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for UNLModify<S> {
+impl<S: FieldSource> TransactionCommonFields for UNLModify<S> {
     type Source = S;
 
     #[inline(always)]
@@ -6169,14 +5326,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for UNLModify
 }
 
 /// View of the `EmitFailure` transaction (`ttEMIT_FAILURE`, type code 103).
-pub struct EmitFailure<S: crate::views::source::FieldSource> {
+pub struct EmitFailure<S: FieldSource> {
     src: S,
 }
 
 impl EmitFailure<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `EmitFailure`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttEMIT_FAILURE).map(|src| Self { src })
     }
 }
@@ -6185,9 +5342,7 @@ impl EmitFailure<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttEMIT_FAILURE`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -6198,26 +5353,26 @@ impl EmitFailure<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 }
 
-impl<S: crate::views::source::FieldSource> EmitFailure<S> {
+impl<S: FieldSource> EmitFailure<S> {
     /// `sfLedgerSequence` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn ledger_sequence(&self) -> crate::error::Result<u32> {
+    pub fn ledger_sequence(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfLedgerSequence)
     }
 
     /// `sfTransactionHash` — Hash256, `soeREQUIRED`.
     #[inline(always)]
-    pub fn transaction_hash(&self) -> crate::error::Result<crate::types::Hash> {
+    pub fn transaction_hash(&self) -> Result<crate::types::Hash> {
         self.src.read(crate::sfield::sfTransactionHash)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for EmitFailure<S> {
+impl<S: FieldSource> TransactionCommonFields for EmitFailure<S> {
     type Source = S;
 
     #[inline(always)]
@@ -6227,14 +5382,14 @@ impl<S: crate::views::source::FieldSource> TransactionCommonFields for EmitFailu
 }
 
 /// View of the `UNLReport` transaction (`ttUNL_REPORT`, type code 104).
-pub struct UNLReport<S: crate::views::source::FieldSource> {
+pub struct UNLReport<S: FieldSource> {
     src: S,
 }
 
 impl UNLReport<crate::views::source::OtxnSource> {
     /// Views the originating transaction as `UNLReport`, checking its type.
     #[inline(always)]
-    pub fn otxn() -> crate::error::Result<Self> {
+    pub fn otxn() -> Result<Self> {
         crate::views::source::otxn_of_type(rshooks_core::ttUNL_REPORT).map(|src| Self { src })
     }
 }
@@ -6243,9 +5398,7 @@ impl UNLReport<crate::views::source::SlotSource> {
     /// Takes a transaction slot after verifying `sfTransactionType` is `ttUNL_REPORT`.
     /// A failed check best-effort clears the consumed slot.
     #[inline(always)]
-    pub fn from_slot(
-        obj: crate::slot_obj::SlotObject<crate::types::STObject>,
-    ) -> crate::error::Result<Self> {
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
         crate::views::source::slot_of_type(
             obj,
             crate::sfield::sfTransactionType,
@@ -6256,74 +5409,52 @@ impl UNLReport<crate::views::source::SlotSource> {
 
     /// Consumes the view and returns its slot.
     #[inline(always)]
-    pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {
+    pub fn into_slot(self) -> SlotObject<STObject> {
         self.src.into_slot()
     }
 
     /// `sfActiveValidator` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn active_validator_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+    pub fn active_validator_slot(&self) -> Result<Option<SlotObject<STObject>>> {
         self.src.subobject_opt(crate::sfield::sfActiveValidator)
     }
 
     /// `sfImportVLKey` — STObject, `soeOPTIONAL`.
-    ///
-    /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
-    pub fn import_vl_key_slot(
-        &self,
-    ) -> crate::error::Result<Option<crate::slot_obj::SlotObject<crate::types::STObject>>> {
+    pub fn import_vl_key_slot(&self) -> Result<Option<SlotObject<STObject>>> {
         self.src.subobject_opt(crate::sfield::sfImportVLKey)
     }
 }
 
-impl<S: crate::views::source::FieldSource> UNLReport<S> {
+impl<S: FieldSource> UNLReport<S> {
     /// `sfLedgerSequence` — UInt32, `soeREQUIRED`.
     #[inline(always)]
-    pub fn ledger_sequence(&self) -> crate::error::Result<u32> {
+    pub fn ledger_sequence(&self) -> Result<u32> {
         self.src.read(crate::sfield::sfLedgerSequence)
     }
 
     /// `sfActiveValidator` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `active_validator_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
     pub fn active_validator_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfActiveValidator.code(), out)
     }
 
     /// `sfImportVLKey` — STObject, `soeOPTIONAL`.
-    ///
-    /// Writes the raw wire bytes to `out`.
-    /// Use `import_vl_key_slot` on a slot-backed view to navigate the container.
-    ///
-    /// `Ok(None)` when the field is absent.
     #[inline(always)]
     pub fn import_vl_key_into<B: AsMut<[u8]> + ?Sized>(
         &self,
         out: &mut B,
-    ) -> crate::error::Result<Option<usize>> {
+    ) -> Result<Option<usize>> {
         self.src
             .read_raw_opt(crate::sfield::sfImportVLKey.code(), out)
     }
 }
 
-impl<S: crate::views::source::FieldSource> TransactionCommonFields for UNLReport<S> {
+impl<S: FieldSource> TransactionCommonFields for UNLReport<S> {
     type Source = S;
 
     #[inline(always)]

@@ -584,7 +584,7 @@ impl HostBackend for Backend {
     // file's module doc comment.
 
     fn util_sha512h(&self, data: &[u8]) -> Result<[u8; 32], i64> {
-        Ok(crate::host::util::util_sha512h(data))
+        Ok(crate::host::util::sha512_half(data))
     }
 
     fn util_accid(&self, r_address: &[u8]) -> Result<Vec<u8>, i64> {
