@@ -55,7 +55,7 @@ To see the `trace!` line actually run, enable the `trace` feature in
 
 ```toml
 [dependencies]
-rshooks = { version = "0.2.1", features = ["trace", "host-panic-handler"] }
+rshooks = { version = "0.2.2", features = ["trace", "host-panic-handler"] }
 ```
 
 ### `#![no_std]`
@@ -204,7 +204,7 @@ exist). For `AcceptAll`, `out/current/` contains:
   },
   "builder": {
     "name": "rshooks-build",
-    "version": "0.2.1",
+    "version": "0.2.2",
     "rustc": "rustc 1.89.0 (29483883e 2025-08-04)",
     "cargo_args": ["rustc", "--release", "--locked", "--target", "wasm32v1-none", "--crate-type", "cdylib"],
     "rustc_args": ["--cfg", "rshooks_entry=\"0\"", "--check-cfg", "cfg(rshooks_entry,values(\"0\",\"1\",\"2\",\"3\",\"4\",\"5\",\"6\",\"7\",\"8\",\"9\"))", "-C", "link-arg=-zstack-size=131072"],
