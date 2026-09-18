@@ -1,5 +1,8 @@
 # rshooks
 
+[![Crates.io](https://img.shields.io/crates/v/rshooks.svg)](https://crates.io/crates/rshooks)
+[![Documentation](https://docs.rs/rshooks/badge.svg)](https://docs.rs/rshooks)
+
 A Rust monorepo for developing [Xahau](https://xahau.network/) Hooks
 (WebAssembly smart contracts) end to end — from raw Hook API bindings to
 one or more SetHook-valid `.wasm` binaries and a generated `SetHook`
