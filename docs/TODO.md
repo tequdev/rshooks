@@ -25,28 +25,6 @@ mind:
 Every feature below must therefore ship with probe numbers (WCE / size /
 nesting, before vs. after) and must keep a raw-API escape hatch available.
 
-## 1. Off-chain unit-test environment (priority 1) — IMPLEMENTED
-
-A mock host (`rshooks_core::backend::HostBackend`, installed per-thread) now
-lets `#[hooks]` chain entries and helpers run as plain native Rust under
-`cargo test` — no wasm build, no node — with assertions on state, exit type,
-and emitted transactions, via the `crates/rshooks-testenv` harness
-(`TestEnv::invoke`). See the book's ["Off-Chain Unit
-Tests"](../book/src/testing/unit-tests.md) chapter for the developer-facing
-walkthrough and coverage table, and `docs/DESIGN.md` §7 for the shipped
-mechanism. WCE/zero-cost impact is verified by `scripts/probe-testenv-parity.sh`
-(Stage 6 of `.claude/design/TESTENV_IMPLEMENTATION.md`), which rebuilds every
-example twice at the same commit — pristine vs. test-wired — and asserts
-byte-for-byte identity of the shipped `.wasm` artifacts.
-
-`.claude/design/TESTENV_PHASE2_DESIGN.md` (stages P2-A..P2-E) then extended
-the mock backend from that initial subset to the entire `extern.h` Hook API
-surface a hook can call (`_g` excepted), including `float_*`/`slot_*`/
-`sto_*`/`util_*`/`keylet_*`, `hook_again`/`hook_skip`/`hook_param_set`, and
-`TestEnv::invoke_cbak` for running a `#[cbak]` body directly — see the book
-chapter's coverage table for the current, honest list of what remains
-unmodeled.
-
 ## 2. Typed `Result`-based entry return values (priority 2) — IMPLEMENTED (breaking, typed-only)
 
 A `#[hook]`/`#[cbak]` entry returns `rshooks::exit::HookResult`

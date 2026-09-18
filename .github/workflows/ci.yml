@@ -51,19 +51,23 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # mise-action installs mise.toml's pinned rust *version* but not the
+      # wasm32v1-none target/components rust-toolchain.toml also declares;
+      # this step covers those (and no-ops once mise-action's toolchain is
+      # already active).
       - name: Install Rust toolchain (per rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
 
+      - uses: jdx/mise-action@v2
+
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            examples
 
-      - name: Clippy (host, deny warnings)
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - name: Clippy (host, active-amendments feature, deny warnings)
-        run: cargo clippy -p rshooks --all-targets --features active-amendments -- -D warnings
-
-      - name: Clippy (host, all-features, deny warnings)
-        run: cargo clippy -p rshooks --all-targets --all-features -- -D warnings
+      - name: Clippy (per mise.toml's lint task)
+        run: mise run lint
 
       - name: Clippy (host, unstable draft-spec features, deny warnings)
         run: cargo clippy --workspace --all-targets --features rshooks/unstable-param-sig-interface,rshooks/unstable-state-interface,rshooks-testenv/unstable-param-sig-interface,rshooks-testenv/unstable-state-interface -- -D warnings
@@ -83,6 +87,8 @@ jobs:
       - name: Install Rust toolchain (per rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
 
+      - uses: jdx/mise-action@v2
+
       - uses: Swatinem/rust-cache@v2
 
       - name: Generated rshooks-core sources are up to date
@@ -93,17 +99,11 @@ jobs:
 
       # `cargo test` builds every lib, bin and test target; there is no
       # separate `cargo build` step for it to duplicate.
-      - name: Test
-        run: cargo test --workspace
-
-      - name: Test (active-amendments feature)
-        run: cargo test -p rshooks --features active-amendments
-
-      - name: Test (all-features)
-        run: cargo test -p rshooks --all-features
+      - name: Test (per mise.toml's test task)
+        run: mise run test
 
       - name: Test (unstable draft-spec features)
-        run: cargo test --workspace --features rshooks/unstable-param-sig-interface,rshooks/unstable-state-interface,rshooks-testenv/unstable-param-sig-interface,rshooks-testenv/unstable-state-interface
+        run: mise run test:unstable
 
       - name: Build no_std crates for wasm32v1-none
         run: cargo build -p rshooks-core -p rshooks --target wasm32v1-none --release
@@ -133,11 +133,10 @@ jobs:
       - name: Check (no_std crates, wasm32v1-none)
         run: cargo check -p rshooks-core -p rshooks --target wasm32v1-none
 
-  # Build & check every example (end-to-end): one independent job per
-  # example (matrix, fail-fast: false), so one example failing never
-  # blocks the others from running or reporting their own PR check. See
-  # build-examples.yml for the discovery/build/clippy jobs this expands
-  # into; the `e2e` job below deploys the artifacts it uploads.
+  # Build & check every example (end-to-end). See build-examples.yml for
+  # the discovery/build jobs this expands into (its examples-workspace
+  # clippy run is covered by the `lint` job above's `mise run lint`); the
+  # `e2e` job below deploys the artifacts it uploads.
   examples:
     name: Build & check examples (end-to-end)
     uses: ./.github/workflows/build-examples.yml
@@ -150,33 +149,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Download example hook binaries
+      # build-examples.yml's "Upload hook binaries" step uploads the
+      # `examples/*/out/current/...` tree itself, so downloading straight
+      # into `examples/` reconstructs `rshooks build`'s own publication
+      # layout with no reassembly step: `e2e/scripts/copy-wasm.mjs`
+      # and e2e suites that read a generated `sethook.template.json`
+      # directly (e.g. `e2e/test/param-signature.test.ts`) see the same
+      # paths as a local `mise run build-examples` run.
+      - name: Download example hook binaries into examples/*/out/current/
         uses: actions/download-artifact@v8
         with:
-          pattern: example-hooks-*
-          path: examples-out
+          name: example-hooks
+          path: examples
 
-      # `examples/scripts/copy-wasm.mjs` reads each artifact from
-      # `out/current/<index>.<entry-fn>.wasm`, matching `rshooks build`'s
-      # own publication layout (see mise.toml's `build-examples` task) —
-      # reconstruct that same layout from the flat per-example artifact
-      # downloaded above. Also place any uploaded `sethook.template.json`
-      # (see build-examples.yml's "Upload hook binary" step) the same way,
-      # for e2e suites that read the generated template directly (e.g.
-      # `e2e/test/param-signature.test.ts`) instead of hand-writing its
-      # declarations.
-      - name: Place downloaded wasm/template files back under examples/*/out/current/
-        run: |
-          set -e
-          for dir in examples-out/example-hooks-*; do
-            example="$(basename "$dir" | sed 's/^example-hooks-//')"
-            mkdir -p "examples/${example}/out/current"
-            cp "$dir"/*.wasm "examples/${example}/out/current/"
-            if [ -f "$dir/sethook.template.json" ]; then
-              cp "$dir/sethook.template.json" "examples/${example}/out/current/"
-            fi
-          done
-          find examples -name '*.wasm' -o -name 'sethook.template.json'
+      - name: List downloaded hook artifacts
+        run: find examples -name '*.wasm' -o -name 'sethook.template.json'
 
       - uses: actions/setup-node@v7
         with:
