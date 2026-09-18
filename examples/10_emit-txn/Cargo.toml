@@ -14,11 +14,11 @@ crate-type = ["cdylib", "rlib"]
 # available under the `--test` harness, never in the shipped wasm build.
 
 [dependencies]
-rshooks = { path = "../../crates/rshooks", features = ["host-panic-handler"] }
+rshooks = { workspace = true, features = ["host-panic-handler"] }
 
 [dev-dependencies]
-rshooks = { path = "../../crates/rshooks", features = ["testenv"] }
-rshooks-testenv = { path = "../../crates/rshooks-testenv" }
+rshooks = { workspace = true, features = ["testenv"] }
+rshooks-testenv.workspace = true
 
 [lints]
 workspace = true

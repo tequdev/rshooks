@@ -385,17 +385,11 @@ pub trait TypedStateKey: StateKeyEncode {
 ///
 /// Takes the raw `code` directly — compared against
 /// [`rshooks_core::DOESNT_EXIST`] *before* any [`HookError`] is ever
-/// constructed — rather than an already-decoded `Result<usize>`: matching
-/// one specific [`HookError`] variant out of an already-decoded value forces
-/// the compiler to keep the full ~44-arm [`HookError::from`] decode
-/// resolvable at this call site, and to fold that decode's own block nesting
-/// into the caller's once inlined into a large hook (measured: a 24→70
-/// nesting-depth blowup, over the Hook API's 32-level guard-checker limit,
-/// when tried the other way — see DESIGN.md §5.1's "no specific-variant
-/// decode inside rshooks" principle). `res(code)` is still called on the one
-/// path that needs a full [`HookError`]; its caller only ever propagates
-/// that error onward via `?`, so [`HookError::from`]'s decode optimizes away
-/// there too.
+/// constructed — rather than an already-wrapped `Result<usize>`: the raw
+/// code is already in hand at this call site, so comparing it directly
+/// skips a conversion the comparison does not need. `res(code)` is still
+/// called on the one path that needs a [`HookError`]; its caller only ever
+/// propagates that error onward via `?`.
 ///
 /// `raw` is only ever read over its `..n` prefix (`n = res(code)?`, the
 /// host's own reported write count) — so [`state_get_encoded`]/

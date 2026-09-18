@@ -892,7 +892,7 @@ pub mod prelude {
     pub use crate::buf_eq::*;
     pub use crate::convert::{FixedRead, FromBytes, ToBytes, TypedParamName};
     pub use crate::decl::{HookParam, OtxnParam, State};
-    pub use crate::error::{HookError, Result};
+    pub use crate::error::{HookError, HookErrorKind, Result};
     pub use crate::exit::{Accept, HookResult, Rollback};
     pub use crate::ledger_entry_type::LedgerEntryType;
     pub use crate::macros::no_unroll;

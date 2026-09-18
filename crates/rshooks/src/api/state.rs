@@ -139,8 +139,7 @@ pub fn state<B: AsMut<[u8]> + ?Sized, K: AsRef<[u8]> + ?Sized>(
 /// constructed here. `#[inline(always)]` and `pub(crate)`: an internal
 /// fast path for callers that need to compare the raw code against a
 /// specific constant (e.g. [`rshooks_core::DOESNT_EXIST`]) *before* deciding
-/// whether to decode at all — see DESIGN.md §5.1's "no specific-variant
-/// decode inside rshooks" principle.
+/// whether to construct a [`Result`] at all.
 ///
 /// Deliberately **not** implemented by having [`state`] call this (or vice
 /// versa): routing [`state`] *through* a second, separately-defined

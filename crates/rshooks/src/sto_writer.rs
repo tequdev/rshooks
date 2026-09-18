@@ -340,7 +340,8 @@ impl<'a> StoWriter<'a> {
     }
 
     /// Writes an `STI_ACCOUNT` field (a 1-byte VL length of `20` followed by
-    /// the 20 raw bytes — matches [`codec::write_account_id`]'s output).
+    /// the 20 raw bytes — matches [`codec::write_const_bytes`]'s output for
+    /// the same bytes).
     ///
     /// Recognizes `sfAccount` by value; see the module doc comment.
     ///

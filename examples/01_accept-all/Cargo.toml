@@ -7,13 +7,12 @@ publish.workspace = true
 
 [lib]
 crate-type = ["cdylib"]
-# no_std, no test crate for wasm32v1-none; see examples/README.md.
 test = false
 
 [dependencies]
 # The `trace` feature turns rshooks's trace! macros into real host calls;
 # without it they compile to nothing.
-rshooks = { path = "../../crates/rshooks", features = ["trace", "host-panic-handler"] }
+rshooks = { workspace = true, features = ["trace", "host-panic-handler"] }
 
 [lints]
 workspace = true
