@@ -1,53 +1,19 @@
-import {
-  ExecutionUtility,
-  Xrpld,
-  clearAllHooks,
-  hexNamespace,
-  readHookBinaryHexFromNS,
-  serverUrl,
-  setHooks,
-  setupClient,
-  teardownClient,
-  type XrplIntegrationTestContext,
-  type iHook,
-} from '@xahau/hooks-toolkit'
-import { calculateHookOn } from 'xahau'
-import { HookFlags } from 'xahau/dist/npm/models/common/xahau'
+import { ExecutionUtility, Xrpld } from '@xahau/hooks-toolkit'
+import { installHook } from './harness'
 
-const namespace = 'rshooks-e2e-reward'
 // The hook's static worst case, from
 // out/current/1.reward.metadata.json (WCE.hook).
 const WORST_CASE_HOOK_INSTRUCTIONS = 12881
 
 describe('reward', () => {
-  let testContext: XrplIntegrationTestContext
-
-  beforeAll(async () => {
-    testContext = await setupClient(serverUrl)
-
-    const hook: iHook = {
-      CreateCode: readHookBinaryHexFromNS('reward', 'wasm'),
-      Flags: HookFlags.hsfOverride,
-      HookOn: calculateHookOn(['Invoke', 'ClaimReward']),
-      HookNamespace: hexNamespace(namespace),
-      HookApiVersion: 0,
-    }
-    await setHooks({
-      client: testContext.client,
-      wallet: testContext.hook1,
-      hooks: [{ Hook: hook }],
-    })
-  })
-
-  afterAll(async () => {
-    await clearAllHooks({
-      client: testContext.client,
-      wallet: testContext.hook1,
-    })
-    await teardownClient(testContext)
+  const getContext = installHook({
+    wasmName: 'reward',
+    namespace: 'rshooks-e2e-reward',
+    hookOn: ['Invoke', 'ClaimReward'],
   })
 
   it('passes through a non-ClaimReward txn (reward.c L106)', async () => {
+    const testContext = getContext()
     const response = await Xrpld.submit(testContext.client, {
       tx: {
         TransactionType: 'Invoke',
