@@ -5,7 +5,7 @@
       "artifact": "0.remit.wasm",
       "index": 0,
       "hook_fn": "remit",
-      "bytes": 3665,
+      "bytes": 3534,
       "wce": {
         "hook": 1060,
         "cbak": 7
