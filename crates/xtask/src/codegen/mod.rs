@@ -4,29 +4,25 @@
 
 /// Generates `crates/rshooks-core/src/api.rs` from `extern.h`.
 pub mod api;
+/// Generates `crates/rshooks-core/src/{tts,sfcodes,error,ls_flags}.rs`: each
+/// is a module doc plus one const-rendering call over its header's parsed
+/// consts, sharing one file since none has any logic of its own.
+pub mod const_tables;
 /// Generates `crates/rshooks-core/src/consts.rs` from `hookapi.h`/`macro.h`.
 pub mod consts;
-/// Generates `crates/rshooks-core/src/error.rs` from `error.h`.
-pub mod error;
 /// Generates `crates/rshooks-core/src/host.rs`: the `HookHost` trait + `Guest`.
 pub mod host;
 /// Generates `crates/rshooks-core/src/lets.rs` from the ledger entry
 /// formats in `protocol_formats.json`.
 pub mod lets;
-/// Generates `crates/rshooks-core/src/ls_flags.rs` from `ls_flags.h`.
-pub mod ls_flags;
-/// Generates `crates/rshooks-core/src/sfcodes.rs` from `sfcodes.h`.
-pub mod sfcodes;
 /// Generates `crates/rshooks/src/sfield.rs` (typed `SField<T>` field
-/// constants) from `sfcodes.h` — the typed mirror of [`sfcodes`]'s raw
-/// table, in `rshooks` for the same reason [`tx_type`] is.
+/// constants) from `sfcodes.h` — the typed mirror of [`const_tables`]'s raw
+/// `sfcodes` table, in `rshooks` for the same reason [`tx_type`] is.
 pub mod sfield;
 /// Generates `crates/rshooks-testenv/src/protocol_formats_generated.rs`
 /// (the off-chain emit-blob validator's required-field table) from the
 /// transaction formats in `protocol_formats.json`.
 pub mod testenv_required_fields;
-/// Generates `crates/rshooks-core/src/tts.rs` from `tts.h`.
-pub mod tts;
 /// Generates `crates/rshooks-core/src/tx_flags.rs` from `tx_flags.h`.
 pub mod tx_flags;
 
@@ -46,6 +42,10 @@ pub mod tx_type_table;
 /// Generates `crates/rshooks/src/views/{tx,ledger,inner}.rs` (typed read
 /// views over every declared format) from `protocol_formats.json`.
 pub mod views;
+/// Generates `crates/rshooks-build/src/whitelist.rs` (the Hook API import
+/// whitelist) from `extern.h`, sharing [`api`]'s parse so the wasm validator
+/// and `rshooks-core`'s declarations can never drift apart.
+pub mod whitelist;
 
 /// Prepends the required `// @generated ...` marker to a module's `//!`
 /// doc-comment body, per `docs/DESIGN.md` §4 / the xtask spec: every
