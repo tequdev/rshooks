@@ -22,7 +22,7 @@
  *    — either a new numbered example (if that's judged worth a permanent
  *    tutorial slot) or a standalone crate under `e2e/fixtures/` with its
  *    own `rshooks build` step wired into `package.json`'s `pretest` /
- *    `scripts/copy-wasm.mjs` (see that script's `examples` map for the
+ *    `scripts/copy-wasm.mjs` (see that script's `exampleDirs` list for the
  *    pattern an additional fixture would follow).
  * 2. Submit a triggering transaction against it, the same way every other
  *    test in this suite does (`Xrpld.submit` +
