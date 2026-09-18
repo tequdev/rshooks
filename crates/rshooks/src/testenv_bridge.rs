@@ -109,17 +109,9 @@ pub(crate) fn write_bytes_code(out: &mut [u8], r: BackendResult<Vec<u8>>) -> i64
     }
 }
 
-/// [`write_bytes`] into uninitialized storage. Each byte is initialized
-/// explicitly because the destination must not be reborrowed as `&mut [u8]`.
-#[inline(always)]
-pub(crate) fn write_bytes_uninit(
-    out: &mut [core::mem::MaybeUninit<u8>],
-    r: BackendResult<Vec<u8>>,
-) -> HookResult<usize> {
-    res(write_bytes_uninit_code(out, r)).map(|v| v as usize)
-}
-
-/// Raw-code counterpart to [`write_bytes_uninit`].
+/// [`write_bytes_code`] into uninitialized storage. Each byte is
+/// initialized explicitly because the destination must not be reborrowed as
+/// `&mut [u8]`.
 #[inline(always)]
 pub(crate) fn write_bytes_uninit_code(
     out: &mut [core::mem::MaybeUninit<u8>],

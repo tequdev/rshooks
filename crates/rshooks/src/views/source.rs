@@ -27,23 +27,17 @@
 //!
 //! An optional field reads back as `Ok(None)` when it is missing. That
 //! decision is made by comparing the **undecoded** `i64` the host returned
-//! against `rshooks_core::DOESNT_EXIST`, never by matching
-//! `HookError::DoesntExist`.
-//!
-//! This is a hard requirement, not a micro-optimization: `HookError::from`
-//! compiles to a ~40-block `br_table` that the optimizer only keeps at call
-//! sites inspecting *which* variant a failure was (`docs/DESIGN.md` §5.6),
-//! and `rshooks-build` inlines every function into `hook()`/`cbak()`, which
-//! must stay under the guard checker's 32-level nesting limit. A view emits
-//! an optional read per optional field, so matching
-//! `Err(HookError::DoesntExist)` here would be inlined once per accessor
-//! call and blow that budget on its own. The raw-code helpers
-//! ([`crate::api::otxn`]'s `otxn_field_raw_code`, [`crate::api::slot`]'s
-//! `slot_subfield_raw_code`) exist for exactly this.
+//! against `rshooks_core::DOESNT_EXIST`, rather than by first converting to
+//! a `HookError` and comparing that: the raw code is already in hand at the
+//! call site, so the raw compare skips a conversion the comparison does not
+//! need. `HookError::from` is the identity (a `#[repr(transparent)]`
+//! newtype over the code), so either spelling costs one `i64` compare; the
+//! raw-code helpers ([`crate::api::otxn`]'s `otxn_field_raw_code`,
+//! [`crate::api::slot`]'s `slot_subfield_raw_code`) are a convention, not a
+//! nesting-budget necessity.
 //!
 //! The required-field accessors are the optional ones plus
-//! `.ok_or(HookError::DoesntExist)`: *constructing* a variant is free, only
-//! *inspecting* one is not.
+//! `.ok_or(HookError::DoesntExist)`.
 //!
 //! # Slot lifetime: get, read, clear
 //!
@@ -429,9 +423,9 @@ impl FieldSource for SlotSource {
 // from `rshooks_core::tts`, an `lt*` one from `rshooks_core::lets` — and
 // never a [`crate::tx_type::TxType`] or
 // [`crate::ledger_entry_type::LedgerEntryType`]. Those enums' `From<u16>`
-// impls are ~74- and ~34-arm matches with the same nesting cost as
-// `HookError::from` (`docs/DESIGN.md` §5.6), and a view checks its type once
-// per construction, so the check has to stay a single integer compare.
+// impls are wide matches (`docs/DESIGN.md` §5.6) that nest a block per arm
+// once inlined, and a view checks its type once per construction, so the
+// check has to stay a single integer compare.
 
 /// Verifies the originating transaction's type before a view claims it,
 /// for the generated `Xxx::otxn()` constructors.

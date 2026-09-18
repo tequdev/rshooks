@@ -200,7 +200,7 @@ fn access(sti_code: u32) -> Access {
         26 => Access::Value("crate::types::CurrencyCode"),
         6 => Access::Value("crate::slot_obj::AmountBytes"),
         24 => Access::Value("crate::slot_obj::IssueData"),
-        14 => Access::Container("crate::types::STObject"),
+        14 => Access::Container("STObject"),
         15 => Access::Container("crate::types::STArray"),
         _ => Access::Raw,
     }
@@ -360,16 +360,6 @@ fn tier_field_doc(tier: Tier) -> String {
     }
 }
 
-fn optional_doc(p: Presence) -> &'static str {
-    match p {
-        Presence::Default => {
-            "///\n\
-             /// `Ok(None)` when omitted; `soeDEFAULT` defines no value to substitute.\n"
-        }
-        _ => "///\n/// `Ok(None)` when the field is absent.\n",
-    }
-}
-
 /// Renders the value/raw accessors — the ones every source can serve.
 fn push_shared_accessor(
     buf: &mut String,
@@ -382,13 +372,10 @@ fn push_shared_accessor(
     match a.access {
         Access::Value(ty) => {
             buf.push_str(&field_doc(a, view_tier));
-            if opt {
-                buf.push_str(optional_doc(a.spec.presence));
-            }
             let ret = if opt {
-                format!("crate::error::Result<Option<{ty}>>")
+                format!("Result<Option<{ty}>>")
             } else {
-                format!("crate::error::Result<{ty}>")
+                format!("Result<{ty}>")
             };
             let call = if opt { "read_opt" } else { "read" };
             buf.push_str(&field_cfg(a, view_tier));
@@ -404,29 +391,11 @@ fn push_shared_accessor(
             .context("writing a value accessor")?;
         }
         Access::Raw | Access::Container(_) => {
-            let container = matches!(a.access, Access::Container(_));
             buf.push_str(&field_doc(a, view_tier));
-            buf.push_str("///\n/// Writes the raw wire bytes to `out`.\n");
-            if container {
-                // A plain code span, not an intra-doc link: on a
-                // transaction view this doc sits in the `impl<S:
-                // FieldSource>` block, where `Self::{name}_slot` does not
-                // resolve — that method exists only on the `SlotSource`
-                // instantiation.
-                writeln!(
-                    buf,
-                    "/// Use `{name}_slot` on a slot-backed view to navigate the container.",
-                    name = a.name,
-                )
-                .context("writing a container accessor doc")?;
-            }
-            if opt {
-                buf.push_str(optional_doc(a.spec.presence));
-            }
             let ret = if opt {
-                "crate::error::Result<Option<usize>>"
+                "Result<Option<usize>>"
             } else {
-                "crate::error::Result<usize>"
+                "Result<usize>"
             };
             let call = if opt { "read_raw_opt" } else { "read_raw" };
             buf.push_str(&field_cfg(a, view_tier));
@@ -459,21 +428,11 @@ fn push_slot_accessor(
     };
     let opt = is_optional(a.spec.presence);
     buf.push_str(&field_doc(a, view_tier));
-    buf.push_str(
-        "///\n\
-         /// Returns an owned child slot. Clear or consume it to avoid exhausting slots.\n",
-    );
-    if opt {
-        buf.push_str(optional_doc(a.spec.presence));
-    }
-    let inner = format!("crate::slot_obj::SlotObject<{slot_ty}>");
+    let inner = format!("SlotObject<{slot_ty}>");
     let (ret, call) = if opt {
-        (
-            format!("crate::error::Result<Option<{inner}>>"),
-            "subobject_opt",
-        )
+        (format!("Result<Option<{inner}>>"), "subobject_opt")
     } else {
-        (format!("crate::error::Result<{inner}>"), "subobject")
+        (format!("Result<{inner}>"), "subobject")
     };
     buf.push_str(&field_cfg(a, view_tier));
     writeln!(
@@ -509,8 +468,22 @@ fn tier_prelude(tier: Tier) -> (String, String) {
     (format!("{attr}\n"), doc)
 }
 
-/// Brings `FieldSource` methods into scope for concrete `SlotSource` views.
-const SOURCE_TRAIT_IMPORT: &str = "\nuse crate::views::source::FieldSource as _;\n\n";
+/// Brings `FieldSource` (and its methods, for concrete `SlotSource` views)
+/// plus the other types every accessor signature in the module names, so
+/// signatures read as `Result<T>`/`SlotObject<STObject>` rather than their
+/// fully-qualified paths. Only types every view in the module uses
+/// unconditionally are imported here; a field-type-specific name (`Hash`,
+/// `AccountId`, `STArray`, …) stays fully qualified at its call site, since
+/// whether a given module's fields ever reach a particular serialized type
+/// is data from `protocol_formats.json`, not something this generator can
+/// promise ahead of rendering — an unconditional import of an unused one
+/// would fail the `unused_imports` lint the next time upstream's format
+/// declarations change.
+const SHARED_IMPORTS: &str = "\n\
+    use crate::error::Result;\n\
+    use crate::slot_obj::SlotObject;\n\
+    use crate::types::STObject;\n\
+    use crate::views::source::FieldSource;\n\n";
 
 /// Guards against two formats claiming the same Rust type name in one
 /// generated module.
@@ -533,7 +506,7 @@ const TX_MODULE_DOC: &str = "\
 //!
 //! Each is named exactly as upstream names the type ([`Payment`],
 //! [`EscrowCreate`], …) and is generic over
-//! [`FieldSource`](crate::views::source::FieldSource), so the same struct
+//! [`FieldSource`], so the same struct
 //! reads the originating transaction directly
 //! ([`OtxnSource`](crate::views::source::OtxnSource), via `Xxx::otxn()`) or
 //! an already-loaded transaction slot
@@ -543,11 +516,15 @@ const TX_MODULE_DOC: &str = "\
 //!
 //! A field the format declares `soeREQUIRED` reads as `Result<T>`; one
 //! declared `soeOPTIONAL` or `soeDEFAULT` reads as `Result<Option<T>>`,
-//! with absence reported as `Ok(None)`. A field whose serialized type this
-//! crate models no typed read for is reachable as raw wire bytes through a
-//! `…_into` accessor. `STObject`/`STArray` fields have that too, plus a
-//! `…_slot` child-slot accessor on the slot-backed views only — navigating
-//! into a container is something `otxn_field` cannot do.
+//! with absence reported as `Ok(None)` either way — `soeDEFAULT` says only
+//! that upstream may omit the field from the wire form, not what value to
+//! substitute for it. A field whose serialized type this crate models no
+//! typed read for is reachable as raw wire bytes through a `…_into`
+//! accessor. `STObject`/`STArray` fields have that too, plus a `…_slot`
+//! child-slot accessor on the slot-backed views only — navigating into a
+//! container is something `otxn_field` cannot do; the returned
+//! [`SlotObject`] is still owned by the caller and must be cleared or
+//! consumed, per its own documentation.
 //!
 //! The fields every transaction carries (`sfAccount`, `sfFee`, `sfMemos`, …)
 //! are served once, as [`TransactionCommonFields`] default methods — plus
@@ -569,7 +546,7 @@ pub fn generate_tx(formats: &ProtocolFormats, availability: &FormatAvailability)
         "transaction",
     )?;
 
-    let mut body = String::from(SOURCE_TRAIT_IMPORT);
+    let mut body = String::from(SHARED_IMPORTS);
     push_tx_common_traits(&mut body, formats, &sfields, &field_tiers)?;
     for tx in &formats.transactions {
         let tier = availability.tx(&tx.name);
@@ -607,7 +584,7 @@ fn push_tx_common_traits(
          pub trait TransactionCommonFields {{\n\
          /// The backing source used by this transaction view.\n\
          #[doc(hidden)]\n\
-         type Source: crate::views::source::FieldSource;\n\
+         type Source: FieldSource;\n\
          \n\
          /// Returns the backing field source.\n\
          #[doc(hidden)]\n\
@@ -651,7 +628,7 @@ fn push_tx_view(
     writeln!(
         buf,
         "/// View of the `{name}` transaction (`{tag}`, type code {value}).\n\
-         {tier_doc}{cfg}pub struct {name}<S: crate::views::source::FieldSource> {{\n\
+         {tier_doc}{cfg}pub struct {name}<S: FieldSource> {{\n\
          src: S,\n\
          }}\n",
         tag = tx.tag,
@@ -664,7 +641,7 @@ fn push_tx_view(
         "{cfg}impl {name}<crate::views::source::OtxnSource> {{\n\
          /// Views the originating transaction as `{name}`, checking its type.\n\
          #[inline(always)]\n\
-         pub fn otxn() -> crate::error::Result<Self> {{\n\
+         pub fn otxn() -> Result<Self> {{\n\
          crate::views::source::otxn_of_type(rshooks_core::{tag}).map(|src| Self {{ src }})\n\
          }}\n\
          }}\n",
@@ -679,8 +656,8 @@ fn push_tx_view(
          /// A failed check best-effort clears the consumed slot.\n\
          #[inline(always)]\n\
          pub fn from_slot(\n\
-         obj: crate::slot_obj::SlotObject<crate::types::STObject>,\n\
-         ) -> crate::error::Result<Self> {{\n\
+         obj: SlotObject<STObject>,\n\
+         ) -> Result<Self> {{\n\
          crate::views::source::slot_of_type(\n\
          obj,\n\
          crate::sfield::sfTransactionType,\n\
@@ -691,7 +668,7 @@ fn push_tx_view(
          \n\
          /// Consumes the view and returns its slot.\n\
          #[inline(always)]\n\
-         pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {{\n\
+         pub fn into_slot(self) -> SlotObject<STObject> {{\n\
          self.src.into_slot()\n\
          }}\n",
         tag = tx.tag,
@@ -709,14 +686,11 @@ fn push_tx_view(
         "{cfg}impl {name}<crate::views::source::SlotSource> {{\n{slot_only}}}\n"
     )
     .context("writing the slot impl")?;
+    writeln!(buf, "{cfg}impl<S: FieldSource> {name}<S> {{\n{shared}}}\n")
+        .context("writing the shared impl")?;
     writeln!(
         buf,
-        "{cfg}impl<S: crate::views::source::FieldSource> {name}<S> {{\n{shared}}}\n"
-    )
-    .context("writing the shared impl")?;
-    writeln!(
-        buf,
-        "{cfg}impl<S: crate::views::source::FieldSource> TransactionCommonFields for {name}<S> {{\n\
+        "{cfg}impl<S: FieldSource> TransactionCommonFields for {name}<S> {{\n\
          type Source = S;\n\
          \n\
          #[inline(always)]\n\
@@ -749,8 +723,8 @@ const LEDGER_MODULE_DOC: &str = "\
 //! parameterized is per-type knowledge upstream's format macros do not
 //! encode, so it is not generated.
 //!
-//! Presence and value-type rules are [`crate::views::tx`]'s, unchanged. A
-//! name that is both a transaction type and a ledger entry type
+//! Presence, value-type and slot-lifetime rules are [`crate::views::tx`]'s,
+//! unchanged. A name that is both a transaction type and a ledger entry type
 //! (`DepositPreauth`) is two different structs in two different modules.
 //!
 //! The fields every ledger entry carries (`sfLedgerEntryType`, `sfFlags`, …)
@@ -771,7 +745,7 @@ pub fn generate_ledger(
         "ledger entry",
     )?;
 
-    let mut body = String::from(SOURCE_TRAIT_IMPORT);
+    let mut body = String::from(SHARED_IMPORTS);
     push_ledger_common_trait(&mut body, formats, &sfields, &field_tiers)?;
     for le in &formats.ledger_entries {
         let tier = availability.ledger_entry(&le.name);
@@ -844,16 +818,16 @@ fn push_ledger_view(
          {cfg}impl {name} {{\n\
          /// Loads and type-checks the ledger object identified by `keylet`.\n\
          #[inline(always)]\n\
-         pub fn from_keylet(keylet: &crate::types::Keylet) -> crate::error::Result<Self> {{\n\
-         Self::from_slot(crate::slot_obj::SlotObject::from_keylet(keylet)?)\n\
+         pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {{\n\
+         Self::from_slot(SlotObject::from_keylet(keylet)?)\n\
          }}\n\
          \n\
          /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `{tag}`.\n\
          /// A failed check best-effort clears the consumed slot.\n\
          #[inline(always)]\n\
          pub fn from_slot(\n\
-         obj: crate::slot_obj::SlotObject<crate::types::STObject>,\n\
-         ) -> crate::error::Result<Self> {{\n\
+         obj: SlotObject<STObject>,\n\
+         ) -> Result<Self> {{\n\
          crate::views::source::slot_of_type(\n\
          obj,\n\
          crate::sfield::sfLedgerEntryType,\n\
@@ -864,7 +838,7 @@ fn push_ledger_view(
          \n\
          /// Consumes the view and returns its slot.\n\
          #[inline(always)]\n\
-         pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {{\n\
+         pub fn into_slot(self) -> SlotObject<STObject> {{\n\
          self.src.into_slot()\n\
          }}\n",
         tag = le.tag,
@@ -924,7 +898,7 @@ pub fn generate_inner(
         .collect::<Result<Vec<_>>>()?;
     check_unique(names.into_iter(), "inner object")?;
 
-    let mut body = String::from(SOURCE_TRAIT_IMPORT);
+    let mut body = String::from(SHARED_IMPORTS);
     for obj in &formats.inner_objects {
         let tier = availability.inner_object(&inner_name(&obj.sfield)?);
         push_inner_view(&mut body, obj, &sfields, tier, &field_tiers)
@@ -975,7 +949,7 @@ fn push_inner_view(
          /// Takes a child slot without type-checking it; inner objects have no type field.\n\
          #[inline(always)]\n\
          #[must_use]\n\
-         pub fn from_slot(obj: crate::slot_obj::SlotObject<crate::types::STObject>) -> Self {{\n\
+         pub fn from_slot(obj: SlotObject<STObject>) -> Self {{\n\
          Self {{\n\
          src: crate::views::source::SlotSource::new(obj),\n\
          }}\n\
@@ -983,7 +957,7 @@ fn push_inner_view(
          \n\
          /// Consumes the view and returns its slot.\n\
          #[inline(always)]\n\
-         pub fn into_slot(self) -> crate::slot_obj::SlotObject<crate::types::STObject> {{\n\
+         pub fn into_slot(self) -> SlotObject<STObject> {{\n\
          self.src.into_slot()\n\
          }}\n",
         sf = obj.sfield,
@@ -1223,16 +1197,10 @@ mod tests {
             .expect("no Payment view");
 
         // soeREQUIRED -> Result<T>; AMOUNT -> AmountBytes, ACCOUNT -> AccountId.
-        assert!(payment.contains(
-            "pub fn amount(&self) -> crate::error::Result<crate::slot_obj::AmountBytes>"
-        ));
-        assert!(payment.contains(
-            "pub fn destination(&self) -> crate::error::Result<crate::types::AccountId>"
-        ));
+        assert!(payment.contains("pub fn amount(&self) -> Result<crate::slot_obj::AmountBytes>"));
+        assert!(payment.contains("pub fn destination(&self) -> Result<crate::types::AccountId>"));
         // soeOPTIONAL -> Result<Option<T>>.
-        assert!(
-            payment.contains("pub fn destination_tag(&self) -> crate::error::Result<Option<u32>>")
-        );
+        assert!(payment.contains("pub fn destination_tag(&self) -> Result<Option<u32>>"));
         // Unmodeled serialized type -> a raw `*_into` accessor only.
         assert!(payment.contains("pub fn paths_into<B: AsMut<[u8]> + ?Sized>"));
         assert!(!payment.contains("pub fn paths(&self)"));
@@ -1262,9 +1230,7 @@ mod tests {
             .expect("unterminated trait section");
         assert!(slot_common.contains("fn memos_slot(&self)"));
         // Every view wires itself into the common trait.
-        assert!(payment.contains(
-            "impl<S: crate::views::source::FieldSource> TransactionCommonFields for Payment<S>"
-        ));
+        assert!(payment.contains("impl<S: FieldSource> TransactionCommonFields for Payment<S>"));
     }
 
     /// Every field any format references has an accessor name, and no

@@ -285,13 +285,11 @@ impl InvocationContext {
     /// this invocation → `TOO_MANY_NONCES`; independent of
     /// [`Self::next_emit_nonce`]'s budget.
     pub(crate) fn next_ledger_nonce(&mut self) -> Result<[u8; 32], i64> {
-        if self.ledger_nonce_count >= MAX_NONCES {
-            return Err(rshooks_core::TOO_MANY_NONCES);
-        }
-        let call = self.call_counter;
-        self.ledger_nonce_count = self.ledger_nonce_count.saturating_add(1);
-        self.call_counter = self.call_counter.saturating_add(1);
-        Ok(hash_counters(self.invocation_id, call))
+        draw_nonce(
+            self.invocation_id,
+            &mut self.call_counter,
+            &mut self.ledger_nonce_count,
+        )
     }
 
     /// Draws the next deterministic emit nonce, shared by `etxn_nonce` and
@@ -301,13 +299,11 @@ impl InvocationContext {
     /// `etxn_details` calls this invocation → `TOO_MANY_NONCES`; independent
     /// of [`Self::next_ledger_nonce`]'s budget.
     pub(crate) fn next_emit_nonce(&mut self) -> Result<[u8; 32], i64> {
-        if self.emit_nonce_count >= MAX_NONCES {
-            return Err(rshooks_core::TOO_MANY_NONCES);
-        }
-        let call = self.call_counter;
-        self.emit_nonce_count = self.emit_nonce_count.saturating_add(1);
-        self.call_counter = self.call_counter.saturating_add(1);
-        Ok(hash_counters(self.invocation_id, call))
+        draw_nonce(
+            self.invocation_id,
+            &mut self.call_counter,
+            &mut self.emit_nonce_count,
+        )
     }
 
     /// Whether a foreign write is blocked by an earlier authorization
@@ -385,6 +381,23 @@ impl InvocationContext {
     }
 }
 
+/// Shared draw for `next_ledger_nonce`/`next_emit_nonce`: budget-checks the
+/// caller's own counter (`ledger_nonce_count`/`emit_nonce_count`), then
+/// advances the `call_counter` shared by both nonce kinds.
+fn draw_nonce(
+    invocation_id: u64,
+    call_counter: &mut u64,
+    budget_count: &mut u32,
+) -> Result<[u8; 32], i64> {
+    if *budget_count >= MAX_NONCES {
+        return Err(rshooks_core::TOO_MANY_NONCES);
+    }
+    let call = *call_counter;
+    *budget_count = budget_count.saturating_add(1);
+    *call_counter = call_counter.saturating_add(1);
+    Ok(hash_counters(invocation_id, call))
+}
+
 /// Deterministic per-invocation nonce derivation: SHA-256 of the two
 /// counters' big-endian bytes, taken directly as the 32-byte nonce.
 fn hash_counters(invocation_id: u64, call_counter: u64) -> [u8; 32] {
@@ -447,38 +460,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn ledger_nonce_budget_rejects_at_256() {
-        let mut ctx = InvocationContext::new(0);
-        for _ in 0..256 {
-            assert!(ctx.next_ledger_nonce().is_ok());
-        }
-        assert_eq!(ctx.next_ledger_nonce(), Err(rshooks_core::TOO_MANY_NONCES));
-    }
-
-    #[test]
-    fn emit_nonce_budget_rejects_at_256() {
-        let mut ctx = InvocationContext::new(0);
-        for _ in 0..256 {
-            assert!(ctx.next_emit_nonce().is_ok());
-        }
-        assert_eq!(ctx.next_emit_nonce(), Err(rshooks_core::TOO_MANY_NONCES));
-    }
-
-    #[test]
-    fn ledger_and_emit_nonce_budgets_are_independent() {
-        let mut ctx = InvocationContext::new(0);
-        for _ in 0..256 {
-            assert!(ctx.next_ledger_nonce().is_ok());
-        }
-        // The ledger-nonce family is exhausted, but the emit-nonce family
-        // still has its own, untouched 256-call budget.
-        for _ in 0..256 {
-            assert!(ctx.next_emit_nonce().is_ok());
-        }
-        assert_eq!(ctx.next_ledger_nonce(), Err(rshooks_core::TOO_MANY_NONCES));
-        assert_eq!(ctx.next_emit_nonce(), Err(rshooks_core::TOO_MANY_NONCES));
-    }
+    // Nonce-budget rejection and cross-family independence are covered
+    // end-to-end at the backend layer (`backend.rs`:
+    // `ledger_and_etxn_nonce_budgets_are_independent_at_the_backend`,
+    // `etxn_details_consumes_the_etxn_nonce_budget`).
 
     #[test]
     fn nonces_are_deterministic_given_the_same_counters() {

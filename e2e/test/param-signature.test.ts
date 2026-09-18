@@ -8,51 +8,18 @@
 // right in isolation (see book/src/build/metadata.md's "Generated
 // `SetHook` declarations" section).
 
-import { readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import {
-  ExecutionUtility,
-  StateUtility,
-  Xrpld,
-  clearAllHooks,
-  clearHookState,
-  hexNamespace,
-  readHookBinaryHexFromNS,
-  serverUrl,
-  setHooks,
-  setupClient,
-  teardownClient,
-  type XrplIntegrationTestContext,
-  type iHook,
-} from '@xahau/hooks-toolkit'
-import { calculateHookOn, decodeAccountID, type TransactionMetadata } from 'xahau'
-import { HookFlags } from 'xahau/dist/npm/models/common/xahau'
-import { sigParam, u16BEHex } from './sig-param'
+import { ExecutionUtility, StateUtility, Xrpld, hexNamespace } from '@xahau/hooks-toolkit'
+import { decodeAccountID, type TransactionMetadata } from 'xahau'
+import { installHook, readDeclaredHookParameters, type Wallet } from './harness'
 
 const namespace = 'rshooks-e2e-param-signature'
+const hookNamespace = hexNamespace(namespace)
 const WORST_CASE_INSTRUCTIONS = 280
-
-// This file lives in `e2e/test/`, mirroring `e2e/scripts/copy-wasm.mjs`'s
-// own two-level walk up to the repo root.
-const e2eRoot = dirname(dirname(fileURLToPath(import.meta.url)))
-const repoRoot = dirname(e2eRoot)
-const templatePath = join(
-  repoRoot,
-  'examples',
-  '19_param-signature',
-  'out',
-  'current',
-  'sethook.template.json',
-)
 
 // The generated template's own `HookParameters` declaration array for this
 // entry - `[{ HookParameter: { HookParameterName, HookParameterValue: "00" } }, ...]`,
 // in index order: `account`(0) then `count`(1). Installed verbatim below.
-const template = JSON.parse(readFileSync(templatePath, 'utf8'))
-const declaredHookParameters = template.Hooks[0].Hook.HookParameters as Array<{
-  HookParameter: { HookParameterName: string; HookParameterValue: string }
-}>
+const declaredHookParameters = readDeclaredHookParameters('19_param-signature')
 const ACCOUNT_NAME_HEX = declaredHookParameters[0].HookParameter.HookParameterName
 const COUNT_NAME_HEX = declaredHookParameters[1].HookParameter.HookParameterName
 
@@ -67,51 +34,36 @@ function counterStateKeyHex(address: string): string {
   return accountIdHex(address).padStart(64, '0')
 }
 
+// The TS-side mirror of `rshooks::sig::sig_param_name`/`sig_name!`
+// (crates/rshooks/src/sig.rs): one `HookParameter` array entry keyed by a
+// declared signature-parameter name.
+function sigParam(nameHex: string, valueHex: string) {
+  return {
+    HookParameter: {
+      HookParameterName: nameHex,
+      HookParameterValue: valueHex,
+    },
+  }
+}
+
+function u16BEHex(value: number): string {
+  const buf = Buffer.alloc(2)
+  buf.writeUInt16BE(value)
+  return buf.toString('hex').toUpperCase()
+}
+
 describe('param-signature', () => {
-  let testContext: XrplIntegrationTestContext
-  const hookNamespace = hexNamespace(namespace)
-
-  beforeAll(async () => {
-    testContext = await setupClient(serverUrl)
-
-    const hook: iHook = {
-      CreateCode: readHookBinaryHexFromNS('param_signature', 'wasm'),
-      Flags: HookFlags.hsfOverride,
-      HookOn: calculateHookOn(['Invoke']),
-      HookNamespace: hookNamespace,
-      HookApiVersion: 0,
-      // Installed verbatim from the generated template (see header comment).
-      HookParameters: declaredHookParameters,
-    } as iHook
-    await setHooks({
-      client: testContext.client,
-      wallet: testContext.hook1,
-      hooks: [{ Hook: hook }],
-    })
+  const getContext = installHook({
+    wasmName: 'param_signature',
+    namespace,
+    hookOn: ['Invoke'],
+    // Installed verbatim from the generated template (see header comment).
+    hookParameters: declaredHookParameters,
+    clearState: true,
   })
 
-  afterAll(async () => {
-    const clearStateHook: iHook = {
-      Flags: HookFlags.hsfNSDelete,
-      HookNamespace: hookNamespace,
-    }
-    await clearHookState({
-      client: testContext.client,
-      wallet: testContext.hook1,
-      hooks: [{ Hook: clearStateHook }],
-    })
-    await clearAllHooks({
-      client: testContext.client,
-      wallet: testContext.hook1,
-    })
-    await teardownClient(testContext)
-  })
-
-  function invoke(
-    sender: XrplIntegrationTestContext['alice'],
-    target: string,
-    count: number,
-  ) {
+  function invoke(sender: Wallet, target: string, count: number) {
+    const testContext = getContext()
     return Xrpld.submit(testContext.client, {
       tx: {
         TransactionType: 'Invoke',
@@ -133,6 +85,7 @@ describe('param-signature', () => {
   })
 
   it('accepts a well-formed Invoke and returns the new count as the accept code', async () => {
+    const testContext = getContext()
     const response = await invoke(testContext.alice, testContext.alice.classicAddress, 5)
 
     const meta = response.meta as TransactionMetadata
@@ -154,6 +107,7 @@ describe('param-signature', () => {
   })
 
   it('persists the per-account counter as an 8-byte LE u64 in hook state', async () => {
+    const testContext = getContext()
     const entry = await StateUtility.getHookState(
       testContext.client,
       testContext.hook1.classicAddress,
@@ -166,6 +120,7 @@ describe('param-signature', () => {
   })
 
   it('accumulates across invocations, keyed per account', async () => {
+    const testContext = getContext()
     const response = await invoke(testContext.alice, testContext.alice.classicAddress, 3)
     const meta = response.meta as TransactionMetadata
     const hookExecutions = await ExecutionUtility.getHookExecutionsFromMeta(
@@ -176,6 +131,7 @@ describe('param-signature', () => {
   })
 
   it("bob's own counter is independent of alice's", async () => {
+    const testContext = getContext()
     const response = await invoke(testContext.bob, testContext.bob.classicAddress, 1)
     const meta = response.meta as TransactionMetadata
     const hookExecutions = await ExecutionUtility.getHookExecutionsFromMeta(
@@ -186,6 +142,7 @@ describe('param-signature', () => {
   })
 
   it('rejects an Invoke missing the count signature parameter', async () => {
+    const testContext = getContext()
     const response = Xrpld.submit(testContext.client, {
       tx: {
         TransactionType: 'Invoke',
@@ -201,6 +158,7 @@ describe('param-signature', () => {
   })
 
   it('rejects an Invoke with a short (wrong-length) count value', async () => {
+    const testContext = getContext()
     const response = Xrpld.submit(testContext.client, {
       tx: {
         TransactionType: 'Invoke',
