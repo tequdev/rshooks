@@ -640,7 +640,9 @@ fn cargo_spawn_context(cargo: &Path) -> String {
 /// `PATH`. Never fails the build: any spawn or parse problem returns
 /// `None`.
 fn detect_rustc_version(cargo: &Path) -> Option<String> {
-    let sibling = cargo.parent().map(|dir| dir.join("rustc"));
+    let sibling = cargo
+        .parent()
+        .map(|dir| dir.join(format!("rustc{}", std::env::consts::EXE_SUFFIX)));
     sibling
         .into_iter()
         .chain(std::iter::once(PathBuf::from("rustc")))
