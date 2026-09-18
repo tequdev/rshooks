@@ -1,6 +1,5 @@
 //! Blob builders shared by more than one module's `#[cfg(test)]` suite
-//! (`crate::emit_walk`, `crate::host::sto`) — kept in one place instead of
-//! copied per module.
+//! (`crate::emit_walk`, `crate::host::sto`).
 
 use std::vec::Vec;
 

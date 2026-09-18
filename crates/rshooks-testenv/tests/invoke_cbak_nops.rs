@@ -5,7 +5,7 @@
 //! (`crate::backend::Backend::emit`), and the stored, already-canonical
 //! bytes are what a `#[cbak]`'s otxn reconstruction (`crate::otxn::
 //! from_emitted`/`deserialize`) then navigates. This test asserts on that
-//! stored blob (`!txn.blob.contains(&0x99)`) and on the callback's own
+//! stored blob (`!txn.blob().contains(&0x99)`) and on the callback's own
 //! successful navigation; it does not by itself exercise `deserialize`'s
 //! *own* canonicalization step in isolation on a raw, not-yet-canonical
 //! blob — `crate::otxn::tests::deserialize_canonicalizes_a_nested_nop_
@@ -151,7 +151,7 @@ fn cbak_navigates_a_nested_field_that_carried_a_nop() {
     // canonicalizes before storing (see `crate::emit_walk::canonicalize`'s
     // doc comment) — but the nested NOP was still genuinely present in the
     // bytes the hook passed to `emit`.
-    assert!(!txn.blob.contains(&0x99));
+    assert!(!txn.blob().contains(&0x99));
 
     let cbak_exit = env.invoke_cbak::<Chain>(0, CbakOutcome::Success(txn));
     assert_eq!(cbak_exit.exit, ExitType::Accept, "{cbak_exit:?}");

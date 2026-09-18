@@ -1,11 +1,11 @@
 //! Source-scan test (design §2.1): for each bridged `rshooks::api::*` file,
 //! counts raw `rshooks_core::<fn>(` call sites (source before the file's
-//! own `#[cfg(test)]` module) against `feature = "testenv"` cfg-marker
-//! occurrences, and requires at least as many markers as call sites. A
-//! deleted interception block drops a marker without dropping its call
-//! site, so the count goes negative and this test catches it.
-//! `tests/spy_backend_audit.rs` separately proves the runtime property
-//! (every backend method is actually reached).
+//! own test module) against `feature = "testenv"` cfg-marker occurrences,
+//! and requires the two counts to match exactly — every raw call site has
+//! its own guard, one-to-one. A deleted interception block drops a marker
+//! without dropping its call site, so the counts diverge and this test
+//! catches it. `tests/spy_backend_audit.rs` separately proves the runtime
+//! property (every backend method is actually reached).
 
 #![allow(
     clippy::panic,
@@ -35,12 +35,25 @@ fn rshooks_crate_dir() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../rshooks")
 }
 
-/// Everything before this file's `#[cfg(test)]` module. Test code calls
-/// `rshooks_core::` directly with no testenv guard, so it's excluded from
-/// both counts rather than forcing a marker that would only ever guard a
-/// test.
+/// Everything before this file's first test module — `#[cfg(test)]` or,
+/// where the whole module is also gated on `feature = "testenv"` (e.g.
+/// `control.rs`'s `testenv_tests`), `#[cfg(all(test, ...))]`. Test code
+/// calls `rshooks_core::` directly with no intercept of its own, and a
+/// `cfg(all(test, feature = "testenv"))` module attribute is not itself an
+/// intercept's guard, so both must be excluded from the counts — otherwise
+/// a file with no plain `#[cfg(test)]` module at all (only the
+/// `cfg(all(test, ...))` one) never gets cut, and that attribute's own
+/// `feature = "testenv"` text inflates `marker_count` enough to mask a
+/// genuinely deleted intercept elsewhere in the file.
 fn source_before_test_module(content: &str) -> &str {
-    match content.find("\n#[cfg(test)]") {
+    let cut = [
+        content.find("\n#[cfg(test)]"),
+        content.find("\n#[cfg(all(test"),
+    ]
+    .into_iter()
+    .flatten()
+    .min();
+    match cut {
         Some(i) => &content[..i],
         None => content,
     }
@@ -76,7 +89,7 @@ fn find_raw_call_in_keylet(line: &str) -> bool {
             .is_some_and(|idx| !line[..idx].ends_with('.'))
 }
 
-fn every_bridged_file_has_enough_markers() -> Vec<(String, usize, usize)> {
+fn every_bridged_file_has_matching_markers() -> Vec<(String, usize, usize)> {
     const MARKER: &str = "feature = \"testenv\"";
     let api_dir = rshooks_crate_dir().join("src/api");
     let mut offenders = Vec::new();
@@ -92,7 +105,7 @@ fn every_bridged_file_has_enough_markers() -> Vec<(String, usize, usize)> {
         };
         let raw_count = content.lines().filter(|l| find(l)).count();
         let marker_count = content.matches(MARKER).count();
-        if marker_count < raw_count {
+        if marker_count != raw_count {
             offenders.push((label.to_string(), raw_count, marker_count));
         }
     };
@@ -117,11 +130,11 @@ fn every_bridged_file_has_enough_markers() -> Vec<(String, usize, usize)> {
 
 #[test]
 fn every_raw_call_site_has_an_enclosing_testenv_guard() {
-    let offenders = every_bridged_file_has_enough_markers();
+    let offenders = every_bridged_file_has_matching_markers();
     assert!(
         offenders.is_empty(),
-        "file(s) with fewer `feature = \"testenv\"` markers than raw call sites, as \
-         (label, raw_call_count, marker_count) — an interception block may have been \
-         deleted: {offenders:#?}"
+        "file(s) whose raw-call-site count and `feature = \"testenv\"` marker count \
+         disagree, as (label, raw_call_count, marker_count) — an interception block may \
+         have been deleted (or a marker added without a matching call site): {offenders:#?}"
     );
 }

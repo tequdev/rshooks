@@ -106,7 +106,7 @@ fn cbak_sees_the_emitted_transaction_as_its_own_otxn() {
     let cbak_exit = env.invoke_cbak::<Chain>(0, CbakOutcome::Success(txn.clone()));
     assert_eq!(cbak_exit.exit, ExitType::Accept, "{cbak_exit:?}");
 
-    assert_eq!(env.state(b"cbak_otxn_id"), Some(txn.hash.to_vec()));
+    assert_eq!(env.state(b"cbak_otxn_id"), Some(txn.hash().to_vec()));
     // A non-emitted originating otxn's default burden/generation is (1, 0),
     // so this hook's one emission has burden `1 * 1 = 1` and generation
     // `0 + 1 = 1` — the callback reads those same `EmitDetails` values
@@ -153,7 +153,7 @@ fn invoke_cbak_failure_outcome_still_swaps_the_otxn() {
 
     let cbak_exit = env.invoke_cbak::<Chain>(0, CbakOutcome::Failure(txn.clone()));
     assert_eq!(cbak_exit.exit, ExitType::Accept, "{cbak_exit:?}");
-    assert_eq!(env.state(b"cbak_otxn_id"), Some(txn.hash.to_vec()));
+    assert_eq!(env.state(b"cbak_otxn_id"), Some(txn.hash().to_vec()));
 }
 
 #[test]
@@ -174,12 +174,12 @@ fn emit_callback_presence_tracks_whether_the_entry_declares_a_cbak() {
     let with_cbak = env();
     let exit = with_cbak.invoke::<Chain>(0);
     assert_eq!(exit.exit, ExitType::Accept, "{exit:?}");
-    let blob_with = with_cbak.emitted()[0].blob.to_vec();
+    let blob_with = with_cbak.emitted()[0].blob().to_vec();
 
     let without_cbak = env();
     let exit = without_cbak.invoke::<Chain>(2);
     assert_eq!(exit.exit, ExitType::Accept, "{exit:?}");
-    let blob_without = without_cbak.emitted()[0].blob.to_vec();
+    let blob_without = without_cbak.emitted()[0].blob().to_vec();
 
     let (hdr, hdr_len) = rshooks::txn::codec::field_header(rshooks::sfield::sfEmitCallback);
     let mut expected = hdr[..hdr_len].to_vec();

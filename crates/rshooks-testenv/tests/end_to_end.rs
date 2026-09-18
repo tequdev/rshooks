@@ -283,7 +283,7 @@ fn payout_emits_one_payment() {
     let emitted = env.emitted();
     assert_eq!(emitted.len(), 1);
     assert_eq!(emitted[0].tx_type(), Some(TxType::Payment));
-    assert!(!emitted[0].blob.is_empty());
+    assert!(!emitted[0].blob().is_empty());
 }
 
 /// Byte-exact check of the nested `sfAmounts` region emitted by
@@ -299,7 +299,7 @@ fn remit_emits_one_remit_with_nested_amounts() {
     let emitted = env.emitted();
     assert_eq!(emitted.len(), 1);
     assert_eq!(emitted[0].tx_type(), Some(TxType::Remit));
-    let blob = &emitted[0].blob;
+    let blob = emitted[0].blob();
 
     let (amounts_hdr, amounts_hdr_len) = rshooks::txn::codec::field_header(sfAmounts);
     let (entry_hdr, entry_hdr_len) = rshooks::txn::codec::field_header(sfAmountEntry);
@@ -361,13 +361,13 @@ fn remit_with_nops_stores_the_canonical_nop_free_blob() {
     let emitted = env.emitted();
     assert_eq!(emitted.len(), 1);
     assert_eq!(emitted[0].tx_type(), Some(TxType::Remit));
-    let blob = &emitted[0].blob;
+    let blob = emitted[0].blob();
 
     let plain = env
         .state(b"nop_test_plain_blob")
         .expect("remit_with_nops stashes the pre-splice bytes");
     assert_eq!(
-        *blob, plain,
+        blob, plain,
         "the stored emitted blob must be byte-for-byte identical to the \
          pre-splice (NOP-free) bytes: {blob:02x?} vs {plain:02x?}"
     );

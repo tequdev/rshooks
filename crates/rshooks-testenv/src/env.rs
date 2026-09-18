@@ -481,7 +481,7 @@ impl TestEnv {
 
         let (cbak_otxn, burden, generation) = {
             let txn = outcome.emitted_txn();
-            let parsed = crate::otxn::from_emitted(&txn.blob, txn.hash).unwrap_or_else(|| {
+            let parsed = crate::otxn::from_emitted(txn.blob(), txn.hash()).unwrap_or_else(|| {
                 panic!(
                     "rshooks_testenv::TestEnv::invoke_cbak: the emitted transaction blob failed \
                      to parse into an otxn (malformed or missing TransactionType/EmitDetails) — \

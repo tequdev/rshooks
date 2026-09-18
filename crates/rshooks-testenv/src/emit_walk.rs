@@ -78,6 +78,7 @@
 use std::vec::Vec;
 
 use rshooks::tx_type::TxType;
+use rshooks::txn::codec::sti::{STI_ACCOUNT, STI_ARRAY, STI_OBJECT, STI_VL};
 use rshooks::txn::codec::{ARRAY_END_MARKER, MAX_NOPS_PER_CONTAINER, NOP, OBJECT_END_MARKER};
 
 const SF_TRANSACTION_TYPE: u64 = rshooks::sfield::sfTransactionType.code() as u64;
@@ -93,9 +94,11 @@ const SF_EMIT_DETAILS: u64 = rshooks::sfield::sfEmitDetails.code() as u64;
 const SF_SIGNERS: u64 = rshooks::sfield::sfSigners.code() as u64;
 const SF_TICKET_SEQUENCE: u64 = rshooks::sfield::sfTicketSequence.code() as u64;
 
-/// Packs a raw `(type, field)` pair into the same `u64` code shape as the
-/// `SF_*` constants above — for ad-hoc/synthetic test codes with no
-/// corresponding `rshooks::sfield::sfXxx` constant.
+/// Packs a raw `(type, field)` pair into the `(type << 16) | field` `u64`
+/// code shape [`FieldSpan::code`] and the `SF_*` constants above use —
+/// [`walk_fields`] calls this for every field it decodes; test code also
+/// calls it directly for an ad-hoc/synthetic code with no corresponding
+/// `rshooks::sfield::sfXxx` constant.
 const fn sfcode(ty: u32, field: u32) -> u64 {
     ((ty as u64) << 16) | (field as u64)
 }
@@ -167,8 +170,7 @@ pub(crate) enum NopMode {
 /// failing once that counter would exceed [`MAX_NOPS_PER_CONTAINER`]. Each
 /// skipped NOP's offset is also pushed to `nops` — unused by every caller
 /// except [`canonicalize`], which walks once under [`NopMode::Tolerant`]
-/// and re-serializes `data` with exactly those offsets dropped, rather than
-/// maintaining a second, parallel copy-and-recurse walk.
+/// and re-serializes `data` with exactly those offsets dropped.
 fn skip_nops(
     data: &[u8],
     pos: &mut usize,
@@ -400,21 +402,6 @@ pub(crate) fn walk_object_body(
     walk_fields(data, pos, depth, true, mode, nops)
 }
 
-/// The STI_OBJECT type code — every STArray element's field header must
-/// decode to this type (rippled's real STArray deserialization requires
-/// each element to be an STObject field, e.g. `sfMemo`/`sfSigner`; nothing
-/// else is a legal array element).
-const STI_OBJECT: u32 = 14;
-
-/// The STI_ARRAY type code — [`reject_duplicate_fields`]'s array-element
-/// recursion case.
-const STI_ARRAY: u32 = 15;
-
-/// The STI_VL / STI_ACCOUNT type codes — [`field_value_payload`]'s two VL
-/// length-prefix-stripped cases.
-const STI_VL: u32 = 7;
-const STI_ACCOUNT: u32 = 8;
-
 fn walk_array_body(
     data: &[u8],
     pos: &mut usize,
@@ -528,12 +515,11 @@ fn walk_top_level(data: &[u8], mode: NopMode) -> Result<Vec<FieldSpan>, ()> {
 /// `STI_ARRAY`(15) field) its own terminator — survive unchanged; only NOP
 /// bytes are dropped. One [`walk_fields`] pass under [`NopMode::Tolerant`]
 /// (same grammar, same per-container 63-NOP budget, same `Err(())`
-/// conditions — including a container's 64th NOP), collecting each skipped
-/// NOP's offset via [`skip_nops`]'s `nops` output rather than a second,
-/// parallel copy-and-recurse walk; those offsets are then the exact
-/// positions dropped when copying `data` to the output — recorded in
-/// increasing order since the walk visits every byte strictly left to
-/// right, depth-first.
+/// conditions — including a container's 64th NOP) collects each skipped
+/// NOP's offset via [`skip_nops`]'s `nops` output; those offsets are then
+/// the exact positions dropped when copying `data` to the output —
+/// recorded in increasing order since the walk visits every byte strictly
+/// left to right, depth-first.
 pub(crate) fn canonicalize(data: &[u8]) -> Result<Vec<u8>, ()> {
     let mut pos = 0usize;
     let mut nops = Vec::new();

@@ -79,14 +79,12 @@ pub struct EmittedTxn {
 impl EmittedTxn {
     /// The raw emitted-transaction bytes.
     #[must_use]
-    #[deprecated(since = "0.2.2", note = "read the public `blob` field directly")]
     pub fn blob(&self) -> &[u8] {
         &self.blob
     }
 
     /// The emitted transaction's hash, as returned by `emit`.
     #[must_use]
-    #[deprecated(since = "0.2.2", note = "read the public `hash` field directly")]
     pub fn hash(&self) -> [u8; 32] {
         self.hash
     }
