@@ -1849,7 +1849,7 @@ only.
   "WCE": { "hook": 4150, "cbak": 0 },
   "builder": {
     "name": "rshooks-build",
-    "version": "0.2.2",
+    "version": "x.y.z",
     "rustc": "rustc 1.89.0 (29483883e 2025-08-04)",
     "cargo_args": ["rustc", "--release", "--locked", "--target", "wasm32v1-none", "--crate-type", "cdylib"],
     "rustc_args": ["--cfg", "rshooks_entry=\"0\"", "--check-cfg", "cfg(rshooks_entry,values(\"0\",\"1\",\"2\",\"3\",\"4\",\"5\",\"6\",\"7\",\"8\",\"9\"))", "-C", "link-arg=-zstack-size=131072"],
