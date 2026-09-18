@@ -4,14 +4,18 @@
 //! [`check`] runner does extraction, type checking, and name-set/value
 //! comparison via `common::assert_maps_match`.
 //!
-//! `tx_flags.h` is the one irregular row: some of its members
-//! (`MPTokenIssuanceCreateFlags`) alias `ls_flags.h` values (`tfMPTCanLock =
-//! lsfMPTCanLock`), so its row seeds the evaluation environment with
-//! `ls_flags` first, then filters the comparison back down to just the
-//! `tx_flags` names.
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+//! `tx_flags.h` is irregular: some of its members (`MPTokenIssuanceCreateFlags`)
+//! alias `ls_flags.h` values (`tfMPTCanLock = lsfMPTCanLock`), so its row
+//! seeds the evaluation environment with `ls_flags` first, then filters the
+//! comparison back down to just the `tx_flags` names.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 mod common;
 use common::{
@@ -29,100 +33,76 @@ const LS_FLAGS_RUST: &str = include_str!("../src/ls_flags.rs");
 const TX_FLAGS_HEADER: &str = include_str!("../vendor/xahaud-hook/tx_flags.h");
 const TX_FLAGS_RUST: &str = include_str!("../src/tx_flags.rs");
 
-#[derive(Clone, Copy)]
-enum HeaderKind {
-    Defines,
-    EnumMembers,
-}
-
-fn extract_header(kind: HeaderKind, src: &str) -> Vec<(String, String)> {
-    match kind {
-        HeaderKind::Defines => extract_c_defines(src),
-        HeaderKind::EnumMembers => extract_c_enum_members(src),
-    }
-}
-
 struct Case {
     header_label: &'static str,
-    header_kind: HeaderKind,
     header: &'static str,
-    seed_header: Option<(HeaderKind, &'static str)>,
+    extract_header: fn(&str) -> Vec<(String, String)>,
     rust_label: &'static str,
     rust: &'static str,
-    rust_seed: Option<&'static str>,
     rust_ty: &'static str,
-    extra: Option<fn(&BTreeMap<String, i64>)>,
+    /// `(seed header source, seed rust source)`: extra entries that seed the
+    /// evaluation environment but are filtered back out of the final
+    /// comparison, for `tx_flags`'s aliasing into `ls_flags`.
+    seed: Option<(&'static str, &'static str)>,
 }
 
 const CASES: &[Case] = &[
     Case {
         header_label: "tts.h",
-        header_kind: HeaderKind::Defines,
         header: TTS_HEADER,
-        seed_header: None,
+        extract_header: extract_c_defines,
         rust_label: "tts.rs",
         rust: TTS_RUST,
-        rust_seed: None,
         rust_ty: "u16",
-        extra: None,
+        seed: None,
     },
     Case {
         header_label: "sfcodes.h",
-        header_kind: HeaderKind::Defines,
         header: SFCODES_HEADER,
-        seed_header: None,
+        extract_header: extract_c_defines,
         rust_label: "sfcodes.rs",
         rust: SFCODES_RUST,
-        rust_seed: None,
         rust_ty: "u32",
-        extra: None,
+        seed: None,
     },
     Case {
         header_label: "error.h",
-        header_kind: HeaderKind::Defines,
         header: ERROR_HEADER,
-        seed_header: None,
+        extract_header: extract_c_defines,
         rust_label: "error.rs",
         rust: ERROR_RUST,
-        rust_seed: None,
         rust_ty: "i64",
-        // The known irregular value, called out explicitly in both the
-        // header and the Rust translation's doc comment.
-        extra: Some(|env| assert_eq!(env["INVALID_FLOAT"], -10024)),
+        seed: None,
     },
     Case {
         header_label: "ls_flags.h",
-        header_kind: HeaderKind::EnumMembers,
         header: LS_FLAGS_HEADER,
-        seed_header: None,
+        extract_header: extract_c_enum_members,
         rust_label: "ls_flags.rs",
         rust: LS_FLAGS_RUST,
-        rust_seed: None,
         rust_ty: "u32",
-        extra: None,
+        seed: None,
     },
     Case {
         header_label: "tx_flags.h",
-        header_kind: HeaderKind::EnumMembers,
         header: TX_FLAGS_HEADER,
-        seed_header: Some((HeaderKind::EnumMembers, LS_FLAGS_HEADER)),
+        extract_header: extract_c_enum_members,
         rust_label: "tx_flags.rs",
         rust: TX_FLAGS_RUST,
-        rust_seed: Some(LS_FLAGS_RUST),
         rust_ty: "u32",
-        extra: None,
+        seed: Some((LS_FLAGS_HEADER, LS_FLAGS_RUST)),
     },
 ];
 
 fn check(case: &Case) {
-    let own_header_defs = extract_header(case.header_kind, case.header);
+    let own_header_defs = (case.extract_header)(case.header);
     let filter: Option<BTreeSet<String>> = case
-        .seed_header
+        .seed
         .is_some()
         .then(|| own_header_defs.iter().map(|(n, _)| n.clone()).collect());
-    let header_defs = match case.seed_header {
-        Some((seed_kind, seed_src)) => {
-            let mut combined = extract_header(seed_kind, seed_src);
+    let header_defs = match case.seed {
+        Some((seed_header, _)) => {
+            let mut combined = (case.extract_header)(seed_header);
             combined.extend(own_header_defs);
             combined
         }
@@ -132,6 +112,11 @@ fn check(case: &Case) {
     if let Some(names) = &filter {
         header_env.retain(|k, _| names.contains(k));
     }
+    assert!(
+        !header_env.is_empty(),
+        "{}: no entries extracted",
+        case.header_label
+    );
 
     let own_rust_consts = extract_rust_consts(case.rust);
     for (name, ty, _) in &own_rust_consts {
@@ -141,9 +126,9 @@ fn check(case: &Case) {
             case.rust_label, case.rust_ty
         );
     }
-    let rust_defs: Vec<(String, String)> = match case.rust_seed {
-        Some(seed_src) => {
-            let mut combined: Vec<(String, String)> = extract_rust_consts(seed_src)
+    let rust_defs: Vec<(String, String)> = match case.seed {
+        Some((_, seed_rust)) => {
+            let mut combined: Vec<(String, String)> = extract_rust_consts(seed_rust)
                 .into_iter()
                 .map(|(n, _, e)| (n, e))
                 .collect();
@@ -159,11 +144,13 @@ fn check(case: &Case) {
     if let Some(names) = &filter {
         rust_env.retain(|k, _| names.contains(k));
     }
+    assert!(
+        !rust_env.is_empty(),
+        "{}: no entries extracted",
+        case.rust_label
+    );
 
     assert_maps_match(case.header_label, &header_env, case.rust_label, &rust_env);
-    if let Some(extra) = case.extra {
-        extra(&header_env);
-    }
 }
 
 #[test]
@@ -171,4 +158,12 @@ fn vendored_header_consts_match_rust_translation() {
     for case in CASES {
         check(case);
     }
+}
+
+#[test]
+fn error_h_invalid_float_is_the_documented_irregular_value() {
+    // The known irregular value, called out explicitly in both the header
+    // and the Rust translation's doc comment.
+    let env = build_env(&extract_c_defines(ERROR_HEADER));
+    assert_eq!(env["INVALID_FLOAT"], -10024);
 }

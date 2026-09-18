@@ -70,16 +70,18 @@ sync_group() {
 
     if [ "${MODE}" = "check" ]; then
         group_status=0
+        file_names=""
 
         for f in ${files}; do
             b="$(basename "${f}")"
+            file_names="${file_names} ${b}"
             if ! cmp -s "${group_tmp}/${b}" "${vendor_dir}/${b}"; then
                 echo "DRIFT: [${name}] ${b} differs from upstream ${REPO}@${BRANCH}" >&2
                 diff -u "${vendor_dir}/${b}" "${group_tmp}/${b}" | head -40 >&2 || true
                 group_status=1
             fi
 
-            recorded="$(awk -v n="${b}" '$2==n{print $1}' "${sums_file}")"
+            recorded="$(awk -v n="${b}" '$2==n{print $1}' "${sums_file}" 2>/dev/null || true)"
             if [ -z "${recorded}" ]; then
                 echo "DRIFT: [${name}] ${b} missing from ${sums_file}" >&2
                 group_status=1
@@ -91,6 +93,21 @@ sync_group() {
                 group_status=1
             fi
         done
+
+        # Flag SHA256SUMS lines for files this group no longer vendors.
+        if [ -f "${sums_file}" ]; then
+            while IFS= read -r line || [ -n "${line}" ]; do
+                [ -z "${line}" ] && continue
+                entry_name="${line#*  }"
+                case " ${file_names} " in
+                    *" ${entry_name} "*) ;;
+                    *)
+                        echo "DRIFT: [${name}] ${sums_file} lists ${entry_name}, not one of this group's vendored files" >&2
+                        group_status=1
+                        ;;
+                esac
+            done < "${sums_file}"
+        fi
 
         if [ "${group_status}" -eq 0 ]; then
             echo "OK: [${name}] vendored files are byte-identical to ${REPO}@${BRANCH}"
