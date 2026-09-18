@@ -10,8 +10,15 @@ use std::time::{Duration, Instant, SystemTime};
 use anyhow::{Context, Result, bail};
 
 use crate::carriers::{self, EntryDecl};
-use crate::metadata::{self, hook_hash};
+use crate::metadata::{self, BuilderInfo, hook_hash};
 use crate::{Options, entry_sidecar, sethook_template};
+
+/// Shadow stack size, placed first (`--stack-first`, the target default).
+/// This is the only memory link argument: wasm-ld sizes linear memory to
+/// the pages this stack plus the entry's data/bss need, and no maximum is
+/// declared because xahaud's guard checker rejects `memory.grow`, so a
+/// maximum could never be exercised.
+const STACK_SIZE_BYTES: u32 = 2 * 65_536;
 
 /// CLI-facing inputs to a `rshooks build` invocation.
 #[derive(Debug, Clone, Default)]
@@ -125,12 +132,22 @@ pub fn run(args: &ChainBuildArgs) -> Result<()> {
 
         hook_hashes.insert(index, hook_hash(&final_bytes));
 
-        let sidecar = entry_sidecar::build_entry_sidecar(
+        let builder = BuilderInfo {
+            cargo_args: [
+                BuildPlan::cargo_args("rustc"),
+                vec!["--crate-type".into(), "cdylib".into()],
+            ]
+            .concat(),
+            rustc_args: BuildPlan::selected_rustc_args(index),
+            wasm_opt: opts.optimize,
+            ..BuilderInfo::current(rustc.clone())
+        };
+        let sidecar = entry_sidecar::build_entry_sidecar_with(
             entry,
             &discovery_carriers.chain,
             &final_bytes,
             &report,
-            rustc.clone(),
+            builder,
         )?;
         for warning in &sidecar.warnings {
             eprintln!("warning: {warning}");
@@ -434,22 +451,41 @@ impl BuildPlan {
         })
     }
 
-    fn base_cargo_args(&self, subcommand: &str) -> Vec<String> {
-        let mut args = vec![
+    /// Machine-independent `cargo` arguments shared by every build of this
+    /// plan: no `--target-dir`, `--manifest-path`, or `-p`, since those hold
+    /// paths local to this machine and are appended separately by the
+    /// caller (this is also the shape recorded in the sidecar's `builder`
+    /// block, for reproducibility).
+    fn cargo_args(subcommand: &str) -> Vec<String> {
+        vec![
             subcommand.to_string(),
             "--release".to_string(),
             "--locked".to_string(),
             "--target".to_string(),
             "wasm32v1-none".to_string(),
-            "--target-dir".to_string(),
-        ];
-        args.push(self.private_target_dir.display().to_string());
-        args
+        ]
+    }
+
+    /// `rustc` arguments passed after `--` for a selected build of entry
+    /// `index`, in the exact order used on the command line and recorded
+    /// verbatim in the sidecar's `builder.rustc_args`. Includes the link
+    /// arguments that fix the linear memory layout (see
+    /// [`STACK_SIZE_BYTES`]).
+    fn selected_rustc_args(index: u8) -> Vec<String> {
+        vec![
+            "--cfg".to_string(),
+            format!("rshooks_entry=\"{index}\""),
+            "--check-cfg".to_string(),
+            "cfg(rshooks_entry,values(\"0\",\"1\",\"2\",\"3\",\"4\",\"5\",\"6\",\"7\",\"8\",\"9\"))".to_string(),
+            "-C".to_string(),
+            format!("link-arg=-zstack-size={STACK_SIZE_BYTES}"),
+        ]
     }
 
     fn run_discovery(&self) -> Result<Vec<u8>> {
         let mut cmd = Command::new(&self.cargo);
-        cmd.args(self.base_cargo_args("build"));
+        cmd.args(Self::cargo_args("build"));
+        cmd.arg("--target-dir").arg(&self.private_target_dir);
         if let Some(mp) = &self.manifest_path {
             cmd.arg("--manifest-path").arg(mp);
         }
@@ -462,17 +498,15 @@ impl BuildPlan {
 
     fn run_selected(&self, index: u8) -> Result<Vec<u8>> {
         let mut cmd = Command::new(&self.cargo);
-        cmd.args(self.base_cargo_args("rustc"));
+        cmd.args(Self::cargo_args("rustc"));
+        cmd.arg("--target-dir").arg(&self.private_target_dir);
         if let Some(mp) = &self.manifest_path {
             cmd.arg("--manifest-path").arg(mp);
         }
         cmd.args(["-p", &self.package_id, "--crate-type", "cdylib"]);
         cmd.arg("--message-format=json-render-diagnostics");
         cmd.arg("--");
-        cmd.arg("--cfg").arg(format!("rshooks_entry=\"{index}\""));
-        cmd.arg("--check-cfg").arg(
-            "cfg(rshooks_entry,values(\"0\",\"1\",\"2\",\"3\",\"4\",\"5\",\"6\",\"7\",\"8\",\"9\"))",
-        );
+        cmd.args(Self::selected_rustc_args(index));
         let artifact = self.run_cargo_and_capture_artifact(cmd)?;
         std::fs::read(&artifact).with_context(|| {
             format!(

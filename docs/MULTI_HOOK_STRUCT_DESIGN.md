@@ -647,7 +647,8 @@ BuildPlan fixes at least the following:
   **The digest is re-verified before and after each invocation**; any
   mid-run change is an error
 - The complete argv (`cargo rustc --release --target wasm32v1-none --locked
-  -p <package-id> --crate-type cdylib` plus `--cfg` / `--check-cfg`), the
+  -p <package-id> --crate-type cdylib` plus `--cfg` / `--check-cfg` and the
+  `-C link-arg` memory-layout flags), the
   feature set, the profile, incremental builds disabled
 - The toolchain (rustc/cargo version), the canonical cwd, and a content
   digest of every involved Cargo config file (`.cargo/config.toml`)
