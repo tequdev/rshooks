@@ -86,6 +86,12 @@ enum Cmd {
     Check {
         /// The wasm file to validate.
         file: PathBuf,
+        /// Print the result as one JSON object on stdout instead of
+        /// human-readable text (warnings still go to stderr):
+        /// `{"max_nesting_depth": N, "wce": {"hook": H, "cbak": C} | null}`.
+        /// For scripts that would otherwise scrape the text output.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -126,9 +132,9 @@ fn main() -> Result<()> {
             };
             cmd_clean(&input, out, &opts)
         }
-        Cmd::Check { file } => {
+        Cmd::Check { file, json } => {
             let opts = Options::default();
-            cmd_check(&file, &opts)
+            cmd_check(&file, &opts, json)
         }
     }
 }
@@ -144,6 +150,22 @@ fn print_report(report: &ValidationReport) {
         );
     }
     println!("max nesting depth: {}", report.max_nesting_depth);
+}
+
+/// The `--json` counterpart to [`print_report`]'s two numeric lines,
+/// consumed by `scripts/record-example-metrics.py` and
+/// `scripts/probe-testenv-parity.sh` instead of scraping text output.
+fn print_report_json(report: &ValidationReport) {
+    let wce = report
+        .guard_verdict
+        .map(|v| serde_json::json!({"hook": v.hook_cost, "cbak": v.cbak_cost}));
+    println!(
+        "{}",
+        serde_json::json!({
+            "max_nesting_depth": report.max_nesting_depth,
+            "wce": wce,
+        })
+    );
 }
 
 fn print_size_and_fee(bytes: &[u8]) {
@@ -191,13 +213,17 @@ fn write_wasm(output: &[u8], out_path: &Path, report: &ValidationReport) -> Resu
     Ok(())
 }
 
-fn cmd_check(file: &Path, opts: &Options) -> Result<()> {
+fn cmd_check(file: &Path, opts: &Options, json: bool) -> Result<()> {
     let wasm = std::fs::read(file).with_context(|| format!("reading {}", file.display()))?;
     match rshooks_build::verify(&wasm, opts) {
         Ok(report) => {
-            print_report(&report);
-            println!("OK: {} is a valid SetHook wasm binary", file.display());
-            print_size_and_fee(&wasm);
+            if json {
+                print_report_json(&report);
+            } else {
+                print_report(&report);
+                println!("OK: {} is a valid SetHook wasm binary", file.display());
+                print_size_and_fee(&wasm);
+            }
             Ok(())
         }
         Err(e) => {
