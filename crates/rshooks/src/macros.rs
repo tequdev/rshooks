@@ -192,28 +192,36 @@ macro_rules! trace_float {
     };
 }
 
+/// Write loop shared by [`padded_bytes`]/[`padded_bytes_left`]: copies `src`
+/// into a zeroed `[u8; N]` starting at `offset` (`0` for a right pad, `N -
+/// src.len()` for a left pad). Both callers' own `assert!` already bounds
+/// `src.len() <= N`, so the indexing below is in-bounds and, since every
+/// caller runs this inside a `const { .. }` block, const-evaluated only.
+#[allow(clippy::indexing_slicing)]
+const fn padded_at<const N: usize>(src: &[u8], offset: usize) -> [u8; N] {
+    let mut output = [0u8; N];
+    let mut i = 0;
+
+    while i < src.len() {
+        output[offset.wrapping_add(i)] = src[i];
+        i = i.wrapping_add(1);
+    }
+
+    output
+}
+
 /// Compile-time zero-padding helper backing [`pad!`](crate::pad).
 ///
 /// Copies `src` into the start of a zeroed `[u8; N]`. The `pad!` macro wraps
-/// every call in an inline `const` block, so the `assert!` and the indexing
-/// below are compile-time checks — they can never become runtime panics.
+/// every call in an inline `const` block, so the `assert!` below is a
+/// compile-time check — it can never become a runtime panic.
 #[doc(hidden)]
-#[allow(clippy::indexing_slicing)] // in-bounds by the assert, const-evaluated only
 pub const fn padded_bytes<const N: usize>(src: &[u8]) -> [u8; N] {
     assert!(
         src.len() <= N,
         "pad!: source is larger than the destination"
     );
-
-    let mut output = [0u8; N];
-    let mut i = 0;
-
-    while i < src.len() {
-        output[i] = src[i];
-        i = i.wrapping_add(1);
-    }
-
-    output
+    padded_at(src, 0)
 }
 
 /// Zero-pad a constant byte string to a fixed-size array, at compile time.
@@ -272,27 +280,15 @@ macro_rules! pad {
 ///
 /// Copies `src` into the *end* of a zeroed `[u8; N]` — the mirror image of
 /// [`padded_bytes`], which copies `src` into the start. The `pad_left!`
-/// macro wraps every call in an inline `const` block, so the `assert!` and
-/// the indexing below are compile-time checks — they can never become
-/// runtime panics.
+/// macro wraps every call in an inline `const` block, so the `assert!` below
+/// is a compile-time check — it can never become a runtime panic.
 #[doc(hidden)]
-#[allow(clippy::indexing_slicing)] // in-bounds by the assert, const-evaluated only
 pub const fn padded_bytes_left<const N: usize>(src: &[u8]) -> [u8; N] {
     assert!(
         src.len() <= N,
         "pad_left!: source is larger than the destination"
     );
-
-    let mut output = [0u8; N];
-    let offset = N.wrapping_sub(src.len());
-    let mut i = 0;
-
-    while i < src.len() {
-        output[offset.wrapping_add(i)] = src[i];
-        i = i.wrapping_add(1);
-    }
-
-    output
+    padded_at(src, N.wrapping_sub(src.len()))
 }
 
 /// Zero-pad a constant byte string to a fixed-size array, at compile time —
