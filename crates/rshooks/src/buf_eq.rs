@@ -23,12 +23,13 @@ macro_rules! word_diff {
 /// body is straight-line code (no loop, no bounds-check panic path)
 /// regardless of optimization level.
 macro_rules! impl_buf_eq {
-    ($name:ident, $n:literal, [ $( $ty:ident [ $($i:literal),+ $(,)? ] ),+ $(,)? ]) => {
+    ($(#[$meta:meta])* $name:ident, $n:literal, [ $( $ty:ident [ $($i:literal),+ $(,)? ] ),+ $(,)? ]) => {
         #[doc = concat!(
             "Loop-free, panic-free equality check for two ", stringify!($n),
             "-byte buffers. See the [module docs](self) for why this exists ",
             "instead of `a == b`."
         )]
+        $(#[$meta])*
         #[inline(always)]
         #[must_use]
         pub fn $name(a: &[u8; $n], b: &[u8; $n]) -> bool {
@@ -82,6 +83,7 @@ impl_buf_eq!(
     ]
 );
 impl_buf_eq!(
+    #[deprecated(since = "0.2.2", note = "backs no type in this crate; unused")]
     buf_eq_40,
     40,
     [
@@ -105,6 +107,7 @@ impl_buf_eq!(
     ]
 );
 impl_buf_eq!(
+    #[deprecated(since = "0.2.2", note = "backs no type in this crate; unused")]
     buf_eq_64,
     64,
     [
@@ -211,6 +214,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn buf_eq_40_matches_slice_eq() {
         check_eq_and_all_single_byte_diffs(buf_eq_40);
     }
@@ -221,6 +225,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn buf_eq_64_matches_slice_eq() {
         check_eq_and_all_single_byte_diffs(buf_eq_64);
     }
