@@ -75,7 +75,7 @@ pub struct UnnestReport {
     /// Total number of branch sites (`br`/`br_if`) rewritten into a spliced
     /// tail — each rewrite duplicates that tail's instructions once.
     pub tails_duplicated: u32,
-    /// Total number of instructions dropped by [`eliminate_dead_code`]
+    /// Total number of instructions dropped by `eliminate_dead_code`
     /// across every defined function — leftover unreachable tails from
     /// block removal.
     pub dead_ops_removed: u32,

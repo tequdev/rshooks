@@ -14,34 +14,10 @@
 use rshooks_build::Options;
 
 mod common;
-use common::{append_custom_section, target_features_payload};
+use common::{append_custom_section, strip_custom_sections, target_features_payload};
 
 fn wasm(src: &str) -> Vec<u8> {
     wat::parse_str(src).expect("fixture is valid wat")
-}
-
-/// Drops every custom section (`wat::parse_str` emits a debug name section
-/// the native guard checker rejects outright: "Hook contained a custom
-/// section, which is not allowed. Use cleaner."), leaving every other
-/// section's raw bytes untouched. Used by fixtures that need to reach the
-/// native checker without going through the full `clean()` pipeline (which
-/// would also strip the very export/section this test is targeting).
-fn strip_custom_sections(wasm: &[u8]) -> Vec<u8> {
-    let mut module = wasm_encoder::Module::new();
-    for payload in wasmparser::Parser::new(0).parse_all(wasm) {
-        let payload = payload.expect("valid wasm");
-        if matches!(payload, wasmparser::Payload::CustomSection(_)) {
-            continue;
-        }
-        let Some((id, range)) = payload.as_section() else {
-            continue;
-        };
-        module.section(&wasm_encoder::RawSection {
-            id,
-            data: &wasm[range],
-        });
-    }
-    module.finish()
 }
 
 fn opts() -> Options {

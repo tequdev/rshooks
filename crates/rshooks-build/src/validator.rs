@@ -30,7 +30,7 @@ pub struct ValidationError {
 impl ValidationError {
     /// True if there is at least one finding and every finding is
     /// guard-class (safe for [`crate::verify`] to downgrade wholesale).
-    #[deprecated(since = "0.2.2", note = "unused; inspect `hard`/`guard` directly")]
+    #[deprecated(note = "unused; inspect `hard`/`guard` directly")]
     pub fn is_guard_only(&self) -> bool {
         self.hard.is_empty() && !self.guard.is_empty()
     }

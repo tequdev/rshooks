@@ -64,6 +64,30 @@ pub fn target_features_payload(features: &[&str]) -> Vec<u8> {
     payload
 }
 
+/// Drops every custom section (`wat::parse_str` emits a debug name section
+/// the native guard checker rejects outright: "Hook contained a custom
+/// section, which is not allowed. Use cleaner."), leaving every other
+/// section's raw bytes untouched. Used by fixtures that need to reach the
+/// native checker without going through the full `clean()` pipeline (which
+/// would also strip the very export/section a test is targeting).
+pub fn strip_custom_sections(wasm: &[u8]) -> Vec<u8> {
+    let mut module = wasm_encoder::Module::new();
+    for payload in wasmparser::Parser::new(0).parse_all(wasm) {
+        let payload = payload.expect("valid wasm");
+        if matches!(payload, wasmparser::Payload::CustomSection(_)) {
+            continue;
+        }
+        let Some((id, range)) = payload.as_section() else {
+            continue;
+        };
+        module.section(&wasm_encoder::RawSection {
+            id,
+            data: &wasm[range],
+        });
+    }
+    module.finish()
+}
+
 // ---------------------------------------------------------------------
 // wasmi differential-test harness (flatten/unnest)
 // ---------------------------------------------------------------------

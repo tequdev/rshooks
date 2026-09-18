@@ -487,7 +487,7 @@ impl BuildPlan {
         cmd.stderr(Stdio::inherit());
         let mut child = cmd
             .spawn()
-            .with_context(|| format!("failed to spawn `{}`", self.cargo.display()))?;
+            .with_context(|| cargo_spawn_context(&self.cargo))?;
         let stdout = child
             .stdout
             .take()
@@ -500,9 +500,15 @@ impl BuildPlan {
             if line.trim().is_empty() {
                 continue;
             }
-            // cargo can emit non-JSON lines on some setups; ignore those.
-            if let Ok(msg) = serde_json::from_str(&line) {
-                messages.push(msg);
+            match serde_json::from_str::<CargoMessage>(&line) {
+                Ok(msg) => messages.push(msg),
+                // cargo can emit non-JSON lines on some setups; ignore
+                // those, but a line that *is* JSON and still fails to
+                // deserialize is a real schema mismatch, not noise.
+                Err(e) if e.is_syntax() || e.is_eof() => {}
+                Err(e) => {
+                    return Err(e).with_context(|| format!("parsing cargo output line: {line}"));
+                }
             }
         }
 
@@ -586,9 +592,7 @@ fn run_cargo_metadata(cargo: &Path, manifest_path: Option<&Path>) -> Result<Carg
     if let Some(mp) = manifest_path {
         cmd.arg("--manifest-path").arg(mp);
     }
-    let output = cmd
-        .output()
-        .with_context(|| format!("failed to spawn `{}`", cargo.display()))?;
+    let output = cmd.output().with_context(|| cargo_spawn_context(cargo))?;
     if !output.status.success() {
         bail!(
             "`cargo metadata` failed ({}): {}",
@@ -605,23 +609,29 @@ fn run_generate_lockfile(cargo: &Path, manifest_path: Option<&Path>) -> Result<(
     if let Some(mp) = manifest_path {
         cmd.arg("--manifest-path").arg(mp);
     }
-    let status = cmd
-        .status()
-        .with_context(|| format!("failed to spawn `{}`", cargo.display()))?;
+    let status = cmd.status().with_context(|| cargo_spawn_context(cargo))?;
     if !status.success() {
         bail!("`cargo generate-lockfile` failed ({status})");
     }
     Ok(())
 }
 
-/// Locates the `cargo` executable to invoke. The user's shell PATH is
-/// inherited verbatim, so this just needs to find *a* `cargo` on it — the
-/// same one the user's shell would run.
 /// Resolves the `cargo` to invoke: the one that ran this build (`$CARGO`,
 /// set by cargo itself), or else the bare name, which `Command` resolves
 /// against `PATH` like a shell would.
 fn find_cargo() -> PathBuf {
     std::env::var("CARGO").map_or_else(|_| PathBuf::from("cargo"), PathBuf::from)
+}
+
+/// Context for a failure to spawn `cargo`: the most actionable explanation
+/// is usually that it was never on `PATH` in the first place, since
+/// [`find_cargo`] does not check that up front.
+fn cargo_spawn_context(cargo: &Path) -> String {
+    format!(
+        "failed to spawn `{}`; run `rshooks build` from a shell where `cargo build` already \
+         works",
+        cargo.display()
+    )
 }
 
 /// Detects the `rustc` toolchain that performed this build, for the

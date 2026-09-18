@@ -139,10 +139,13 @@ fn main() -> Result<()> {
     }
 }
 
-fn print_report(report: &ValidationReport) {
+fn print_warnings(report: &ValidationReport) {
     for w in &report.warnings {
         eprintln!("warning: {w}");
     }
+}
+
+fn print_report(report: &ValidationReport) {
     if let Some(verdict) = report.guard_verdict {
         println!(
             "worst-case instructions: hook={} cbak={}",
@@ -190,6 +193,7 @@ fn cmd_clean(input: &Path, out: Option<PathBuf>, opts: &Options) -> Result<()> {
 
 fn run_pipeline_and_report(wasm: &[u8], opts: &Options) -> Result<(Vec<u8>, ValidationReport)> {
     let (output, report) = rshooks_build::run_pipeline(wasm, opts)?;
+    print_warnings(&report);
     print_report(&report);
     Ok((output, report))
 }
@@ -217,6 +221,7 @@ fn cmd_check(file: &Path, opts: &Options, json: bool) -> Result<()> {
     let wasm = std::fs::read(file).with_context(|| format!("reading {}", file.display()))?;
     match rshooks_build::verify(&wasm, opts) {
         Ok(report) => {
+            print_warnings(&report);
             if json {
                 print_report_json(&report);
             } else {
