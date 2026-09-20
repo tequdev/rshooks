@@ -125,7 +125,12 @@ impl Views {
         let mut buf = [0u8; 64];
         assert_eq!(p.paths_into(&mut buf).unwrap(), None);
 
-        assert_eq!(p.signing_pub_key_into(&mut buf).unwrap(), 33);
+        // sfSigningPubKey (Blob/STI_VL) keeps its wire VL length prefix on
+        // `otxn_field` — only STI_ACCOUNT is stripped
+        // (`applyHook.cpp:1873-1878`).
+        assert_eq!(p.signing_pub_key_into(&mut buf).unwrap(), 34);
+        assert_eq!(buf[0], 33);
+        assert_eq!(&buf[1..34], &[0u8; 33]);
 
         assert_eq!(
             tx::EscrowCreate::otxn().err(),
@@ -167,6 +172,13 @@ impl Views {
         let raw_len = p.emit_details_into(&mut buf).unwrap().expect("present");
         assert!(raw_len > 0);
 
+        // sfSigningPubKey through the slot-backed source exercises the same
+        // `slot()` write-out as `otxn_field` (`crate::otxn::value_wire_bytes`)
+        // — the VL prefix is present here too.
+        assert_eq!(p.signing_pub_key_into(&mut buf).unwrap(), 34);
+        assert_eq!(buf[0], 33);
+        assert_eq!(&buf[1..34], &[0u8; 33]);
+
         let child = p
             .emit_details_slot()
             .unwrap()
@@ -180,6 +192,16 @@ impl Views {
 
         let back = p.into_slot();
         assert!(back.size().unwrap() > 0);
+
+        // sfAccount stays fixed-width through `slot()` (no VL prefix — the
+        // `check_account_walk` fidelity anchor), but `slot_size` still
+        // counts the VL byte the `slot()` write-out skips
+        // (`HookAPI.cpp:2143-2156`).
+        let account_slot = back.get(sfAccount).unwrap();
+        assert_eq!(account_slot.size().unwrap(), 21);
+        let acc_bytes: [u8; 20] = account_slot.take_raw_exact().unwrap();
+        assert_eq!(acc_bytes, SENDER);
+
         back.clear().unwrap();
 
         accept!(b"ok", 0)

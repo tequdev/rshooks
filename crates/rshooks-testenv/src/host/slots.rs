@@ -6,27 +6,37 @@
 //! `src/xrpld/app/hook/detail/HookAPI.cpp`/`applyHook.cpp`; line numbers are
 //! cited per function below.
 //!
-//! # Slot content = "value payload", exactly what `slot()` itself returns
+//! # Slot content = "value payload"; `slot()`/`slot_size()` reconstruct the wire form
 //!
 //! Upstream's `HookAPI::slot(slot_no)` returns the stored `STBase const*`
-//! (`hookCtx.slot[slot_no].entry`), and the wasm-facing wrapper serializes
-//! it with a bare `entry->add(s)` call (`applyHook.cpp:1946-1958`) — the
-//! *value's own* serialization, never the field header that names it
-//! within its parent (that header is written by the parent's own
-//! field-walk, not the value's `add()`). Same code path `otxn_field` uses
-//! (`applyHook.cpp:1908-1916`), so `otxn_field`'s documented "fixed-width
-//! `sfAccount`, VL-prefixed `sfBlob`" trap
-//! (`~/.claude/skills/hook-api/references/otxn.md`) applies here too: an
-//! `AccountID` field's slot content is its raw 20 bytes, *not* the
-//! wire-framed `<0x14><20 bytes>` a full-object parse would show for that
-//! same field. `crate::emit_walk::field_value_payload` implements exactly
-//! this convention: VL length-prefix stripped for `STI_VL`(7)/
-//! `STI_ACCOUNT`(8), value bytes as-is otherwise — including the trailing
-//! `0xE1`/`0xF1` terminator for a nested `STI_OBJECT`(14)/`STI_ARRAY`(15)
-//! field, since that terminator is part of *that* value's own
-//! serialization. `examples/15_slot-objects`' e2e-pinned
+//! (`hookCtx.slot[slot_no].entry`), and the wasm-facing wrapper serializes it
+//! with a bare `entry->add(s)` call, then — only for `STI_ACCOUNT`(8) —
+//! skips that call's leading VL byte before writing the result out
+//! (`applyHook.cpp:1912-1920`'s `WRITE_WASM_MEMORY_OR_RETURN_AS_INT64`,
+//! whose final argument is `getSType() == STI_ACCOUNT`). `otxn_field` is
+//! driven by the identical macro over the identical `add(s)` call
+//! (`applyHook.cpp:1870-1878`). So an `STI_ACCOUNT` field's slot/`otxn_field`
+//! content is its raw 20 bytes, *not* the wire-framed `<0x14><20 bytes>`
+//! `add(s)` itself produces — `examples/15_slot-objects`' e2e-pinned
 //! `check_account_walk` (exactly 20 bytes for `sfAccount`) is the fidelity
-//! anchor for this convention.
+//! anchor for this. An `STI_VL`(7)/Blob field gets no such special case:
+//! `slot()`/`otxn_field` return `add(s)`'s bytes as-is, VL length prefix
+//! included (`STBlob::add`).
+//!
+//! `crate::emit_walk::field_value_payload` (shared with `sto_subfield`'s own,
+//! separately-documented payload convention) strips the VL length-prefix for
+//! both `STI_VL`(7)/`STI_ACCOUNT`(8) when this module derives a slot's
+//! *stored* [`crate::invocation::SlotEntry::bytes`] (`child_slot_content`
+//! below) — value-only, matching [`crate::otxn::Otxn::fields`]'s convention.
+//! `slot()` and `slot_size()` reconstruct the real wire form from that
+//! stored payload via [`crate::otxn::value_wire_bytes`]/
+//! [`crate::otxn::wire_add_len`]: a VL prefix is added back for `STI_VL`
+//! only (`STI_ACCOUNT`'s stored bytes are already the correct output, and
+//! `slot_size` counts a prefix for both, per `HookAPI::slot_size` computing
+//! `add(s)`'s length directly with no `STI_ACCOUNT` skip). The trailing
+//! `0xE1`/`0xF1` terminator for a nested `STI_OBJECT`(14)/`STI_ARRAY`(15)
+//! field's own bytes is unaffected by any of this — it is part of *that*
+//! value's own serialization, not a VL prefix.
 //!
 //! A **root** slot (`otxn_slot`/`meta_slot`/`xpop_slot`/`slot_set`) has no
 //! enclosing object at all, so its content is a bare canonical field
@@ -94,11 +104,14 @@ fn amount_is_native(bytes: &[u8]) -> bool {
 }
 
 /// `HookAPI::slot` (`HookAPI.cpp:2042-2052`) + the wrapper's `entry->add(s)`
-/// (`applyHook.cpp:1946-1958`) — see this module's doc comment.
+/// (`applyHook.cpp:1912-1920`) — see this module's doc comment and
+/// [`crate::otxn::value_wire_bytes`].
 pub(crate) fn slot(ctx: &InvocationContext, slot_no: u32) -> Result<Vec<u8>, i64> {
-    ctx.slot_entry(slot_no)
-        .map(|e| e.bytes.clone())
-        .ok_or(DOESNT_EXIST)
+    let entry = ctx.slot_entry(slot_no).ok_or(DOESNT_EXIST)?;
+    Ok(crate::otxn::value_wire_bytes(
+        entry.reported_code,
+        &entry.bytes,
+    ))
 }
 
 /// `HookAPI::slot_clear` (`HookAPI.cpp:2054-2063`): existence check only, no
@@ -134,13 +147,12 @@ pub(crate) fn slot_count(ctx: &InvocationContext, slot_no: u32) -> i64 {
     }
 }
 
-/// `HookAPI::slot_size` (`HookAPI.cpp:2143-2156`): no type restriction,
-/// computed via the same `add(s)` call `slot()` uses — i.e. exactly
-/// `entry.bytes.len()` here, since that is already the payload `slot()`
-/// would return.
+/// `HookAPI::slot_size` (`HookAPI.cpp:2143-2156`): the full `add(s)` length,
+/// unlike `slot()` never skipping `STI_ACCOUNT`'s VL byte — see
+/// [`crate::otxn::wire_add_len`].
 pub(crate) fn slot_size(ctx: &InvocationContext, slot_no: u32) -> i64 {
     match ctx.slot_entry(slot_no) {
-        Some(e) => e.bytes.len() as i64,
+        Some(e) => crate::otxn::wire_add_len(e.reported_code, e.bytes.len()) as i64,
         None => DOESNT_EXIST,
     }
 }
@@ -653,11 +665,32 @@ mod tests {
             SlotKind::Scalar
         );
 
-        // sfAccount: 20 raw bytes, no VL prefix — the
-        // `examples/15_slot-objects::check_account_walk` fidelity anchor.
+        // sfAccount: 20 raw bytes, no VL prefix on `slot()` — the
+        // `examples/15_slot-objects::check_account_walk` fidelity anchor —
+        // but `slot_size` still counts the `add(s)` VL byte real xahaud
+        // never skips (`HookAPI.cpp:2143-2156`, `entry->add(s)` on an
+        // `STAccount` writes `<0x14><20 bytes>`).
         let acc_slot = slot_subfield(&mut ctx, root, SF_ACCOUNT, 0) as u32;
         assert_eq!(slot(&ctx, acc_slot), Ok(vec![9u8; 20]));
-        assert_eq!(slot_size(&ctx, acc_slot), 20);
+        assert_eq!(slot_size(&ctx, acc_slot), 21);
+    }
+
+    #[test]
+    fn slot_subfield_reads_a_blob_field_with_its_vl_prefix() {
+        // A minimal root object with one `STI_VL`(7) field: sfSigningPubKey
+        // (type 7, field 3) = 0x73, 1-byte VL length, 3 value bytes. Real
+        // xahaud's `slot()`/`otxn_field` never skip a Blob's VL prefix —
+        // only `STI_ACCOUNT` is special-cased (`applyHook.cpp:1912-1920`).
+        const SF_SIGNING_PUB_KEY: u32 = (7 << 16) + 3;
+        let mut ctx = fresh_ctx();
+        let kl = keylet(1);
+        let object = vec![0x73, 3, 0xAA, 0xBB, 0xCC];
+        let world = seeded_world(kl, &object);
+        let root = slot_set(&mut ctx, &world, &kl, 0) as u32;
+
+        let blob_slot = slot_subfield(&mut ctx, root, SF_SIGNING_PUB_KEY, 0) as u32;
+        assert_eq!(slot(&ctx, blob_slot), Ok(vec![3, 0xAA, 0xBB, 0xCC]));
+        assert_eq!(slot_size(&ctx, blob_slot), 4);
     }
 
     #[test]

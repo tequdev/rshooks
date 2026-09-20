@@ -170,6 +170,48 @@ fn write_vl_len(out: &mut Vec<u8>, len: usize) {
     }
 }
 
+/// The wire bytes a `slot()`/`otxn_field` write-out returns for one field's
+/// stored value-only bytes (`Otxn::fields`' and a numbered slot's
+/// `SlotEntry::bytes` share this convention). Real xahaud's wrapper
+/// serializes the field's own value with a bare `add(s)` and then, only for
+/// `STI_ACCOUNT`(8), skips that call's leading VL byte before writing it out
+/// (`applyHook.cpp:1873-1878` for `otxn_field`, `:1915-1920` for `slot`, both
+/// driven by the same `WRITE_WASM_MEMORY_OR_RETURN_AS_INT64` macro's final
+/// `getSType() == STI_ACCOUNT` argument) — so an `STI_ACCOUNT` value's
+/// already-prefix-free stored bytes come back unchanged, while an
+/// `STI_VL`(7)/Blob value's `add(s)` keeps its length prefix
+/// (`STBlob::add`), which is added back here since the stored bytes are
+/// value-only. Every other type has no VL concept and is returned as-is.
+pub(crate) fn value_wire_bytes(field_code: u32, value: &[u8]) -> Vec<u8> {
+    if field_code >> 16 == STI_VL {
+        let mut out = Vec::with_capacity(value.len().wrapping_add(3));
+        write_vl_len(&mut out, value.len());
+        out.extend_from_slice(value);
+        out
+    } else {
+        value.to_vec()
+    }
+}
+
+/// The full `entry->add(s)` length `HookAPI::slot_size` reports for one
+/// field's stored value-only bytes (`HookAPI.cpp:2143-2156`): unlike
+/// [`value_wire_bytes`], this is never stripped for `STI_ACCOUNT`, since
+/// `slot_size` computes `add(s)`'s length directly and has no
+/// `STI_ACCOUNT`-skipping macro in its path — `value_len` plus a VL
+/// length-prefix's own byte count for both `STI_VL`(7) and `STI_ACCOUNT`(8)
+/// (both wire types are `addVL`-serialized), plain `value_len` for every
+/// other type.
+pub(crate) fn wire_add_len(field_code: u32, value_len: usize) -> usize {
+    match field_code >> 16 {
+        ty if ty == STI_VL || ty == STI_ACCOUNT => {
+            let mut prefix = Vec::new();
+            write_vl_len(&mut prefix, value_len);
+            prefix.len().wrapping_add(value_len)
+        }
+        _ => value_len,
+    }
+}
+
 /// Parses a root field sequence (as [`serialize`] produces, any other
 /// well-formed root slot's content, or a raw NOP-padded blob a test
 /// supplies directly) back into a field map — the inverse of [`serialize`].
