@@ -130,7 +130,7 @@ pub(crate) fn write_field_header(out: &mut Vec<u8>, ty: u32, field: u32) {
         out.push((ty << 4) as u8);
         out.push(field as u8);
     } else if field < 16 {
-        out.push((field << 4) as u8);
+        out.push(field as u8);
         out.push(ty as u8);
     } else {
         out.push(0);
@@ -510,5 +510,20 @@ mod tests {
         // NOP genuinely present in `bytes` did not survive into the map
         // `deserialize` returns.
         assert_eq!(nested_value, &vec![0x24, 0, 0, 0, 7, 0xE1]);
+    }
+
+    #[test]
+    fn write_field_header_round_trips_type_ge_16_field_lt_16() {
+        // sfCloseResolution (type 16, field 1): the `type >= 16 && field <
+        // 16` case, wire-encoded as `[field, type]` per rippled's
+        // `Serializer::encodeFieldID`.
+        let mut bytes = Vec::new();
+        write_field_header(&mut bytes, 16, 1);
+        assert_eq!(bytes, [0x01, 0x10]);
+
+        let mut pos = 0;
+        let decoded = crate::emit_walk::decode_header(&bytes, &mut pos).unwrap();
+        assert_eq!(decoded, (16, 1));
+        assert_eq!(pos, bytes.len());
     }
 }
