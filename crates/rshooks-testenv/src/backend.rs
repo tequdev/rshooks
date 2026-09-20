@@ -460,6 +460,22 @@ impl HostBackend for Backend {
         }
     }
 
+    // `_g(guard_id, maxiter)`: `guard_id`'s call count is cumulative for
+    // the whole invocation (`applyHook.cpp:3297-3331`); once it exceeds
+    // `maxiter`, the invocation terminates like `rollback!` with
+    // `GUARD_VIOLATION`.
+    #[allow(clippy::panic)] // documented API: mirrors xahaud's own guard-violation rollback (design §2.2's exit mechanism), not an error path
+    fn _g(&self, guard_id: u32, maxiter: u32) -> i32 {
+        if self.ctx.borrow_mut().guard_hit(guard_id, maxiter) {
+            std::panic::panic_any(HookExitSignal(HookExit {
+                exit: ExitType::Rollback,
+                code: rshooks_core::GUARD_VIOLATION,
+                msg: Vec::new(),
+            }));
+        }
+        1
+    }
+
     #[allow(clippy::panic)] // documented API: this is the accept! exit mechanism itself (design §2.2), not an error path
     fn accept(&self, msg: &[u8], code: i64) -> ! {
         std::panic::panic_any(HookExitSignal(HookExit {
