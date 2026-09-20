@@ -1771,7 +1771,7 @@ mod tests {
         // field<16,type>=16 -> 2 bytes
         out.clear();
         write_field_header(&mut out, 1, 20);
-        assert_eq!(out, [0x10, 20]);
+        assert_eq!(out, [1, 20]);
         // field>=16,type>=16 -> 3 bytes
         out.clear();
         write_field_header(&mut out, 20, 20);
