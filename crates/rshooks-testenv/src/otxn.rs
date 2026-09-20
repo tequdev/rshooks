@@ -10,9 +10,13 @@ use rshooks::txn::codec::sti::{STI_ACCOUNT, STI_VL};
 
 /// The originating transaction a [`crate::TestEnv`] seeds its invocations
 /// with — backs `otxn_field`/`otxn_type`/`otxn_id`/`otxn_param`. Every field
-/// is stored as its **raw value bytes** (what a real `otxn_field` call
-/// would write into a caller buffer — no STObject header, no VL length
-/// prefix), keyed by the field's `sfXxx` code.
+/// is stored as its **value-only** bytes — no STObject header, no VL length
+/// prefix — keyed by the field's `sfXxx` code; this is a storage
+/// convention, not what `otxn_field`/`slot()` hand back to the hook. Those
+/// write-outs serialize the value with a bare `add(s)` call and drop the
+/// leading VL byte only for `STI_ACCOUNT`(8) (`applyHook.cpp:1873-1878` for
+/// `otxn_field`, `:1912-1920` for `slot`); an `STI_VL`(7)/Blob field's VL
+/// prefix is added back at that point by [`value_wire_bytes`].
 #[derive(Debug, Clone)]
 pub struct Otxn {
     pub(crate) tx_type: TxType,
@@ -130,7 +134,7 @@ pub(crate) fn write_field_header(out: &mut Vec<u8>, ty: u32, field: u32) {
         out.push((ty << 4) as u8);
         out.push(field as u8);
     } else if field < 16 {
-        out.push((field << 4) as u8);
+        out.push(field as u8);
         out.push(ty as u8);
     } else {
         out.push(0);
@@ -167,6 +171,54 @@ fn write_vl_len(out: &mut Vec<u8>, len: usize) {
         out.push(241usize.wrapping_add(adj / 65536) as u8);
         out.push(((adj / 256) % 256) as u8);
         out.push((adj % 256) as u8);
+    }
+}
+
+/// The wire bytes a `slot()`/`otxn_field` write-out returns for one field's
+/// stored value-only bytes (`Otxn::fields`' and a numbered slot's
+/// `SlotEntry::bytes` share this convention). Real xahaud's wrapper
+/// serializes the field's own value with a bare `add(s)` and then, only for
+/// `STI_ACCOUNT`(8), skips that call's leading VL byte before writing it out
+/// (`applyHook.cpp:1873-1878` for `otxn_field`, `:1915-1920` for `slot`, both
+/// driven by the same `WRITE_WASM_MEMORY_OR_RETURN_AS_INT64` macro's final
+/// `getSType() == STI_ACCOUNT` argument) — so an `STI_ACCOUNT` value's
+/// already-prefix-free stored bytes come back unchanged, while an
+/// `STI_VL`(7)/Blob value's `add(s)` keeps its length prefix
+/// (`STBlob::add`), which is added back here since the stored bytes are
+/// value-only. Every other type has no VL concept and is returned as-is.
+pub(crate) fn value_wire_bytes(field_code: u32, value: &[u8]) -> Vec<u8> {
+    if field_code >> 16 == STI_VL {
+        let mut out = Vec::with_capacity(value.len().wrapping_add(3));
+        write_vl_len(&mut out, value.len());
+        out.extend_from_slice(value);
+        out
+    } else {
+        value.to_vec()
+    }
+}
+
+/// The full `entry->add(s)` length `HookAPI::slot_size` reports for one
+/// field's stored value-only bytes (`HookAPI.cpp:2143-2156`): unlike
+/// [`value_wire_bytes`], this is never stripped for `STI_ACCOUNT`, since
+/// `slot_size` computes `add(s)`'s length directly and has no
+/// `STI_ACCOUNT`-skipping macro in its path — `value_len` plus a VL
+/// length-prefix's own byte count for both `STI_VL`(7) and `STI_ACCOUNT`(8)
+/// (both wire types are `addVL`-serialized), plain `value_len` for every
+/// other type.
+///
+/// Known parity gap this harness does not model: rippled's `STAccount`
+/// serializes a default (all-zero) account as an empty VL, so a real node
+/// reports `slot_size` 1 / `slot()` 0 bytes for one — this always sizes a
+/// stored 20-byte all-zero account as a normal 20-byte account (`slot_size`
+/// 21, `slot()` 20).
+pub(crate) fn wire_add_len(field_code: u32, value_len: usize) -> usize {
+    match field_code >> 16 {
+        ty if ty == STI_VL || ty == STI_ACCOUNT => {
+            let mut prefix = Vec::new();
+            write_vl_len(&mut prefix, value_len);
+            prefix.len().wrapping_add(value_len)
+        }
+        _ => value_len,
     }
 }
 
@@ -468,5 +520,20 @@ mod tests {
         // NOP genuinely present in `bytes` did not survive into the map
         // `deserialize` returns.
         assert_eq!(nested_value, &vec![0x24, 0, 0, 0, 7, 0xE1]);
+    }
+
+    #[test]
+    fn write_field_header_round_trips_type_ge_16_field_lt_16() {
+        // sfCloseResolution (type 16, field 1): the `type >= 16 && field <
+        // 16` case, wire-encoded as `[field, type]` per rippled's
+        // `Serializer::encodeFieldID`.
+        let mut bytes = Vec::new();
+        write_field_header(&mut bytes, 16, 1);
+        assert_eq!(bytes, [0x01, 0x10]);
+
+        let mut pos = 0;
+        let decoded = crate::emit_walk::decode_header(&bytes, &mut pos).unwrap();
+        assert_eq!(decoded, (16, 1));
+        assert_eq!(pos, bytes.len());
     }
 }

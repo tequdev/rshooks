@@ -70,7 +70,7 @@ pub mod codec {
     ///
     /// - `type < 16 && field < 16`: **1 byte**, `(type << 4) | field`.
     /// - `type < 16 && field >= 16`: **2 bytes**, `[type << 4, field]`.
-    /// - `type >= 16 && field < 16`: **2 bytes**, `[field << 4, type]`.
+    /// - `type >= 16 && field < 16`: **2 bytes**, `[field, type]`.
     /// - `type >= 16 && field >= 16`: **3 bytes**, `[0, type, field]`.
     ///
     /// See `KNOWN_HEADERS` in the unit tests below for a table of real
@@ -95,7 +95,7 @@ pub mod codec {
             ([byte0, byte1, 0], 2)
         } else if field < 16 {
             assert!(ty < 256, "field_header: type code must fit in a byte");
-            let byte0 = field.wrapping_shl(4) as u8;
+            let byte0 = field as u8;
             let byte1 = ty as u8;
             ([byte0, byte1, 0], 2)
         } else {
@@ -1110,7 +1110,8 @@ pub mod codec {
             ((7 << 16) + 3, &[0x73]),           // SigningPubKey (7,3)
             ((8 << 16) + 1, &[0x81]),           // Account (8,1)
             ((8 << 16) + 3, &[0x83]),           // Destination (8,3)
-            ((16 << 16) + 1, &[0x10, 0x10]),    // sfCloseResolution (16,1): type>=16, field<16
+            ((16 << 16) + 1, &[0x01, 0x10]),    // sfCloseResolution (16,1): type>=16, field<16
+            ((16 << 16) + 3, &[0x03, 0x10]),    // sfTransactionResult (16,3): type>=16, field<16
             ((16 << 16) + 16, &[0x00, 0x10, 0x10]), // sfTickSize (16,16): type>=16, field>=16
         ];
 
@@ -7531,13 +7532,13 @@ mod tests {
         assert_eq!(&b[33..49], &[0u8; 16]); // hash128 default: zeroed
         assert_eq!(&b[49..51], &[0x50, 0x11]); // InvoiceID (5,17) header
         assert_eq!(&b[51..83], &[0u8; 32]); // hash256 default: zeroed
-        assert_eq!(&b[116..118], &[0x30, 0x10]); // TransactionResult (16,3) header
+        assert_eq!(&b[116..118], &[0x03, 0x10]); // TransactionResult (16,3) header
         assert_eq!(b[118], 0xAB); // u8 default
-        assert_eq!(&b[119..121], &[0x10, 0x11]); // TakerPaysCurrency (17,1) header
+        assert_eq!(&b[119..121], &[0x01, 0x11]); // TakerPaysCurrency (17,1) header
         assert_eq!(&b[121..141], &[0u8; 20]); // hash160 default: zeroed
-        assert_eq!(&b[141..143], &[0x50, 0x18]); // ClaimCurrency (24,5) header
+        assert_eq!(&b[141..143], &[0x05, 0x18]); // ClaimCurrency (24,5) header
         assert_eq!(&b[143..163], &[0u8; 20]); // native_issue default: zeroed
-        assert_eq!(&b[163..165], &[0x10, 0x1A]); // BaseAsset (26,1) header
+        assert_eq!(&b[163..165], &[0x01, 0x1A]); // BaseAsset (26,1) header
         assert_eq!(&b[165..185], &[0u8; 20]); // currency default: zeroed
         assert_eq!(PerKindFixture::LEN, 185 + EMIT_DETAILS_MAX_LEN);
     }
@@ -7606,7 +7607,7 @@ mod tests {
             // + Fee(9) + SPK(2) + Account(22) = 53
             53usize
         };
-        assert_eq!(&tpl.bytes()[off..off.wrapping_add(2)], &[0x50, 0x18]); // ClaimCurrency (24,5)
+        assert_eq!(&tpl.bytes()[off..off.wrapping_add(2)], &[0x05, 0x18]); // ClaimCurrency (24,5)
         let value_off = off.wrapping_add(2);
         assert_eq!(
             &tpl.bytes()[value_off..value_off.wrapping_add(40)],
@@ -8264,7 +8265,7 @@ mod tests {
         // TransactionResult (16,3): 2-byte header + 1-byte value = 3-byte slot.
         assert_eq!(&tpl.bytes()[off..off + 3], &[codec::NOP; 3]);
         tpl.set_transaction_result(0xAB);
-        assert_eq!(&tpl.bytes()[off..off + 2], &[0x30, 0x10]);
+        assert_eq!(&tpl.bytes()[off..off + 2], &[0x03, 0x10]);
         assert_eq!(tpl.bytes()[off + 2], 0xAB);
         tpl.clear_transaction_result();
         assert_eq!(&tpl.bytes()[off..off + 3], &[codec::NOP; 3]);
@@ -8300,7 +8301,7 @@ mod tests {
         // TakerPaysCurrency (17,1): 2-byte header + 20-byte value = 22-byte slot.
         assert_eq!(&tpl.bytes()[off..off + 22], &[codec::NOP; 22]);
         tpl.set_taker_pays_currency(&[0x77; 20]);
-        assert_eq!(&tpl.bytes()[off..off + 2], &[0x10, 0x11]);
+        assert_eq!(&tpl.bytes()[off..off + 2], &[0x01, 0x11]);
         assert_eq!(&tpl.bytes()[off + 2..off + 22], &[0x77; 20]);
         tpl.clear_taker_pays_currency();
         assert_eq!(&tpl.bytes()[off..off + 22], &[codec::NOP; 22]);
@@ -8341,7 +8342,7 @@ mod tests {
         // Asset (24,3): 2-byte header + 20-byte value = 22-byte slot.
         assert_eq!(&tpl.bytes()[off..off + 22], &[codec::NOP; 22]);
         tpl.set_asset();
-        assert_eq!(&tpl.bytes()[off..off + 2], &[0x30, 0x18]);
+        assert_eq!(&tpl.bytes()[off..off + 2], &[0x03, 0x18]);
         assert_eq!(&tpl.bytes()[off + 2..off + 22], &[0u8; 20]);
         tpl.clear_asset();
         assert_eq!(&tpl.bytes()[off..off + 22], &[codec::NOP; 22]);
@@ -8378,7 +8379,7 @@ mod tests {
         let currency = CurrencyCode::from_iso(b"GBP");
         let issuer = AccountId([0x66; ACC_ID_LEN]);
         tpl.set_claim_currency(&currency, &issuer);
-        assert_eq!(&tpl.bytes()[off..off + 2], &[0x50, 0x18]);
+        assert_eq!(&tpl.bytes()[off..off + 2], &[0x05, 0x18]);
         assert_eq!(&tpl.bytes()[off + 2..off + 22], currency.as_ref());
         assert_eq!(&tpl.bytes()[off + 22..off + 42], issuer.as_ref());
         tpl.clear_claim_currency();
@@ -8415,7 +8416,7 @@ mod tests {
         assert_eq!(&tpl.bytes()[off..off + 22], &[codec::NOP; 22]);
         let currency = CurrencyCode::from_iso(b"EUR");
         tpl.set_base_asset(&currency);
-        assert_eq!(&tpl.bytes()[off..off + 2], &[0x10, 0x1A]);
+        assert_eq!(&tpl.bytes()[off..off + 2], &[0x01, 0x1A]);
         assert_eq!(&tpl.bytes()[off + 2..off + 22], currency.as_ref());
         tpl.clear_base_asset();
         assert_eq!(&tpl.bytes()[off..off + 22], &[codec::NOP; 22]);

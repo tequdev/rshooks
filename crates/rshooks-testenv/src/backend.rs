@@ -178,13 +178,13 @@ impl HostBackend for Backend {
     }
 
     fn otxn_field(&self, field_id: u32) -> Result<Vec<u8>, i64> {
-        self.world
-            .borrow()
+        let world = self.world.borrow();
+        let value = world
             .otxn
             .fields
             .get(&field_id)
-            .cloned()
-            .ok_or(rshooks_core::DOESNT_EXIST)
+            .ok_or(rshooks_core::DOESNT_EXIST)?;
+        Ok(crate::otxn::value_wire_bytes(field_id, value))
     }
 
     fn otxn_type(&self) -> i64 {
