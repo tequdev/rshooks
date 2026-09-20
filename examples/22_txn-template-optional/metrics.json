@@ -5,9 +5,9 @@
       "artifact": "0.remit.wasm",
       "index": 0,
       "hook_fn": "remit",
-      "bytes": 3488,
+      "bytes": 4064,
       "wce": {
-        "hook": 1047,
+        "hook": 1233,
         "cbak": 7
       },
       "max_nesting": 8

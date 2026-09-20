@@ -69,15 +69,23 @@ pub(crate) fn guard_hint(guess: LoopBodyGuess) -> Option<&'static str> {
              `guard!` so its `maxiter` is explicit",
         ),
         LoopBodyGuess::CopyLike => Some(
-            "this looks like a compiler-generated memcpy-style copy loop — consider moving the \
-             source data into a `static` (data segment) instead of building it on the stack, \
-             per examples/README.md's \"Statics for templates and large buffers\" section",
+            "this looks like a compiler-generated memcpy-style copy loop — either (a) a \
+             stack-built source buffer: consider moving it into a `static` (data segment) \
+             instead of building it on the stack, per examples/README.md's \"Statics for \
+             templates and large buffers\" section, or (b) a constant-length copy over 64 \
+             bytes (`copy_from_slice`, a struct/array move): past LLVM's 8-word inline-memcpy \
+             limit on this target, this lowers to a `memcpy` libcall — chunk it with \
+             rshooks::txn::codec::copy_fixed (or the buf_copy_<N> table in \
+             crates/rshooks/src/buf_eq.rs for a fixed, already-covered length)",
         ),
         LoopBodyGuess::ZeroInitLike => Some(
-            "this looks like a compiler-generated memset-style zero-init loop — consider a \
-             zero-initialized `static` (rshooks::static_cell::HookStatic) instead of a large \
-             stack-local buffer, per examples/README.md's \"Statics for templates and large \
-             buffers\" section",
+            "this looks like a compiler-generated memset-style zero-init loop — either (a) a \
+             large stack-local buffer: consider a zero-initialized `static` \
+             (rshooks::static_cell::HookStatic) instead, per examples/README.md's \"Statics \
+             for templates and large buffers\" section, or (b) a constant-length fill over 64 \
+             bytes (`[x; N]`, a NOP/zero fill): past LLVM's 8-word inline-memset limit on this \
+             target, this lowers to a `memset` libcall — chunk it with \
+             rshooks::txn::codec::fill_fixed",
         ),
         LoopBodyGuess::Unknown => None,
     }

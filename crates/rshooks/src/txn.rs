@@ -396,6 +396,207 @@ pub mod codec {
         }
     }
 
+    /// Largest `N` [`copy_fixed`]/[`fill_fixed`] accept. Raise it if a
+    /// declared field needs more.
+    pub const MAX_CHUNKED_LEN: usize = 512;
+
+    /// Emits one literal-indexed 64-byte group of [`copy_fixed`]'s or
+    /// [`fill_fixed`]'s body per literal `$k`, for every group `N` fully
+    /// covers (`$n >= ($k + 1) * 64`): 56 plain bytes (`copy_from_slice`/
+    /// `fill`, inlining as at most 7 `i64` load/store pairs -- well under
+    /// LLVM's own 8-pair/64-byte threshold) followed by one 8-byte
+    /// separator word that is *not* a plain copy -- see `copy_fixed`'s
+    /// docs for why that separator is what matters. `$n` and `$k` are
+    /// always concrete, monomorphized/literal `usize` values, so the
+    /// group-coverage test above folds to a compile-time constant and
+    /// only the groups a given `N` actually needs survive optimization --
+    /// an unused arm costs nothing.
+    macro_rules! chunked_groups {
+        (copy, $n:ident, $dst:ident, $src:ident, $z:ident, [$($k:literal),+ $(,)?]) => {
+            $(
+                if $n >= ($k + 1) * 64 {
+                    let base = $k * 64;
+                    $dst[base..(base + 56)].copy_from_slice(&$src[base..(base + 56)]);
+                    let w = u64::from_ne_bytes([
+                        $src[base + 56], $src[base + 57], $src[base + 58], $src[base + 59],
+                        $src[base + 60], $src[base + 61], $src[base + 62], $src[base + 63],
+                    ]) ^ $z;
+                    $dst[(base + 56)..(base + 64)].copy_from_slice(&w.to_ne_bytes());
+                }
+            )+
+        };
+        (fill, $n:ident, $dst:ident, $byte:ident, $w:ident, [$($k:literal),+ $(,)?]) => {
+            $(
+                if $n >= ($k + 1) * 64 {
+                    let base = $k * 64;
+                    $dst[base..(base + 56)].fill($byte);
+                    $dst[(base + 56)..(base + 64)].copy_from_slice(&$w.to_ne_bytes());
+                }
+            )+
+        };
+    }
+
+    /// Writes `$dst[$idx]` for each of [`group_tail`]'s up to 7 trailing
+    /// indices past `$plain_end`, using `$val!($idx)` for the stored
+    /// byte -- shared between `copy_fixed`'s XORed remainder and
+    /// `fill_fixed`'s plain-byte one, so this 7-arm body exists once
+    /// instead of once per mode.
+    macro_rules! group_tail_bytes {
+        ($n:ident, $dst:ident, $plain_end:ident, $val:ident) => {
+            let o1 = $plain_end.wrapping_add(1);
+            let o2 = $plain_end.wrapping_add(2);
+            let o3 = $plain_end.wrapping_add(3);
+            let o4 = $plain_end.wrapping_add(4);
+            let o5 = $plain_end.wrapping_add(5);
+            let o6 = $plain_end.wrapping_add(6);
+            if $n > $plain_end {
+                $dst[$plain_end] = $val!($plain_end);
+            }
+            if $n > o1 {
+                $dst[o1] = $val!(o1);
+            }
+            if $n > o2 {
+                $dst[o2] = $val!(o2);
+            }
+            if $n > o3 {
+                $dst[o3] = $val!(o3);
+            }
+            if $n > o4 {
+                $dst[o4] = $val!(o4);
+            }
+            if $n > o5 {
+                $dst[o5] = $val!(o5);
+            }
+            if $n > o6 {
+                $dst[o6] = $val!(o6);
+            }
+        };
+    }
+
+    /// Writes the trailing `N - (N / 64) * 64` bytes (`0..=63`)
+    /// [`chunked_groups`]'s full-group arms leave uncovered: up to 56
+    /// plain bytes, then (if any remain) up to 7 remainder bytes via
+    /// [`group_tail_bytes`] -- XORed with `$zb` for `copy_fixed`, plain
+    /// `$byte` for `fill_fixed`. Needs no barrier of its own: 56 + 7 = 63
+    /// bytes stays under the 64-byte fusion threshold even unseparated.
+    macro_rules! group_tail {
+        (copy, $n:ident, $dst:ident, $src:ident, $zb:ident) => {
+            let full_base = ($n / 64).wrapping_mul(64);
+            let rem = $n.wrapping_sub(full_base);
+            let plain_end = if rem < 56 {
+                $n
+            } else {
+                full_base.wrapping_add(56)
+            };
+            if $n > full_base {
+                $dst[full_base..plain_end].copy_from_slice(&$src[full_base..plain_end]);
+            }
+            macro_rules! __group_tail_val {
+                ($i:expr) => {
+                    $src[$i] ^ $zb
+                };
+            }
+            group_tail_bytes!($n, $dst, plain_end, __group_tail_val);
+        };
+        (fill, $n:ident, $dst:ident, $byte:ident) => {
+            let full_base = ($n / 64).wrapping_mul(64);
+            let rem = $n.wrapping_sub(full_base);
+            let plain_end = if rem < 56 {
+                $n
+            } else {
+                full_base.wrapping_add(56)
+            };
+            if $n > full_base {
+                $dst[full_base..plain_end].fill($byte);
+            }
+            macro_rules! __group_tail_val {
+                ($i:expr) => {
+                    $byte
+                };
+            }
+            group_tail_bytes!($n, $dst, plain_end, __group_tail_val);
+        };
+    }
+
+    /// Runtime, chunked counterpart to [`write_const_bytes`] for a
+    /// compile-time-constant-length copy whose length `N` can exceed 64
+    /// bytes: `txn_template!`'s `fixed_vl`/`optional fixed_vl` setters and
+    /// its `optional object`/`optional array` element restore copy a
+    /// declared, potentially large `N`-byte constant into a runtime
+    /// buffer, which `write_const_bytes` cannot do (it is compile-time
+    /// only).
+    ///
+    /// A contiguous run of pure load-then-store-unchanged bytes longer
+    /// than 64 -- not a single Rust `copy_from_slice` call, but any such
+    /// run LLVM's wasm backend can recognize, including several adjacent
+    /// `copy_from_slice` calls -- lowers to a `compiler_builtins` `memcpy`
+    /// libcall whose internal loop the Guard-type guard checker rejects,
+    /// even though the Rust source has no loop at all. One opaque-XOR
+    /// word in every 64 bytes keeps every such run at or under 56 bytes:
+    /// each 64-byte group is 56 plain bytes followed by one 8-byte word
+    /// whose stored value is `load ^ z` for one opaque, call-wide,
+    /// runtime-zero `z` (a single [`core::hint::black_box`] call per
+    /// `copy_fixed` call) -- that word is never a pure copy, so no run
+    /// through it can be recognized. `black_box` is a best-effort
+    /// barrier, not a guaranteed one, with the same failure mode as
+    /// [`crate::no_unroll`]'s (see its "Failure mode" section) --
+    /// re-measure the worst case after any toolchain upgrade.
+    ///
+    /// `dst` must be at least `N` bytes; a shorter `dst` traps via
+    /// ordinary slice indexing.
+    #[allow(clippy::indexing_slicing)] // in-bounds by construction: every offset is <= N <= dst.len() at every call site
+    #[inline(always)]
+    pub fn copy_fixed<const N: usize>(dst: &mut [u8], src: &[u8; N]) {
+        const {
+            assert!(
+                N <= MAX_CHUNKED_LEN,
+                "copy_fixed: N exceeds MAX_CHUNKED_LEN"
+            )
+        };
+        if N <= 64 {
+            dst[..N].copy_from_slice(src);
+        } else {
+            let z: u64 = ::core::hint::black_box(0u64);
+            chunked_groups!(copy, N, dst, src, z, [0, 1, 2, 3, 4, 5, 6, 7]);
+            let zb: u8 = (z & 0xFF) as u8;
+            group_tail!(copy, N, dst, src, zb);
+        }
+    }
+
+    /// Runtime, chunked counterpart to [`write_nops`] for a
+    /// compile-time-constant-length fill whose length `N` can exceed 64
+    /// bytes: `txn_template!`'s `clear_<field>`/`clear_<container>`
+    /// setters NOP-fill a declared, potentially large `N`-byte reserved
+    /// slot back to absent. Same 56-plain-plus-one-opaque-word-per-64-
+    /// bytes chunking as [`copy_fixed`] -- see its docs -- with one
+    /// difference: a fill's value is the same known byte (`NOP`, `0x99`)
+    /// everywhere, so the separator word is `black_box` applied directly
+    /// to the fill word itself (computed once per call, not once per
+    /// group), not an XOR. An opaque, repeated-byte `u64` is not a
+    /// byte-splat `memset` candidate for the same underlying reason a
+    /// `black_box`ed load isn't a `memcpy` candidate: the optimizer can
+    /// no longer prove the store is "filling with a known constant byte".
+    ///
+    /// `dst` must be at least `N` bytes; a shorter `dst` traps via
+    /// ordinary slice indexing.
+    #[allow(clippy::indexing_slicing)] // in-bounds by construction: every offset is <= N <= dst.len() at every call site
+    #[inline(always)]
+    pub fn fill_fixed<const N: usize>(dst: &mut [u8], byte: u8) {
+        const {
+            assert!(
+                N <= MAX_CHUNKED_LEN,
+                "fill_fixed: N exceeds MAX_CHUNKED_LEN"
+            )
+        };
+        if N <= 64 {
+            dst[..N].fill(byte);
+        } else {
+            let w: u64 = ::core::hint::black_box(u64::from_ne_bytes([byte; 8]));
+            chunked_groups!(fill, N, dst, byte, w, [0, 1, 2, 3, 4, 5, 6, 7]);
+            group_tail!(fill, N, dst, byte);
+        }
+    }
+
     /// The largest length rippled's three-byte VL length prefix can
     /// represent. [`vl_length_prefix`] panics (at compile time) past this;
     /// [`crate::sto_writer::StoWriter::vl`] (the runtime counterpart)
@@ -2048,7 +2249,7 @@ macro_rules! __txn_template_ensure {
                 const LEN: usize = ($slot).len();
                 const END: usize = OFF.wrapping_add(LEN);
                 if $bytes[OFF] == $crate::txn::codec::NOP {
-                    $bytes[OFF..END].copy_from_slice(&($slot));
+                    $crate::txn::codec::copy_fixed(&mut $bytes[OFF..END], &($slot));
                 }
             }
         )*
@@ -3002,7 +3203,7 @@ macro_rules! __txn_template_step {
                     const OFF: usize = ($($prev)*)
                         .wrapping_add($crate::txn::codec::field_header($sfcode).1)
                         .wrapping_add($crate::txn::codec::vl_length_prefix($n).1);
-                    self.bytes[OFF..OFF.wrapping_add($n)].copy_from_slice(value);
+                    $crate::txn::codec::copy_fixed(&mut self.bytes[OFF..OFF.wrapping_add($n)], value);
                 }
             ],
             emit_region = [$($emit_region)*],
@@ -3067,7 +3268,7 @@ macro_rules! __txn_template_step {
                     const OFF: usize = ($($prev)*)
                         .wrapping_add($crate::txn::codec::field_header($sfcode).1)
                         .wrapping_add($crate::txn::codec::vl_length_prefix($n).1);
-                    self.bytes[OFF..OFF.wrapping_add($n)].copy_from_slice(value);
+                    $crate::txn::codec::copy_fixed(&mut self.bytes[OFF..OFF.wrapping_add($n)], value);
                 }
             ],
             emit_region = [$($emit_region)*],
@@ -4938,7 +5139,7 @@ macro_rules! __txn_template_step {
                     let pstart = OFF.wrapping_add(HDR.1);
                     self.bytes[pstart..pstart.wrapping_add(PREFIX.1)].copy_from_slice(&PREFIX.0[..PREFIX.1]);
                     let vstart = pstart.wrapping_add(PREFIX.1);
-                    self.bytes[vstart..vstart.wrapping_add($n)].copy_from_slice(value);
+                    $crate::txn::codec::copy_fixed(&mut self.bytes[vstart..vstart.wrapping_add($n)], value);
                 }
 
                 #[doc = concat!("Clears `", stringify!($field), "` back to absent (NOP-fills its whole reserved slot).")]
@@ -4947,7 +5148,7 @@ macro_rules! __txn_template_step {
                 $vis fn [<clear_ $($prefix)* $field>](&mut self) {
                     const OFF: usize = $($prev)*;
                     const SLOT: usize = $crate::txn::codec::fixed_vl_field_size($sfcode, $n);
-                    self.bytes[OFF..OFF.wrapping_add(SLOT)].copy_from_slice(&[$crate::txn::codec::NOP; SLOT]);
+                    $crate::txn::codec::fill_fixed::<SLOT>(&mut self.bytes[OFF..OFF.wrapping_add(SLOT)], $crate::txn::codec::NOP);
                 }
             ],
             emit_region = [$($emit_region)*],
@@ -5386,7 +5587,7 @@ macro_rules! __txn_template_step {
                 $vis fn [<clear_ $($prefix)* $field>](&mut self) {
                     const OFF: usize = $($prev)*;
                     const SLOT: usize = $crate::txn::codec::field_header($sfcode).1.wrapping_add($crate::txn::codec::vl_slot_size($max));
-                    self.bytes[OFF..OFF.wrapping_add(SLOT)].copy_from_slice(&[$crate::txn::codec::NOP; SLOT]);
+                    $crate::txn::codec::fill_fixed::<SLOT>(&mut self.bytes[OFF..OFF.wrapping_add(SLOT)], $crate::txn::codec::NOP);
                 }
             ],
             emit_region = [$($emit_region)*],
@@ -5654,7 +5855,7 @@ macro_rules! __txn_template_step {
                     const OFF: usize = $($poff)*;
                     const LEN: usize = [<__ $Name _ $($pfx)* $cname _SLOT>].len();
                     const END: usize = OFF.wrapping_add(LEN);
-                    self.bytes[OFF..END].copy_from_slice(&[$crate::txn::codec::NOP; LEN]);
+                    $crate::txn::codec::fill_fixed::<LEN>(&mut self.bytes[OFF..END], $crate::txn::codec::NOP);
                 }
 
                 #[doc = concat!("Whether `", stringify!($cname), "` is currently present (its slot's first byte is not a NOP).")]
@@ -5741,7 +5942,7 @@ macro_rules! __txn_template_step {
                     const OFF: usize = $($poff)*;
                     const LEN: usize = [<__ $Name _ $($pfx)* $cname _SLOT>].len();
                     const END: usize = OFF.wrapping_add(LEN);
-                    self.bytes[OFF..END].copy_from_slice(&[$crate::txn::codec::NOP; LEN]);
+                    $crate::txn::codec::fill_fixed::<LEN>(&mut self.bytes[OFF..END], $crate::txn::codec::NOP);
                 }
 
                 #[doc = concat!("Whether `", stringify!($cname), "` is currently present (its slot's first byte is not a NOP).")]
@@ -6608,14 +6809,14 @@ macro_rules! __txn_template_step {
             #[inline(always)]
             #[allow(clippy::indexing_slicing)] // `self.bytes` is always exactly `Self::LEN` bytes, by construction
             $vis fn enable(&mut self) {
-                self.bytes.copy_from_slice(&Self::TEMPLATE);
+                $crate::txn::codec::copy_fixed(&mut *self.bytes, &Self::TEMPLATE);
             }
 
             /// NOP-fills this element's bytes -- makes it absent.
             #[inline(always)]
             #[allow(clippy::indexing_slicing)] // `self.bytes` is always exactly `Self::LEN` bytes, by construction
             $vis fn clear(&mut self) {
-                self.bytes.copy_from_slice(&[$crate::txn::codec::NOP; [<__ $Elem _LEN>]]);
+                $crate::txn::codec::fill_fixed::<[<__ $Elem _LEN>]>(&mut *self.bytes, $crate::txn::codec::NOP);
             }
 
             /// Whether this element is currently present: its first byte
