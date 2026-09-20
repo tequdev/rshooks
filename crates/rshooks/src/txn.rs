@@ -5224,7 +5224,10 @@ macro_rules! __txn_template_step {
                 /// execution (including once per inlined call site, if the
                 /// compiler duplicates it) can exceed the budget and abort
                 /// the hook with a guard violation. Call it at most once
-                /// per hook execution for this field.
+                /// per hook execution for this field. `rshooks-testenv`
+                /// enforces this same cumulative budget, so a unit test
+                /// that fills this field twice in one invocation fails
+                /// with `GUARD_VIOLATION`.
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction; the loop below is bounded by REGION_LEN, a compile-time constant
                 $vis fn [<set_ $($prefix)* $field>](&mut self, value: &[u8]) -> $crate::error::Result<()> {
@@ -5345,7 +5348,10 @@ macro_rules! __txn_template_step {
                 /// execution (including once per inlined call site, if the
                 /// compiler duplicates it) can exceed the budget and abort
                 /// the hook with a guard violation. Call it at most once
-                /// per hook execution for this field.
+                /// per hook execution for this field. `rshooks-testenv`
+                /// enforces this same cumulative budget, so a unit test
+                /// that fills this field twice in one invocation fails
+                /// with `GUARD_VIOLATION`.
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction; the loop below is bounded by REGION_LEN, a compile-time constant
                 $vis fn [<set_ $($prefix)* $field>](&mut self, value: &[u8]) -> $crate::error::Result<()> {
