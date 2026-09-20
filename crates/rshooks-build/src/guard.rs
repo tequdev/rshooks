@@ -49,6 +49,36 @@ pub(crate) enum LoopBodyGuess {
     /// Stores memory but never loads or calls: the shape LLVM emits for a
     /// `memset`-style zero-init loop.
     ZeroInitLike,
+    /// Contains a `call` to the `_g` guard import somewhere in its body, but
+    /// not at its head (a guarded loop's head is already excluded before
+    /// this heuristic runs — see [`scan_function_loops`]), and not the head
+    /// of a nested loop either (see [`guess_loop_body`]'s own doc comment).
+    /// Distinct compiler behaviors can produce this shape:
+    ///
+    /// - The block-wrap case: Binaryen `wasm-opt -Oz` (run early in
+    ///   `rshooks build`'s pipeline, before cleaning) restructures a loop
+    ///   whose body contains an internal early-exit branch (a `continue`,
+    ///   or an `if`/`?` check) into `loop { block { <guard>; .. } }`,
+    ///   wrapping the guard in a `block` the checker's exact prologue match
+    ///   doesn't see through.
+    /// - The rotation case: LLVM's loop-rotation pass turns
+    ///   `loop { guard!(maxiter); if !cond { break } body }` into a
+    ///   do-while: the condition/guard block moves to the loop's latch and
+    ///   is duplicated into the preheader, so the compiled `loop` opcode is
+    ///   followed by `body`, not by the guard, even though the source
+    ///   guard is present.
+    ///
+    /// [`crate::guard_hoist::hoist`] runs before this check inside
+    /// `run_pipeline` (i.e. from `rshooks build`) and undoes exactly the
+    /// block-wrap case, so a `RotatedGuard` guess reaching a diagnostic from
+    /// `rshooks build` means the rotation case. `rshooks check` on an
+    /// already-built file calls [`verify`](crate::verify) directly, with no
+    /// hoist pass, so either cause is still possible there (see
+    /// [`guard_hint`]'s message). Takes priority over
+    /// `CompareLike`/`CopyLike`/`ZeroInitLike` in [`guess_loop_body`]: a
+    /// real guard call anywhere in the body is a more specific signal than
+    /// the generic load/store shape.
+    RotatedGuard,
     /// Didn't conservatively match any of the above (most commonly: the
     /// loop calls something, or neither loads nor stores memory at all) —
     /// no hint should be printed for this case.
@@ -79,6 +109,21 @@ pub(crate) fn guard_hint(guess: LoopBodyGuess) -> Option<&'static str> {
              stack-local buffer, per examples/README.md's \"Statics for templates and large \
              buffers\" section",
         ),
+        LoopBodyGuess::RotatedGuard => Some(
+            "this loop contains a `_g` guard call that is not at its head — either (a) \
+             `wasm-opt -Oz` wrapped the loop body in a `block` (the guard itself is still \
+             unconditional and present, just not immediately after `loop`), or (b) LLVM's \
+             loop rotation moved the guard to the loop's latch and duplicated a copy into the \
+             preheader (the same guard id then also appears right before this `loop`). \
+             `rshooks build`'s pipeline already hoists case (a) back out automatically before \
+             this check runs, so seeing this from `rshooks build` means (b) — write the loop \
+             as `rshooks::guarded_while!(maxiter, cond, { .. })` instead, which stays guarded \
+             either way. `rshooks check` on an already-built file runs no hoist pass, so \
+             either cause is possible there; `rshooks build --no-optimize` and `wasm-tools \
+             print` on the raw per-entry wasm distinguish them (see \
+             book/src/concepts/guards.md, \"wasm-opt block-wrapping and LLVM loop \
+             rotation\")",
+        ),
         LoopBodyGuess::Unknown => None,
     }
 }
@@ -90,15 +135,35 @@ pub(crate) fn guard_hint(guess: LoopBodyGuess) -> Option<&'static str> {
 /// over via a depth counter, not descended into specially — their
 /// loads/stores/calls still count towards the outer loop's shape, which is
 /// intentional: a `bcmp`/`memcpy`/`memset` loop's body sometimes contains a
-/// nested `if` for an early exit).
-fn guess_loop_body(reader: &wasmparser::OperatorsReader) -> Result<LoopBodyGuess> {
+/// nested `if` for an early exit). `g_index` is the current function index
+/// of the `_g` import, if the module imports one (see [`find_g_index`]).
+///
+/// A `call` to `_g` still counts towards [`LoopBodyGuess::RotatedGuard`]
+/// wherever it appears in the body — *except* the three operator slots
+/// right after a nested `loop`'s own opener, which are excluded: a call
+/// there is that inner loop's own (possibly perfectly valid) guard
+/// prologue, not evidence that the loop being inspected here is missing its
+/// own guard. Without this exclusion, an outer loop that simply forgot its
+/// `guard!` — with a correctly guarded inner loop somewhere in its body —
+/// would wrongly get the rotation hint instead of the plain "add a guard!"
+/// diagnostic.
+fn guess_loop_body(
+    reader: &wasmparser::OperatorsReader,
+    g_index: Option<u32>,
+) -> Result<LoopBodyGuess> {
     let mut r = reader.clone();
     let mut depth: u32 = 0;
     let mut has_load = false;
     let mut has_store = false;
     let mut has_call = false;
+    let mut has_g_call = false;
+    // Counts down the three operator slots right after a nested `loop`
+    // opener, where that inner loop's own guard prologue would sit — see
+    // this function's doc comment.
+    let mut nested_prologue_guard: u32 = 0;
     while !r.eof() {
-        match r.read()? {
+        let op = r.read()?;
+        match &op {
             wasmparser::Operator::Block { .. }
             | wasmparser::Operator::Loop { .. }
             | wasmparser::Operator::If { .. } => depth += 1,
@@ -108,7 +173,13 @@ fn guess_loop_body(reader: &wasmparser::OperatorsReader) -> Result<LoopBodyGuess
                 }
                 depth -= 1;
             }
-            wasmparser::Operator::Call { .. } | wasmparser::Operator::CallIndirect { .. } => {
+            wasmparser::Operator::Call { function_index } => {
+                has_call = true;
+                if g_index == Some(*function_index) && nested_prologue_guard == 0 {
+                    has_g_call = true;
+                }
+            }
+            wasmparser::Operator::CallIndirect { .. } => {
                 has_call = true;
             }
             op => {
@@ -127,6 +198,14 @@ fn guess_loop_body(reader: &wasmparser::OperatorsReader) -> Result<LoopBodyGuess
                 }
             }
         }
+        if matches!(op, wasmparser::Operator::Loop { .. }) {
+            nested_prologue_guard = 3;
+        } else {
+            nested_prologue_guard = nested_prologue_guard.saturating_sub(1);
+        }
+    }
+    if has_g_call {
+        return Ok(LoopBodyGuess::RotatedGuard);
     }
     Ok(match (has_call, has_load, has_store) {
         (false, true, false) => LoopBodyGuess::CompareLike,
@@ -152,7 +231,7 @@ pub(crate) fn scan_function_loops(
             .context("function body operator")?;
         if let wasmparser::Operator::Loop { .. } = op {
             let guarded = is_guard_prologue(&reader, g_index)?;
-            let guess = guess_loop_body(&reader)?;
+            let guess = guess_loop_body(&reader, g_index)?;
             sites.push(LoopSite {
                 offset,
                 guarded,
@@ -320,7 +399,10 @@ mod tests {
 
     // -- guess_loop_body / guard_hint --------------------------------------------
 
-    fn guess_of(loop_body: &[wasm_encoder::Instruction]) -> LoopBodyGuess {
+    fn guess_of_with_g(
+        loop_body: &[wasm_encoder::Instruction],
+        g_index: Option<u32>,
+    ) -> LoopBodyGuess {
         let mut ops = vec![wasm_encoder::Instruction::Loop(
             wasm_encoder::BlockType::Empty,
         )];
@@ -330,7 +412,11 @@ mod tests {
         let bytes = body_bytes(&ops);
         let body = parse_body(&bytes);
         let r = reader_after_loop(&body);
-        guess_loop_body(&r).expect("valid")
+        guess_loop_body(&r, g_index).expect("valid")
+    }
+
+    fn guess_of(loop_body: &[wasm_encoder::Instruction]) -> LoopBodyGuess {
+        guess_of_with_g(loop_body, None)
     }
 
     #[test]
@@ -396,6 +482,68 @@ mod tests {
             wasm_encoder::Instruction::Call(0),
             wasm_encoder::Instruction::Drop,
         ]);
+        assert_eq!(guess, LoopBodyGuess::Unknown);
+        assert!(guard_hint(guess).is_none());
+    }
+
+    #[test]
+    fn guess_call_to_g_in_body_is_rotated_guard() {
+        // The rotated-loop shape: the guard call sits at the loop's latch,
+        // not its head, with unrelated body instructions ahead of it.
+        let guess = guess_of_with_g(
+            &[
+                wasm_encoder::Instruction::I32Const(0),
+                wasm_encoder::Instruction::I32Load(wasm_encoder::MemArg {
+                    offset: 0,
+                    align: 0,
+                    memory_index: 0,
+                }),
+                wasm_encoder::Instruction::Drop,
+                wasm_encoder::Instruction::I32Const(1),
+                wasm_encoder::Instruction::I32Const(10),
+                wasm_encoder::Instruction::Call(3),
+                wasm_encoder::Instruction::Drop,
+            ],
+            Some(3),
+        );
+        assert_eq!(guess, LoopBodyGuess::RotatedGuard);
+        assert!(guard_hint(guess).expect("hint").contains("guarded_while"));
+    }
+
+    #[test]
+    fn guess_call_to_other_import_is_not_rotated_guard() {
+        // A call in the body that does not resolve to `_g` must not be
+        // mistaken for a rotated guard.
+        let guess = guess_of_with_g(
+            &[
+                wasm_encoder::Instruction::I32Const(1),
+                wasm_encoder::Instruction::I32Const(10),
+                wasm_encoder::Instruction::Call(7),
+                wasm_encoder::Instruction::Drop,
+            ],
+            Some(3),
+        );
+        assert_eq!(guess, LoopBodyGuess::Unknown);
+    }
+
+    #[test]
+    fn guess_nested_loops_own_guard_is_not_mistaken_for_rotated_guard() {
+        // The outer loop is genuinely unguarded (a plain missing-`guard!`
+        // bug); its body contains a nested loop with its own, correctly
+        // placed guard prologue at its head. That inner guard must not
+        // make the outer loop's guess `RotatedGuard` — it's unrelated to
+        // rotation, and hinting at `guarded_while!` here would be wrong.
+        let guess = guess_of_with_g(
+            &[
+                wasm_encoder::Instruction::Loop(wasm_encoder::BlockType::Empty),
+                wasm_encoder::Instruction::I32Const(1),
+                wasm_encoder::Instruction::I32Const(10),
+                wasm_encoder::Instruction::Call(3),
+                wasm_encoder::Instruction::Drop,
+                wasm_encoder::Instruction::End, // closes the nested loop
+            ],
+            Some(3),
+        );
         assert_eq!(guess, LoopBodyGuess::Unknown);
         assert!(guard_hint(guess).is_none());
     }

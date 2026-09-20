@@ -15,6 +15,17 @@
 /// `GUARD` macro's guard-id formula exactly, including the `+ 1` on
 /// `maxiter`.
 ///
+/// The example below writes the guard as the first statement of a `loop`
+/// body, ahead of the break check — the natural translation of the C
+/// `GUARD`/`break` idiom. At `opt-level = 3`, LLVM's loop-rotation pass can
+/// turn this exact source shape into a do-while, moving the compiled guard
+/// call off the top of the loop (see [`guarded_while!`](crate::guarded_while)
+/// for the source-level idiom that stays guard-first either way, and
+/// `book/src/concepts/guards.md`'s "wasm-opt block-wrapping and LLVM loop
+/// rotation" section for the full mechanism — that section also covers a
+/// second case, `wasm-opt -Oz` wrapping the loop body in a `block`, which
+/// `rshooks build` corrects automatically and needs no source change).
+///
 /// # Examples
 ///
 /// ```
@@ -51,6 +62,74 @@ macro_rules! guard_m {
         let __maxiter: u32 = (($m) as u32).wrapping_add(1);
         unsafe { $crate::raw::_g(__guard_id, __maxiter) }
     }};
+}
+
+/// A `while` loop that stays guard-first whether or not LLVM's loop-rotation
+/// pass rotates it, by placing a guard in both the condition block and the
+/// top of the body.
+///
+/// # Why this exists
+///
+/// The Hook API's static guard checker requires the compiled `loop` opcode
+/// to be followed immediately by the guard prologue. Source written as
+/// `loop { guard!(maxiter); if !cond { break } body }` satisfies this in the
+/// source, but at `opt-level = 3` LLVM's loop-rotation pass can turn it into
+/// a do-while: the condition/guard block is duplicated into the preheader
+/// and the original moves to the loop's latch, so the compiled `loop`
+/// opcode is followed by `body`, not by the guard call, and the checker
+/// rejects it. The mirror-image source, `while cond { guard!(maxiter); body
+/// }`, passes when LLVM rotates it (the guard becomes the first instruction
+/// of the rotated body) but would fail the same way if LLVM did *not*
+/// rotate it (e.g. a large, expensive condition — LLVM's rotation heuristic
+/// only duplicates a "small" header). Which of the two source forms ends up
+/// guard-first after compilation is therefore an LLVM decision the hook
+/// author cannot see from the source alone.
+///
+/// `guarded_while!` sidesteps the question by guarding both positions: the
+/// condition block (evaluated before every iteration, including the first)
+/// and the top of the body (run only when the condition holds). Whichever
+/// of the two blocks LLVM leaves at the top of the compiled `loop` after
+/// rotation, that block already starts with a guard call. `continue` inside
+/// `$body` jumps back to the condition block, which begins with a guard, so
+/// it stays covered too.
+///
+/// The cost is one extra `_g` guard prologue per iteration — the full
+/// `i32.const; i32.const; call; drop` sequence, not just the call — since
+/// the checker's worst-case model takes a loop's `maxiter` from the guard
+/// at its head, and both guards here carry the same `maxiter`. Both are
+/// `_g` calls to an imported function, so LLVM can neither drop, merge, nor
+/// reorder them across each other. Composes with [`no_unroll`]:
+/// `guarded_while!(n, no_unroll(i) < n, { .. })`.
+///
+/// # Guard ids
+///
+/// Both guards live on the macro invocation's own source line, so they use
+/// [`guard_m!`] to disambiguate: `$n = 1` for the condition-block guard,
+/// `$n = 2` for the body-top guard. A `guard!`/`guard_m!` on that same
+/// source line using `$n = 1` or `$n = 2` would collide with one of these.
+///
+/// # Examples
+///
+/// ```
+/// use rshooks::guarded_while;
+///
+/// let mut i = 0;
+/// guarded_while!(10, i < 3, {
+///     i += 1;
+/// });
+/// assert_eq!(i, 3);
+/// ```
+#[macro_export]
+macro_rules! guarded_while {
+    ($maxiter:expr, $cond:expr, $body:block) => {
+        while {
+            $crate::guard_m!($maxiter, 1);
+            $cond
+        } {
+            $crate::guard_m!($maxiter, 2);
+            $body
+        }
+    };
 }
 
 /// Defeats full loop unrolling for a small, fixed-trip-count loop whose body
