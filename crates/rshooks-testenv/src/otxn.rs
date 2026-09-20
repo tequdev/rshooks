@@ -10,9 +10,13 @@ use rshooks::txn::codec::sti::{STI_ACCOUNT, STI_VL};
 
 /// The originating transaction a [`crate::TestEnv`] seeds its invocations
 /// with — backs `otxn_field`/`otxn_type`/`otxn_id`/`otxn_param`. Every field
-/// is stored as its **raw value bytes** (what a real `otxn_field` call
-/// would write into a caller buffer — no STObject header, no VL length
-/// prefix), keyed by the field's `sfXxx` code.
+/// is stored as its **value-only** bytes — no STObject header, no VL length
+/// prefix — keyed by the field's `sfXxx` code; this is a storage
+/// convention, not what `otxn_field`/`slot()` hand back to the hook. Those
+/// write-outs serialize the value with a bare `add(s)` call and drop the
+/// leading VL byte only for `STI_ACCOUNT`(8) (`applyHook.cpp:1873-1878` for
+/// `otxn_field`, `:1912-1920` for `slot`); an `STI_VL`(7)/Blob field's VL
+/// prefix is added back at that point by [`value_wire_bytes`].
 #[derive(Debug, Clone)]
 pub struct Otxn {
     pub(crate) tx_type: TxType,
@@ -201,6 +205,12 @@ pub(crate) fn value_wire_bytes(field_code: u32, value: &[u8]) -> Vec<u8> {
 /// length-prefix's own byte count for both `STI_VL`(7) and `STI_ACCOUNT`(8)
 /// (both wire types are `addVL`-serialized), plain `value_len` for every
 /// other type.
+///
+/// Known parity gap this harness does not model: rippled's `STAccount`
+/// serializes a default (all-zero) account as an empty VL, so a real node
+/// reports `slot_size` 1 / `slot()` 0 bytes for one — this always sizes a
+/// stored 20-byte all-zero account as a normal 20-byte account (`slot_size`
+/// 21, `slot()` 20).
 pub(crate) fn wire_add_len(field_code: u32, value_len: usize) -> usize {
     match field_code >> 16 {
         ty if ty == STI_VL || ty == STI_ACCOUNT => {
