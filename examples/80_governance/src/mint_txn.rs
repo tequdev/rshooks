@@ -186,10 +186,14 @@ impl MintTxn {
 
         self.push_u32_field(HDR_FLAGS, tfCANONICAL);
         self.push_u32_field(HDR_SEQUENCE, 0);
-        self.fls_offset = self.push_u32_field(HDR_FIRST_LEDGER_SEQUENCE, 0);
-        self.lls_offset = self.push_u32_field(HDR_LAST_LEDGER_SEQUENCE, 0);
+        self.fls_offset = self
+            .push_u32_field(HDR_FIRST_LEDGER_SEQUENCE, 0)
+            .wrapping_add(HDR_FIRST_LEDGER_SEQUENCE.1);
+        self.lls_offset = self
+            .push_u32_field(HDR_LAST_LEDGER_SEQUENCE, 0)
+            .wrapping_add(HDR_LAST_LEDGER_SEQUENCE.1);
 
-        self.fee_offset = self.push_field_header(HDR_FEE);
+        self.fee_offset = self.push_field_header(HDR_FEE).wrapping_add(HDR_FEE.1);
         self.push(&[0u8; 8]); // Fee payload, patched in `finish`
 
         self.push_field_header(HDR_SIGNING_PUB_KEY);
