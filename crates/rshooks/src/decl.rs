@@ -29,14 +29,15 @@
 //! [`State<V, S>`]'s accessors are thin forwards onto [`mod@crate::state`]'s
 //! internal `_encoded`-suffixed funnels (`state_get_encoded`,
 //! `state_set_encoded`, `state_update_encoded`, `state_delete_encoded`,
-//! `state_foreign_get_encoded`, `state_foreign_set_encoded`) — this module
-//! adds no new decode logic of its own. [`StateSpec::with_key`] produces an
-//! already-encoded key (via [`StateSpec::encode_key`] by default, or a
-//! `'static`-promoted literal for a macro-generated constant key — see
-//! [`StateSpec::with_key`]'s doc comment) and hands it straight to the
-//! matching funnel, so no [`StateKeyEncode::encode`] call happens on this
-//! path — [`StateEntry`] (bound via [`State::at`]) calls the same funnels
-//! directly with its own already-encoded key.
+//! `state_foreign_get_encoded`, `state_foreign_set_encoded`), which take raw
+//! key bytes (`&[u8]`) — this module adds no new decode logic of its own.
+//! [`StateSpec::with_key_bytes`] computes those bytes (via
+//! [`StateSpec::with_key`]'s [`AsRef<[u8]>`](AsRef) view by default, or a
+//! right-sized or `'static`-promoted image for a macro-generated constant
+//! key — see [`StateSpec::with_key_bytes`]'s doc comment) and hands them
+//! straight to the matching funnel. [`StateEntry`] (bound via
+//! [`State::at`]) calls the same funnels with its own already-encoded
+//! key's [`AsRef<[u8]>`](AsRef) view.
 //!
 //! # Params: absence vs. decode failure
 //!
@@ -223,6 +224,25 @@ pub trait StateSpec {
     fn with_key<R>(args: &Self::KeyArgs, f: impl FnOnce(&EncodedStateKey) -> R) -> R {
         f(&Self::encode_key(args))
     }
+
+    /// Computes this spec's key bytes and hands them to `f`, returning
+    /// whatever `f` returns — the [`crate::state::StateKeyEncode::with_key_bytes`]
+    /// counterpart for a `StateSpec` marker: [`State`]'s constant-key
+    /// accessors route through this method, not [`Self::with_key`], so a
+    /// macro-generated marker can hand `f` a right-sized or fully
+    /// `'static`-promoted key image with no [`EncodedStateKey`] built at
+    /// all — a byte-string-literal `#[state(key = b"...")]` field hands `f`
+    /// its own bytes directly inside a `const` block; any other constant
+    /// key expression const-promotes to the same `'static` reference and
+    /// hands it to that concrete type's own
+    /// [`crate::state::StateKeyEncode::with_key_bytes`] override. The
+    /// default forwards through [`Self::with_key`], so every existing
+    /// `StateSpec` impl (including one a hook crate wrote itself) keeps
+    /// working unchanged with no override required.
+    #[inline(always)]
+    fn with_key_bytes<R>(args: &Self::KeyArgs, f: impl FnOnce(&[u8]) -> R) -> R {
+        Self::with_key(args, |key| f(key.as_ref()))
+    }
 }
 
 /// Declares how a [`HookParam`]/[`OtxnParam`] marker `S` encodes its
@@ -331,14 +351,16 @@ where
     /// vs. decode failure" contract this forwards to unchanged.
     #[inline(always)]
     pub fn get(&self) -> Result<Option<V>> {
-        S::with_key(&(), crate::state::state_get_encoded::<V>)
+        S::with_key_bytes(&(), crate::state::state_get_encoded::<V>)
     }
 
     /// Writes this entry, encoding `value` as `V`. Returns the number of
     /// bytes written.
     #[inline(always)]
     pub fn set(&self, value: &V) -> Result<usize> {
-        S::with_key(&(), |key| crate::state::state_set_encoded::<V>(key, value))
+        S::with_key_bytes(&(), |kbytes| {
+            crate::state::state_set_encoded::<V>(kbytes, value)
+        })
     }
 
     /// Read-modify-writes this entry: reads the current value (or `None` if
@@ -346,8 +368,8 @@ where
     /// returns the number of bytes written.
     #[inline(always)]
     pub fn update(&self, f: impl FnOnce(Option<V>) -> V) -> Result<usize> {
-        S::with_key(&(), |key| {
-            crate::state::state_update_encoded::<V, _>(key, f)
+        S::with_key_bytes(&(), |kbytes| {
+            crate::state::state_update_encoded::<V, _>(kbytes, f)
         })
     }
 
@@ -355,7 +377,7 @@ where
     /// for why deletion has no distinct "not found" failure.
     #[inline(always)]
     pub fn delete(&self) -> Result<()> {
-        S::with_key(&(), crate::state::state_delete_encoded)
+        S::with_key_bytes(&(), crate::state::state_delete_encoded)
     }
 
     /// Reads this entry belonging to another namespace/account, decoded as
@@ -363,8 +385,8 @@ where
     /// `Option` convention. `Ok(None)` means no entry exists.
     #[inline(always)]
     pub fn get_foreign(&self, ns: Option<&[u8]>, acct: Option<&[u8]>) -> Result<Option<V>> {
-        S::with_key(&(), |key| {
-            crate::state::state_foreign_get_encoded::<V>(key, ns, acct)
+        S::with_key_bytes(&(), |kbytes| {
+            crate::state::state_foreign_get_encoded::<V>(kbytes, ns, acct)
         })
     }
 
@@ -374,8 +396,8 @@ where
     /// the number of bytes written.
     #[inline(always)]
     pub fn set_foreign(&self, value: &V, ns: Option<&[u8]>, acct: Option<&[u8]>) -> Result<usize> {
-        S::with_key(&(), |key| {
-            crate::state::state_foreign_set_encoded::<V>(key, value, ns, acct)
+        S::with_key_bytes(&(), |kbytes| {
+            crate::state::state_foreign_set_encoded::<V>(kbytes, value, ns, acct)
         })
     }
 }
@@ -426,14 +448,14 @@ impl<V: ToBytes + FromBytes> StateEntry<V> {
     /// Reads this entry, decoded as `V`. `Ok(None)` means no entry exists.
     #[inline(always)]
     pub fn get(&self) -> Result<Option<V>> {
-        crate::state::state_get_encoded::<V>(&self.key)
+        crate::state::state_get_encoded::<V>(self.key.as_ref())
     }
 
     /// Writes this entry, encoding `value` as `V`. Returns the number of
     /// bytes written.
     #[inline(always)]
     pub fn set(&self, value: &V) -> Result<usize> {
-        crate::state::state_set_encoded::<V>(&self.key, value)
+        crate::state::state_set_encoded::<V>(self.key.as_ref(), value)
     }
 
     /// Read-modify-writes this entry: reads the current value (or `None` if
@@ -441,13 +463,13 @@ impl<V: ToBytes + FromBytes> StateEntry<V> {
     /// returns the number of bytes written.
     #[inline(always)]
     pub fn update(&self, f: impl FnOnce(Option<V>) -> V) -> Result<usize> {
-        crate::state::state_update_encoded::<V, _>(&self.key, f)
+        crate::state::state_update_encoded::<V, _>(self.key.as_ref(), f)
     }
 
     /// Deletes this entry.
     #[inline(always)]
     pub fn delete(&self) -> Result<()> {
-        crate::state::state_delete_encoded(&self.key)
+        crate::state::state_delete_encoded(self.key.as_ref())
     }
 
     /// Reads this entry belonging to another namespace/account, decoded as
@@ -455,7 +477,7 @@ impl<V: ToBytes + FromBytes> StateEntry<V> {
     /// `Option` convention. `Ok(None)` means no entry exists.
     #[inline(always)]
     pub fn get_foreign(&self, ns: Option<&[u8]>, acct: Option<&[u8]>) -> Result<Option<V>> {
-        crate::state::state_foreign_get_encoded::<V>(&self.key, ns, acct)
+        crate::state::state_foreign_get_encoded::<V>(self.key.as_ref(), ns, acct)
     }
 
     /// Writes this entry belonging to another namespace/account, encoding
@@ -464,7 +486,7 @@ impl<V: ToBytes + FromBytes> StateEntry<V> {
     /// the number of bytes written.
     #[inline(always)]
     pub fn set_foreign(&self, value: &V, ns: Option<&[u8]>, acct: Option<&[u8]>) -> Result<usize> {
-        crate::state::state_foreign_set_encoded::<V>(&self.key, value, ns, acct)
+        crate::state::state_foreign_set_encoded::<V>(self.key.as_ref(), value, ns, acct)
     }
 }
 
@@ -878,6 +900,41 @@ mod tests {
         assert_ne!(
             MockKeyedState::encode_key(&1).as_ref(),
             MockKeyedState::encode_key(&2).as_ref()
+        );
+    }
+
+    /// A spec overriding [`StateSpec::with_key_bytes`] directly, bypassing
+    /// [`StateSpec::with_key`]/[`StateSpec::encode_key`] entirely — mirrors
+    /// what the `#[hooks]` macro emits for a promoted constant key.
+    /// [`Self::encode_key`] deliberately returns *different* bytes (`"EK"`)
+    /// than the override (`"OV"`), so a test asserting on `"OV"` proves
+    /// [`State`]'s accessors actually call the override, not silently fall
+    /// through to the `with_key`-based default.
+    struct MockOverriddenState;
+
+    impl StateSpec for MockOverriddenState {
+        type Value = u32;
+        type KeyArgs = ();
+
+        #[inline(always)]
+        fn encode_key(_args: &()) -> EncodedStateKey {
+            b"EK".encode()
+        }
+
+        #[inline(always)]
+        fn with_key_bytes<R>(_args: &(), f: impl FnOnce(&[u8]) -> R) -> R {
+            f(b"OV")
+        }
+    }
+
+    #[test]
+    fn with_key_bytes_override_is_used_instead_of_the_with_key_default() {
+        MockOverriddenState::with_key_bytes(&(), |bytes| assert_eq!(bytes, b"OV"));
+        assert_ne!(
+            MockOverriddenState::encode_key(&()).as_ref(),
+            b"OV",
+            "the mock's encode_key/with_key path must disagree with the \
+             override, or this test cannot tell them apart"
         );
     }
 }

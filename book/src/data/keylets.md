@@ -35,7 +35,7 @@ right away:
 ```rust,ignore
 let mut keylet = Keylet::default();
 keylet_account_into(&mut keylet, &owner)?;
-state_set(keylet.as_ref(), &key.encode())?;
+key.with_key_bytes(|k| state_set(keylet.as_ref(), k))?;
 ```
 
 The by-value form's own scratch buffer has its address taken by the host
@@ -120,7 +120,10 @@ let Ok(dest) = otxn_field_typed(sfDestination) else {
 let Ok(keylet) = keylet_account(&owner) else {
     rollback!(b"keylets: a keylet_xxx call failed", ...)
 };
-if state_set(keylet.as_ref(), &KeyletKey::Account.encode()).is_err() {
+if KeyletKey::Account
+    .with_key_bytes(|k| state_set(keylet.as_ref(), k))
+    .is_err()
+{
     rollback!(b"keylets: state_set failed", ...);
 }
 ```
