@@ -926,6 +926,14 @@ macro_rules! state_keys {
             next = 0u8,
             enum_body = [],
             arms = [],
+            // `__f` (not the literal `f`) is a single `:ident` fragment
+            // threaded through every recursive step so every generated
+            // `with_key_bytes` call site shares one hygienic binding with
+            // the generated fn's own parameter — macro hygiene otherwise
+            // treats a same-spelled `f` written in a separate step's
+            // expansion as a distinct identifier.
+            bytes_fn = __f,
+            bytes_arms = [],
             discs = [],
             fits_checks = []
         }
@@ -964,6 +972,8 @@ macro_rules! __state_keys_step {
         next = $next:expr,
         enum_body = [$($enum_body:tt)*],
         arms = [$($arms:tt)*],
+        bytes_fn = $bytes_fn:ident,
+        bytes_arms = [$($bytes_arms:tt)*],
         discs = [$($discs:tt)*],
         fits_checks = [$($fits_checks:tt)*]
     ) => {
@@ -977,6 +987,17 @@ macro_rules! __state_keys_step {
             fn encode(&self) -> $crate::state::EncodedStateKey {
                 match self {
                     $($arms)*
+                }
+            }
+
+            // Hands `f` this variant's real-length bytes directly, skipping
+            // the 32-byte `EncodedStateKey` buffer `Self::encode` builds —
+            // see the unit/tuple variant arms below for what those bytes
+            // are per shape.
+            #[inline(always)]
+            fn with_key_bytes<R>(&self, $bytes_fn: impl FnOnce(&[u8]) -> R) -> R {
+                match self {
+                    $($bytes_arms)*
                 }
             }
         }
@@ -1012,6 +1033,8 @@ macro_rules! __state_keys_step {
         next = $next:expr,
         enum_body = [$($enum_body:tt)*],
         arms = [$($arms:tt)*],
+        bytes_fn = $bytes_fn:ident,
+        bytes_arms = [$($bytes_arms:tt)*],
         discs = [$($discs:tt)*],
         fits_checks = [$($fits_checks:tt)*]
     ) => {
@@ -1038,6 +1061,11 @@ macro_rules! __state_keys_step {
                     $crate::state::EncodedStateKey::new(__out, 1usize)
                 }
             ],
+            bytes_fn = $bytes_fn,
+            bytes_arms = [
+                $($bytes_arms)*
+                $Name::$variant => $bytes_fn(const { &[$next] }),
+            ],
             discs = [ $($discs)* $next, ],
             fits_checks = [ $($fits_checks)* ]
         }
@@ -1054,6 +1082,8 @@ macro_rules! __state_keys_step {
         next = $next:expr,
         enum_body = [$($enum_body:tt)*],
         arms = [$($arms:tt)*],
+        bytes_fn = $bytes_fn:ident,
+        bytes_arms = [$($bytes_arms:tt)*],
         discs = [$($discs:tt)*],
         fits_checks = [$($fits_checks:tt)*]
     ) => {
@@ -1087,6 +1117,25 @@ macro_rules! __state_keys_step {
                             <$payload as $crate::convert::ToBytes>::MAX_LEN,
                         ),
                     )
+                }
+            ],
+            bytes_fn = $bytes_fn,
+            bytes_arms = [
+                $($bytes_arms)*
+                $Name::$variant(__payload) => {
+                    const __LEN: usize = 1usize.wrapping_add(
+                        <$payload as $crate::convert::ToBytes>::MAX_LEN,
+                    );
+                    let mut __out = [0u8; __LEN];
+                    if let Some(__byte) = __out.get_mut(0) {
+                        *__byte = $next;
+                    }
+                    if let Some(__rest) = __out.get_mut(1..) {
+                        let _ = <$payload as $crate::convert::ToBytes>::write(
+                            __payload, __rest,
+                        );
+                    }
+                    $bytes_fn(&__out)
                 }
             ],
             discs = [ $($discs)* $next, ],
@@ -1235,6 +1284,10 @@ mod tests {
         assert_matches(&[0xABu8; STATE_KEY_LEN]);
         assert_matches(&StateKey::from([0xCDu8; STATE_KEY_LEN]));
         assert_matches(&b"RR".encode());
+        // `state_keys!`-generated variants: const bytes for a unit variant,
+        // a `MAX_LEN`-sized buffer for a payload variant.
+        assert_matches(&TestKey::Counter);
+        assert_matches(&TestKey::Balance(0x0102_0304));
     }
 
     #[test]
