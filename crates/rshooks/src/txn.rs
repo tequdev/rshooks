@@ -70,7 +70,7 @@ pub mod codec {
     ///
     /// - `type < 16 && field < 16`: **1 byte**, `(type << 4) | field`.
     /// - `type < 16 && field >= 16`: **2 bytes**, `[type << 4, field]`.
-    /// - `type >= 16 && field < 16`: **2 bytes**, `[field << 4, type]`.
+    /// - `type >= 16 && field < 16`: **2 bytes**, `[field, type]`.
     /// - `type >= 16 && field >= 16`: **3 bytes**, `[0, type, field]`.
     ///
     /// See `KNOWN_HEADERS` in the unit tests below for a table of real
@@ -95,7 +95,7 @@ pub mod codec {
             ([byte0, byte1, 0], 2)
         } else if field < 16 {
             assert!(ty < 256, "field_header: type code must fit in a byte");
-            let byte0 = field.wrapping_shl(4) as u8;
+            let byte0 = field as u8;
             let byte1 = ty as u8;
             ([byte0, byte1, 0], 2)
         } else {
@@ -393,6 +393,235 @@ pub mod codec {
         while i < count {
             write_const_bytes(bytes, offset.wrapping_add(i.wrapping_mul(elem_len)), src);
             i = i.wrapping_add(1);
+        }
+    }
+
+    /// Largest `N` [`copy_fixed`]/[`fill_fixed`] accept. A single declared
+    /// field this large already eats a meaningful slice of the hook
+    /// binary's own 65,535-byte SetHook limit, which makes a larger one
+    /// impractical; a field that still needs more room should be declared
+    /// `vl(sfX, N, N)` instead, whose setter writes through a guarded loop
+    /// with no fixed-`N` cap.
+    pub const MAX_CHUNKED_LEN: usize = 4096;
+
+    /// Emits one literal-indexed 64-byte group of [`copy_fixed`]'s or
+    /// [`fill_fixed`]'s body per literal `$k`, for every group `N` fully
+    /// covers (`$n >= ($k + 1) * 64`): 56 plain bytes (`copy_from_slice`/
+    /// `fill`, inlining as at most 7 `i64` load/store pairs -- well under
+    /// LLVM's own 8-pair/64-byte threshold) followed by one 8-byte
+    /// separator word that is *not* a plain copy -- see `copy_fixed`'s
+    /// docs for why that separator is what matters. `$n` and `$k` are
+    /// always concrete, monomorphized/literal `usize` values, so the
+    /// group-coverage test above folds to a compile-time constant and
+    /// only the groups a given `N` actually needs survive optimization --
+    /// an unused arm costs nothing.
+    macro_rules! chunked_groups {
+        (copy, $n:ident, $dst:ident, $src:ident, $z:ident, [$($k:literal),+ $(,)?]) => {
+            $(
+                if $n >= ($k + 1) * 64 {
+                    let base = $k * 64;
+                    $dst[base..(base + 56)].copy_from_slice(&$src[base..(base + 56)]);
+                    let w = u64::from_ne_bytes([
+                        $src[base + 56], $src[base + 57], $src[base + 58], $src[base + 59],
+                        $src[base + 60], $src[base + 61], $src[base + 62], $src[base + 63],
+                    ]) ^ $z;
+                    $dst[(base + 56)..(base + 64)].copy_from_slice(&w.to_ne_bytes());
+                }
+            )+
+        };
+        (fill, $n:ident, $dst:ident, $byte:ident, $w:ident, [$($k:literal),+ $(,)?]) => {
+            $(
+                if $n >= ($k + 1) * 64 {
+                    let base = $k * 64;
+                    $dst[base..(base + 56)].fill($byte);
+                    $dst[(base + 56)..(base + 64)].copy_from_slice(&$w.to_ne_bytes());
+                }
+            )+
+        };
+    }
+
+    /// Writes `$dst[$idx]` for each of [`group_tail`]'s up to 7 trailing
+    /// indices past `$plain_end`, using `$val!($idx)` for the stored
+    /// byte -- shared between `copy_fixed`'s XORed remainder and
+    /// `fill_fixed`'s plain-byte one, so this 7-arm body exists once
+    /// instead of once per mode.
+    macro_rules! group_tail_bytes {
+        ($n:ident, $dst:ident, $plain_end:ident, $val:ident) => {
+            let o1 = $plain_end.wrapping_add(1);
+            let o2 = $plain_end.wrapping_add(2);
+            let o3 = $plain_end.wrapping_add(3);
+            let o4 = $plain_end.wrapping_add(4);
+            let o5 = $plain_end.wrapping_add(5);
+            let o6 = $plain_end.wrapping_add(6);
+            if $n > $plain_end {
+                $dst[$plain_end] = $val!($plain_end);
+            }
+            if $n > o1 {
+                $dst[o1] = $val!(o1);
+            }
+            if $n > o2 {
+                $dst[o2] = $val!(o2);
+            }
+            if $n > o3 {
+                $dst[o3] = $val!(o3);
+            }
+            if $n > o4 {
+                $dst[o4] = $val!(o4);
+            }
+            if $n > o5 {
+                $dst[o5] = $val!(o5);
+            }
+            if $n > o6 {
+                $dst[o6] = $val!(o6);
+            }
+        };
+    }
+
+    /// Writes the trailing `N - (N / 64) * 64` bytes (`0..=63`)
+    /// [`chunked_groups`]'s full-group arms leave uncovered: up to 56
+    /// plain bytes, then (if any remain) up to 7 remainder bytes via
+    /// [`group_tail_bytes`] -- XORed with `$zb` for `copy_fixed`, plain
+    /// `$byte` for `fill_fixed`. Needs no barrier of its own: 56 + 7 = 63
+    /// bytes stays under the 64-byte fusion threshold even unseparated.
+    macro_rules! group_tail {
+        (copy, $n:ident, $dst:ident, $src:ident, $zb:ident) => {
+            let full_base = ($n / 64).wrapping_mul(64);
+            let rem = $n.wrapping_sub(full_base);
+            let plain_end = if rem < 56 {
+                $n
+            } else {
+                full_base.wrapping_add(56)
+            };
+            if $n > full_base {
+                $dst[full_base..plain_end].copy_from_slice(&$src[full_base..plain_end]);
+            }
+            macro_rules! __group_tail_val {
+                ($i:expr) => {
+                    $src[$i] ^ $zb
+                };
+            }
+            group_tail_bytes!($n, $dst, plain_end, __group_tail_val);
+        };
+        (fill, $n:ident, $dst:ident, $byte:ident) => {
+            let full_base = ($n / 64).wrapping_mul(64);
+            let rem = $n.wrapping_sub(full_base);
+            let plain_end = if rem < 56 {
+                $n
+            } else {
+                full_base.wrapping_add(56)
+            };
+            if $n > full_base {
+                $dst[full_base..plain_end].fill($byte);
+            }
+            macro_rules! __group_tail_val {
+                ($i:expr) => {
+                    $byte
+                };
+            }
+            group_tail_bytes!($n, $dst, plain_end, __group_tail_val);
+        };
+    }
+
+    /// Runtime, chunked counterpart to [`write_const_bytes`] for a
+    /// compile-time-constant-length copy whose length `N` can exceed 64
+    /// bytes: `txn_template!`'s `fixed_vl`/`optional fixed_vl` setters and
+    /// its `optional object`/`optional array` element restore copy a
+    /// declared, potentially large `N`-byte constant into a runtime
+    /// buffer, which `write_const_bytes` cannot do (it is compile-time
+    /// only).
+    ///
+    /// A contiguous run of pure load-then-store-unchanged bytes longer
+    /// than 64 -- not a single Rust `copy_from_slice` call, but any such
+    /// run LLVM's wasm backend can recognize, including several adjacent
+    /// `copy_from_slice` calls -- lowers to a `compiler_builtins` `memcpy`
+    /// libcall whose internal loop the Guard-type guard checker rejects,
+    /// even though the Rust source has no loop at all. One opaque-XOR
+    /// word in every 64 bytes keeps every such run at or under 56 bytes:
+    /// each 64-byte group is 56 plain bytes followed by one 8-byte word
+    /// whose stored value is `load ^ z` for one opaque, call-wide,
+    /// runtime-zero `z` (a single [`core::hint::black_box`] call per
+    /// `copy_fixed` call) -- that word is never a pure copy, so no run
+    /// through it can be recognized. `black_box` is a best-effort
+    /// barrier, not a guaranteed one, with the same failure mode as
+    /// [`crate::no_unroll`]'s (see its "Failure mode" section) --
+    /// re-measure the worst case after any toolchain upgrade.
+    ///
+    /// `dst` must be at least `N` bytes; a shorter `dst` traps via
+    /// ordinary slice indexing.
+    #[allow(clippy::indexing_slicing)] // in-bounds by construction: every offset is <= N <= dst.len() at every call site
+    #[inline(always)]
+    pub fn copy_fixed<const N: usize>(dst: &mut [u8], src: &[u8; N]) {
+        const {
+            assert!(
+                N <= MAX_CHUNKED_LEN,
+                "copy_fixed: N exceeds MAX_CHUNKED_LEN; declare the field as vl(sfX, N, N) to use the guarded copy loop instead"
+            )
+        };
+        if N <= 64 {
+            dst[..N].copy_from_slice(src);
+        } else {
+            let z: u64 = ::core::hint::black_box(0u64);
+            chunked_groups!(
+                copy,
+                N,
+                dst,
+                src,
+                z,
+                [
+                    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+                    22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
+                    42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61,
+                    62, 63,
+                ]
+            );
+            let zb: u8 = (z & 0xFF) as u8;
+            group_tail!(copy, N, dst, src, zb);
+        }
+    }
+
+    /// Runtime, chunked counterpart to [`write_nops`] for a
+    /// compile-time-constant-length fill whose length `N` can exceed 64
+    /// bytes: `txn_template!`'s `clear_<field>`/`clear_<container>`
+    /// setters NOP-fill a declared, potentially large `N`-byte reserved
+    /// slot back to absent. Same 56-plain-plus-one-opaque-word-per-64-
+    /// bytes chunking as [`copy_fixed`] -- see its docs -- with one
+    /// difference: a fill's value is the same known byte (`NOP`, `0x99`)
+    /// everywhere, so the separator word is `black_box` applied directly
+    /// to the fill word itself (computed once per call, not once per
+    /// group), not an XOR. An opaque, repeated-byte `u64` is not a
+    /// byte-splat `memset` candidate for the same underlying reason a
+    /// `black_box`ed load isn't a `memcpy` candidate: the optimizer can
+    /// no longer prove the store is "filling with a known constant byte".
+    ///
+    /// `dst` must be at least `N` bytes; a shorter `dst` traps via
+    /// ordinary slice indexing.
+    #[allow(clippy::indexing_slicing)] // in-bounds by construction: every offset is <= N <= dst.len() at every call site
+    #[inline(always)]
+    pub fn fill_fixed<const N: usize>(dst: &mut [u8], byte: u8) {
+        const {
+            assert!(
+                N <= MAX_CHUNKED_LEN,
+                "fill_fixed: N exceeds MAX_CHUNKED_LEN; declare the field as vl(sfX, N, N) to use the guarded copy loop instead"
+            )
+        };
+        if N <= 64 {
+            dst[..N].fill(byte);
+        } else {
+            let w: u64 = ::core::hint::black_box(u64::from_ne_bytes([byte; 8]));
+            chunked_groups!(
+                fill,
+                N,
+                dst,
+                byte,
+                w,
+                [
+                    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+                    22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
+                    42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61,
+                    62, 63,
+                ]
+            );
+            group_tail!(fill, N, dst, byte);
         }
     }
 
@@ -1110,7 +1339,8 @@ pub mod codec {
             ((7 << 16) + 3, &[0x73]),           // SigningPubKey (7,3)
             ((8 << 16) + 1, &[0x81]),           // Account (8,1)
             ((8 << 16) + 3, &[0x83]),           // Destination (8,3)
-            ((16 << 16) + 1, &[0x10, 0x10]),    // sfCloseResolution (16,1): type>=16, field<16
+            ((16 << 16) + 1, &[0x01, 0x10]),    // sfCloseResolution (16,1): type>=16, field<16
+            ((16 << 16) + 3, &[0x03, 0x10]),    // sfTransactionResult (16,3): type>=16, field<16
             ((16 << 16) + 16, &[0x00, 0x10, 0x10]), // sfTickSize (16,16): type>=16, field>=16
         ];
 
@@ -1362,6 +1592,38 @@ pub mod codec {
             assert_eq!(field_offset_or(SAMPLE_TABLE, 100, 0), 4);
             assert_eq!(field_offset_or(SAMPLE_TABLE, 999, 42), 42);
         }
+
+        #[test]
+        fn copy_fixed_handles_the_full_max_chunked_len() {
+            let src = [0xABu8; MAX_CHUNKED_LEN];
+            let mut dst = [0u8; MAX_CHUNKED_LEN];
+            copy_fixed(&mut dst, &src);
+            assert_eq!(dst, src);
+        }
+
+        #[test]
+        fn copy_fixed_handles_one_byte_under_max_chunked_len() {
+            const N: usize = MAX_CHUNKED_LEN - 1;
+            let src = [0xCDu8; N];
+            let mut dst = [0u8; N];
+            copy_fixed(&mut dst, &src);
+            assert_eq!(dst, src);
+        }
+
+        #[test]
+        fn fill_fixed_handles_the_full_max_chunked_len() {
+            let mut dst = [0u8; MAX_CHUNKED_LEN];
+            fill_fixed::<MAX_CHUNKED_LEN>(&mut dst, 0x42);
+            assert_eq!(dst, [0x42u8; MAX_CHUNKED_LEN]);
+        }
+
+        #[test]
+        fn fill_fixed_handles_one_byte_under_max_chunked_len() {
+            const N: usize = MAX_CHUNKED_LEN - 1;
+            let mut dst = [0u8; N];
+            fill_fixed::<N>(&mut dst, 0x42);
+            assert_eq!(dst, [0x42u8; N]);
+        }
     }
 }
 
@@ -1396,7 +1658,10 @@ pub trait TemplateBytes {
 /// through a stale handle while believing it still reflects an unprepared
 /// buffer. Setters remain reachable through
 /// [`core::ops::Deref`]/[`core::ops::DerefMut`], so re-adjusting a field and
-/// calling `prepare_for_emit` again is fine.
+/// calling `prepare_for_emit` again is fine; a generated `clear_optionals()`
+/// is also reachable through the same `Deref`/`DerefMut` path, for making
+/// every optional element absent again between emissions of a reused
+/// `HookStatic<Self>`.
 ///
 /// Obtained only from a generated `prepare_for_emit()`; [`Self::new`] is
 /// `#[doc(hidden)]` and crate-external code has no other way to produce a
@@ -1531,7 +1796,7 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// | `optional <scalar_kind>(sfX $(, N)?)` | (of `<scalar_kind>`) | that kind's slot | all [`NOP`](crate::txn::codec::NOP) (absent) | `set_x(<same args as the kind>)` (argument-less for `optional empty_vl`/`optional native_issue`), `clear_x()` |
 /// | `any_amount(sfX)` | AMOUNT | 1 + 48 | issued zero (as `amount`) | `set_x_native(u64) -> Result<()>`, `set_x_iou(XFL, &CurrencyCode, &AccountId)` |
 /// | `optional any_amount(sfX)` | AMOUNT | 1 + 48 | all NOP (absent) | the two above, plus `clear_x()` |
-/// | `vl(sfX, MAX)` / `vl(sfX, MIN, MAX)` | VL | VL-prefix(MAX) + MAX | prefix(MIN) + MIN zeros + NOP tail | `set_x(&[u8]) -> Result<()>` |
+/// | `vl(sfX, MAX)` / `vl(sfX, MIN, MAX)` | VL | VL-prefix(MAX) + MAX | prefix(MIN) + MIN zeros + NOP tail | `set_x(&[u8]) -> Result<()>`, `reset_x()` |
 /// | `optional vl(sfX, MIN, MAX)` | VL | VL-prefix(MAX) + MAX | all NOP (absent) | `set_x(&[u8]) -> Result<()>`, `clear_x()` |
 /// | `optional object(sfX) { .. }` | OBJECT | inner + 1 (`0xE1`) | all NOP (absent) | inner setters, prefixed (any one makes it present); `enable_x()`, `clear_x()`, `is_x_present() -> bool` |
 /// | `optional array(sfX) [ .. ]` | ARRAY | inner + 1 (`0xF1`) | all NOP (absent) | same |
@@ -1684,6 +1949,29 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// layouts, the homogeneous-array-of-optional-elements shape, and every
 /// compile-time check: `docs/NOP_PADDING_DESIGN.md`.
 ///
+/// **Presence is sticky.** An `optional` element made present by any of its
+/// setters stays present across every later emission of the same template
+/// instance — `prepare_for_emit()`/`emit()` never clear it. `clear_x()` on
+/// just the fields a caller knows it touched is the cheap way back to
+/// absent — worst-case instruction count only pays for what it clears. The
+/// generated `clear_optionals()` calls every `clear_*` in declaration
+/// order in one go (the same NOP fills, summed) for a caller that cannot
+/// track which fields it set, restoring every optional element to absent
+/// (scalars and `vl` payloads outside an `optional` keep their values) —
+/// useful for a `HookStatic<Self>` reused across emissions. `clear_optionals`
+/// is a reserved name at the top level: a field literally named `optionals`
+/// collides with it (see "Setter names" above).
+///
+/// A required `vl(sfX, MIN, MAX)` field is the same story: it keeps
+/// whatever payload its setter last wrote across every later emission —
+/// `prepare_for_emit()`/`emit()` never touch it either. Its generated
+/// `reset_x()` restores the slot to `new()`'s baked default (the declared
+/// `MIN`-byte zeroed payload, NOP-padded out to `MAX`) in one call, loop-free
+/// (`codec::fill_fixed`) so — unlike the setter, whose payload/NOP-tail
+/// write is one guard-budgeted loop callable at most once per hook
+/// execution for that field — calling `reset_x()` costs no guard budget
+/// and may be called any number of times.
+///
 /// ## Required fields, and `prepare_for_emit()`
 ///
 /// An emitted transaction is invalid at the protocol level without these
@@ -1741,6 +2029,11 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// field gets the `_`-joined path form instead; a homogeneous array field
 /// gets a runtime-indexed accessor with no `set_` prefix, since it returns
 /// a view rather than writing a value directly.
+///
+/// `clear_optionals` is reserved at the top level: a field literally named
+/// `optionals` (`optionals: optional sfX`) collides with the generated
+/// `clear_optionals()` and fails to compile with a duplicate-method error
+/// inside the macro expansion — name the field something else.
 ///
 /// # Generated items
 ///
@@ -1944,6 +2237,7 @@ macro_rules! txn_template {
             table = [],
             emit_details = [false, 0usize],
             nops = [],
+            clears = [],
             prefix = [],
             ctx = obj,
             depth = [0usize],
@@ -2048,10 +2342,56 @@ macro_rules! __txn_template_ensure {
                 const LEN: usize = ($slot).len();
                 const END: usize = OFF.wrapping_add(LEN);
                 if $bytes[OFF] == $crate::txn::codec::NOP {
-                    $bytes[OFF..END].copy_from_slice(&($slot));
+                    $crate::txn::codec::copy_fixed(&mut $bytes[OFF..END], &($slot));
                 }
             }
         )*
+    };
+}
+
+/// Emits `$self.<name>();` for each `[<..>]` paste marker in `$list`
+/// (comma-terminated, as `__txn_template_step!`'s `clears` accumulator
+/// stores them), threading `$self` through by substitution rather than
+/// writing a fresh `self` literal in this macro's own template. A plain
+/// `self.<name>();` written directly at the `__txn_template_step!` arm
+/// that first accumulates `<name>` would not resolve against the `self`
+/// parameter of a `fn clear_optionals(&mut self)` declared by a
+/// *different* arm -- `macro_rules!` hygiene treats every recursive
+/// expansion step as its own scope for a freshly-written identifier, so
+/// only a caller-supplied `$self` fragment (which keeps the hygiene of
+/// wherever it was substituted from) can name the right receiver here.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __txn_template_emit_clears {
+    ($self:tt, []) => {};
+    ($self:tt, [$call:tt, $($rest:tt)*]) => {
+        $self.$call();
+        $crate::__txn_template_emit_clears! { $self, [$($rest)*] }
+    };
+}
+
+/// Generates `clear_optionals()` on a `txn_template!` type -- the
+/// top-level template or a homogeneous array element -- only when it has
+/// at least one `optional` field of its own (a non-empty `$($clears)*`);
+/// a type with none gets nothing, rather than an always-empty,
+/// always-dead method. Factored out of [`__txn_template_step!`] since the
+/// `mode = tpl`, `mode = elem`, and `mode = elem_opt` base cases all need
+/// it.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __txn_template_maybe_clear_optionals {
+    ($vis:vis, []) => {};
+    ($vis:vis, [$($clears:tt)+]) => {
+        /// Makes every optional element absent, in declaration order --
+        /// the same NOP fills as calling each `clear_*` by hand.
+        /// Presence is sticky: a reused `HookStatic<Self>`/element handle
+        /// keeps every optional element set for one emission present in
+        /// the next unless it is cleared.
+        #[inline(always)]
+        #[allow(dead_code)] // not every txn_template! test fixture reuses a template/element across emissions; real callers reach this via a `HookStatic<Self>`-backed template
+        $vis fn clear_optionals(&mut self) {
+            $crate::__txn_template_emit_clears! { self, [$($clears)*] }
+        }
     };
 }
 
@@ -2061,12 +2401,25 @@ macro_rules! __txn_template_ensure {
 /// `@step` peels one field off `fields = [...]` and recurses; state threads
 /// through named accumulators (`setters`/`init`/`buf`/`order`/`table`/
 /// `prev`/`emit_region`/`emit_details`/`prefix`/`ctx`/`depth`/`stack`/
-/// `mode`/`nops`), one base case per `mode` tag. Ascribing `= default` to a
-/// zeroed inferred kind, or omitting it on an integer inferred kind, is a
-/// compile error. See `docs/TXN_TEMPLATE_FIELDS_DESIGN.md` §3.2 (muncher
-/// state, container nesting) and `docs/NOP_PADDING_DESIGN.md` §3 (`mode`'s
-/// `optional`-ancestor tracking, the NOP budget) for what each one carries
-/// and why.
+/// `mode`/`nops`/`clears`), one base case per `mode` tag. `clears`
+/// accumulates one `self.clear_<field>();` call per directly-held
+/// `optional`/`vl`/`any_amount` field, in declaration order, backing the
+/// generated `clear_optionals()`; entering an `optional object`/`optional
+/// array` container resets it to empty and entering any other container
+/// (required, or a homogeneous array element's own build) leaves it
+/// threading straight through -- see the `optional object(sfX) { .. }`/
+/// `@end_opt_object`/`@end_object` arms for the reset-and-replace vs.
+/// merge-forward distinction, which mirrors `nops`'s own per-container
+/// reset except at container close, where an `optional` container's own
+/// accumulated clears are discarded in favor of one outer
+/// `self.clear_<name>();` call (calling it already NOPs everything nested
+/// inside), while a required container's are merged onto the parent's
+/// (there is no outer clear call to subsume them). Ascribing `= default`
+/// to a zeroed inferred kind, or omitting it on an integer inferred kind,
+/// is a compile error. See `docs/TXN_TEMPLATE_FIELDS_DESIGN.md` §3.2
+/// (muncher state, container nesting) and `docs/NOP_PADDING_DESIGN.md` §3
+/// (`mode`'s `optional`-ancestor tracking, the NOP budget) for what each
+/// one carries and why.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __txn_template_step {
@@ -2077,6 +2430,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2094,6 +2448,7 @@ macro_rules! __txn_template_step {
             table = [$($table)*],
             emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*],
             ctx = $ctx,
             depth = [$($depth)*],
@@ -2110,6 +2465,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2153,6 +2509,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2169,6 +2526,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2212,6 +2570,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2228,6 +2587,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2271,6 +2631,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2287,6 +2648,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2330,6 +2692,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2346,6 +2709,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2395,6 +2759,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2411,6 +2776,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2454,6 +2820,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2470,6 +2837,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2505,6 +2873,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2521,6 +2890,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2559,6 +2929,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2575,6 +2946,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2613,6 +2985,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2629,6 +3002,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2667,6 +3041,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2683,6 +3058,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2721,6 +3097,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2737,6 +3114,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2789,6 +3167,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2805,6 +3184,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2857,6 +3237,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2873,6 +3254,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2903,6 +3285,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2919,6 +3302,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -2958,6 +3342,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -2974,6 +3359,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -3002,7 +3388,7 @@ macro_rules! __txn_template_step {
                     const OFF: usize = ($($prev)*)
                         .wrapping_add($crate::txn::codec::field_header($sfcode).1)
                         .wrapping_add($crate::txn::codec::vl_length_prefix($n).1);
-                    self.bytes[OFF..OFF.wrapping_add($n)].copy_from_slice(value);
+                    $crate::txn::codec::copy_fixed(&mut self.bytes[OFF..OFF.wrapping_add($n)], value);
                 }
             ],
             emit_region = [$($emit_region)*],
@@ -3023,6 +3409,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -3039,6 +3426,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -3067,7 +3455,7 @@ macro_rules! __txn_template_step {
                     const OFF: usize = ($($prev)*)
                         .wrapping_add($crate::txn::codec::field_header($sfcode).1)
                         .wrapping_add($crate::txn::codec::vl_length_prefix($n).1);
-                    self.bytes[OFF..OFF.wrapping_add($n)].copy_from_slice(value);
+                    $crate::txn::codec::copy_fixed(&mut self.bytes[OFF..OFF.wrapping_add($n)], value);
                 }
             ],
             emit_region = [$($emit_region)*],
@@ -3098,6 +3486,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -3114,6 +3503,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -3164,6 +3554,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)* $crate::txn::codec::u8_field_size($sfcode),],
+            clears = [$($clears)* [<clear_ $($prefix)* $field>], ],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -3180,6 +3571,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -3231,6 +3623,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)* $crate::txn::codec::u16_field_size($sfcode),],
+            clears = [$($clears)* [<clear_ $($prefix)* $field>], ],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -3247,6 +3640,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -3298,6 +3692,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)* $crate::txn::codec::u32_field_size($sfcode),],
+            clears = [$($clears)* [<clear_ $($prefix)* $field>], ],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -3319,6 +3714,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -3331,6 +3727,7 @@ macro_rules! __txn_template_step {
             buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
             table = [$($table)*], emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*], ctx = $ctx, depth = [$($depth)*],
             stack = [$($stack)*],
             mode = $mode,
@@ -3347,6 +3744,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -3359,6 +3757,7 @@ macro_rules! __txn_template_step {
             buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
             table = [$($table)*], emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*], ctx = $ctx, depth = [$($depth)*],
             stack = [$($stack)*],
             mode = $mode,
@@ -3372,6 +3771,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -3423,6 +3823,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)* $crate::txn::codec::u64_field_size($sfcode),],
+            clears = [$($clears)* [<clear_ $($prefix)* $field>], ],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -3439,6 +3840,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -3490,6 +3892,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)* $crate::txn::codec::fixed_field_size($sfcode, 16usize),],
+            clears = [$($clears)* [<clear_ $($prefix)* $field>], ],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -3506,6 +3909,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -3557,6 +3961,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)* $crate::txn::codec::fixed_field_size($sfcode, 20usize),],
+            clears = [$($clears)* [<clear_ $($prefix)* $field>], ],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -3573,6 +3978,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -3624,6 +4030,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)* $crate::txn::codec::fixed_field_size($sfcode, 32usize),],
+            clears = [$($clears)* [<clear_ $($prefix)* $field>], ],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -3640,6 +4047,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -3691,6 +4099,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)* $crate::txn::codec::fixed_field_size($sfcode, 20usize),],
+            clears = [$($clears)* [<clear_ $($prefix)* $field>], ],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -3707,6 +4116,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -3763,6 +4173,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)* $crate::txn::codec::native_amount_field_size($sfcode),],
+            clears = [$($clears)* [<clear_ $($prefix)* $field>], ],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -3779,6 +4190,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -3830,6 +4242,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)* $crate::txn::codec::iou_amount_field_size($sfcode),],
+            clears = [$($clears)* [<clear_ $($prefix)* $field>], ],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -3846,6 +4259,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -3897,6 +4311,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)* $crate::txn::codec::fixed_field_size($sfcode, 20usize),],
+            clears = [$($clears)* [<clear_ $($prefix)* $field>], ],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -3913,6 +4328,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -3966,6 +4382,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)* $crate::txn::codec::fixed_field_size($sfcode, 40usize),],
+            clears = [$($clears)* [<clear_ $($prefix)* $field>], ],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -3982,6 +4399,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -4035,6 +4453,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)* $crate::txn::codec::account_id_field_size($sfcode),],
+            clears = [$($clears)* [<clear_ $($prefix)* $field>], ],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -4056,6 +4475,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -4082,6 +4502,7 @@ macro_rules! __txn_template_step {
             table = [$($table)*],
             emit_details = [true, (($($prev)*))],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -4101,6 +4522,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
         stack = [ [ $($frame:tt)* ] $($stack:tt)* ],
         mode = $mode:tt,
@@ -4124,6 +4546,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -4154,6 +4577,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -4166,6 +4590,7 @@ macro_rules! __txn_template_step {
             buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
             table = [$($table)*], emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*], ctx = $ctx, depth = [$($depth)*],
             stack = [$($stack)*],
             mode = $mode,
@@ -4183,6 +4608,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -4195,6 +4621,7 @@ macro_rules! __txn_template_step {
             buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
             table = [$($table)*], emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*], ctx = $ctx, depth = [$($depth)*],
             stack = [$($stack)*],
             mode = $mode,
@@ -4209,6 +4636,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -4221,6 +4649,7 @@ macro_rules! __txn_template_step {
             buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
             table = [$($table)*], emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*], ctx = $ctx, depth = [$($depth)*],
             stack = [$($stack)*],
             mode = $mode,
@@ -4238,6 +4667,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -4250,6 +4680,7 @@ macro_rules! __txn_template_step {
             buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
             table = [$($table)*], emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*], ctx = $ctx, depth = [$($depth)*],
             stack = [$($stack)*],
             mode = $mode,
@@ -4266,6 +4697,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -4278,6 +4710,7 @@ macro_rules! __txn_template_step {
             buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
             table = [$($table)*], emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
             stack = [$($stack)*],
             mode = $mode,
@@ -4306,6 +4739,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -4318,6 +4752,7 @@ macro_rules! __txn_template_step {
             buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
             table = [$($table)*], emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
             stack = [$($stack)*],
             mode = $mode,
@@ -4332,6 +4767,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -4344,6 +4780,7 @@ macro_rules! __txn_template_step {
             buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
             table = [$($table)*], emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
             stack = [$($stack)*],
             mode = $mode,
@@ -4361,6 +4798,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -4373,6 +4811,7 @@ macro_rules! __txn_template_step {
             buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
             table = [$($table)*], emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
             stack = [$($stack)*],
             mode = $mode,
@@ -4387,6 +4826,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -4399,6 +4839,7 @@ macro_rules! __txn_template_step {
             buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
             table = [$($table)*], emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
             stack = [$($stack)*],
             mode = $mode,
@@ -4414,6 +4855,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -4426,6 +4868,7 @@ macro_rules! __txn_template_step {
             buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
             table = [$($table)*], emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
             stack = [$($stack)*],
             mode = $mode,
@@ -4441,6 +4884,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -4453,6 +4897,7 @@ macro_rules! __txn_template_step {
             buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
             table = [$($table)*], emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
             stack = [$($stack)*],
             mode = $mode,
@@ -4468,6 +4913,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -4546,6 +4992,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -4563,6 +5010,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -4630,6 +5078,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -4657,6 +5106,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -4669,6 +5119,7 @@ macro_rules! __txn_template_step {
             buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
             table = [$($table)*], emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
             stack = [$($stack)*],
             mode = $mode,
@@ -4682,6 +5133,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -4694,6 +5146,7 @@ macro_rules! __txn_template_step {
             buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
             table = [$($table)*], emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
             stack = [$($stack)*],
             mode = $mode,
@@ -4707,6 +5160,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -4719,6 +5173,7 @@ macro_rules! __txn_template_step {
             buf = [$($buf)*], init = [$($init)*], prev = [$($prev)*],
             table = [$($table)*], emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*], ctx = obj, depth = [$($depth)*],
             stack = [$($stack)*],
             mode = $mode,
@@ -4740,6 +5195,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -4826,6 +5282,7 @@ macro_rules! __txn_template_step {
                         .wrapping_add(<$crate::txn::codec::Infer<{ $crate::txn::codec::sti_of($sfcode) }> as $crate::txn::codec::InferKind>::LEN),
                 ),
             ],
+            clears = [$($clears)* [<clear_ $($prefix)* $field>], ],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -4843,6 +5300,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -4893,6 +5351,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)* $crate::txn::codec::empty_vl_field_size($sfcode),],
+            clears = [$($clears)* [<clear_ $($prefix)* $field>], ],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -4909,6 +5368,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -4938,7 +5398,7 @@ macro_rules! __txn_template_step {
                     let pstart = OFF.wrapping_add(HDR.1);
                     self.bytes[pstart..pstart.wrapping_add(PREFIX.1)].copy_from_slice(&PREFIX.0[..PREFIX.1]);
                     let vstart = pstart.wrapping_add(PREFIX.1);
-                    self.bytes[vstart..vstart.wrapping_add($n)].copy_from_slice(value);
+                    $crate::txn::codec::copy_fixed(&mut self.bytes[vstart..vstart.wrapping_add($n)], value);
                 }
 
                 #[doc = concat!("Clears `", stringify!($field), "` back to absent (NOP-fills its whole reserved slot).")]
@@ -4947,7 +5407,7 @@ macro_rules! __txn_template_step {
                 $vis fn [<clear_ $($prefix)* $field>](&mut self) {
                     const OFF: usize = $($prev)*;
                     const SLOT: usize = $crate::txn::codec::fixed_vl_field_size($sfcode, $n);
-                    self.bytes[OFF..OFF.wrapping_add(SLOT)].copy_from_slice(&[$crate::txn::codec::NOP; SLOT]);
+                    $crate::txn::codec::fill_fixed::<SLOT>(&mut self.bytes[OFF..OFF.wrapping_add(SLOT)], $crate::txn::codec::NOP);
                 }
             ],
             emit_region = [$($emit_region)*],
@@ -4963,6 +5423,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)* $crate::txn::codec::fixed_vl_field_size($sfcode, $n),],
+            clears = [$($clears)* [<clear_ $($prefix)* $field>], ],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -4979,6 +5440,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -5041,6 +5503,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)* $crate::txn::codec::ANY_AMOUNT_NATIVE_NOPS,],
+            clears = [$($clears)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -5057,6 +5520,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -5129,6 +5593,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)* $crate::txn::codec::any_amount_field_size($sfcode),],
+            clears = [$($clears)* [<clear_ $($prefix)* $field>], ],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -5145,6 +5610,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -5162,6 +5628,7 @@ macro_rules! __txn_template_step {
             table = [$($table)*],
             emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -5177,6 +5644,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -5223,7 +5691,10 @@ macro_rules! __txn_template_step {
                 /// execution (including once per inlined call site, if the
                 /// compiler duplicates it) can exceed the budget and abort
                 /// the hook with a guard violation. Call it at most once
-                /// per hook execution for this field.
+                /// per hook execution for this field. `rshooks-testenv`
+                /// enforces this same cumulative budget, so a unit test
+                /// that fills this field twice in one invocation fails
+                /// with `GUARD_VIOLATION`.
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction; the loop below is bounded by REGION_LEN, a compile-time constant
                 $vis fn [<set_ $($prefix)* $field>](&mut self, value: &[u8]) -> $crate::error::Result<()> {
@@ -5258,6 +5729,33 @@ macro_rules! __txn_template_step {
                     }
                     ::core::result::Result::Ok(())
                 }
+
+                #[doc = concat!("Restores `", stringify!($field), "`'s slot to the bytes `new()` bakes in: header unchanged, a zeroed `", stringify!($min), "`-byte payload, then NOP-padding out to the reserved `", stringify!($max), "`-byte capacity. A required `vl` field keeps its last-set payload across every later emission of the same template instance -- `prepare_for_emit()`/`emit()` never reset it -- call this to restore the baked default between emissions of a reused `HookStatic<Self>`.")]
+                ///
+                /// # Guard budget
+                ///
+                /// Loop-free (`", stringify!($min), "` and the NOP tail are
+                /// each written through `codec::fill_fixed`'s chunked,
+                /// unrolled word writes, not a guarded loop), so unlike the
+                /// setter above, calling this more than once per execution
+                /// costs no guard budget.
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                #[allow(dead_code)] // not every txn_template! test fixture with a required vl field exercises reset_x(); real callers reach it via a `HookStatic<Self>`-backed template
+                $vis fn [<reset_ $($prefix)* $field>](&mut self) {
+                    const OFF: usize = $($prev)*;
+                    const HDR: ([u8; 3], usize) = $crate::txn::codec::field_header($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(HDR.1)].copy_from_slice(&HDR.0[..HDR.1]);
+                    const REGION_OFF: usize = OFF.wrapping_add(HDR.1);
+                    const PREFIX: ([u8; 3], usize) = $crate::txn::codec::vl_length_prefix($min);
+                    self.bytes[REGION_OFF..REGION_OFF.wrapping_add(PREFIX.1)].copy_from_slice(&PREFIX.0[..PREFIX.1]);
+                    const PAYLOAD_OFF: usize = REGION_OFF.wrapping_add(PREFIX.1);
+                    const PAYLOAD_LEN: usize = $min;
+                    $crate::txn::codec::fill_fixed::<PAYLOAD_LEN>(&mut self.bytes[PAYLOAD_OFF..PAYLOAD_OFF.wrapping_add(PAYLOAD_LEN)], 0u8);
+                    const TAIL_OFF: usize = PAYLOAD_OFF.wrapping_add(PAYLOAD_LEN);
+                    const TAIL_LEN: usize = ($crate::txn::codec::vl_slot_size($max)).saturating_sub($crate::txn::codec::vl_slot_size($min));
+                    $crate::txn::codec::fill_fixed::<TAIL_LEN>(&mut self.bytes[TAIL_OFF..TAIL_OFF.wrapping_add(TAIL_LEN)], $crate::txn::codec::NOP);
+                }
             ],
             emit_region = [$($emit_region)*],
             buf = [$($buf)*],
@@ -5282,6 +5780,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)* ($crate::txn::codec::vl_slot_size($max)).saturating_sub($crate::txn::codec::vl_slot_size($min)),],
+            clears = [$($clears)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -5298,6 +5797,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -5344,7 +5844,10 @@ macro_rules! __txn_template_step {
                 /// execution (including once per inlined call site, if the
                 /// compiler duplicates it) can exceed the budget and abort
                 /// the hook with a guard violation. Call it at most once
-                /// per hook execution for this field.
+                /// per hook execution for this field. `rshooks-testenv`
+                /// enforces this same cumulative budget, so a unit test
+                /// that fills this field twice in one invocation fails
+                /// with `GUARD_VIOLATION`.
                 #[inline(always)]
                 #[allow(clippy::indexing_slicing)] // in-bounds by construction; the loop below is bounded by REGION_LEN, a compile-time constant
                 $vis fn [<set_ $($prefix)* $field>](&mut self, value: &[u8]) -> $crate::error::Result<()> {
@@ -5386,7 +5889,7 @@ macro_rules! __txn_template_step {
                 $vis fn [<clear_ $($prefix)* $field>](&mut self) {
                     const OFF: usize = $($prev)*;
                     const SLOT: usize = $crate::txn::codec::field_header($sfcode).1.wrapping_add($crate::txn::codec::vl_slot_size($max));
-                    self.bytes[OFF..OFF.wrapping_add(SLOT)].copy_from_slice(&[$crate::txn::codec::NOP; SLOT]);
+                    $crate::txn::codec::fill_fixed::<SLOT>(&mut self.bytes[OFF..OFF.wrapping_add(SLOT)], $crate::txn::codec::NOP);
                 }
             ],
             emit_region = [$($emit_region)*],
@@ -5402,6 +5905,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)* $crate::txn::codec::vl_field_size($sfcode, $max),],
+            clears = [$($clears)* [<clear_ $($prefix)* $field>], ],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -5437,6 +5941,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = [$tag:tt $($entry:tt)*],
@@ -5468,10 +5973,11 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [],
+            clears = [],
             prefix = [$($prefix)* $name _],
             ctx = obj,
             depth = [ (($($depth)*).wrapping_add(1usize)) ],
-            stack = [ [ [$($prefix)*] [$($order)* ($sfcode).code(),] [$($nops)*] $name obj [$($buf)*] [$($init)*] [$($prev)*] [$tag $($entry)*] ] $($stack)* ],
+            stack = [ [ [$($prefix)*] [$($order)* ($sfcode).code(),] [$($nops)*] [$($clears)*] $name obj [$($buf)*] [$($init)*] [$($prev)*] [$tag $($entry)*] ] $($stack)* ],
             mode = [$tag $($entry)* (($($prev)*), [<__ $Name _ $($prefix)* $name _SLOT>])],
             fields = [ $($inner)* , @ end_opt_object $(, $($rest)*)? ]
         }
@@ -5486,6 +5992,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = arr, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = [$tag:tt $($entry:tt)*],
@@ -5517,10 +6024,11 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [],
+            clears = [],
             prefix = [$($prefix)* $name _],
             ctx = obj,
             depth = [ (($($depth)*).wrapping_add(1usize)) ],
-            stack = [ [ [$($prefix)*] [$($order)*] [$($nops)*] $name arr [$($buf)*] [$($init)*] [$($prev)*] [$tag $($entry)*] ] $($stack)* ],
+            stack = [ [ [$($prefix)*] [$($order)*] [$($nops)*] [$($clears)*] $name arr [$($buf)*] [$($init)*] [$($prev)*] [$tag $($entry)*] ] $($stack)* ],
             mode = [$tag $($entry)* (($($prev)*), [<__ $Name _ $($prefix)* $name _SLOT>])],
             fields = [ $($inner)* , @ end_opt_object $(, $($rest)*)? ]
         }
@@ -5536,6 +6044,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = [$tag:tt $($entry:tt)*],
@@ -5569,10 +6078,11 @@ macro_rules! __txn_template_step {
                 ],
                 emit_details = [$($emit_details)*],
                 nops = [],
+                clears = [],
                 prefix = [$($prefix)* $name _],
                 ctx = arr,
                 depth = [ (($($depth)*).wrapping_add(1usize)) ],
-                stack = [ [ [$($prefix)*] [$($order)* ($sfcode).code(),] [$($nops)*] $name obj [$($buf)*] [$($init)*] [$($prev)*] [$tag $($entry)*] ] $($stack)* ],
+                stack = [ [ [$($prefix)*] [$($order)* ($sfcode).code(),] [$($nops)*] [$($clears)*] $name obj [$($buf)*] [$($init)*] [$($prev)*] [$tag $($entry)*] ] $($stack)* ],
                 mode = [$tag $($entry)* (($($prev)*), [<__ $Name _ $($prefix)* $name _SLOT>])],
                 fields = [ @ ELEMS , @ end_opt_array $(, $($rest)*)? ]
             }
@@ -5600,8 +6110,9 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
-        stack = [ [ [$($pfx:tt)*] [$($ord:tt)*] [$($nps:tt)*] $cname:tt $old_ctx:tt [$($pbuf:tt)*] [$($pinit:tt)*] [$($poff:tt)*] [$($omode:tt)*] ] $($stack:tt)* ],
+        stack = [ [ [$($pfx:tt)*] [$($ord:tt)*] [$($nps:tt)*] [$($cls:tt)*] $cname:tt $old_ctx:tt [$($pbuf:tt)*] [$($pinit:tt)*] [$($poff:tt)*] [$($omode:tt)*] ] $($stack:tt)* ],
         mode = $mode:tt,
         fields = [ @ end_opt_object $(, $($rest:tt)*)? ]
     ) => {
@@ -5654,7 +6165,7 @@ macro_rules! __txn_template_step {
                     const OFF: usize = $($poff)*;
                     const LEN: usize = [<__ $Name _ $($pfx)* $cname _SLOT>].len();
                     const END: usize = OFF.wrapping_add(LEN);
-                    self.bytes[OFF..END].copy_from_slice(&[$crate::txn::codec::NOP; LEN]);
+                    $crate::txn::codec::fill_fixed::<LEN>(&mut self.bytes[OFF..END], $crate::txn::codec::NOP);
                 }
 
                 #[doc = concat!("Whether `", stringify!($cname), "` is currently present (its slot's first byte is not a NOP).")]
@@ -5680,6 +6191,7 @@ macro_rules! __txn_template_step {
             table = [$($table)*],
             emit_details = [$($emit_details)*],
             nops = [$($nps)* (($($prev)*).wrapping_add(1usize)).wrapping_sub($($poff)*),],
+            clears = [$($cls)* [<clear_ $($pfx)* $cname>], ],
             prefix = [$($pfx)*],
             ctx = $old_ctx,
             depth = [ (($($depth)*).wrapping_sub(1usize)) ],
@@ -5698,8 +6210,9 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
-        stack = [ [ [$($pfx:tt)*] [$($ord:tt)*] [$($nps:tt)*] $cname:tt $old_ctx:tt [$($pbuf:tt)*] [$($pinit:tt)*] [$($poff:tt)*] [$($omode:tt)*] ] $($stack:tt)* ],
+        stack = [ [ [$($pfx:tt)*] [$($ord:tt)*] [$($nps:tt)*] [$($cls:tt)*] $cname:tt $old_ctx:tt [$($pbuf:tt)*] [$($pinit:tt)*] [$($poff:tt)*] [$($omode:tt)*] ] $($stack:tt)* ],
         mode = $mode:tt,
         fields = [ @ end_opt_array $(, $($rest:tt)*)? ]
     ) => {
@@ -5741,7 +6254,7 @@ macro_rules! __txn_template_step {
                     const OFF: usize = $($poff)*;
                     const LEN: usize = [<__ $Name _ $($pfx)* $cname _SLOT>].len();
                     const END: usize = OFF.wrapping_add(LEN);
-                    self.bytes[OFF..END].copy_from_slice(&[$crate::txn::codec::NOP; LEN]);
+                    $crate::txn::codec::fill_fixed::<LEN>(&mut self.bytes[OFF..END], $crate::txn::codec::NOP);
                 }
 
                 #[doc = concat!("Whether `", stringify!($cname), "` is currently present (its slot's first byte is not a NOP).")]
@@ -5767,6 +6280,7 @@ macro_rules! __txn_template_step {
             table = [$($table)*],
             emit_details = [$($emit_details)*],
             nops = [$($nps)* (($($prev)*).wrapping_add(1usize)).wrapping_sub($($poff)*),],
+            clears = [$($cls)* [<clear_ $($pfx)* $cname>], ],
             prefix = [$($pfx)*],
             ctx = $old_ctx,
             depth = [ (($($depth)*).wrapping_sub(1usize)) ],
@@ -5792,6 +6306,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -5831,10 +6346,11 @@ macro_rules! __txn_template_step {
             table = [],
             emit_details = [false, 0usize],
             nops = [],
+            clears = [],
             prefix = [],
             ctx = obj,
             depth = [ (($($depth)*).wrapping_add(2usize)) ],
-            stack = [ [ [] [] [] $Elem obj ] ],
+            stack = [ [ [] [] [] [] $Elem obj ] ],
             mode = [elem_opt (0usize, $Elem::<'static>::TEMPLATE)],
             fields = [ $($efields)* , @ end_object ]
         }
@@ -5866,6 +6382,15 @@ macro_rules! __txn_template_step {
                         .get_mut(start..start.wrapping_add(ELEM_LEN))
                         .map(|bytes| $Elem { bytes })
                 }
+
+                #[doc = concat!("Makes every element of `", stringify!($name), "` absent -- one NOP fill over the whole reserved region, rather than one call per element.")]
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as every setter above
+                $vis fn [<clear_ $($prefix)* $name>](&mut self) {
+                    const OFF: usize = ($($prev)*).wrapping_add($crate::txn::codec::field_header($sfcode).1);
+                    const REGION: usize = (($($n)*) as usize).wrapping_mul($Elem::<'static>::LEN);
+                    self.bytes[OFF..OFF.wrapping_add(REGION)].copy_from_slice(&[$crate::txn::codec::NOP; REGION]);
+                }
             ],
             emit_region = [$($emit_region)*],
             buf = [$($buf)*],
@@ -5890,6 +6415,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)* [<clear_ $($prefix)* $name>], ],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -5905,6 +6431,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -5936,10 +6463,11 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [],
+            clears = [],
             prefix = [$($prefix)* $name _],
             ctx = obj,
             depth = [ (($($depth)*).wrapping_add(1usize)) ],
-            stack = [ [ [$($prefix)*] [$($order)* ($sfcode).code(),] [$($nops)*] $name obj ] $($stack)* ],
+            stack = [ [ [$($prefix)*] [$($order)* ($sfcode).code(),] [$($nops)*] [$($clears)*] $name obj ] $($stack)* ],
             mode = $mode,
             fields = [ $($inner)* , @ end_object $(, $($rest)*)? ]
         }
@@ -5952,6 +6480,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = arr, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -5983,10 +6512,11 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [],
+            clears = [],
             prefix = [$($prefix)* $name _],
             ctx = obj,
             depth = [ (($($depth)*).wrapping_add(1usize)) ],
-            stack = [ [ [$($prefix)*] [$($order)*] [$($nops)*] $name arr ] $($stack)* ],
+            stack = [ [ [$($prefix)*] [$($order)*] [$($nops)*] [$($clears)*] $name arr ] $($stack)* ],
             mode = $mode,
             fields = [ $($inner)* , @ end_object $(, $($rest)*)? ]
         }
@@ -5999,6 +6529,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -6038,10 +6569,11 @@ macro_rules! __txn_template_step {
             table = [],
             emit_details = [false, 0usize],
             nops = [],
+            clears = [],
             prefix = [],
             ctx = obj,
             depth = [ (($($depth)*).wrapping_add(2usize)) ],
-            stack = [ [ [] [] [] $Elem obj ] ],
+            stack = [ [ [] [] [] [] $Elem obj ] ],
             mode = [elem],
             fields = [ $($efields)* , @ end_object ]
         }
@@ -6094,6 +6626,7 @@ macro_rules! __txn_template_step {
             ],
             emit_details = [$($emit_details)*],
             nops = [$($nops)*],
+            clears = [$($clears)*],
             prefix = [$($prefix)*],
             ctx = obj,
             depth = [$($depth)*],
@@ -6109,6 +6642,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = obj, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -6142,10 +6676,11 @@ macro_rules! __txn_template_step {
                 ],
                 emit_details = [$($emit_details)*],
                 nops = [],
+                clears = [],
                 prefix = [$($prefix)* $name _],
                 ctx = arr,
                 depth = [ (($($depth)*).wrapping_add(1usize)) ],
-                stack = [ [ [$($prefix)*] [$($order)* ($sfcode).code(),] [$($nops)*] $name obj ] $($stack)* ],
+                stack = [ [ [$($prefix)*] [$($order)* ($sfcode).code(),] [$($nops)*] [$($clears)*] $name obj ] $($stack)* ],
                 mode = $mode,
                 fields = [ @ ELEMS , @ end_array $(, $($rest)*)? ]
             }
@@ -6159,8 +6694,9 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
-        stack = [ [ [$($pfx:tt)*] [$($ord:tt)*] [$($nps:tt)*] $cname:tt $old_ctx:tt ] $($stack:tt)* ],
+        stack = [ [ [$($pfx:tt)*] [$($ord:tt)*] [$($nps:tt)*] [$($cls:tt)*] $cname:tt $old_ctx:tt ] $($stack:tt)* ],
         mode = $mode:tt,
         fields = [ @ end_object $(, $($rest:tt)*)? ]
     ) => {
@@ -6194,6 +6730,7 @@ macro_rules! __txn_template_step {
             table = [$($table)*],
             emit_details = [$($emit_details)*],
             nops = [$($nps)*],
+            clears = [$($cls)* $($clears)*],
             prefix = [$($pfx)*],
             ctx = $old_ctx,
             depth = [ (($($depth)*).wrapping_sub(1usize)) ],
@@ -6210,8 +6747,9 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
-        stack = [ [ [$($pfx:tt)*] [$($ord:tt)*] [$($nps:tt)*] $cname:tt $old_ctx:tt ] $($stack:tt)* ],
+        stack = [ [ [$($pfx:tt)*] [$($ord:tt)*] [$($nps:tt)*] [$($cls:tt)*] $cname:tt $old_ctx:tt ] $($stack:tt)* ],
         mode = $mode:tt,
         fields = [ @ end_array $(, $($rest:tt)*)? ]
     ) => {
@@ -6234,6 +6772,7 @@ macro_rules! __txn_template_step {
             table = [$($table)*],
             emit_details = [$($emit_details)*],
             nops = [$($nps)*],
+            clears = [$($cls)* $($clears)*],
             prefix = [$($pfx)*],
             ctx = $old_ctx,
             depth = [ (($($depth)*).wrapping_sub(1usize)) ],
@@ -6260,6 +6799,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$ed_p:tt, $ed_off:expr],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = [tpl],
@@ -6297,6 +6837,8 @@ macro_rules! __txn_template_step {
                 $($init)*
                 Self { bytes: $($buf)* }
             }
+
+            $crate::__txn_template_maybe_clear_optionals! { $vis, [$($clears)*] }
 
             $($setters)*
 
@@ -6508,6 +7050,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = [elem],
@@ -6544,6 +7087,8 @@ macro_rules! __txn_template_step {
 
             $($setters)*
 
+            $crate::__txn_template_maybe_clear_optionals! { $vis, [$($clears)*] }
+
             /// Returns this element's full [`Self::LEN`]-byte region.
             #[inline(always)]
             #[must_use]
@@ -6573,6 +7118,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = [elem_opt $($mode_entry:tt)*],
@@ -6608,14 +7154,14 @@ macro_rules! __txn_template_step {
             #[inline(always)]
             #[allow(clippy::indexing_slicing)] // `self.bytes` is always exactly `Self::LEN` bytes, by construction
             $vis fn enable(&mut self) {
-                self.bytes.copy_from_slice(&Self::TEMPLATE);
+                $crate::txn::codec::copy_fixed(&mut *self.bytes, &Self::TEMPLATE);
             }
 
             /// NOP-fills this element's bytes -- makes it absent.
             #[inline(always)]
             #[allow(clippy::indexing_slicing)] // `self.bytes` is always exactly `Self::LEN` bytes, by construction
             $vis fn clear(&mut self) {
-                self.bytes.copy_from_slice(&[$crate::txn::codec::NOP; [<__ $Elem _LEN>]]);
+                $crate::txn::codec::fill_fixed::<[<__ $Elem _LEN>]>(&mut *self.bytes, $crate::txn::codec::NOP);
             }
 
             /// Whether this element is currently present: its first byte
@@ -6628,6 +7174,8 @@ macro_rules! __txn_template_step {
             $vis fn is_present(&self) -> bool {
                 self.bytes[0] != $crate::txn::codec::NOP
             }
+
+            $crate::__txn_template_maybe_clear_optionals! { $vis, [$($clears)*] }
 
             /// Returns this element's full [`Self::LEN`]-byte region.
             #[inline(always)]
@@ -6646,6 +7194,7 @@ macro_rules! __txn_template_step {
         buf = [$($buf:tt)*], init = [$($init:tt)*], prev = [$($prev:tt)*],
         table = [$($table:tt)*], emit_details = [$($emit_details:tt)*],
         nops = [$($nops:tt)*],
+        clears = [$($clears:tt)*],
         prefix = [$($prefix:tt)*], ctx = $ctx:tt, depth = [$($depth:tt)*],
         stack = [$($stack:tt)*],
         mode = $mode:tt,
@@ -7525,13 +8074,13 @@ mod tests {
         assert_eq!(&b[33..49], &[0u8; 16]); // hash128 default: zeroed
         assert_eq!(&b[49..51], &[0x50, 0x11]); // InvoiceID (5,17) header
         assert_eq!(&b[51..83], &[0u8; 32]); // hash256 default: zeroed
-        assert_eq!(&b[116..118], &[0x30, 0x10]); // TransactionResult (16,3) header
+        assert_eq!(&b[116..118], &[0x03, 0x10]); // TransactionResult (16,3) header
         assert_eq!(b[118], 0xAB); // u8 default
-        assert_eq!(&b[119..121], &[0x10, 0x11]); // TakerPaysCurrency (17,1) header
+        assert_eq!(&b[119..121], &[0x01, 0x11]); // TakerPaysCurrency (17,1) header
         assert_eq!(&b[121..141], &[0u8; 20]); // hash160 default: zeroed
-        assert_eq!(&b[141..143], &[0x50, 0x18]); // ClaimCurrency (24,5) header
+        assert_eq!(&b[141..143], &[0x05, 0x18]); // ClaimCurrency (24,5) header
         assert_eq!(&b[143..163], &[0u8; 20]); // native_issue default: zeroed
-        assert_eq!(&b[163..165], &[0x10, 0x1A]); // BaseAsset (26,1) header
+        assert_eq!(&b[163..165], &[0x01, 0x1A]); // BaseAsset (26,1) header
         assert_eq!(&b[165..185], &[0u8; 20]); // currency default: zeroed
         assert_eq!(PerKindFixture::LEN, 185 + EMIT_DETAILS_MAX_LEN);
     }
@@ -7600,7 +8149,7 @@ mod tests {
             // + Fee(9) + SPK(2) + Account(22) = 53
             53usize
         };
-        assert_eq!(&tpl.bytes()[off..off.wrapping_add(2)], &[0x50, 0x18]); // ClaimCurrency (24,5)
+        assert_eq!(&tpl.bytes()[off..off.wrapping_add(2)], &[0x05, 0x18]); // ClaimCurrency (24,5)
         let value_off = off.wrapping_add(2);
         assert_eq!(
             &tpl.bytes()[value_off..value_off.wrapping_add(40)],
@@ -8258,7 +8807,7 @@ mod tests {
         // TransactionResult (16,3): 2-byte header + 1-byte value = 3-byte slot.
         assert_eq!(&tpl.bytes()[off..off + 3], &[codec::NOP; 3]);
         tpl.set_transaction_result(0xAB);
-        assert_eq!(&tpl.bytes()[off..off + 2], &[0x30, 0x10]);
+        assert_eq!(&tpl.bytes()[off..off + 2], &[0x03, 0x10]);
         assert_eq!(tpl.bytes()[off + 2], 0xAB);
         tpl.clear_transaction_result();
         assert_eq!(&tpl.bytes()[off..off + 3], &[codec::NOP; 3]);
@@ -8294,7 +8843,7 @@ mod tests {
         // TakerPaysCurrency (17,1): 2-byte header + 20-byte value = 22-byte slot.
         assert_eq!(&tpl.bytes()[off..off + 22], &[codec::NOP; 22]);
         tpl.set_taker_pays_currency(&[0x77; 20]);
-        assert_eq!(&tpl.bytes()[off..off + 2], &[0x10, 0x11]);
+        assert_eq!(&tpl.bytes()[off..off + 2], &[0x01, 0x11]);
         assert_eq!(&tpl.bytes()[off + 2..off + 22], &[0x77; 20]);
         tpl.clear_taker_pays_currency();
         assert_eq!(&tpl.bytes()[off..off + 22], &[codec::NOP; 22]);
@@ -8335,7 +8884,7 @@ mod tests {
         // Asset (24,3): 2-byte header + 20-byte value = 22-byte slot.
         assert_eq!(&tpl.bytes()[off..off + 22], &[codec::NOP; 22]);
         tpl.set_asset();
-        assert_eq!(&tpl.bytes()[off..off + 2], &[0x30, 0x18]);
+        assert_eq!(&tpl.bytes()[off..off + 2], &[0x03, 0x18]);
         assert_eq!(&tpl.bytes()[off + 2..off + 22], &[0u8; 20]);
         tpl.clear_asset();
         assert_eq!(&tpl.bytes()[off..off + 22], &[codec::NOP; 22]);
@@ -8372,7 +8921,7 @@ mod tests {
         let currency = CurrencyCode::from_iso(b"GBP");
         let issuer = AccountId([0x66; ACC_ID_LEN]);
         tpl.set_claim_currency(&currency, &issuer);
-        assert_eq!(&tpl.bytes()[off..off + 2], &[0x50, 0x18]);
+        assert_eq!(&tpl.bytes()[off..off + 2], &[0x05, 0x18]);
         assert_eq!(&tpl.bytes()[off + 2..off + 22], currency.as_ref());
         assert_eq!(&tpl.bytes()[off + 22..off + 42], issuer.as_ref());
         tpl.clear_claim_currency();
@@ -8409,7 +8958,7 @@ mod tests {
         assert_eq!(&tpl.bytes()[off..off + 22], &[codec::NOP; 22]);
         let currency = CurrencyCode::from_iso(b"EUR");
         tpl.set_base_asset(&currency);
-        assert_eq!(&tpl.bytes()[off..off + 2], &[0x10, 0x1A]);
+        assert_eq!(&tpl.bytes()[off..off + 2], &[0x01, 0x1A]);
         assert_eq!(&tpl.bytes()[off + 2..off + 22], currency.as_ref());
         tpl.clear_base_asset();
         assert_eq!(&tpl.bytes()[off..off + 22], &[codec::NOP; 22]);
@@ -8774,6 +9323,14 @@ mod tests {
             Err(HookError::InvalidArgument)
         );
 
+        // `reset_memo_format()` restores the slot to `new()`'s baked
+        // default, independent of `prepare_for_emit` -- loop-free, so
+        // unlike the setter it costs no guard budget and may be called
+        // any number of times.
+        assert_ne!(tpl.bytes(), VlFixture::new().bytes());
+        tpl.reset_memo_format();
+        assert_eq!(tpl.bytes(), VlFixture::new().bytes());
+
         tpl.set_sequence(0);
         tpl.set_first_ledger_sequence(0);
         tpl.set_last_ledger_sequence(0);
@@ -8874,6 +9431,21 @@ mod tests {
         tpl.clear_uri();
         assert_eq!(&tpl.bytes()[off..off + 6], &[codec::NOP; 6]);
 
+        // `clear_optionals()` makes every optional element absent in one
+        // call -- the same NOP fill as `clear_uri()` above -- while a
+        // non-optional scalar it never touches (`sequence`, set here to a
+        // non-default value) keeps whatever was set.
+        tpl.set_uri(&[0x01, 0x02, 0x03, 0x04])
+            .expect("4 bytes is within [1, 4]");
+        tpl.set_sequence(42);
+        assert_ne!(tpl.bytes(), OptionalVlFixture::new().bytes());
+        let mut before_clear = [0u8; OptionalVlFixture::LEN];
+        before_clear.copy_from_slice(tpl.bytes());
+        tpl.clear_optionals();
+        let mut expected = before_clear;
+        expected[off..off + 6].copy_from_slice(&[codec::NOP; 6]);
+        assert_eq!(tpl.bytes(), &expected[..]);
+
         tpl.set_sequence(0);
         tpl.set_first_ledger_sequence(0);
         tpl.set_last_ledger_sequence(0);
@@ -8964,6 +9536,12 @@ mod tests {
         // A no-op the second time (already present).
         tpl.enable_hook_grant();
         assert!(tpl.is_hook_grant_present());
+
+        // `clear_optionals()` reaches a whole `optional` container the
+        // same way `clear_hook_grant()` does -- one NOP fill over the
+        // container's entire reserved region.
+        tpl.clear_optionals();
+        assert!(!tpl.is_hook_grant_present());
 
         // Exercise every remaining setter too (dead-code hygiene).
         tpl.set_sequence(0);
@@ -9101,6 +9679,17 @@ mod tests {
         assert!(tpl.is_outer_present());
         assert!(!tpl.is_outer_inner_present());
         tpl.clear_outer();
+
+        tpl.enable_outer_inner();
+        assert!(tpl.is_outer_present());
+        assert!(tpl.is_outer_inner_present());
+
+        // `clear_optionals()` reaches only the outermost `optional`
+        // ancestor (`outer`) -- one NOP fill over its whole region, which
+        // already blanks the nested `inner` container along with it.
+        tpl.clear_optionals();
+        assert!(!tpl.is_outer_present());
+        assert!(!tpl.is_outer_inner_present());
 
         tpl.enable_outer_inner();
         assert!(tpl.is_outer_present());

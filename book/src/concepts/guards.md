@@ -95,8 +95,9 @@ module. The real hazard is a **runtime** one: `_g` tracks each guard id's
 iteration count as the hook actually executes, so two unrelated loops
 sharing an id share one counter — whichever runs first pushes it toward
 the *other* loop's `maxiter`, risking a spurious on-ledger
-`GUARD_VIOLATION` that no build-time tool catches. That's the actual
-reason `$n` exists.
+`GUARD_VIOLATION` that no build-time tool catches; `rshooks-testenv`
+reports it at unit-test time instead, since its own `_g` enforces the
+same cumulative per-id budget. That's the actual reason `$n` exists.
 
 ## wasm-opt block-wrapping and LLVM loop rotation
 

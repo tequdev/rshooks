@@ -17,7 +17,8 @@ txn_template! {
     /// Field order (canonical `(type, field)`): `sequence` (2,4) <
     /// `destination_tag` (2,14) < `first_ledger_sequence` (2,26) <
     /// `last_ledger_sequence` (2,27) < `fee` (6,8) < `signing_pub_key`
-    /// (7,3) < `account` (8,1) < `destination` (8,3) < `amounts` (15,92).
+    /// (7,3) < `blob` (7,26) < `account` (8,1) < `destination` (8,3) <
+    /// `amounts` (15,92).
     struct Remit {
         transaction_type = ttREMIT,
         sequence: sfSequence = 0,
@@ -26,6 +27,12 @@ txn_template! {
         last_ledger_sequence: sfLastLedgerSequence = 0,
         fee: sfFee = NativeAmount(0),
         signing_pub_key: sfSigningPubKey = [],
+        // `sfBlob` is a legal (optional-in-protocol, always populated by
+        // this hook) Remit field; its required (always-present) fixed_vl
+        // declaration here is over 64 bytes, so `set_blob`'s runtime copy
+        // exercises the >64-byte `rshooks::txn::codec::copy_fixed`
+        // chunking path (issue #175).
+        blob: fixed_vl(sfBlob, 96),
         account: sfAccount,
         destination: sfDestination,
         amounts: sfAmounts [
@@ -56,6 +63,8 @@ hook_errors! {
         PrepareFailed = 6,
         /// The prepared transaction could not be emitted.
         EmitFailed = 7,
+        /// The `BLOB` hook parameter was missing or not 96 bytes.
+        MissingBlob = 8,
     }
 }
 
@@ -64,6 +73,13 @@ pub struct TxnTemplateOptional {
     /// The destination account; required.
     #[hook_param(name = b"DEST", required)]
     dest: HookParam<AccountId>,
+    /// `blob`'s 96-byte payload; required. Read from the host at
+    /// runtime (not a compile-time constant), so `set_blob`'s copy
+    /// below exercises the same >64-byte, data-dependent `fixed_vl`
+    /// copy path the issue reports (a compile-time-constant source
+    /// would let LLVM fold the copy into a plain zero-fill instead).
+    #[hook_param(name = b"BLOB", required)]
+    blob: HookParam<[u8; 96]>,
     /// `destination_tag`, if present.
     #[hook_param(name = b"DTAG")]
     dest_tag: HookParam<[u8; 4]>,
@@ -84,8 +100,8 @@ pub struct TxnTemplateOptional {
 
 #[hooks]
 impl TxnTemplateOptional {
-    /// Reserves one emission slot, reads the required `DEST` hook
-    /// parameter, fills `Remit`'s optional fields from the remaining
+    /// Reserves one emission slot, reads the required `DEST`/`BLOB` hook
+    /// parameters, fills `Remit`'s optional fields from the remaining
     /// (all optional) hook parameters, and emits.
     #[hook(0, name = "remit", on = [Invoke], can_emit = [Remit])]
     fn remit(&self) -> HookResult {
@@ -103,6 +119,13 @@ impl TxnTemplateOptional {
             )
         };
 
+        let Ok(blob) = self.hook_param.blob.get_required() else {
+            rollback!(
+                b"txn-template-optional: missing BLOB hook parameter",
+                RemitError::MissingBlob
+            )
+        };
+
         let Some(txn) = REMIT_TXN.take() else {
             rollback!(
                 b"txn-template-optional: remit buffer already taken",
@@ -111,6 +134,7 @@ impl TxnTemplateOptional {
         };
 
         txn.set_destination(&destination);
+        txn.set_blob(&blob);
 
         if let Ok(Some(tag)) = self.hook_param.dest_tag.get() {
             txn.set_destination_tag(u32::from_be_bytes(tag));

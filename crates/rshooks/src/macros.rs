@@ -3,8 +3,10 @@
 //! `guard!`/`guard_m!` match the C `GUARD`/`GUARDM` macros from `macro.h`
 //! exactly, including the `+ 1` on `maxiter`:
 //! `GUARD(maxiter)` in C is `_g((1ULL << 31U) + __LINE__, (maxiter) + 1)`.
-//! The `unsafe` call to `_g` lives inside the macro expansion, so these are
-//! usable from safe code without an `unsafe` block at the call site.
+//! Both expand to a call to [`crate::api::control::guard_check`] (the `_g`
+//! host call, bridged through an installed testenv backend when one is
+//! present), which is itself safe, so these are usable from safe code
+//! without an `unsafe` block at the call site.
 //!
 //! `uninit_buf!` is deliberately NOT provided:
 //! `MaybeUninit::uninit().assume_init()` for a byte array is UB for this use
@@ -46,7 +48,7 @@ macro_rules! guard {
     ($m:expr) => {{
         let __guard_id: u32 = (1u32 << 31).wrapping_add(line!());
         let __maxiter: u32 = (($m) as u32).wrapping_add(1);
-        unsafe { $crate::raw::_g(__guard_id, __maxiter) }
+        $crate::api::control::guard_check(__guard_id, __maxiter)
     }};
 }
 
@@ -60,7 +62,7 @@ macro_rules! guard_m {
             .wrapping_add(line!().wrapping_shl(16))
             .wrapping_add(($n) as u32);
         let __maxiter: u32 = (($m) as u32).wrapping_add(1);
-        unsafe { $crate::raw::_g(__guard_id, __maxiter) }
+        $crate::api::control::guard_check(__guard_id, __maxiter)
     }};
 }
 
