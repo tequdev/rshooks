@@ -280,14 +280,20 @@ pub struct EncodedStateKey {
 impl EncodedStateKey {
     /// Builds an `EncodedStateKey` from a full 32-byte buffer and the
     /// number of leading bytes that are actually meaningful (the rest of
-    /// `buf` is ignored). `len` must be `<= `[`crate::types::STATE_KEY_LEN`]
-    /// — every call site enforces that at compile time before calling this,
-    /// so it is not re-checked here; a `len` beyond `buf`'s bounds simply
-    /// yields an empty [`AsRef<[u8]>`] slice rather than a panic, keeping
-    /// this constructor infallible.
+    /// `buf` is ignored). Every call site in this crate already passes a
+    /// `len` `<= `[`crate::types::STATE_KEY_LEN`] computed at compile time;
+    /// this constructor clamps `len` to that bound as well, so an
+    /// `EncodedStateKey` always upholds `len <= STATE_KEY_LEN` regardless of
+    /// what a caller passes — [`AsRef<[u8]>`]'s impl below relies on that
+    /// invariant.
     #[inline(always)]
     #[must_use]
     pub const fn new(buf: [u8; STATE_KEY_LEN], len: usize) -> Self {
+        let len = if len > STATE_KEY_LEN {
+            STATE_KEY_LEN
+        } else {
+            len
+        };
         Self { buf, len }
     }
 
@@ -322,10 +328,16 @@ impl EncodedStateKey {
 impl AsRef<[u8]> for EncodedStateKey {
     #[inline(always)]
     fn as_ref(&self) -> &[u8] {
-        match self.buf.get(..self.len) {
-            Some(s) => s,
-            None => &[],
-        }
+        // SAFETY: every `EncodedStateKey` is built through `new` (which
+        // clamps `len` to `STATE_KEY_LEN`), `from_short` (const-checked
+        // `N <= STATE_KEY_LEN`), or a `StateKeyEncode::encode` impl that
+        // computes `len` from a `ToBytes::MAX_LEN` bound to
+        // `STATE_KEY_LEN` at compile time (`[u8; N]`'s and
+        // `#[derive(HookKey)]`'s asserts, `state_keys!`'s "payload too
+        // large" check). `self.len <= STATE_KEY_LEN == self.buf.len()`
+        // always holds, so `self.len` is a valid, in-bounds prefix length
+        // of `self.buf`.
+        unsafe { core::slice::from_raw_parts(self.buf.as_ptr(), self.len) }
     }
 }
 
