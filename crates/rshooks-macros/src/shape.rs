@@ -85,6 +85,29 @@ pub(crate) fn read_body(fields: &[FieldShape]) -> String {
     body
 }
 
+/// `ToBytes::with_bytes` override shared by `HookKey`, `HookData`, and
+/// `ParamName` (the `extra` text each passes to [`to_bytes_impl`]) — the
+/// embedded `///` doc comment below is the source text, so it rides along
+/// into every generated `with_bytes` method. `#[state_interface(..)]`'s
+/// generated value struct (via [`crate::hooks_struct`]) does not use this —
+/// it passes `""` and keeps the generic default.
+pub(crate) const WITH_BYTES: &str = "
+    /// Encodes into a buffer sized to this struct's own
+    /// [`MAX_LEN`](::rshooks::convert::ToBytes::MAX_LEN) rather than
+    /// [`ToBytes::with_bytes`](::rshooks::convert::ToBytes::with_bytes)'s
+    /// generic-default scratch size — see that method's doc comment for why
+    /// only a concrete, non-generic impl (this one) can do so. `__buf` is
+    /// exactly `MAX_LEN` bytes, so `write` always succeeds and fills all of
+    /// it — the whole buffer is handed to `f` directly, with no slicing on
+    /// `write`'s return value.
+    #[inline(always)]
+    fn with_bytes<__R>(&self, f: impl FnOnce(&[u8]) -> __R) -> __R {
+        let mut __buf = [0u8; <Self as ::rshooks::convert::ToBytes>::MAX_LEN];
+        let _ = <Self as ::rshooks::convert::ToBytes>::write(self, &mut __buf);
+        f(&__buf)
+    }
+";
+
 /// Generates the `ToBytes` impl block (`MAX_LEN` const + `write()`) shared
 /// by every fixed-offset codegen path: `HookKey`, `HookData`, `ParamName`,
 /// and `#[state_interface(..)]`'s generated value struct (`ParamValue` is
@@ -92,8 +115,8 @@ pub(crate) fn read_body(fields: &[FieldShape]) -> String {
 /// at all). `body` is `write()`'s statements before the final `MAX_LEN`
 /// return (an [`offset_consts`]/[`write_body`] pair, or, for
 /// `state_interface`, per-field writes at macro-computed literal offsets).
-/// `extra` is spliced in as further associated items (`HookData`'s
-/// `with_bytes` override) — pass `""` for none.
+/// `extra` is spliced in as further associated items ([`WITH_BYTES`], or
+/// `state_interface`'s own `""`) — pass `""` for none.
 pub(crate) fn to_bytes_impl(name: &str, max_len_expr: &str, body: &str, extra: &str) -> String {
     format!(
         "

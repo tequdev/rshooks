@@ -39,7 +39,7 @@
 //! shared via [`crate::shape`]; only the generated impl set differs.
 
 use crate::shape::{
-    StructShape, max_len_expr, offset_consts, parse_struct, to_bytes_impl, write_body,
+    StructShape, WITH_BYTES, max_len_expr, offset_consts, parse_struct, to_bytes_impl, write_body,
 };
 use proc_macro::TokenStream;
 
@@ -50,32 +50,6 @@ pub fn derive(input: TokenStream) -> TokenStream {
         Err(e) => e,
     }
 }
-
-/// `HookKey`'s one addition to the shared `ToBytes` impl — the `extra`
-/// text [`generate`] passes to [`crate::shape::to_bytes_impl`]. Identical
-/// mechanism to [`crate::hook_data`]'s `WITH_BYTES` — see that constant's
-/// doc comment for why only a concrete, non-generic impl can size the
-/// scratch buffer to `Self::MAX_LEN`. Distinct from
-/// [`StateKeyEncode::with_key_bytes`](::rshooks::state::StateKeyEncode::with_key_bytes)
-/// below, which right-sizes the *key* buffer for `StateKeyEncode` callers;
-/// this overrides `ToBytes::with_bytes` itself, for any caller that treats
-/// the struct as an ordinary `ToBytes` value.
-const WITH_BYTES: &str = "
-    /// Encodes into a buffer sized to this struct's own
-    /// [`MAX_LEN`](::rshooks::convert::ToBytes::MAX_LEN) rather than
-    /// [`ToBytes::with_bytes`](::rshooks::convert::ToBytes::with_bytes)'s
-    /// generic-default scratch size — see that method's doc comment for why
-    /// only a concrete, non-generic impl (this one) can do so. `__buf` is
-    /// exactly `MAX_LEN` bytes, so `write` always succeeds and fills all of
-    /// it — the whole buffer is handed to `f` directly, with no slicing on
-    /// `write`'s return value.
-    #[inline(always)]
-    fn with_bytes<__R>(&self, f: impl FnOnce(&[u8]) -> __R) -> __R {
-        let mut __buf = [0u8; <Self as ::rshooks::convert::ToBytes>::MAX_LEN];
-        let _ = <Self as ::rshooks::convert::ToBytes>::write(self, &mut __buf);
-        f(&__buf)
-    }
-";
 
 /// Generates the `ToBytes` impl plus an explicit `StateKeyEncode` impl
 /// (with its 32-byte compile-time length assert), for an already-validated
@@ -121,6 +95,12 @@ pub(crate) fn generate(shape: &StructShape) -> TokenStream {
 /// no `EncodedStateKey` built at all. Carries its own copy of `encode`'s
 /// compile-time length assert, since an override replaces the default body
 /// (assert included).
+///
+/// Distinct from [`crate::shape::WITH_BYTES`]'s `ToBytes::with_bytes`
+/// override on this same derive's `ToBytes` impl: that one right-sizes the
+/// buffer for any caller that treats the struct as an ordinary `ToBytes`
+/// value, while `with_key_bytes` here right-sizes it specifically for
+/// `StateKeyEncode` callers.
 pub(crate) fn state_key_encode_impl(name: &str) -> String {
     format!(
         "

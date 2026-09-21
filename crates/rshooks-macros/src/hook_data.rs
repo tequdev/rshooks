@@ -50,8 +50,8 @@
 //! "rshooks", .. }`).
 
 use crate::shape::{
-    StructShape, fixed_read_impl, from_bytes_impl, max_len_expr, offset_consts, parse_struct,
-    read_body, to_bytes_impl, write_body,
+    StructShape, WITH_BYTES, fixed_read_impl, from_bytes_impl, max_len_expr, offset_consts,
+    parse_struct, read_body, to_bytes_impl, write_body,
 };
 use proc_macro::TokenStream;
 
@@ -62,26 +62,6 @@ pub fn derive(input: TokenStream) -> TokenStream {
         Err(e) => e,
     }
 }
-
-/// `HookData`'s one addition to the shared `ToBytes` impl — the `extra`
-/// text [`generate`] passes to [`crate::shape::to_bytes_impl`], including
-/// its own rustdoc so the derived type's generated `with_bytes` keeps it.
-const WITH_BYTES: &str = "
-    /// Encodes into a buffer sized to this struct's own
-    /// [`MAX_LEN`](::rshooks::convert::ToBytes::MAX_LEN) rather than
-    /// [`ToBytes::with_bytes`](::rshooks::convert::ToBytes::with_bytes)'s
-    /// generic-default scratch size — see that method's doc comment for why
-    /// only a concrete, non-generic impl (this one) can do so. `__buf` is
-    /// exactly `MAX_LEN` bytes, so `write` always succeeds and fills all of
-    /// it — the whole buffer is handed to `f` directly, with no slicing on
-    /// `write`'s return value.
-    #[inline(always)]
-    fn with_bytes<__R>(&self, f: impl FnOnce(&[u8]) -> __R) -> __R {
-        let mut __buf = [0u8; <Self as ::rshooks::convert::ToBytes>::MAX_LEN];
-        let _ = <Self as ::rshooks::convert::ToBytes>::write(self, &mut __buf);
-        f(&__buf)
-    }
-";
 
 /// Generates the `ToBytes`/`FromBytes`/`FixedRead` impls plus the inherent
 /// `LEN` const, for an already-validated [`StructShape`].
