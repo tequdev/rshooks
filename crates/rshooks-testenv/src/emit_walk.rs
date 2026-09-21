@@ -543,16 +543,17 @@ fn field_bytes(data: &[u8], range: (usize, usize)) -> Option<&[u8]> {
 /// The **value-only** payload range a stored slot / `sto_subfield` reports
 /// for `field` within `data` — [`FieldSpan::value_range`] as-is for every
 /// type except `STI_VL`(7)/`STI_ACCOUNT`(8), where the VL length-prefix
-/// (present in `value_range`, since real wire bytes carry it) is stripped:
-/// a slot's content is exactly what the host's `entry->add(s)` reports for
-/// that field's value alone (`crate::host::slots`' module doc cites
-/// `otxn_field`'s identically-shaped documented behavior — a `sfAccount`
-/// field reads back as exactly its 20 raw bytes, matching
-/// `examples/15_slot-objects`' e2e-pinned `check_account_walk`), and
-/// `sto_subfield`'s "payload" convention strips the same prefix
+/// (present in `value_range`, since real wire bytes carry it) is stripped.
+/// This is the on-disk/in-slot *storage* convention, not necessarily what a
+/// host call hands the hook back verbatim: `sto_subfield`'s own "payload"
+/// output legitimately is this value-only shape
 /// (`HookAPI::get_stobject_length`'s `payload_start`/`payload_length` are
 /// computed *after* decoding a VL type's own length prefix — see
-/// `crate::host::sto`'s module doc for the citation).
+/// `crate::host::sto`'s module doc for the citation), but a numbered slot's
+/// stored bytes are reconstructed into the real `slot()`/`otxn_field` wire
+/// form by `crate::otxn::value_wire_bytes` (VL prefix added back for
+/// `STI_VL`, `STI_ACCOUNT` left as-is — see `crate::host::slots`' module
+/// doc).
 ///
 /// Does **not** special-case `STI_ARRAY`(15) into the "fully formed"
 /// (header-included) shape `sto_subfield` uses for arrays — the one
@@ -1396,6 +1397,16 @@ mod tests {
         let (start, end) = field_value_payload(&data, &fields[0]).unwrap();
         assert_eq!((start, end), (2, 22));
         assert_eq!(data.get(start..end).unwrap(), &[7u8; 20]);
+
+        // sfSigningPubKey (type 7, field 3) = 0x73, VL-prefixed 3-byte
+        // payload — the *storage* payload strips the prefix the same as
+        // sfAccount; only `slot()`/`otxn_field`'s write-out
+        // (`crate::otxn::value_wire_bytes`) adds it back for `STI_VL`.
+        let blob_data: &[u8] = &[0x73, 3, 0xAA, 0xBB, 0xCC];
+        let blob_fields = walk_top_level_fields(blob_data, NopMode::Strict).unwrap();
+        let (bstart, bend) = field_value_payload(blob_data, &blob_fields[0]).unwrap();
+        assert_eq!((bstart, bend), (2, 5));
+        assert_eq!(blob_data.get(bstart..bend).unwrap(), &[0xAA, 0xBB, 0xCC]);
     }
 
     #[test]

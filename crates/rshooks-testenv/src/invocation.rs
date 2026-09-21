@@ -176,6 +176,12 @@ pub(crate) struct InvocationContext {
     /// `HookAPI.cpp:1727-1728`) — counts every *call* (not distinct keys),
     /// fresh each invocation (upstream: fresh per `HookResult`).
     pub(crate) param_override_count: u32,
+    /// `_g`'s cumulative per-guard-id call count this invocation
+    /// (`hookCtx.guard_map`, `applyHook.cpp:3297-3331`): shared by every
+    /// static call site sharing a guard id across the whole invocation, not
+    /// reset between loop iterations or repeated calls to the same guarded
+    /// function.
+    guard_counts: HashMap<u32, u32>,
 }
 
 impl InvocationContext {
@@ -199,7 +205,21 @@ impl InvocationContext {
             skip_directives: Vec::new(),
             pending_param_overrides: HashMap::new(),
             param_override_count: 0,
+            guard_counts: HashMap::new(),
         }
+    }
+
+    /// `_g(guard_id, maxiter)`: increments this invocation's cumulative
+    /// count for `guard_id` and reports whether it now exceeds `maxiter`
+    /// (`applyHook.cpp:3306-3311` increments `hookCtx.guard_map[id]` before
+    /// comparing it against `maxitr`). The caller (`Backend::_g`)
+    /// terminates the invocation with `GUARD_VIOLATION` when this returns
+    /// `true`, mirroring xahaud's own `exitType`/`exitCode` assignment
+    /// inside the host call itself.
+    pub(crate) fn guard_hit(&mut self, guard_id: u32, maxiter: u32) -> bool {
+        let count = self.guard_counts.entry(guard_id).or_insert(0);
+        *count = count.saturating_add(1);
+        *count > maxiter
     }
 
     /// `etxn_reserve(count)`: `0` → `TOO_SMALL`; `> 255` → `TOO_BIG`; a
