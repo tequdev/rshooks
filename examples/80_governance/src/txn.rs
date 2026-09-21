@@ -301,7 +301,7 @@ pub fn emit_l1_vote_forward(
     txn.push(&[OBJECT_END, ARRAY_END]);
 
     let bytes = txn.finish_fee(fee_offset);
-    emit_buf(bytes).is_ok()
+    emit(bytes).is_ok()
 }
 
 /// Builds and emits a `HookSet` actioning a hook-topic vote — govern.c's
@@ -359,5 +359,5 @@ pub fn emit_hookset(hook_accid: &AccountId, slot_index: u8, hash: Option<&[u8; 3
     txn.push(&[ARRAY_END]);
 
     let bytes = txn.finish_fee(fee_offset);
-    emit_buf(bytes).is_ok()
+    emit(bytes).is_ok()
 }

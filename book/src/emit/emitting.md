@@ -32,7 +32,7 @@ if etxn_reserve(1).is_err() {
 `etxn_reserve` must run before the corresponding `emit` call; it is not
 optional bookkeeping. `rshooks::api::etxn` also exposes the lower-level
 pieces this all rests on — `etxn_burden`, `etxn_fee_base`,
-`etxn_generation`, `etxn_nonce`/`etxn_nonce_buf` — for hooks that need them
+`etxn_generation`, `etxn_nonce`/`etxn_nonce_into` — for hooks that need them
 directly, but `txn_template!`'s `prepare_for_emit()` (below) already calls
 the ones a typical Payment-shaped emission needs.
 
@@ -496,7 +496,7 @@ match prepared.emit() {
 }
 ```
 
-`Prepared::emit()` is a convenience wrapper over `rshooks::api::etxn::emit_buf`
+`Prepared::emit()` is a convenience wrapper over `rshooks::api::etxn::emit`
 that passes exactly `Prepared::as_bytes()` — the real, emit-sized prefix of
 the template's buffer, never the full reserved capacity.
 

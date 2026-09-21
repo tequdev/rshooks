@@ -169,7 +169,7 @@ cursor, once every container the caller opened has been closed:
 only) — exactly as in `txn_template!`'s macro-generated
 `prepare_for_emit`. `StoWriter::prepare_for_emit` returns the same
 `crate::txn::Prepared` type `txn_template!`'s does, so `Prepared::emit()`
-— the thin wrapper over `rshooks::api::etxn::emit_buf` that passes exactly
+— the thin wrapper over `rshooks::api::etxn::emit` that passes exactly
 `Prepared::as_bytes()` — works identically either way:
 
 ```rust,ignore

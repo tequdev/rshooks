@@ -41,7 +41,7 @@ fn emit_minimal_payment() {
     let mut prepared = [0u8; 256];
     let n = etxn::prepare(&mut prepared, &template).expect("prepare");
     let mut hash = [0u8; 32];
-    etxn::emit(&mut hash, &prepared[..n]).expect("emit");
+    etxn::emit_into(&mut hash, &prepared[..n]).expect("emit");
 }
 
 #[hooks]

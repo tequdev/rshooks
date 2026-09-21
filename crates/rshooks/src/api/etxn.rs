@@ -77,11 +77,12 @@ pub fn etxn_generation() -> u32 {
     unsafe { rshooks_core::etxn_generation() as u32 }
 }
 
-/// A fresh nonce for use in an emitted transaction, written into `out`.
-/// Returns the number of bytes written. [`etxn_nonce_buf`] is the fixed-size
-/// convenience twin.
+/// Read a fresh nonce for use in an emitted transaction into `out`. Returns
+/// the number of bytes written. `pub(crate)`: [`etxn_nonce`]/
+/// [`etxn_nonce_into`] are the public forms — see the `api` module doc
+/// comment's "Naming" section.
 #[inline(always)]
-pub fn etxn_nonce<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
+pub(crate) fn etxn_nonce_raw<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
     let out = out.as_mut();
     let cap = out.len();
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
@@ -94,15 +95,16 @@ pub fn etxn_nonce<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
 
 fixed_buf_fn! {
     /// A fresh nonce for use in an emitted transaction.
-    fn etxn_nonce_buf() -> Nonce = etxn_nonce,
+    fn etxn_nonce() -> Nonce = etxn_nonce_raw,
     etxn_nonce_into
 }
 
 /// Emit `tx_blob` as a new transaction, writing the emitted transaction's
 /// hash into `out`. Requires a prior [`etxn_reserve`] call. Returns the
-/// number of bytes written. [`emit_buf`] is the fixed-size convenience twin.
+/// number of bytes written. `pub(crate)`: [`emit`]/[`emit_into`] are the
+/// public forms — see the `api` module doc comment's "Naming" section.
 #[inline(always)]
-pub fn emit<B: AsMut<[u8]> + ?Sized>(out: &mut B, tx_blob: &[u8]) -> Result<usize> {
+pub(crate) fn emit_raw<B: AsMut<[u8]> + ?Sized>(out: &mut B, tx_blob: &[u8]) -> Result<usize> {
     let out = out.as_mut();
     let cap = out.len();
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
@@ -120,10 +122,18 @@ pub fn emit<B: AsMut<[u8]> + ?Sized>(out: &mut B, tx_blob: &[u8]) -> Result<usiz
     .map(|v| (v as usize).min(cap))
 }
 
+/// Out-param twin of [`emit`] — see the `api` module doc comment's "Naming"
+/// section.
+#[inline(always)]
+pub fn emit_into<B: AsMut<[u8]> + ?Sized>(out: &mut B, tx_blob: &[u8]) -> Result<()> {
+    let _ = emit_raw(out, tx_blob)?;
+    Ok(())
+}
+
 /// Emit `tx_blob` as a new transaction. Requires a prior [`etxn_reserve`]
 /// call. Returns the emitted transaction's hash.
 #[inline(always)]
-pub fn emit_buf(tx_blob: &[u8]) -> Result<Hash> {
+pub fn emit(tx_blob: &[u8]) -> Result<Hash> {
     let mut storage =
         core::mem::MaybeUninit::<crate::convert::Scratch<{ crate::types::HASH_LEN }>>::uninit();
     // SAFETY: only read via `assume_init` below, once `written == HASH_LEN`
@@ -135,7 +145,7 @@ pub fn emit_buf(tx_blob: &[u8]) -> Result<Hash> {
     // clamp down, so `written == HASH_LEN` still proves every byte was
     // written.
     let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
-    let written = emit(buf, tx_blob)?;
+    let written = emit_raw(buf, tx_blob)?;
     if written == crate::types::HASH_LEN {
         // SAFETY: see the host contract cited above.
         Ok(Hash(unsafe { storage.assume_init() }.0))
@@ -179,17 +189,20 @@ mod tests {
         assert_eq!(etxn_fee_base(&[0u8; 4]), Err(HookError::NotImplemented));
         assert_eq!(etxn_reserve(1), Err(HookError::NotImplemented));
         assert_eq!(etxn_generation(), rshooks_core::NOT_IMPLEMENTED as u32);
-        assert_eq!(etxn_nonce_buf(), Err(HookError::NotImplemented));
+        assert_eq!(etxn_nonce(), Err(HookError::NotImplemented));
         assert_eq!(
             etxn_nonce_into(&mut Nonce::default()),
             Err(HookError::NotImplemented)
         );
-        assert_eq!(emit_buf(&[0u8; 4]), Err(HookError::NotImplemented));
+        assert_eq!(emit(&[0u8; 4]), Err(HookError::NotImplemented));
         let mut out = [0u8; 8];
         let mut nonce_out = [0u8; 32];
-        assert_eq!(etxn_nonce(&mut nonce_out), Err(HookError::NotImplemented));
         assert_eq!(
-            emit(&mut nonce_out, &[0u8; 4]),
+            etxn_nonce_into(&mut nonce_out),
+            Err(HookError::NotImplemented)
+        );
+        assert_eq!(
+            emit_into(&mut nonce_out, &[0u8; 4]),
             Err(HookError::NotImplemented)
         );
         assert_eq!(prepare(&mut out, &[0u8; 4]), Err(HookError::NotImplemented));

@@ -37,19 +37,18 @@ let written = state(&mut buf, &key)?;
 state_set(&buf[..written], &key)?;
 ```
 
-For the common primitive shapes there are dedicated helpers —
-`state_u32`/`state_set_u32`, `state_i64`/`state_set_i64`,
-`state_xfl`/`state_set_xfl`, and their `state_update_*` read-modify-write
-counterparts — all little-endian via `state_exact` under the hood. The one
-outlier is `state_u64`/`state_update_u64`, which use the host's as-int64
-mode and read/write **big-endian** — intended for an entry whose bytes
-originated from Xahau Binary itself (a protocol-mirroring value, or interop
-with a C hook), not one this crate's own typed layer wrote. For a
-little-endian `u64` written by the typed layer, use `state_u64_le` instead.
-`state_exact::<T>` is the general fixed-length escape hatch this tier is
-built on, identical in spirit to `otxn_field_exact` (see [Reading the
-Originating Transaction](otxn.md)): `T` must be exactly the right length,
-inferred from context, no turbofish.
+`state_u64`/`state_update_u64` use the host's as-int64 mode and read/write
+**big-endian** — intended for an entry whose bytes originated from Xahau
+Binary itself (a protocol-mirroring value, or interop with a C hook), not
+one this crate's own typed layer wrote. For a little-endian scalar written
+by the typed layer, reach for Tier 2's `state_get`/`state_set_loose`/
+`state_update_loose` instead. `state_exact::<T>` is the general
+fixed-length escape hatch this tier is built on, identical in spirit to
+`otxn_field_exact` (see [Reading the Originating
+Transaction](otxn.md)): `T` must be exactly the right length, inferred from
+context, no turbofish — `state_exact::<[u8; 8]>(key).map(u64::from_le_bytes)`
+is the little-endian `u64` read for a raw runtime key with no typed layer
+in play.
 
 Reach for this tier for a one-off primitive read/write with no reuse
 value, or as the escape hatch [Hook Chains](../concepts/chains.md#a-real-limit-typed-accessor-density-inside-one-entry)

@@ -32,7 +32,7 @@ fn emit_minimal_payment(_r: u32) -> i64 {
     let mut prepared = [0u8; 256];
     let n = rshooks::api::etxn::prepare(&mut prepared, &template).expect("prepare");
     let mut hash = [0u8; 32];
-    rshooks::api::etxn::emit(&mut hash, &prepared[..n]).expect("emit");
+    rshooks::api::etxn::emit_into(&mut hash, &prepared[..n]).expect("emit");
 
     let burden = rshooks::api::otxn::otxn_burden();
     let _ = rshooks::api::state::state_set(&burden.to_be_bytes(), b"main_burden");
@@ -53,7 +53,7 @@ fn emit_minimal_payment(_r: u32) -> i64 {
 /// transaction's own `EmitDetails` fields in both cases (not incremented).
 fn record_cbak_otxn(_r: u32) -> i64 {
     let mut id = [0u8; 32];
-    rshooks::api::otxn::otxn_id(&mut id, 0).expect("otxn_id");
+    rshooks::api::otxn::otxn_id_into(&mut id, 0).expect("otxn_id");
     let _ = rshooks::api::state::state_set(&id, b"cbak_otxn_id");
 
     let burden = rshooks::api::otxn::otxn_burden();

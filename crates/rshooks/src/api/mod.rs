@@ -18,19 +18,22 @@
 //! components are pointers, which are plain integers, how many are used) is
 //! encoded in its signature instead of six same-typed slots.
 //!
-//! # `_into` twins
+//! # Naming
 //!
-//! Every by-value fixed-size read in this module (`hook_account_buf`,
-//! `hook_hash_buf`, `otxn_id_buf`, `ledger_last_hash_buf`, `etxn_nonce_buf`,
-//! `util_accid_buf`, `util_sha512h_buf`, `otxn_field_exact`,
-//! `otxn_field_typed`) has an `_into(out: &mut T, ...) -> Result<()>` twin
-//! that writes straight into caller-owned `out` instead of returning `T` by
-//! value. Reach for the twin when the result is about to be borrowed into
-//! another call right away: the by-value form's own local has its address
-//! taken by the host call, which stops the optimizer from eliding the copy
-//! into the caller's actual destination on return. [`keylet`]'s own
-//! "`_into` twins" section covers the keylet family's version of the same
-//! split.
+//! A wrapper's postfix says what it returns, not which host call backs it:
+//!
+//! | Form | Signature | Meaning |
+//! |---|---|---|
+//! | bare, fixed-size output | `fn name(..) -> Result<T>` | Returns the value by value (`AccountId`/`Hash`/`Keylet`/`Nonce`). |
+//! | bare, variable-length output | `fn name(out: &mut B, ..) -> Result<usize>` | Host shape: caller buffer, byte count returned (`state`, `otxn_field`, `hook_param`, `otxn_param`, `slot`, `util_raddr`, `etxn_details`, `prepare`, ...). |
+//! | `_into` | `fn name_into(out: &mut Out, ..) -> Result<()>` | Out-param twin of a by-value read; writes into caller-owned storage. `Out` is any `AsMut<[u8]>` buffer (a newtype, a `[u8; N]`, or an exactly-sized slice of a larger buffer) for a fixed-size host read, and the read type itself for `_exact`/`_typed`/`keylet_xxx` twins. Reach for it when the value is only ever borrowed into the next call. |
+//! | `_exact` | `fn name_exact<T: FixedRead>(key_or_field) -> Result<T>` | Variable-length host output read as a caller-chosen fixed-size `T`. |
+//! | `_typed` | `fn name_typed(arg) -> Result<..>` | The value type comes from the argument (`SField<T>`, `TypedParamName`). |
+//! | `_opt` | `fn name_opt<T: FixedRead>(name) -> Result<Option<T>>` | `_exact` distinguishing absence. |
+//! | `_u64` | `fn name_u64(key_or_field) -> Result<u64>` | The host's as-int64 mode, big-endian, entries of at most 8 bytes. |
+//!
+//! [`keylet`]'s own "`_into` twins" section covers the keylet family's
+//! version of the `_into` split.
 
 pub mod control;
 pub mod etxn;
@@ -45,12 +48,12 @@ pub mod sto;
 pub mod trace;
 pub mod util;
 
-/// Emits a `xxx_buf`/`xxx_into` pair around a caller-buffer host wrapper
-/// `raw(out: &mut B, ...) -> Result<usize>` — the by-value/`_into` split
-/// `keylet.rs`'s `keylet_fn!` does for the keylet family, applied here to a
-/// concrete, non-generic `raw`/return-type pair instead of a whole
-/// `KEYLET_*` table (see this module's "`_into` twins" doc section for when
-/// to reach for the twin). The `_into` twin writes straight into
+/// Emits a `name`/`name_into` pair from a `pub(crate)` raw caller-buffer
+/// host wrapper `raw(out: &mut B, ...) -> Result<usize>` — the by-value/
+/// `_into` split `keylet.rs`'s `keylet_fn!` does for the keylet family,
+/// applied here to a concrete, non-generic `raw`/return-type pair instead of
+/// a whole `KEYLET_*` table (see this module's "Naming" doc section for when
+/// to reach for which form). The `_into` twin writes straight into
 /// caller-owned `out`; the by-value form is just that twin plus a local,
 /// since `raw` always writes the whole fixed-size `out` on success (the `?`
 /// above it already propagated any error) — the local's own initial value
@@ -72,12 +75,12 @@ macro_rules! fixed_buf_fn {
 
         #[doc = concat!(
             "Out-param twin of [`", stringify!($name), "`] — see the ",
-            "`api` module doc comment's \"`_into` twins\" section for when ",
-            "to reach for this over the by-value form."
+            "`api` module doc comment's \"Naming\" section for when to ",
+            "reach for this over the by-value form."
         )]
         #[inline(always)]
-        pub fn $into_name(out: &mut $ret, $($arg: $aty),*) -> crate::error::Result<()> {
-            let _ = $raw(out.as_mut(), $($arg),*)?;
+        pub fn $into_name<B: AsMut<[u8]> + ?Sized>(out: &mut B, $($arg: $aty),*) -> crate::error::Result<()> {
+            let _ = $raw(out, $($arg),*)?;
             Ok(())
         }
     };

@@ -50,9 +50,9 @@ fn main() {
     let _ = otxn_burden();
     let _ = otxn_generation();
     let _ = otxn_type();
-    let _ = otxn_id_buf(0);
+    let _ = otxn_id(0);
     let mut idbuf = [0u8; 32];
-    let _ = otxn_id(&mut idbuf, 0);
+    let _ = otxn_id_into(&mut idbuf, 0);
 
     // Numbered slot functions, by explicit path.
     let _ = slot_set(&[0u8; 34], 1);

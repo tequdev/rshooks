@@ -332,8 +332,8 @@ src/
     ├── slot.rs    # slot_* family, meta_slot, xpop_slot
     ├── sto.rs     # sto_subfield, sto_subarray, sto_emplace, sto_erase, sto_validate
     ├── float.rs   # thin fns backing XFL (float_sto, float_sto_set, slot_float)
-    ├── util.rs    # util_accid, util_raddr, util_sha512h, util_verify, util_keylet(_buf)
-    ├── keylet.rs  # one typed keylet_xxx() + keylet_xxx_into() per KEYLET_* constant, each independently built on util_keylet_buf/util_keylet
+    ├── util.rs    # util_accid, util_raddr, util_sha512h, util_verify, util_keylet/util_keylet_into
+    ├── keylet.rs  # one typed keylet_xxx() + keylet_xxx_into() per KEYLET_* constant, each independently built on util_keylet/util_keylet_into
     └── trace.rs   # trace, trace_num, trace_float
 ```
 
@@ -433,9 +433,9 @@ existed. See the doc comments on those functions.)
 #[inline(always)]
 pub fn state(out: &mut [u8], key: &[u8]) -> Result<usize>;
 #[inline(always)]
-pub fn hook_account(out: &mut [u8]) -> Result<usize>;
+pub fn hook_account() -> Result<AccountId>;               // fixed-size output
 #[inline(always)]
-pub fn hook_account_buf() -> Result<AccountId>;   // fixed-size convenience
+pub fn hook_account_into(out: &mut [u8]) -> Result<()>;   // out-param twin
 ```
 
 - Every `out: &mut [u8]`/key-or-value-shaped `&[u8]` parameter across the
@@ -476,35 +476,25 @@ pub fn hook_account_buf() -> Result<AccountId>;   // fixed-size convenience
   `[u8; 34]`/`[u8; 32]`, …) rather than bare arrays — same layout, size,
   and FFI-compatibility as the array, but distinct at the type level so an
   `AccountId` and a `Hash` can no longer be passed to each other's slots by
-  accident (see `types.rs`'s module doc comment). The caller-buffer form keeps
-  the standard name (`hook_account(out: &mut [u8], ...) -> Result<usize>`,
-  matching the raw Hook API's write_ptr/write_len shape and the crate's
-  other caller-buffer functions like `state`); the array-returning
-  convenience is the same name with a `_buf` postfix
-  (`hook_account_buf() -> Result<AccountId>`), for callers who just want
-  the value. Writing directly into an existing buffer (e.g. a region of a
-  larger template) uses the standard form; the host's own
-  TOO_SMALL/OUT_OF_BOUNDS handling applies to whatever slice is passed. The
-  `_buf` form delegates to the standard form so each raw call site exists
-  once.
-- **Deviation: `api/keylet.rs`'s 26 typed `keylet_xxx` helpers use `_into`,
-  not `_buf`, for their caller-buffer twin** (`keylet_xxx_into(out: &mut
-  Keylet, ...) -> Result<()>`), and — unlike the `_buf` rule above, where
-  the caller-buffer form is the primitive the value-returning convenience
-  delegates to — **neither form delegates to the other here**: each
-  independently calls the host (`keylet_xxx` through `util_keylet_buf`,
-  `keylet_xxx_into` through `util_keylet`), duplicating the small amount of
-  argument-marshaling/testenv-interception plumbing. Reason: the
-  value-returning `keylet_xxx(...) -> Result<Keylet>` is this layer's
-  primary, best-documented API; the caller-buffer form exists specifically
-  as an opt-in escape hatch for a caller about to borrow the result into
-  another buffer-taking call right away (`_into` names that escape hatch
-  without reusing `_buf`'s "the caller-buffer form is the standard one"
-  connotation) — but routing the by-value form through its `_into` twin was
-  measured to cost a handful of extra worst-case instructions at a call
-  site that only uses the by-value API (an inlined delegation wrapper's own
-  local `out` has the same address-taken problem `_into` exists to avoid,
-  so delegation buys nothing there), so the two stand alone instead.
+  accident (see `types.rs`'s module doc comment). A fixed-size read is
+  exposed as exactly two forms — see `crate::api`'s module doc comment
+  "Naming" section — a bare by-value function returning the newtype
+  (`hook_account() -> Result<AccountId>`) and an `_into` out-param twin
+  writing into caller-owned storage (`hook_account_into(out: &mut B, ...)
+  -> Result<()>`); the host's own TOO_SMALL/OUT_OF_BOUNDS handling applies
+  to whatever slice `_into` is given. Every `fixed_buf_fn!`-generated pair
+  (`api/hook_ctx.rs`, `otxn.rs`, `ledger.rs`, `etxn.rs`, `util.rs`) has the
+  by-value form delegate to its `_into` twin (measured byte-identical for
+  every by-value-only caller). `emit` and `util_keylet` instead read into
+  `MaybeUninit` scratch and check the written length themselves, and
+  `api/keylet.rs`'s typed `keylet_xxx` helpers have the two forms call the
+  host independently (`keylet_xxx` through `util_keylet`, `keylet_xxx_into`
+  through `util_keylet_into`) — because routing the by-value form through its
+  `_into` twin there was measured to cost a handful of extra worst-case
+  instructions at a by-value-only call site (an inlined delegation
+  wrapper's own local `out` has the same address-taken problem `_into`
+  exists to avoid, so delegation buys nothing there); see `api/keylet.rs`'s
+  own module doc comment for the full reasoning.
 - **"as-int64" mode** (`state`, `state_foreign`, `otxn_field`, `slot`):
   the host treats `write_ptr = 0, write_len = 0` as a request to return
   the data itself, packed **big-endian** into the non-negative `i64`
@@ -1037,7 +1027,7 @@ length fixes the real blob length — then `etxn_fee_base` over the actual
 blob→fee). `Prepared<'a, T>` (`rshooks::txn::Prepared`) is a typestate
 wrapper — `{ inner: &'a mut T, len: usize }` — that is the *only* way to
 reach an emit-sized slice (`Prepared::as_bytes`) or emit it
-(`Prepared::emit`, wrapping `api::etxn::emit_buf`): the unprepared template
+(`Prepared::emit`, wrapping `api::etxn::emit`): the unprepared template
 type has no `as_bytes`/`emit` method at all, so code cannot emit a buffer
 whose FLS/LLS/Account/EmitDetails/Fee were never actually filled — that
 mistake is now a compile error (`E0599`, no method found), not a runtime
@@ -1076,28 +1066,25 @@ back to this section instead of re-explaining it.
 | Xahau Binary — the Hook API host's "as-int64" mode | **Big-endian** | `state`/`state_foreign`/`otxn_field`/`slot` called with `write_ptr = 0, write_len = 0` return the entry's raw bytes packed big-endian into the non-negative `i64` result (xahaud `applyHook.cpp`, `data_as_int64`) | `api::state::state_u64`/`state_foreign_u64`, `api::otxn::otxn_field_u64` |
 | Xahau Binary — keylets | **Big-endian** | A keylet's first two bytes are the ledger-entry-type tag, big-endian, per xahaud's own keylet construction. rshooks never assembles keylet bytes itself — every `keylet_xxx` helper (`api/keylet.rs`) calls the host's `util_keylet` and receives an already-built, opaque `Keylet`/`[u8; 34]` back — this row documents the host's own convention, not code in this crate | xahaud host (`util_keylet`); wrapped opaquely by `crates/rshooks/src/api/keylet.rs` |
 | Xahau Binary — short state/param keys | **Big-endian-flavored zero-padding**: a key shorter than the fixed key width is **left**-padded with zero bytes by the host (the value's bytes end up at the *end* of the fixed-width key, not the front) | rshooks' `StateKeyEncode` layer (`[u8; N]`, `state_keys!`, `#[derive(HookKey)]`) sends a short key at its own real length and relies on this host-side left-pad directly — see §5.7 for the full rule; `pad_left!` (`crates/rshooks/src/macros.rs`) reproduces this same left-pad *locally*, for the rarer case of needing the already-padded bytes themselves as a value, not as a `state`/`state_set` argument | host left-pad: xahaud; local equivalent: `pad_left!` (`crates/rshooks/src/macros.rs`) |
-| Hook-private data: state values, param values | **Little-endian** (the guest's own native memory image — LE on `wasm32v1-none`) | The C hook idiom `state(&native_int64, 8, key, klen)` — a raw pointer to a native `int64_t`, read/written in whatever the guest's own endianness is; `crates/rshooks/src/convert.rs`'s `ToBytes`/`FromBytes` traits (and every `rshooks::types` newtype, plus the `#[derive(HookKey)]`/`#[derive(HookData)]` macros built on them) encode/decode this way; `api::state::state_u32`/`state_i64`/`state_xfl` (+ their `state_set_*`/`state_update_*` twins) read/write this convention via the ordinary (non-as-int64) buffer path | `crates/rshooks/src/convert.rs`, `crates/rshooks/src/types.rs`, `api::state::state_u32`/`state_i64`/`state_xfl`/`state_u64_le`/`state_foreign_u64_le` |
+| Hook-private data: state values, param values | **Little-endian** (the guest's own native memory image — LE on `wasm32v1-none`) | The C hook idiom `state(&native_int64, 8, key, klen)` — a raw pointer to a native `int64_t`, read/written in whatever the guest's own endianness is; `crates/rshooks/src/convert.rs`'s `ToBytes`/`FromBytes` traits (and every `rshooks::types` newtype, plus the `#[derive(HookKey)]`/`#[derive(HookData)]` macros built on them) encode/decode this way; `crate::state`'s `state_get`/`state_set_loose`/`state_update_loose` (+ `_foreign` twins) read/write this convention via the ordinary (non-as-int64) buffer path | `crates/rshooks/src/convert.rs`, `crates/rshooks/src/types.rs`, `crates/rshooks/src/state.rs` |
 | Raw byte sequences (`AccountId`, `Hash`, ...) | **Neutral** — not a byte-order question | An `AccountId`/`Hash` is an opaque sequence of bytes with no numeric interpretation; scalar Hook API return values, `sfcode`s, and an `XFL`'s raw bit pattern are likewise "values," not multi-byte integers subject to a byte-order convention | — |
 
-**The one API surface that deliberately offers both conventions side by
-side** is `api::state`'s `_u64`-suffixed family, precisely because state
-entries can originate from either world:
-
-- [`state_u64`](crate::api::state::state_u64) / [`state_foreign_u64`](crate::api::state::state_foreign_u64)
-  — the host's as-int64 mode, **big-endian**. Read a state entry whose
-  bytes originated from Xahau Binary itself — e.g. a value mirroring a
-  protocol field like `Tx.Sequence`, or interop with a C hook that wrote
-  the entry with explicit big-endian bytes to match protocol convention.
-  Reading an entry that was instead written by this crate's LE typed layer
-  comes back byte-swapped — that is the documented behavior, not a bug.
-- [`state_u64_le`](crate::api::state::state_u64_le) / [`state_foreign_u64_le`](crate::api::state::state_foreign_u64_le)
-  — the ordinary buffer path, **little-endian**. Read a state entry
-  written by this crate's own typed layer (`ToBytes`/`FromBytes`,
-  `state_set_loose`/`state_set_typed`) or by hand with `to_le_bytes` — the
-  same convention as `state_u32`/`state_i64`/`state_xfl`, just unsigned
-  and 64-bit.
-
-Picking the wrong one of the pair does not fail loudly — both succeed and
+**`api::state`'s `_u64` family is exactly one convention, not two** —
+[`state_u64`](crate::api::state::state_u64) /
+[`state_foreign_u64`](crate::api::state::state_foreign_u64) always mean the
+host's as-int64 mode, **big-endian**. Read a state entry whose bytes
+originated from Xahau Binary itself with it — e.g. a value mirroring a
+protocol field like `Tx.Sequence`, or interop with a C hook that wrote the
+entry with explicit big-endian bytes to match protocol convention. Reading
+an entry that was instead written by this crate's LE typed layer comes back
+byte-swapped — that is the documented behavior, not a bug. For the
+little-endian counterpart — a state entry written by this crate's own typed
+layer (`ToBytes`/`FromBytes`, `state_set_loose`/`state_set_typed`) or by
+hand with `to_le_bytes` — reach for `crate::state`'s
+`state_get`/`state_set_loose`/`state_update_loose` (or, for a runtime
+`&[u8]` key with no typed layer in play,
+`state_exact::<[u8; 8]>(key).map(u64::from_le_bytes)` directly). Picking the
+wrong convention for an entry does not fail loudly — both succeed and
 return a `u64`, just byte-swapped relative to what was intended — so the
 choice has to be made deliberately, by knowing which world wrote the
 bytes being read.

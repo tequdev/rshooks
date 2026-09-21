@@ -89,7 +89,7 @@ fn emit_nop_padded_nested_object(_r: u32) -> i64 {
     spliced.extend_from_slice(&base[pos + 6..]); // 0xE1 onward
 
     let mut hash = [0u8; 32];
-    rshooks::api::etxn::emit(&mut hash, &spliced).expect("emit");
+    rshooks::api::etxn::emit_into(&mut hash, &spliced).expect("emit");
 
     rshooks::api::control::accept(b"emitted", 0);
 }

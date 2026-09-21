@@ -245,7 +245,7 @@ impl Governance {
         let Ok(sender) = otxn_field_typed(sfAccount) else {
             GovernError::AssertionFailed.nope(b"govern: could not read otxn Account")
         };
-        let Ok(hook_accid) = hook_account_buf() else {
+        let Ok(hook_accid) = hook_account() else {
             GovernError::AssertionFailed.nope(b"govern: could not read hook_account")
         };
 
@@ -456,7 +456,7 @@ impl Governance {
         let Ok(sender) = otxn_field_typed(sfAccount) else {
             RewardError::AssertionFailed.rollback(b"reward: could not read otxn Account")
         };
-        let Ok(hook_acc) = hook_account_buf() else {
+        let Ok(hook_acc) = hook_account() else {
             RewardError::AssertionFailed.rollback(b"reward: could not read hook_account")
         };
         // The hook's own emitted ClaimReward-adjacent traffic (there is
@@ -612,7 +612,7 @@ impl Governance {
 
         let bytes = txn.finish(ledger_seq());
 
-        match emit_buf(bytes) {
+        match emit(bytes) {
             Ok(_hash) => accept!(b"Reward: Emitted reward txn successfully.", 0),
             Err(_) => RewardError::EmitFailed.rollback(b"Reward: Emit loopback failed."),
         }
@@ -623,7 +623,7 @@ impl Governance {
 ///
 /// Raw `state_u64` read, not [`GovernanceState::member_count`]'s typed
 /// accessor — see [`keys`]'s module doc comment. `Err(_)`, not
-/// `Err(HookError::DoesntExist)`: `state_u64`, not `state_i64` (the host
+/// `Err(HookError::DoesntExist)`: `state_u64`, not `state_exact` (the host
 /// packs whatever bytes *are* stored into the return value, regardless of
 /// their actual length — the right match for `"MC"`'s actual 1-byte
 /// stored value); and testing only `is_err()`-equivalent (never reading

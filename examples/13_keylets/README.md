@@ -32,7 +32,7 @@ with no setup transactions.
 cargo run -p rshooks-build -- build --manifest-path examples/13_keylets/Cargo.toml
 ```
 
-No extra flags needed: `util_keylet_buf` (which every `keylet_xxx` helper
+No extra flags needed: `util_keylet` (which every `keylet_xxx` helper
 is built on) reads into an uninitialized scratch buffer rather than a
 local zero-init, so the `wasm32v1-none` `memset`-lowering threshold never
 applies to it, at any `opt-level`.

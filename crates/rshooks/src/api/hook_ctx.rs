@@ -15,11 +15,11 @@ use crate::types::{AccountId, Hash};
 /// a buffer this large before trusting a `hook_param` result as complete.
 const HOOK_PARAM_VALUE_MAX_LEN: usize = 256;
 
-/// The AccountID this hook is installed on, written into `out`. Returns the
-/// number of bytes written. [`hook_account_buf`] is the fixed-size
-/// convenience twin.
+/// Read this hook's own AccountID into `out`. Returns the number of bytes
+/// written. `pub(crate)`: [`hook_account`]/[`hook_account_into`] are the
+/// public forms — see the `api` module doc comment's "Naming" section.
 #[inline(always)]
-pub fn hook_account<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
+pub(crate) fn hook_account_raw<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
     let out = out.as_mut();
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
     if let Some(r) = rshooks_core::backend::with_backend(|b| b.hook_account()) {
@@ -31,15 +31,16 @@ pub fn hook_account<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
 
 fixed_buf_fn! {
     /// The AccountID this hook is installed on.
-    fn hook_account_buf() -> AccountId = hook_account,
+    fn hook_account() -> AccountId = hook_account_raw,
     hook_account_into
 }
 
-/// The hash of the hook definition at chain position `hook_no`, written into
-/// `out`. Returns the number of bytes written. [`hook_hash_buf`] is the
-/// fixed-size convenience twin.
+/// Read the hash of the hook definition at chain position `hook_no` into
+/// `out`. Returns the number of bytes written. `pub(crate)`:
+/// [`hook_hash`]/[`hook_hash_into`] are the public forms — see the `api`
+/// module doc comment's "Naming" section.
 #[inline(always)]
-pub fn hook_hash<B: AsMut<[u8]> + ?Sized>(out: &mut B, hook_no: i32) -> Result<usize> {
+pub(crate) fn hook_hash_raw<B: AsMut<[u8]> + ?Sized>(out: &mut B, hook_no: i32) -> Result<usize> {
     let out = out.as_mut();
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
     if let Some(r) = rshooks_core::backend::with_backend(|b| b.hook_hash(hook_no)) {
@@ -53,7 +54,7 @@ fixed_buf_fn! {
     /// The hash of the hook definition at chain position `hook_no` on this
     /// hook's account (negative indices address relative to the current
     /// hook, per Hook API convention).
-    fn hook_hash_buf(hook_no: i32) -> Hash = hook_hash,
+    fn hook_hash(hook_no: i32) -> Hash = hook_hash_raw,
     hook_hash_into
 }
 
@@ -292,8 +293,8 @@ mod tests {
 
     #[test]
     fn smoke_not_implemented_on_host() {
-        assert_eq!(hook_account_buf(), Err(HookError::NotImplemented));
-        assert_eq!(hook_hash_buf(0), Err(HookError::NotImplemented));
+        assert_eq!(hook_account(), Err(HookError::NotImplemented));
+        assert_eq!(hook_hash(0), Err(HookError::NotImplemented));
         assert_eq!(
             hook_account_into(&mut AccountId::default()),
             Err(HookError::NotImplemented)
@@ -303,8 +304,8 @@ mod tests {
             Err(HookError::NotImplemented)
         );
         let mut out = [0u8; 32];
-        assert_eq!(hook_account(&mut out), Err(HookError::NotImplemented));
-        assert_eq!(hook_hash(&mut out, 0), Err(HookError::NotImplemented));
+        assert_eq!(hook_account_into(&mut out), Err(HookError::NotImplemented));
+        assert_eq!(hook_hash_into(&mut out, 0), Err(HookError::NotImplemented));
         assert_eq!(hook_param(&mut out, b"x"), Err(HookError::NotImplemented));
         assert_eq!(
             hook_param_set(b"v", b"x", &[0u8; 32]),

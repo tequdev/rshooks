@@ -77,13 +77,13 @@ fn find_raw_call(line: &str) -> bool {
     name_len > 0 && rest[name_len..].starts_with('(')
 }
 
-/// `api/keylet.rs`'s 26 typed wrappers go through `util_keylet_buf(`/a bare
+/// `api/keylet.rs`'s 26 typed wrappers go through `util_keylet_into(`/a bare
 /// `util_keylet(` rather than `rshooks_core::<fn>(` directly (see the
 /// module doc comment's "`_into` twins" section) — excluding `.util_keylet(`,
 /// the one method-dispatch call inside `testenv_keylet` itself, not a raw
 /// host call site.
 fn find_raw_call_in_keylet(line: &str) -> bool {
-    line.contains("util_keylet_buf(")
+    line.contains("util_keylet_into(")
         || line
             .find("util_keylet(")
             .is_some_and(|idx| !line[..idx].ends_with('.'))

@@ -7,10 +7,10 @@
 //!
 //! # This layer vs. `crate::api::state`'s single-value helpers
 //!
-//! [`mod@crate::api::state`] also has a `state_u32`/`state_i64`/`state_xfl`/
-//! `state_update_u64`/... family: fixed-shape wrappers over
-//! [`crate::api::state::state_exact`] for the primitive integer/
-//! [`crate::xfl::XFL`] cases, each taking a raw `&[u8]` key. This module's
+//! [`mod@crate::api::state`] also has a `state_u64`/`state_update_u64`
+//! pair (the host's as-int64, big-endian path — see that module's doc
+//! comment) and [`crate::api::state::state_exact`], each taking a raw
+//! `&[u8]` key. This module's
 //! [`state_get`]/[`state_set_loose`]/[`state_update_loose`] instead work for
 //! *any* type implementing [`crate::convert::ToBytes`]/
 //! [`crate::convert::FromBytes`] (every `rshooks::types` newtype does, as

@@ -28,10 +28,14 @@ pub fn util_raddr<B: AsMut<[u8]> + ?Sized>(out: &mut B, accid: &[u8]) -> Result<
 }
 
 /// Convert a base58 r-address (`r_address`) to its AccountID form, written
-/// into `out`. Returns the number of bytes written. [`util_accid_buf`] is
-/// the fixed-size convenience twin.
+/// into `out`. Returns the number of bytes written. `pub(crate)`:
+/// [`util_accid`]/[`util_accid_into`] are the public forms — see the `api`
+/// module doc comment's "Naming" section.
 #[inline(always)]
-pub fn util_accid<B: AsMut<[u8]> + ?Sized>(out: &mut B, r_address: &[u8]) -> Result<usize> {
+pub(crate) fn util_accid_raw<B: AsMut<[u8]> + ?Sized>(
+    out: &mut B,
+    r_address: &[u8],
+) -> Result<usize> {
     let out = out.as_mut();
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
     if let Some(r) = rshooks_core::backend::with_backend(|b| b.util_accid(r_address)) {
@@ -50,7 +54,7 @@ pub fn util_accid<B: AsMut<[u8]> + ?Sized>(out: &mut B, r_address: &[u8]) -> Res
 
 fixed_buf_fn! {
     /// Convert a base58 r-address (`r_address`) to its AccountID form.
-    fn util_accid_buf(r_address: &[u8]) -> AccountId = util_accid,
+    fn util_accid(r_address: &[u8]) -> AccountId = util_accid_raw,
     util_accid_into
 }
 
@@ -77,9 +81,10 @@ pub fn util_verify(data: &[u8], signature: &[u8], public_key: &[u8]) -> Result<b
 }
 
 /// SHA-512-Half of `data`, written into `out`. Returns the number of bytes
-/// written. [`util_sha512h_buf`] is the fixed-size convenience twin.
+/// written. `pub(crate)`: [`util_sha512h`]/[`util_sha512h_into`] are the
+/// public forms — see the `api` module doc comment's "Naming" section.
 #[inline(always)]
-pub fn util_sha512h<B: AsMut<[u8]> + ?Sized>(out: &mut B, data: &[u8]) -> Result<usize> {
+pub(crate) fn util_sha512h_raw<B: AsMut<[u8]> + ?Sized>(out: &mut B, data: &[u8]) -> Result<usize> {
     let out = out.as_mut();
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
     if let Some(r) = rshooks_core::backend::with_backend(|b| b.util_sha512h(data)) {
@@ -98,16 +103,17 @@ pub fn util_sha512h<B: AsMut<[u8]> + ?Sized>(out: &mut B, data: &[u8]) -> Result
 
 fixed_buf_fn! {
     /// SHA-512-Half of `data`.
-    fn util_sha512h_buf(data: &[u8]) -> Hash = util_sha512h,
+    fn util_sha512h(data: &[u8]) -> Hash = util_sha512h_raw,
     util_sha512h_into
 }
 
 /// Compute a Keylet of `keylet_type` from up to six `u32` components
 /// (`a`..`f`), written into `out`. Returns the number of bytes written.
-/// [`util_keylet_buf`] is the fixed-size convenience twin.
+/// `pub(crate)`: [`util_keylet`]/[`util_keylet_into`] are the public forms —
+/// see the `api` module doc comment's "Naming" section.
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
-pub fn util_keylet<B: AsMut<[u8]> + ?Sized>(
+pub(crate) fn util_keylet_raw<B: AsMut<[u8]> + ?Sized>(
     out: &mut B,
     keylet_type: u32,
     a: u32,
@@ -158,6 +164,24 @@ pub fn util_keylet<B: AsMut<[u8]> + ?Sized>(
     .map(|v| v as usize)
 }
 
+/// Out-param twin of [`util_keylet`] — see the `api` module doc comment's
+/// "Naming" section.
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+pub fn util_keylet_into<B: AsMut<[u8]> + ?Sized>(
+    out: &mut B,
+    keylet_type: u32,
+    a: u32,
+    b: u32,
+    c: u32,
+    d: u32,
+    e: u32,
+    f: u32,
+) -> Result<()> {
+    let _ = util_keylet_raw(out, keylet_type, a, b, c, d, e, f)?;
+    Ok(())
+}
+
 /// Compute a Keylet of `keylet_type` from up to six `u32` components
 /// (`a`..`f`; unused components are `0` per the Hook API convention for the
 /// given keylet type — see `rshooks_core::KEYLET_*`, or, for a precisely
@@ -172,7 +196,7 @@ pub fn util_keylet<B: AsMut<[u8]> + ?Sized>(
 /// still apply to).
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
-pub fn util_keylet_buf(
+pub fn util_keylet(
     keylet_type: u32,
     a: u32,
     b: u32,
@@ -186,7 +210,7 @@ pub fn util_keylet_buf(
     // SAFETY: only read via `assume_init` below, once `written == KEYLET_LEN`
     // proves the host wrote every byte.
     let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
-    let written = util_keylet(buf, keylet_type, a, b, c, d, e, f)?;
+    let written = util_keylet_raw(buf, keylet_type, a, b, c, d, e, f)?;
     if written == crate::types::KEYLET_LEN {
         // SAFETY: `written == KEYLET_LEN` proves the host wrote every byte.
         Ok(Keylet(crate::buf_eq::buf_copy_34(
@@ -209,7 +233,7 @@ mod tests {
             util_raddr(&mut out, &[0u8; 20]),
             Err(HookError::NotImplemented)
         );
-        assert_eq!(util_accid_buf(b"raddress"), Err(HookError::NotImplemented));
+        assert_eq!(util_accid(b"raddress"), Err(HookError::NotImplemented));
         assert_eq!(
             util_accid_into(&mut AccountId::default(), b"raddress"),
             Err(HookError::NotImplemented)
@@ -218,28 +242,28 @@ mod tests {
             util_verify(b"data", b"sig", b"pubkey"),
             Err(HookError::NotImplemented)
         );
-        assert_eq!(util_sha512h_buf(b"data"), Err(HookError::NotImplemented));
+        assert_eq!(util_sha512h(b"data"), Err(HookError::NotImplemented));
         assert_eq!(
             util_sha512h_into(&mut Hash::default(), b"data"),
             Err(HookError::NotImplemented)
         );
         assert_eq!(
-            util_keylet_buf(1, 0, 0, 0, 0, 0, 0),
+            util_keylet(1, 0, 0, 0, 0, 0, 0),
             Err(HookError::NotImplemented)
         );
         let mut accid_out = [0u8; 20];
         assert_eq!(
-            util_accid(&mut accid_out, b"raddress"),
+            util_accid_into(&mut accid_out, b"raddress"),
             Err(HookError::NotImplemented)
         );
         let mut hash_out = [0u8; 32];
         assert_eq!(
-            util_sha512h(&mut hash_out, b"data"),
+            util_sha512h_into(&mut hash_out, b"data"),
             Err(HookError::NotImplemented)
         );
         let mut keylet_out = [0u8; 34];
         assert_eq!(
-            util_keylet(&mut keylet_out, 1, 0, 0, 0, 0, 0, 0),
+            util_keylet_into(&mut keylet_out, 1, 0, 0, 0, 0, 0, 0),
             Err(HookError::NotImplemented)
         );
     }

@@ -193,7 +193,7 @@ issuer charging no fee — is 18 host calls when the issuer sets no
 | `Payment::otxn()` | 1 | `otxn_type` + one integer compare |
 | `amount()` | 1 | `otxn_field` |
 | `destination_tag()` | 1 | `otxn_field` |
-| `hook_account_buf()` | 1 | `hook_account` |
+| `hook_account()` | 1 | `hook_account` |
 | `keylet_line_for_asset()` | 1 | `util_keylet` |
 | `RippleState::from_keylet()` | 4 | `slot_set`, then the `sfLedgerEntryType` check |
 | `line.flags()` | 3 | `slot_subfield` + read + clear |
@@ -207,7 +207,7 @@ Measured end to end (`rshooks build`/`check`, this workspace's
 worst-case instruction count, wasm size, and max nesting depth for the
 `main` hook.
 
-Every by-value fixed-size read above (`hook_account_buf`,
+Every by-value fixed-size read above (`hook_account`,
 `keylet_line_for_asset`, `keylet_account`) has an `_into(out: &mut T, ..)
 -> Result<()>` twin that writes straight into caller-owned storage. The
 by-value form is the idiom to write; the twin is an escape hatch for a

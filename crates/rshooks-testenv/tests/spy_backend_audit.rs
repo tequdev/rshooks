@@ -158,18 +158,18 @@ fn every_phase1_backend_method_is_reached() {
     let _ = rshooks::api::state::state_foreign_set(&[1, 2], &[0u8; 32], &ns, &acc);
     let _ = otxn_field(&mut buf32, 0u32);
     let _ = otxn_type();
-    let _ = otxn_id(&mut buf32, 0);
+    let _ = otxn_id_into(&mut buf32, 0);
     let _ = otxn_param(&mut buf32, b"x");
     let _ = otxn_burden();
     let _ = otxn_generation();
     let _ = hook_param(&mut buf32, b"x");
-    let _ = hook_account(&mut buf20);
-    let _ = hook_hash(&mut buf32, 0);
+    let _ = hook_account_into(&mut buf20);
+    let _ = hook_hash_into(&mut buf32, 0);
     let _ = hook_pos();
     let _ = ledger_seq();
     let _ = ledger_last_time();
-    let _ = ledger_last_hash(&mut buf32);
-    let _ = ledger_nonce(&mut buf32);
+    let _ = ledger_last_hash_into(&mut buf32);
+    let _ = ledger_nonce_into(&mut buf32);
     let _ = fee_base();
     let _ = etxn_reserve(1);
     let _ = etxn_fee_base(&[0u8; 4]);
@@ -178,9 +178,9 @@ fn every_phase1_backend_method_is_reached() {
     let _ = etxn_burden();
     let _ = etxn_generation();
     let mut nonce_buf = [0u8; 32];
-    let _ = etxn_nonce(&mut nonce_buf);
+    let _ = etxn_nonce_into(&mut nonce_buf);
     let mut emit_out = [0u8; 32];
-    let _ = emit(&mut emit_out, &[0u8; 4]);
+    let _ = emit_into(&mut emit_out, &[0u8; 4]);
     let _ = trace(b"m", b"d", false);
     let _ = trace_num(b"m", 1);
     let _ = catch_unwind(AssertUnwindSafe(|| accept(b"", 0)));
@@ -290,11 +290,11 @@ fn every_phase2_backend_method_is_reached() {
     // -- util --
     let mut util_out = [0u8; 64];
     let _ = rshooks::api::util::util_raddr(&mut util_out, &[0u8; 20]);
-    let _ = rshooks::api::util::util_accid(&mut util_out, b"raddress");
+    let _ = rshooks::api::util::util_accid_into(&mut util_out, b"raddress");
     let _ = rshooks::api::util::util_verify(b"data", b"sig", b"pubkey");
-    let _ = rshooks::api::util::util_sha512h(&mut util_out, b"data");
+    let _ = rshooks::api::util::util_sha512h_into(&mut util_out, b"data");
     let mut keylet_out = [0u8; 34];
-    let _ = rshooks::api::util::util_keylet(&mut keylet_out, 1, 0, 0, 0, 0, 0, 0);
+    let _ = rshooks::api::util::util_keylet_into(&mut keylet_out, 1, 0, 0, 0, 0, 0, 0);
 
     // -- keylet (all 26 typed helpers) --
     let account = AccountId::default();
@@ -333,7 +333,7 @@ fn every_phase2_backend_method_is_reached() {
     let _ = rshooks::api::keylet::keylet_cron(&account, 1);
 
     // -- ledger_keylet --
-    let _ = rshooks::api::ledger::ledger_keylet(&mut keylet_out, &[0u8; 34], &[0u8; 34]);
+    let _ = rshooks::api::ledger::ledger_keylet_into(&mut keylet_out, &[0u8; 34], &[0u8; 34]);
 
     // -- control leftovers / hook_param_set / prepare / trace_float --
     let _ = hook_again();

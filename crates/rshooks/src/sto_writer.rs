@@ -780,7 +780,7 @@ impl<'a> StoWriter<'a> {
     /// [`sfSigningPubKey`], [`sfAccount`]) to have already been written, in
     /// whatever order the caller chose, then:
     ///
-    /// 1. Gathers every fallible input — [`crate::api::hook_ctx::hook_account_buf`],
+    /// 1. Gathers every fallible input — [`crate::api::hook_ctx::hook_account`],
     ///    the runtime-sized `sfEmitDetails` bytes via
     ///    [`crate::api::etxn::etxn_details`], and `etxn_fee_base` computed
     ///    over the serialized prefix including those `EmitDetails` bytes —
@@ -812,7 +812,7 @@ impl<'a> StoWriter<'a> {
     /// [`HookError::InvalidArgument`] if any container is still open, any
     /// required field was never written, `buf` lacks enough headroom for
     /// `EmitDetails`, or the writer is already finalized. Otherwise
-    /// propagates `hook_account_buf`/`etxn_details`/`etxn_fee_base`'s
+    /// propagates `hook_account`/`etxn_details`/`etxn_fee_base`'s
     /// errors.
     #[inline(always)]
     pub fn prepare_for_emit(&mut self) -> Result<Prepared<'_, Self>> {
@@ -839,7 +839,7 @@ impl<'a> StoWriter<'a> {
         // leaves the writer completely unchanged.
         let fls = ledger::ledger_seq().wrapping_add(1);
         let lls = fls.wrapping_add(4);
-        let account = hook_ctx::hook_account_buf()?;
+        let account = hook_ctx::hook_account()?;
 
         let ed_start = self.reserve_capacity(EMIT_DETAILS_MAX_LEN)?;
         let ed_end = ed_start.wrapping_add(EMIT_DETAILS_MAX_LEN);
