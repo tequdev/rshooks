@@ -62,6 +62,15 @@
 //! headroom beyond everything the caller already wrote, or
 //! [`StoWriter::prepare_for_emit`] fails with
 //! [`HookError::InvalidArgument`].
+//!
+//! # Resuming past a compile-time prefix
+//!
+//! [`StoWriter::resume`] starts the cursor past bytes a caller already put
+//! in `buf` by some other means — typically a `const`-computed prefix baked
+//! into a `static`, landing in a wasm data segment instead of costing
+//! runtime instructions. [`StoWriter::emit_plumbing`] then tells a resumed
+//! writer where that prefix's emit-plumbing fields live, standing in for
+//! the field-by-field calls that would otherwise record those offsets.
 
 use crate::api::{etxn, float, hook_ctx, ledger};
 use crate::error::{HookError, Result};
@@ -103,6 +112,21 @@ const ARRAY_END_MARKER: SField<Opaque> = SField::new((15u32 << 16) | 1);
 enum FrameKind {
     Object,
     Array,
+}
+
+/// The value offsets of a resumed prefix's emit-plumbing fields, for
+/// [`StoWriter::emit_plumbing`] — every offset points past the field's
+/// header, at its value bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlumbingOffsets {
+    /// `sfFirstLedgerSequence`'s 4-byte big-endian value.
+    pub first_ledger_sequence_off: usize,
+    /// `sfLastLedgerSequence`'s 4-byte big-endian value.
+    pub last_ledger_sequence_off: usize,
+    /// `sfFee`'s 8-byte native-amount value.
+    pub fee_off: usize,
+    /// `sfAccount`'s 20 raw account-id bytes, after the VL length byte.
+    pub account_off: usize,
 }
 
 /// A bounded, allocation-free writer for a runtime-sized `STObject`
@@ -157,6 +181,72 @@ impl<'a> StoWriter<'a> {
             signing_pub_key_seen: false,
             finalized: false,
         }
+    }
+
+    /// Wraps `buf` as a writer whose cursor starts at `prefix_len` instead
+    /// of `0` — the caller guarantees `buf[..prefix_len]` already holds a
+    /// valid serialized prefix (e.g. a `const`-baked `static`). The writer
+    /// does not inspect those bytes; it carries no plumbing bookkeeping for
+    /// them until a call to [`Self::emit_plumbing`] supplies it.
+    ///
+    /// # Errors
+    ///
+    /// [`HookError::InvalidArgument`] if `prefix_len` exceeds `buf.len()`.
+    #[inline(always)]
+    pub fn resume(buf: &'a mut [u8], prefix_len: usize) -> Result<Self> {
+        if prefix_len > buf.len() {
+            return Err(HookError::InvalidArgument);
+        }
+        let mut w = Self::new(buf);
+        w.pos = prefix_len;
+        Ok(w)
+    }
+
+    /// Declares that the bytes already in the buffer (before the cursor)
+    /// hold all six required emit-plumbing fields — `sfSequence`,
+    /// `sfFirstLedgerSequence`, `sfLastLedgerSequence`, `sfFee`,
+    /// `sfSigningPubKey`, `sfAccount` — and records where the four
+    /// patchable ones (`offsets`) live, exactly as if each had just been
+    /// written through [`Self::u32_field`]/[`Self::native_amount`]/
+    /// [`Self::account_id`]. Typically follows [`Self::resume`] onto a
+    /// prefix that already carries these fields.
+    ///
+    /// # Errors
+    ///
+    /// [`HookError::AlreadySet`] if any of the six fields is already
+    /// recorded. [`HookError::InvalidArgument`] if the writer is already
+    /// finalized (see [`Self::prepare_for_emit`]), or if any offset in
+    /// `offsets` plus its field's length exceeds the current cursor.
+    #[inline(always)]
+    pub fn emit_plumbing(&mut self, offsets: PlumbingOffsets) -> Result<()> {
+        if self.finalized {
+            return Err(HookError::InvalidArgument);
+        }
+        if self.plumbing_already_set(sfSequence.code())
+            || self.plumbing_already_set(sfFirstLedgerSequence.code())
+            || self.plumbing_already_set(sfLastLedgerSequence.code())
+            || self.plumbing_already_set(sfFee.code())
+            || self.plumbing_already_set(sfSigningPubKey.code())
+            || self.plumbing_already_set(sfAccount.code())
+        {
+            return Err(HookError::AlreadySet);
+        }
+        let pos = self.pos;
+        let in_range = |off: usize, len: usize| off.checked_add(len).is_some_and(|end| end <= pos);
+        if !in_range(offsets.first_ledger_sequence_off, 4)
+            || !in_range(offsets.last_ledger_sequence_off, 4)
+            || !in_range(offsets.fee_off, 8)
+            || !in_range(offsets.account_off, ACC_ID_LEN)
+        {
+            return Err(HookError::InvalidArgument);
+        }
+        self.sequence_seen = true;
+        self.signing_pub_key_seen = true;
+        self.first_ledger_sequence_off = Some(offsets.first_ledger_sequence_off);
+        self.last_ledger_sequence_off = Some(offsets.last_ledger_sequence_off);
+        self.fee_off = Some(offsets.fee_off);
+        self.account_off = Some(offsets.account_off);
+        Ok(())
     }
 
     /// The bytes written so far (`0..`[`Self::len`] of the backing buffer).
@@ -1206,6 +1296,119 @@ mod tests {
             .expect("fits");
         w
     }
+
+    #[test]
+    fn resume_then_emit_plumbing_matches_step_by_step_writer() {
+        let mut buf_a = [0u8; 96];
+        let mut a = StoWriter::new(&mut buf_a);
+        a.u16_field(sfTransactionType, 95).expect("fits"); // ttREMIT
+        a.u32_field(sfFlags, 0).expect("fits");
+        a.u32_field(sfSequence, 0).expect("fits");
+        a.u32_field(sfFirstLedgerSequence, 0).expect("fits");
+        a.u32_field(sfLastLedgerSequence, 0).expect("fits");
+        a.native_amount(sfFee, 0).expect("fits");
+        a.empty_vl(sfSigningPubKey).expect("fits");
+        a.account_id(sfAccount, &AccountId::default())
+            .expect("fits");
+
+        let prefix_len = a.len();
+        let offsets = PlumbingOffsets {
+            first_ledger_sequence_off: a.first_ledger_sequence_off.expect("recorded"),
+            last_ledger_sequence_off: a.last_ledger_sequence_off.expect("recorded"),
+            fee_off: a.fee_off.expect("recorded"),
+            account_off: a.account_off.expect("recorded"),
+        };
+        let mut prefix_bytes = [0u8; 96];
+        prefix_bytes[..prefix_len].copy_from_slice(a.as_bytes());
+
+        let mut buf_b = [0u8; 96];
+        buf_b[..prefix_len].copy_from_slice(&prefix_bytes[..prefix_len]);
+        let mut b = StoWriter::resume(&mut buf_b, prefix_len).expect("fits");
+        b.emit_plumbing(offsets)
+            .expect("valid offsets, nothing tracked yet");
+
+        let dest = AccountId([7u8; ACC_ID_LEN]);
+        a.account_id(sfDestination, &dest).expect("fits");
+        b.account_id(sfDestination, &dest).expect("fits");
+
+        assert_eq!(a.as_bytes(), b.as_bytes());
+        assert_eq!(a.pos, b.pos);
+        assert_eq!(a.first_ledger_sequence_off, b.first_ledger_sequence_off);
+        assert_eq!(a.last_ledger_sequence_off, b.last_ledger_sequence_off);
+        assert_eq!(a.fee_off, b.fee_off);
+        assert_eq!(a.account_off, b.account_off);
+        assert_eq!(a.sequence_seen, b.sequence_seen);
+        assert_eq!(a.signing_pub_key_seen, b.signing_pub_key_seen);
+    }
+
+    #[test]
+    fn resume_rejects_prefix_len_over_buffer_len() {
+        let mut buf = [0u8; 4];
+        assert_eq!(
+            StoWriter::resume(&mut buf, 5).err(),
+            Some(HookError::InvalidArgument)
+        );
+    }
+
+    #[test]
+    fn emit_plumbing_rejects_offset_past_cursor() {
+        // A resumed cursor of 40, with a baseline of otherwise-valid
+        // offsets; each case pushes exactly one field's offset (plus its
+        // field's fixed length) past the cursor.
+        const POS: usize = 40;
+        let baseline = PlumbingOffsets {
+            first_ledger_sequence_off: 10,
+            last_ledger_sequence_off: 20,
+            fee_off: 24,
+            account_off: 10,
+        };
+        let cases = [
+            PlumbingOffsets {
+                first_ledger_sequence_off: POS,
+                ..baseline
+            },
+            PlumbingOffsets {
+                last_ledger_sequence_off: POS,
+                ..baseline
+            },
+            PlumbingOffsets {
+                fee_off: POS,
+                ..baseline
+            },
+            PlumbingOffsets {
+                account_off: POS,
+                ..baseline
+            },
+        ];
+        for offsets in cases {
+            let mut buf = [0u8; 64];
+            let mut w = StoWriter::resume(&mut buf, POS).expect("fits");
+            assert_eq!(w.emit_plumbing(offsets), Err(HookError::InvalidArgument));
+        }
+    }
+
+    #[test]
+    fn emit_plumbing_rejects_already_written_plumbing() {
+        let mut buf = [0u8; 32];
+        let mut w = StoWriter::new(&mut buf);
+        w.u32_field(sfSequence, 0).expect("fits");
+        let offsets = PlumbingOffsets {
+            first_ledger_sequence_off: 0,
+            last_ledger_sequence_off: 0,
+            fee_off: 0,
+            account_off: 0,
+        };
+        assert_eq!(w.emit_plumbing(offsets), Err(HookError::AlreadySet));
+
+        // A fresh writer succeeds via `emit_plumbing`, and a later write of
+        // a now-tracked field is rejected the same way `new` would reject
+        // it.
+        let mut buf2 = [0u8; 40];
+        let mut w2 = StoWriter::resume(&mut buf2, 40).expect("fits");
+        w2.emit_plumbing(offsets)
+            .expect("offsets fit within pos 40");
+        assert_eq!(w2.u32_field(sfSequence, 1), Err(HookError::AlreadySet));
+    }
 }
 
 #[cfg(all(test, feature = "testenv", not(target_arch = "wasm32")))]
@@ -1284,6 +1487,48 @@ mod testenv_tests {
         w.empty_vl(sfSigningPubKey).expect("fits");
         w.account_id(sfAccount, &AccountId::default())
             .expect("fits");
+    }
+
+    #[test]
+    fn resume_then_emit_plumbing_prepares_identically_to_step_by_step() {
+        let backend = Rc::new(MockBackend {
+            account: [0xCD; 20],
+            ledger_seq: 500,
+            fee_base: 15,
+            emit_details: vec![0xEEu8; 116],
+            float_sto_out: Vec::new(),
+        });
+        let _guard = rshooks_core::backend::install(backend);
+
+        let mut buf_a = [0u8; 512];
+        let mut a = StoWriter::new(&mut buf_a);
+        write_required_prefix(&mut a);
+        let prefix_len = a.len();
+        let offsets = PlumbingOffsets {
+            first_ledger_sequence_off: a.first_ledger_sequence_off.expect("recorded"),
+            last_ledger_sequence_off: a.last_ledger_sequence_off.expect("recorded"),
+            fee_off: a.fee_off.expect("recorded"),
+            account_off: a.account_off.expect("recorded"),
+        };
+        let mut prefix_bytes = [0u8; 512];
+        prefix_bytes[..prefix_len].copy_from_slice(a.as_bytes());
+
+        let mut buf_b = [0u8; 512];
+        buf_b[..prefix_len].copy_from_slice(&prefix_bytes[..prefix_len]);
+        let mut b = StoWriter::resume(&mut buf_b, prefix_len).expect("fits");
+        b.emit_plumbing(offsets).expect("valid offsets");
+
+        let a_len = {
+            let prepared = a.prepare_for_emit().expect("all required fields present");
+            prepared.as_bytes().len()
+        };
+        let b_len = {
+            let prepared = b.prepare_for_emit().expect("all required fields present");
+            prepared.as_bytes().len()
+        };
+
+        assert_eq!(a_len, b_len);
+        assert_eq!(a.as_bytes(), b.as_bytes());
     }
 
     #[test]
