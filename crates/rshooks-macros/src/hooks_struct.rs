@@ -1422,16 +1422,21 @@ fn field_marker_and_impls(
             let (key_args, encode_body, with_key_override, with_key_bytes_override) = match key {
                 KeySpec::Const { expr } => {
                     let expr_text = tokens_to_string(expr);
-                    // A byte-string-literal key (the common case) is
-                    // promoted to a compile-time `'static` `EncodedStateKey`
-                    // via `with_key` below instead of re-encoding at
-                    // runtime on every access; any other const expression
-                    // keeps the runtime `encode_key` path via `with_key`'s
-                    // default. `with_key_bytes` below hands the literal's
-                    // own `&[u8; N]` bytes straight to `f` inside a `const`
-                    // block — no `EncodedStateKey` built at all.
-                    let is_literal = is_byte_string_literal(expr);
-                    let with_key = is_literal.then(|| {
+                    // A byte-string-literal key is already a `&[u8; N]`
+                    // expression — `with_key_bytes` below hands it straight
+                    // to `f` inside a `const` block, no `EncodedStateKey`
+                    // built at all. Any other const expression is an opaque
+                    // token tree to this macro (no type info to act on), so
+                    // it goes through `ConstKey` instead: ordinary method
+                    // resolution picks the matching inherent `encoded()`
+                    // impl for whatever concrete type the expression turns
+                    // out to have (see `ConstKey`'s doc comment) — a key
+                    // type with no such impl fails to compile right here,
+                    // at this field, rather than falling back silently.
+                    // `with_key` (the `EncodedStateKey`-returning method)
+                    // keeps its own, narrower literal-only override for
+                    // callers that still go through it directly.
+                    let with_key = is_byte_string_literal(expr).then(|| {
                         format!(
                             "#[inline(always)]\n\
                              fn with_key<__R>(_args: &Self::KeyArgs, f: impl ::core::ops::FnOnce(&::rshooks::state::EncodedStateKey) -> __R) -> __R {{\n\
@@ -1439,11 +1444,18 @@ fn field_marker_and_impls(
                              }}\n"
                         )
                     });
-                    let with_key_bytes = is_literal.then(|| {
+                    let with_key_bytes = Some(if is_byte_string_literal(expr) {
                         format!(
                             "#[inline(always)]\n\
                              fn with_key_bytes<__R>(_args: &Self::KeyArgs, f: impl ::core::ops::FnOnce(&[u8]) -> __R) -> __R {{\n\
                                  f(const {{ {expr_text} }})\n\
+                             }}\n"
+                        )
+                    } else {
+                        format!(
+                            "#[inline(always)]\n\
+                             fn with_key_bytes<__R>(_args: &Self::KeyArgs, f: impl ::core::ops::FnOnce(&[u8]) -> __R) -> __R {{\n\
+                                 f(const {{ ::rshooks::state::ConstKey({expr_text}).encoded() }})\n\
                              }}\n"
                         )
                     });

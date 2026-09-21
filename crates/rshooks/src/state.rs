@@ -319,6 +319,43 @@ impl EncodedStateKey {
     }
 }
 
+/// Const-promotes a non-literal `#[state(key = <expr>)]` key expression to a
+/// `'static` byte image, for the `#[hooks]` macro's `with_key_bytes`
+/// codegen. A byte-string-literal key expression promotes directly via
+/// [`EncodedStateKey::from_short`] inside a `const` block; a non-literal
+/// expression (e.g. `&SOME_CONST`, where `SOME_CONST` is itself a `const`)
+/// is opaque token trees to the macro, which has no type information to act
+/// on — wrapping it in `ConstKey` and calling `.encoded()` lets ordinary
+/// method resolution pick the matching inherent impl below for whichever
+/// concrete type the expression turns out to have. A key expression whose
+/// type has no `encoded` inherent impl here fails to compile at the field,
+/// with rustc's own "no method named `encoded`" error pointing at the
+/// unsupported expression.
+pub struct ConstKey<T>(
+    /// The wrapped key expression.
+    pub T,
+);
+
+impl<const N: usize> ConstKey<&'static [u8; N]> {
+    /// The wrapped array's own bytes — already real-length, nothing to
+    /// shorten (mirrors the `[u8; N]` [`StateKeyEncode`] impl above).
+    #[inline(always)]
+    #[must_use]
+    pub const fn encoded(self) -> &'static [u8; N] {
+        self.0
+    }
+}
+
+impl ConstKey<&'static StateKey> {
+    /// The wrapped key's full 32 bytes — nothing to shorten (mirrors the
+    /// [`StateKey`] [`StateKeyEncode`] impl, the one already-32-byte case).
+    #[inline(always)]
+    #[must_use]
+    pub const fn encoded(self) -> &'static [u8; STATE_KEY_LEN] {
+        &self.0.0
+    }
+}
+
 impl AsRef<[u8]> for EncodedStateKey {
     #[inline(always)]
     fn as_ref(&self) -> &[u8] {
