@@ -295,6 +295,10 @@ pub(crate) struct EmittedOtxn {
     /// `#[cbak]` body, so on-chain this transaction never triggers a
     /// callback at all.
     pub(crate) callback_account: Option<[u8; 20]>,
+    /// The emitted transaction's own `sfEmitDetails` value bytes, unparsed —
+    /// carried through verbatim into the `ttEMIT_FAILURE` pseudo-transaction
+    /// [`emit_failure`] builds when the emission expires unapplied.
+    pub(crate) emit_details: Vec<u8>,
 }
 
 pub(crate) fn from_emitted(blob: &[u8], hash: [u8; 32]) -> Option<EmittedOtxn> {
@@ -349,7 +353,28 @@ pub(crate) fn from_emitted(blob: &[u8], hash: [u8; 32]) -> Option<EmittedOtxn> {
         generation,
         hook_hash,
         callback_account,
+        emit_details: ed_bytes.clone(),
     })
+}
+
+/// Builds the `ttEMIT_FAILURE` pseudo-transaction xahaud applies when an
+/// emitted transaction expires unapplied (`Xahau/xahaud` `dev`,
+/// `src/xrpld/app/misc/detail/TxQ.cpp`, "Emission failure, adding cleanup
+/// pseudotxn"): `sfLedgerSequence`, `sfTransactionHash` (the emitted
+/// transaction's hash) and the emitted transaction's own `sfEmitDetails`,
+/// nothing else — no `sfAccount`. Its id is the SHA-256 of its serialized
+/// fields, distinct from `emitted_hash`, the same way [`crate::backend`]'s
+/// `deterministic_hash` derives an emitted transaction's stand-in hash.
+pub(crate) fn emit_failure(emitted: &EmittedOtxn, emitted_hash: [u8; 32], ledger_seq: u32) -> Otxn {
+    let otxn = Otxn::new(TxType::EmitFailure)
+        .field_raw(
+            rshooks::sfield::sfLedgerSequence.code(),
+            &ledger_seq.to_be_bytes(),
+        )
+        .field_raw(rshooks::sfield::sfTransactionHash.code(), &emitted_hash)
+        .field_raw(rshooks::sfield::sfEmitDetails.code(), &emitted.emit_details);
+    let hash = crate::backend::deterministic_hash(&serialize(&otxn));
+    otxn.id(hash)
 }
 
 #[cfg(test)]

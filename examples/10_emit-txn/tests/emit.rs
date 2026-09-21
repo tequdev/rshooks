@@ -34,12 +34,11 @@ fn each_invocation_emits_its_own_payment() {
     assert_eq!(env.emitted().len(), 2);
 }
 
-// `EmitTxn`'s `#[cbak(0)]` body unconditionally accepts, reading neither
-// the wasm argument nor the callback otxn. These tests verify exactly
-// that: `invoke_cbak` reaches `Accept` regardless of
-// `CbakOutcome::Success`/`Failure`, and leaves the surrounding `TestEnv`
-// usable afterward — the callback's otxn swap is invocation-scoped and
-// must not leak into a later `invoke`.
+// `EmitTxn`'s `#[cbak(0)]` body declares an `EmitOutcome` argument and
+// gates on it — `Applied` accepts with code 0, `EmitFailure` accepts with
+// code 1. These tests verify that outcome, and that the surrounding
+// `TestEnv` stays usable afterward — the callback's otxn swap is
+// invocation-scoped and must not leak into a later `invoke`.
 
 #[test]
 fn invoke_cbak_success_reaches_the_real_accept_path() {
@@ -50,16 +49,18 @@ fn invoke_cbak_success_reaches_the_real_accept_path() {
 
     let cbak_exit = env.invoke_cbak::<EmitTxn>(0, CbakOutcome::Success(txn));
     assert_eq!(cbak_exit.exit, ExitType::Accept, "{cbak_exit:?}");
+    assert_eq!(cbak_exit.code, 0);
 }
 
 #[test]
-fn invoke_cbak_failure_still_accepts_because_the_cbak_body_ignores_the_outcome() {
+fn invoke_cbak_failure_reaches_the_emit_failure_arm() {
     let env = env();
     let _ = env.invoke::<EmitTxn>(0);
     let txn = env.emitted()[0].clone();
 
     let cbak_exit = env.invoke_cbak::<EmitTxn>(0, CbakOutcome::Failure(txn));
     assert_eq!(cbak_exit.exit, ExitType::Accept, "{cbak_exit:?}");
+    assert_eq!(cbak_exit.code, 1);
 }
 
 #[test]

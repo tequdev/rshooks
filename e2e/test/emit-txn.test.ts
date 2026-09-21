@@ -88,8 +88,8 @@ describe('emit-txn', () => {
     const cbakExecution = cbakExecutions.executions[0]
     expect(cbakExecution.HookAccount).toBe(testContext.hook1.classicAddress)
     expect(Number(cbakExecution.HookReturnCode)).toBe(0)
-    expect(cbakExecution.HookReturnString).toBe('')
+    expect(cbakExecution.HookReturnString).toBe('emit-txn: applied')
     // Use a live sanity bound because callback cost differs from static accounting.
-    expect(parseInt(cbakExecution.HookInstructionCount, 16)).toBeLessThanOrEqual(20)
+    expect(parseInt(cbakExecution.HookInstructionCount, 16)).toBeLessThanOrEqual(40)
   })
 })

@@ -11,6 +11,7 @@
 )]
 
 use rshooks::decl::{HookChainEntries, NativeEntry};
+use rshooks::tx_type::TxType;
 use rshooks_testenv::prelude::*;
 
 /// Reserves one emission slot, `prepare`s a minimal `ttPAYMENT` template
@@ -41,11 +42,15 @@ fn emit_minimal_payment(_r: u32) -> i64 {
     rshooks::api::control::accept(b"emitted", 0);
 }
 
-/// Records the callback's own view of `otxn_id`/`otxn_burden`/`otxn_generation`
+/// Records the callback's own view of
+/// `otxn_id`/`otxn_burden`/`otxn_generation`/`otxn_type`/`sfTransactionHash`/`sfEmitDetails`
 /// into state (`cbak_*`) — the values `TestEnv::invoke_cbak` seeds per
-/// design §4: the otxn is the emitted transaction itself (`otxn_id` == the
-/// hash `emit` returned for it), and burden/generation come straight from
-/// its own `EmitDetails` fields (not incremented).
+/// design §4: for `CbakOutcome::Success` the otxn is the emitted transaction
+/// itself (`otxn_id` == the hash `emit` returned for it, type `Payment`);
+/// for `CbakOutcome::Failure` the otxn is the `ttEMIT_FAILURE`
+/// pseudo-transaction (its own id, distinct `sfTransactionHash` naming the
+/// emitted transaction). Burden/generation come straight from the emitted
+/// transaction's own `EmitDetails` fields in both cases (not incremented).
 fn record_cbak_otxn(_r: u32) -> i64 {
     let mut id = [0u8; 32];
     rshooks::api::otxn::otxn_id(&mut id, 0).expect("otxn_id");
@@ -55,6 +60,19 @@ fn record_cbak_otxn(_r: u32) -> i64 {
     let _ = rshooks::api::state::state_set(&burden.to_be_bytes(), b"cbak_burden");
     let generation = rshooks::api::otxn::otxn_generation();
     let _ = rshooks::api::state::state_set(&generation.to_be_bytes(), b"cbak_generation");
+
+    let otxn_type = rshooks::api::otxn::otxn_type();
+    let _ = rshooks::api::state::state_set(&otxn_type.code().to_be_bytes(), b"cbak_otxn_type");
+
+    let mut txn_hash = [0u8; 32];
+    if rshooks::api::otxn::otxn_field(&mut txn_hash, rshooks::sfield::sfTransactionHash).is_ok() {
+        let _ = rshooks::api::state::state_set(&txn_hash, b"cbak_txn_hash");
+    }
+    let mut emit_details = [0u8; 256];
+    if let Ok(n) = rshooks::api::otxn::otxn_field(&mut emit_details, rshooks::sfield::sfEmitDetails)
+    {
+        let _ = rshooks::api::state::state_set(&emit_details[..n], b"cbak_emit_details");
+    }
 
     rshooks::api::control::accept(b"cbak", 0);
 }
@@ -107,6 +125,10 @@ fn cbak_sees_the_emitted_transaction_as_its_own_otxn() {
     assert_eq!(cbak_exit.exit, ExitType::Accept, "{cbak_exit:?}");
 
     assert_eq!(env.state(b"cbak_otxn_id"), Some(txn.hash().to_vec()));
+    assert_eq!(
+        env.state(b"cbak_otxn_type"),
+        Some(TxType::Payment.code().to_be_bytes().to_vec())
+    );
     // A non-emitted originating otxn's default burden/generation is (1, 0),
     // so this hook's one emission has burden `1 * 1 = 1` and generation
     // `0 + 1 = 1` — the callback reads those same `EmitDetails` values
@@ -146,14 +168,35 @@ fn invoke_cbak_does_not_leak_its_otxn_into_a_later_plain_invoke() {
 }
 
 #[test]
-fn invoke_cbak_failure_outcome_still_swaps_the_otxn() {
+fn invoke_cbak_failure_presents_the_emit_failure_pseudo_transaction() {
     let env = env();
     let _ = env.invoke::<Chain>(0);
     let txn = env.emitted()[0].clone();
 
     let cbak_exit = env.invoke_cbak::<Chain>(0, CbakOutcome::Failure(txn.clone()));
     assert_eq!(cbak_exit.exit, ExitType::Accept, "{cbak_exit:?}");
-    assert_eq!(env.state(b"cbak_otxn_id"), Some(txn.hash().to_vec()));
+
+    // The otxn is the `ttEMIT_FAILURE` pseudo-transaction, not the emitted
+    // transaction itself: distinct type, distinct id, but `sfTransactionHash`
+    // names the emitted transaction.
+    assert_eq!(
+        env.state(b"cbak_otxn_type"),
+        Some(TxType::EmitFailure.code().to_be_bytes().to_vec())
+    );
+    assert_eq!(env.state(b"cbak_txn_hash"), Some(txn.hash().to_vec()));
+    assert_ne!(env.state(b"cbak_otxn_id"), Some(txn.hash().to_vec()));
+    // The copied `sfEmitDetails` object reads back as a well-formed field.
+    assert!(
+        env.state(b"cbak_emit_details")
+            .is_some_and(|v| !v.is_empty())
+    );
+    // Burden/generation still come straight from the emitted transaction's
+    // own `EmitDetails`, unaffected by the otxn substitution.
+    assert_eq!(env.state(b"cbak_burden"), Some(1u64.to_be_bytes().to_vec()));
+    assert_eq!(
+        env.state(b"cbak_generation"),
+        Some(1u32.to_be_bytes().to_vec())
+    );
 }
 
 #[test]

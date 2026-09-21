@@ -4,13 +4,14 @@
 //! `EntryReturn::finish` converts them into the real `accept`/`rollback`
 //! host calls (`.claude/design/TYPED_ENTRY_RESULTS_DESIGN.md` §1.3).
 //!
-//! Two entries, both with a typed `HookResult` hook *and* cbak: index 0's
-//! cbak always accepts, index 1's always rejects. A `#[cbak(i)]`'s
-//! `fn(&self)` never sees `CbakOutcome::Success`/`Failure` (the
-//! macro-generated wrapper calls it as `Struct::fn(&Struct)`, discarding
-//! `_reserved`), so both variants are driven against both cbaks to prove
-//! the typed exit is what reaches `HookExit`, not which `CbakOutcome`
-//! produced it.
+//! Every entry has a typed `HookResult` hook *and* cbak: index 0's cbak
+//! always accepts, index 1's always rejects. Both declare no argument
+//! after `&self` (`fn(&self)`), so neither sees `CbakOutcome::Success`/
+//! `Failure` at all (the macro-generated wrapper calls them as
+//! `Struct::fn(&Struct)`, discarding `_reserved`) — both variants are
+//! driven against both cbaks to prove the typed exit is what reaches
+//! `HookExit`, not which `CbakOutcome` produced it. Index 2's cbak declares
+//! an `EmitOutcome` argument instead, and does branch on it.
 
 #![allow(
     clippy::unwrap_used,
@@ -20,7 +21,7 @@
 )]
 
 use rshooks::api::etxn;
-use rshooks::exit::{Accept, HookResult, Rollback};
+use rshooks::exit::{Accept, EmitOutcome, HookResult, Rollback};
 use rshooks::hooks;
 use rshooks_testenv::prelude::*;
 
@@ -74,6 +75,24 @@ impl Chain {
     #[cbak(1)]
     fn reject_cbak(&self) -> HookResult {
         Err(Rollback::new(b"cbak-reject", 9))
+    }
+
+    /// Third entry, same emit — paired with a cbak that declares an
+    /// `EmitOutcome` argument and branches on it.
+    #[hook(2, on = [Invoke], can_emit = [Payment])]
+    fn main_3(&self) -> HookResult {
+        emit_minimal_payment();
+        Ok(Accept::new(b"emitted", 0))
+    }
+
+    /// Proves a declared `EmitOutcome` argument decodes correctly from the
+    /// host's `cbak(u32)` argument.
+    #[cbak(2)]
+    fn outcome_cbak(&self, outcome: EmitOutcome) -> HookResult {
+        match outcome {
+            EmitOutcome::Applied => Ok(Accept::new(b"applied", 0)),
+            EmitOutcome::EmitFailure => Ok(Accept::new(b"emit-failure", 1)),
+        }
     }
 }
 
@@ -140,4 +159,21 @@ fn typed_cbak_rollback_reaches_hook_exit_with_msg_on_failure_outcome() {
     assert_eq!(cbak_exit.exit, ExitType::Rollback, "{cbak_exit:?}");
     assert_eq!(cbak_exit.code, 9);
     assert_eq!(cbak_exit.msg, b"cbak-reject");
+}
+
+#[test]
+fn typed_cbak_with_emit_outcome_argument_branches_on_the_real_outcome() {
+    let env = env();
+    let _ = env.invoke::<Chain>(2);
+    let txn = env.emitted()[0].clone();
+
+    let applied_exit = env.invoke_cbak::<Chain>(2, CbakOutcome::Success(txn.clone()));
+    assert_eq!(applied_exit.exit, ExitType::Accept, "{applied_exit:?}");
+    assert_eq!(applied_exit.code, 0);
+    assert_eq!(applied_exit.msg, b"applied");
+
+    let failure_exit = env.invoke_cbak::<Chain>(2, CbakOutcome::Failure(txn));
+    assert_eq!(failure_exit.exit, ExitType::Accept, "{failure_exit:?}");
+    assert_eq!(failure_exit.code, 1);
+    assert_eq!(failure_exit.msg, b"emit-failure");
 }

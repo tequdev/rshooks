@@ -544,21 +544,42 @@ impl EmitTxn {
     fn main(&self) -> HookResult { /* ... */ }
 
     #[cbak(0)]
-    fn cbak(&self) -> HookResult {
-        Ok(Accept::from_code(0))
+    fn cbak(&self, outcome: EmitOutcome) -> HookResult {
+        match outcome {
+            EmitOutcome::Applied => Ok(Accept::new(b"emit-txn: applied", 0)),
+            EmitOutcome::EmitFailure => Ok(Accept::new(b"emit-txn: emit failure", 1)),
+        }
     }
 }
 ```
 
-(from `examples/10_emit-txn`; a real callback typically inspects the
+(from `examples/10_emit-txn`; a real callback typically also inspects the
 settled transaction's metadata via `SlotObject::from_meta()` — see
-[Slots and Ledger Objects](../data/slots.md) — before deciding how to
-react.) `#[cbak(<index>)]` takes only the index — no `name`/`on`/etc. of
-its own, since it settles for whatever its paired `#[hook]` at that same
-index emitted. Declaring one changes that entry's `EmitDetails` real
+[Slots and Ledger Objects](../data/slots.md) — once it knows the emission
+actually applied.) `#[cbak(<index>)]` takes only the index — no `name`/
+`on`/etc. of its own, since it settles for whatever its paired `#[hook]`
+at that same index emitted. Its fn may declare one argument after `&self`
+— `EmitOutcome` (or a raw `u32`) — populated from the host's `cbak(u32)`
+argument. Declaring a `#[cbak]` changes that entry's `EmitDetails` real
 serialized size (138 bytes instead of 116), which is exactly why
 `prepare_for_emit` reads `etxn_details`'s *returned* length rather than
 assuming a fixed one.
+
+### The `EmitFailure` trap
+
+An emission is not guaranteed to apply: if its `LastLedgerSequence` passes
+before it settles, xahaud never applies it as its own transaction type.
+Instead it applies a `ttEMIT_FAILURE` pseudo-transaction carrying
+`sfLedgerSequence`, `sfTransactionHash` (the emitted transaction's hash),
+and the original `sfEmitDetails`. That pseudo-transaction — not the
+emitted transaction — is the callback's own originating transaction, and
+its metadata reports `tesSUCCESS` regardless of what the real emission
+would have done. Reading `meta_slot` → `sfTransactionResult` without
+checking the outcome first therefore reports success for an emission that
+never delivered. Gate on `EmitOutcome::Applied` before trusting
+`meta_slot` (equivalently, `otxn_type() != TxType::EmitFailure`), and in
+the `EmitFailure` arm read `sfTransactionHash` to learn which emission
+expired.
 
 ## `can_emit` on the entry attribute
 

@@ -1,6 +1,7 @@
 //! Typed entry-return values: [`Accept`]/[`Rollback`]/[`HookResult`], and
 //! the sealed [`EntryReturn`] conversion the `#[hooks]` macro's generated
-//! entry body calls into.
+//! entry body calls into, plus [`EmitOutcome`] for a `#[cbak(<index>)]`
+//! entry's optional callback-outcome argument.
 //!
 //! Every `#[hook]`/`#[cbak]` entry returns [`HookResult`] — `Ok(Accept)`
 //! exits via [`crate::accept`], `Err(Rollback)` via [`crate::rollback`],
@@ -173,6 +174,40 @@ impl EntryReturn for HookResult {
         match self {
             Ok(a) => accept(a.msg, a.code),
             Err(r) => rollback(r.msg, r.code),
+        }
+    }
+}
+
+/// The `what` argument xahaud passes to a `cbak` export
+/// (`Transactor::doHookCallback`, `src/xrpld/app/tx/detail/Transactor.cpp`:
+/// `ctx_.tx.getTxnType() == ttEMIT_FAILURE ? 1 : 0`), decoded for a
+/// `#[cbak(<index>)]` entry that declares one argument after `&self`.
+///
+/// [`EmitOutcome::EmitFailure`] means the emitted transaction expired
+/// unapplied: the originating transaction the callback sees is the
+/// `ttEMIT_FAILURE` pseudo-transaction (`TxQ.cpp`, "Emission failure,
+/// adding cleanup pseudotxn") carrying `sfLedgerSequence`,
+/// `sfTransactionHash` (the emitted transaction's hash) and the emitted
+/// transaction's `sfEmitDetails`. Its own metadata reports `tesSUCCESS`,
+/// so a callback must gate on this value before reading the applied
+/// transaction's metadata (`meta_slot`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmitOutcome {
+    /// The emitted transaction was applied (`what == 0`); the otxn is the
+    /// emitted transaction and `meta_slot` holds its metadata.
+    Applied,
+    /// The emitted transaction expired unapplied (`what != 0`); the otxn
+    /// is the `ttEMIT_FAILURE` pseudo-transaction.
+    EmitFailure,
+}
+
+impl From<u32> for EmitOutcome {
+    #[inline(always)]
+    fn from(what: u32) -> Self {
+        if what == 0 {
+            Self::Applied
+        } else {
+            Self::EmitFailure
         }
     }
 }

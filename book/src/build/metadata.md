@@ -42,7 +42,7 @@ fn govern(&self) -> HookResult { /* ... */ }
 - **`description = "..."`** — optional, free-form text for this entry's
   sidecar (independent of the struct's own `description`).
 
-`#[cbak(<index>)]` takes **only** the index — no other arguments, since a
+`#[cbak(<index>)]` takes **only** the index — no other attribute arguments, since a
 callback doesn't get its own trigger or emit declaration; it settles for
 whatever its paired `#[hook]` at the same index emitted.
 
