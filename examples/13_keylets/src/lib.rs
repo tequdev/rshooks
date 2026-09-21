@@ -99,7 +99,10 @@ fn compute(keylet_type: u32, result: Result<Keylet>) -> Keylet {
 /// Stores a keylet in Hook state.
 #[inline(always)]
 fn store(key: &KeyletKey, value: &Keylet) {
-    if state_set(value.as_ref(), &key.encode()).is_err() {
+    if key
+        .with_key_bytes(|k| state_set(value.as_ref(), k))
+        .is_err()
+    {
         rollback!(b"keylets: state_set failed", KeyletsError::StateWriteFailed);
     }
 }
