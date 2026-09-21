@@ -110,12 +110,10 @@ node confirms otherwise.
 every 34-byte result into hook state:
 
 ```rust,ignore
-let mut owner = AccountId::default();
-let Ok(()) = otxn_field_typed_into(&mut owner, sfAccount) else {
+let Ok(owner) = otxn_field_typed(sfAccount) else {
     rollback!(b"keylets: sfAccount missing from the originating transaction", ...)
 };
-let mut dest = AccountId::default();
-let Ok(()) = otxn_field_typed_into(&mut dest, sfDestination) else {
+let Ok(dest) = otxn_field_typed(sfDestination) else {
     rollback!(b"keylets: sfDestination missing from the originating transaction", ...)
 };
 
@@ -126,11 +124,6 @@ if state_set(keylet.as_ref(), &KeyletKey::Account.encode()).is_err() {
     rollback!(b"keylets: state_set failed", ...);
 }
 ```
-
-`owner`/`dest` go through `otxn_field_typed`'s `_into` twin rather than the
-by-value form because both are borrowed by every `keylet_xxx` call below —
-the same "result is about to be borrowed into another call" case this
-page's "Why typed helpers" section above describes for `keylet_xxx_into`.
 
 (condensed from `examples/13_keylets/src/lib.rs`, which repeats this shape
 once per keylet type using a small `compute`/`store` helper pair). Every

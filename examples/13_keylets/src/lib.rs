@@ -112,15 +112,13 @@ impl Keylets {
     /// Hook entry point. See the module doc comment for the full behavior.
     #[hook(0, on = [Invoke])]
     fn main(&self) -> HookResult {
-        let mut owner = AccountId::default();
-        let Ok(()) = otxn_field_typed_into(&mut owner, sfAccount) else {
+        let Ok(owner) = otxn_field_typed(sfAccount) else {
             rollback!(
                 b"keylets: sfAccount missing from the originating transaction",
                 KeyletsError::AccountFieldMissing
             )
         };
-        let mut dest = AccountId::default();
-        let Ok(()) = otxn_field_typed_into(&mut dest, sfDestination) else {
+        let Ok(dest) = otxn_field_typed(sfDestination) else {
             rollback!(
                 b"keylets: sfDestination missing from the originating transaction",
                 KeyletsError::DestinationFieldMissing

@@ -133,15 +133,9 @@ match payment.destination_tag() {
     _ => rollback!(.., ViewError::MissingDestinationTag),
 }
 
-let mut me = AccountId::default();
-let Ok(()) = hook_account_into(&mut me) else { .. };
-
 // The line that gates *receipt* is this account's line to the issuer of
-// the currency being paid — which the payment's own Amount names. `me` is
-// borrowed again below (hook_is_low_side), so this reaches for the
-// `_into` twin instead of the by-value form.
-let mut keylet = Keylet::default();
-keylet_line_for_asset_into(&mut keylet, &me, &iou.asset())?;
+// the currency being paid — which the payment's own Amount names.
+let keylet = keylet_line_for_asset(&me, &iou.asset())?;
 let Ok(line) = ledger::RippleState::from_keylet(&keylet) else { .. };
 ```
 
@@ -199,11 +193,11 @@ issuer charging no fee — is 18 host calls when the issuer sets no
 | `Payment::otxn()` | 1 | `otxn_type` + one integer compare |
 | `amount()` | 1 | `otxn_field` |
 | `destination_tag()` | 1 | `otxn_field` |
-| `hook_account_into()` | 1 | `hook_account` |
-| `keylet_line_for_asset_into()` | 1 | `util_keylet` |
+| `hook_account_buf()` | 1 | `hook_account` |
+| `keylet_line_for_asset()` | 1 | `util_keylet` |
 | `RippleState::from_keylet()` | 4 | `slot_set`, then the `sfLedgerEntryType` check |
 | `line.flags()` | 3 | `slot_subfield` + read + clear |
-| `keylet_account_into()` | 1 | `util_keylet` |
+| `keylet_account()` | 1 | `util_keylet` |
 | `AccountRoot::from_keylet()` | 4 | `slot_set`, then the `sfLedgerEntryType` check |
 | `transfer_rate()` | 1 or 3 | absent: `slot_subfield` reports it missing. Present: + read + clear |
 
@@ -212,6 +206,15 @@ Measured end to end (`rshooks build`/`check`, this workspace's
 `examples/18_typed-views/metrics.json` — see that file for the current
 worst-case instruction count, wasm size, and max nesting depth for the
 `main` hook.
+
+Every by-value fixed-size read above (`hook_account_buf`,
+`keylet_line_for_asset`, `keylet_account`) has an `_into(out: &mut T, ..)
+-> Result<()>` twin that writes straight into caller-owned storage. The
+by-value form is the idiom to write; the twin is an escape hatch for a
+result that is only ever borrowed into the next call, where it saves one
+copy of `T` per call site at the cost of a separate `let mut x =
+T::default();`. Measure with `rshooks check` before reaching for it — see
+the `rshooks::api` module docs.
 
 ## Feature gates: which views exist
 

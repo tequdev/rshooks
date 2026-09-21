@@ -76,13 +76,11 @@ impl TypedViews {
             ),
         }
 
-        let mut me = AccountId::default();
-        let Ok(()) = hook_account_into(&mut me) else {
+        let Ok(me) = hook_account_buf() else {
             rollback!(b"typed-views: no hook account", ViewError::NoHookAccount)
         };
         let asset = iou.asset();
-        let mut keylet = Keylet::default();
-        let Ok(()) = keylet_line_for_asset_into(&mut keylet, &me, &asset) else {
+        let Ok(keylet) = keylet_line_for_asset(&me, &asset) else {
             rollback!(b"typed-views: keylet_line failed", ViewError::KeyletFailed)
         };
         let Ok(line) = ledger::RippleState::from_keylet(&keylet) else {
@@ -113,8 +111,7 @@ impl TypedViews {
             )
         }
 
-        let mut issuer_keylet = Keylet::default();
-        let Ok(()) = keylet_account_into(&mut issuer_keylet, &asset.issuer) else {
+        let Ok(issuer_keylet) = keylet_account(&asset.issuer) else {
             rollback!(
                 b"typed-views: keylet_account failed",
                 ViewError::KeyletFailed

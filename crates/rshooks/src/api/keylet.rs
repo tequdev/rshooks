@@ -43,15 +43,18 @@
 //! `#[inline(always)]`. Writing straight into the caller's own storage has
 //! no such intermediate to copy from.
 //!
-//! **Each `_into` twin has its own independent implementation — it does
-//! not call, and is not called by, its by-value sibling.** An inlined
-//! delegation wrapper's own local `out` has the same address-taken problem
-//! the `_into` twins exist to avoid, so routing the by-value form through
-//! its `_into` twin buys nothing at a call site that only uses the
-//! by-value API, and costs a small but measurable amount of extra
-//! worst-case instructions from the added call-graph shape — hence the
-//! two families duplicate the host-call plumbing instead of one calling
-//! the other. `keylet_intercept` (below) is the one piece actually shared
+//! **Each `_into` twin in this module has its own independent
+//! implementation — it does not call, and is not called by, its by-value
+//! sibling.** An inlined delegation wrapper's own local `out` has the same
+//! address-taken problem the `_into` twins exist to avoid, so routing the
+//! by-value form through its `_into` twin buys nothing at a call site that
+//! only uses the by-value API, and for the keylet family measured a small
+//! amount of extra worst-case instructions from the added call-graph shape
+//! (`examples/13_keylets`) — hence the two families here duplicate the
+//! host-call plumbing instead of one calling the other. This is a per-family
+//! measurement, not a rule: `super::fixed_buf_fn!`'s by-value forms do
+//! delegate to their twins and measured byte-identical on every by-value
+//! caller. `keylet_intercept` (below) is the one piece actually shared
 //! between them (pure interception-side bookkeeping, no wasm-side cost).
 //! [`keylet_fn`] is the macro that emits both bodies for every type below
 //! that doesn't need type-specific branching (`keylet_skip`'s `Option`
