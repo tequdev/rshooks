@@ -43,15 +43,18 @@
 //! `#[inline(always)]`. Writing straight into the caller's own storage has
 //! no such intermediate to copy from.
 //!
-//! **Each `_into` twin has its own independent implementation — it does
-//! not call, and is not called by, its by-value sibling.** An inlined
-//! delegation wrapper's own local `out` has the same address-taken problem
-//! the `_into` twins exist to avoid, so routing the by-value form through
-//! its `_into` twin buys nothing at a call site that only uses the
-//! by-value API, and costs a small but measurable amount of extra
-//! worst-case instructions from the added call-graph shape — hence the
-//! two families duplicate the host-call plumbing instead of one calling
-//! the other. `keylet_intercept` (below) is the one piece actually shared
+//! **Each `_into` twin in this module has its own independent
+//! implementation — it does not call, and is not called by, its by-value
+//! sibling.** An inlined delegation wrapper's own local `out` has the same
+//! address-taken problem the `_into` twins exist to avoid, so routing the
+//! by-value form through its `_into` twin buys nothing at a call site that
+//! only uses the by-value API, and for the keylet family measured a small
+//! amount of extra worst-case instructions from the added call-graph shape
+//! (`examples/13_keylets`) — hence the two families here duplicate the
+//! host-call plumbing instead of one calling the other. This is a per-family
+//! measurement, not a rule: `super::fixed_buf_fn!`'s by-value forms do
+//! delegate to their twins and measured byte-identical on every by-value
+//! caller. `keylet_intercept` (below) is the one piece actually shared
 //! between them (pure interception-side bookkeeping, no wasm-side cost).
 //! [`keylet_fn`] is the macro that emits both bodies for every type below
 //! that doesn't need type-specific branching (`keylet_skip`'s `Option`
@@ -345,6 +348,17 @@ pub fn keylet_line_for_asset(account: &AccountId, asset: &IssuedAsset) -> Result
     keylet_line(account, &asset.issuer, &asset.currency)
 }
 
+/// Out-param twin of [`keylet_line_for_asset`] — see the module doc
+/// comment's `_into` twins section.
+#[inline(always)]
+pub fn keylet_line_for_asset_into(
+    out: &mut Keylet,
+    account: &AccountId,
+    asset: &IssuedAsset,
+) -> Result<()> {
+    keylet_line_into(out, account, &asset.issuer, &asset.currency)
+}
+
 keylet_fn! {
     /// `KEYLET_OFFER` (10): the keylet for `account`'s `Offer` ledger object
     /// created by the transaction at sequence `seq` (an `OfferCreate`'s own
@@ -480,20 +494,33 @@ mod tests {
 
     // One representative `keylet_fn!`-generated pair (`keylet_offer`
     // exercises both the `&$ty` and `u32` argument kinds) plus the
-    // hand-written `keylet_skip` covers this module's two families; every
-    // other helper shares the same macro expansion and host-call shape.
+    // hand-written `keylet_skip`/`keylet_line_for_asset` covers every
+    // family in this module; every other helper shares the same macro
+    // expansion and host-call shape.
     #[test]
     fn smoke_not_implemented_on_host() {
         let account = AccountId::zeroed();
+        let asset = IssuedAsset {
+            currency: CurrencyCode::zeroed(),
+            issuer: AccountId::zeroed(),
+        };
 
         assert_eq!(keylet_offer(&account, 1), Err(HookError::NotImplemented));
         assert_eq!(keylet_skip(None), Err(HookError::NotImplemented));
         assert_eq!(keylet_skip(Some(1)), Err(HookError::NotImplemented));
+        assert_eq!(
+            keylet_line_for_asset(&account, &asset),
+            Err(HookError::NotImplemented)
+        );
     }
 
     #[test]
     fn smoke_into_not_implemented_on_host() {
         let account = AccountId::zeroed();
+        let asset = IssuedAsset {
+            currency: CurrencyCode::zeroed(),
+            issuer: AccountId::zeroed(),
+        };
         let mut out = Keylet::zeroed();
 
         assert_eq!(
@@ -506,6 +533,10 @@ mod tests {
         );
         assert_eq!(
             keylet_skip_into(&mut out, Some(1)),
+            Err(HookError::NotImplemented)
+        );
+        assert_eq!(
+            keylet_line_for_asset_into(&mut out, &account, &asset),
             Err(HookError::NotImplemented)
         );
     }

@@ -277,17 +277,14 @@ every field read/write delegates straight to that field's own
 `ToBytes::write`/`FromBytes::read` — no per-field loop, and (for a total
 size this toolchain's release profile still lowers to inlined stores
 rather than a `memset`/`memcpy` builtin call) no unguarded loop at all.
-`examples/12_typed-data`'s README backs this with a real
-`rshooks build`/`check` measurement: this hook's core deposit-ledger
-logic, built twice — once with the derives as committed, once with all
-four hand-packed instead, everything else byte-for-byte identical:
+`examples/12_typed-data` backs this with a real `rshooks build`/`check`
+measurement: this hook's core deposit-ledger logic, built twice — once
+with the derives as committed (the numbers in its `metrics.json`), once
+with all four hand-packed instead, everything else byte-for-byte
+identical.
 
-| version | worst-case instructions | wasm size |
-|---|---|---|
-| derived (as committed) | 441 | 1504 bytes |
-| hand-packed | 525 | 1674 bytes |
-
-The derived version isn't just as cheap — it measures **cheaper**: the
+The derived version isn't just as cheap — it measures **cheaper** in both
+worst-case instructions and wasm size: the
 generated `write`/`read` check the struct's total length once
 (`buf.get_mut(..Self::MAX_LEN)`), then copy every field through
 already-proven-in-bounds fixed offsets, whereas naive hand-packing
@@ -303,9 +300,9 @@ Composite parameter *names* have one caveat: unlike a plain byte-string tag
 handed to the host with no copy), a struct-shaped name like `AdminName` in
 [Hook and Transaction Parameters](parameters.md) has to actually run its
 `write()` at runtime, since Rust has no stable way to run a trait method at
-compile time. That's still measured cheap (+29 worst-case instructions in
-that example) — see that page's "Composite names" section for the number
-and why it can't go to zero.
+compile time. That's still measured cheap — a small, fixed number of
+worst-case instructions in that example — see that page's "Composite
+names" section for why it can't go to zero.
 
 ## What each derive rejects at compile time
 

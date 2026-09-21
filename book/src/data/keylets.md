@@ -82,7 +82,8 @@ each call the host directly.
 `keylet_line` for when the currency/issuer pair is already an `IssuedAsset`
 (the type `IouAmount::asset()` produces — see [Slots and Ledger
 Objects](slots.md)) rather than two separate arguments: the trust line
-between `account` and `asset.issuer` in `asset.currency`.
+between `account` and `asset.issuer` in `asset.currency`. It has its own
+`keylet_line_for_asset_into` twin, same as the typed helpers above.
 
 Every function returns `Result<Keylet>`. `keylet_hook` addresses the
 *account's* installed hook chain; `keylet_hook_definition` addresses a
