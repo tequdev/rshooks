@@ -714,6 +714,43 @@ mod tests {
         assert_eq!(slot_subfield(&mut ctx, root, 0x0002_0099, 0), DOESNT_EXIST);
     }
 
+    /// `rshooks::slot_path!`'s in-place hop: `new_slot == parent_slot`
+    /// rewrites the parent's slot with the child, matching xahaud's
+    /// `slot_subfield` skipping the storage copy when the two are equal
+    /// (`HookAPI.cpp`).
+    #[test]
+    fn slot_subfield_in_place_rewrites_the_parents_slot() {
+        let mut ctx = fresh_ctx();
+        let kl = keylet(1);
+        // A root holding one nested-object field (SF_NESTED_OBJECT) whose
+        // own body is a single sfSequence field.
+        let root_bytes = vec![0xE2, 0x24, 0, 0, 0, 42, 0xE1];
+        let world = seeded_world(kl, &root_bytes);
+        let root = slot_set(&mut ctx, &world, &kl, 0) as u32;
+        let k = slot_subfield(&mut ctx, root, SF_NESTED_OBJECT, 0) as u32;
+        assert_eq!(ctx.slot_entry(k).unwrap().kind, SlotKind::Object);
+
+        let k2 = slot_subfield(&mut ctx, k, SF_SEQUENCE, k);
+        assert_eq!(k2, k as i64);
+        assert_eq!(slot(&ctx, k), Ok(42u32.to_be_bytes().to_vec()));
+        assert_eq!(ctx.slot_entry(k).unwrap().kind, SlotKind::Scalar);
+    }
+
+    #[test]
+    fn slot_subfield_in_place_failure_leaves_the_slot_untouched() {
+        let mut ctx = fresh_ctx();
+        let kl = keylet(1);
+        let root_bytes = vec![0xE2, 0x24, 0, 0, 0, 42, 0xE1];
+        let world = seeded_world(kl, &root_bytes);
+        let root = slot_set(&mut ctx, &world, &kl, 0) as u32;
+        let k = slot_subfield(&mut ctx, root, SF_NESTED_OBJECT, 0) as u32;
+        let before = ctx.slot_entry(k).unwrap().bytes.clone();
+
+        assert_eq!(slot_subfield(&mut ctx, k, 0x0002_0099, k), DOESNT_EXIST);
+        assert_eq!(ctx.slot_entry(k).unwrap().bytes, before);
+        assert_eq!(ctx.slot_entry(k).unwrap().kind, SlotKind::Object);
+    }
+
     #[test]
     fn slot_subfield_on_a_non_object_slot_is_not_an_object() {
         let mut ctx = fresh_ctx();

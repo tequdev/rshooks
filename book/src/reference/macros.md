@@ -103,7 +103,7 @@ See [Emitting Transactions](../emit/emitting.md).
 
 | macro | purpose | sketch |
 |---|---|---|
-| `slot_path!` | Walk a multi-hop `SlotObject` path, clearing each intermediate handle as soon as its child exists — no `?`-chain slot leaks. | `slot_path!(root[sfSigners][0][sfAccount])` |
+| `slot_path!` | Walk a multi-hop `SlotObject` path in one auto-assigned slot, rewritten in place per hop — no `?`-chain slot leaks. | `slot_path!(root[sfSigners][0][sfAccount])` |
 
 See [Slots and Ledger Objects](../data/slots.md).
 
