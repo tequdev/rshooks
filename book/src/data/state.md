@@ -267,9 +267,11 @@ error" the same way, defaulting to zero either way.
 
 Every typed read here maps "no entry for this key" to `Ok(None)`, the same
 shape as `HashMap::get` — ordinary, not exceptional. Every *other* error,
-including a present-but-undersized entry that fails to decode as `T`,
-still comes back as `Err`, so a genuine decode failure is never mistaken
-for "nothing was ever stored here."
+including a present entry that fails to decode as `T` — shorter than `T`'s
+own encoding, or (for a `T` whose `FromBytes::with_read_buf` right-sizes
+its read scratch — see [Typed Data with Derives](typed-data.md)) longer
+than it — still comes back as `Err`, so a genuine decode failure is never
+mistaken for "nothing was ever stored here."
 
 ## Deleting an entry
 

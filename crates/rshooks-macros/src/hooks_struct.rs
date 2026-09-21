@@ -1605,7 +1605,7 @@ fn state_interface_field_codegen(
         &write_body,
         "",
     ));
-    out.push_str(&from_bytes_impl(value_ty, len_expr, "", &read_body));
+    out.push_str(&from_bytes_impl(value_ty, len_expr, "", &read_body, ""));
     out.push_str(&fixed_read_impl(value_ty, len_expr));
     out.push_str(&format!(
         "impl {value_ty} {{\n\

@@ -849,7 +849,7 @@ mod tests {
 /// buffer contract (design §5.2: `TOO_SMALL` on an undersized destination,
 /// never a truncated copy).
 #[cfg(all(test, feature = "testenv"))]
-mod testenv_tests {
+pub(crate) mod testenv_tests {
     #![allow(clippy::unwrap_used, clippy::panic)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
 
     extern crate std;
@@ -861,9 +861,14 @@ mod testenv_tests {
     use crate::error::HookError;
     use rshooks_core::backend::{HostBackend, install};
 
-    /// Answers every read with a fixed byte string; `accept`/`rollback`
-    /// are unused by these tests and simply panic if ever reached.
-    struct FixedBytesBackend(&'static [u8]);
+    /// Answers every `state`/`state_foreign` read with a fixed byte
+    /// string; `accept`/`rollback` are unused by these tests and simply
+    /// panic if ever reached. `pub(crate)`: also reused by
+    /// `crate::state`'s own `testenv_tests` module, which exercises the
+    /// same host buffer contract one layer up (the typed `state_get`/
+    /// `state_foreign_get` accessors, not this module's raw `state`/
+    /// `state_foreign`).
+    pub(crate) struct FixedBytesBackend(pub(crate) &'static [u8]);
 
     impl HostBackend for FixedBytesBackend {
         fn state(&self, _key: &[u8]) -> core::result::Result<Vec<u8>, i64> {

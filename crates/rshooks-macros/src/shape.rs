@@ -125,8 +125,16 @@ impl ::rshooks::convert::ToBytes for {name} {{
 /// [`crate::param_value`]'s doc comment). `body` is `read()`'s statements
 /// before the final struct literal (an [`offset_consts`] chain, or empty);
 /// `fields` are that struct literal's field initializers (a [`read_body`],
-/// or `state_interface`'s own per-field reads).
-pub(crate) fn from_bytes_impl(name: &str, len_expr: &str, body: &str, fields: &str) -> String {
+/// or `state_interface`'s own per-field reads). `extra` is spliced in as
+/// further associated items ([`crate::hook_data`]'s `with_read_buf`
+/// override) — pass `""` for none.
+pub(crate) fn from_bytes_impl(
+    name: &str,
+    len_expr: &str,
+    body: &str,
+    fields: &str,
+    extra: &str,
+) -> String {
     format!(
         "
 #[automatically_derived]
@@ -141,6 +149,7 @@ impl ::rshooks::convert::FromBytes for {name} {{
             {fields}
         }})
     }}
+    {extra}
 }}
 "
     )

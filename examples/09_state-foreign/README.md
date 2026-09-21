@@ -22,7 +22,10 @@ out of scope for this repo, see `docs/DESIGN.md` §1 non-goals).
 `enabled` is declared `State<[u8; 1]>`, and a typed read requires the
 stored entry to fit exactly — an entry longer than 1 byte fails the host
 call with `TOO_SMALL` rather than decoding its first byte, so it surfaces
-as `ReadFailed` here, the same as a genuinely undersized (empty) entry.
+as `ReadFailed` here. (A stored entry can never be *shorter* than 1 byte
+and still count as present: the Hook API deletes an entry by writing zero
+bytes to it, so a 0-byte "entry" is absent, the same
+`NotConfiguredOnTarget` case as no entry at all.)
 
 ## Build
 
@@ -38,9 +41,9 @@ compiler-generated `bcmp`-style loop to guard.
 
 - `ACCT` not configured (or not 20 bytes) → rollback.
 - `ACCT` configured, but the target account has no `enabled` entry in this
-  hook's namespace → rollback.
-- `ACCT` configured, `enabled` entry present but not exactly 1 byte (empty,
-  or longer than 1 byte) → rollback (`ReadFailed`).
+  hook's namespace → rollback (`NotConfiguredOnTarget`).
+- `ACCT` configured, `enabled` entry present but longer than 1 byte →
+  rollback (`ReadFailed`).
 - `ACCT` configured, `enabled` entry present, exactly 1 byte, value `0` →
   rollback (`FlagOff`).
 - `ACCT` configured, `enabled` entry present, exactly 1 byte, nonzero →

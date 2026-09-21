@@ -214,6 +214,16 @@ macro_rules! fixed_bytes_type {
             fn read(buf: &[u8]) -> Result<Self> {
                 <[u8; $len]>::read(buf).map(|arr| $name($copy_fn(&arr)))
             }
+
+            /// Delegates to `[u8; $len]`'s override — `$name` is that array
+            /// under a transparent/aligned wrapper (see this macro's own
+            /// doc comment), same width. See
+            /// [`FromBytes::with_read_buf`]'s doc comment for what this
+            /// changes.
+            #[inline(always)]
+            fn with_read_buf<R>(f: impl FnOnce(&mut [u8]) -> R) -> R {
+                <[u8; $len]>::with_read_buf(f)
+            }
         }
 
         impl FixedRead for $name {

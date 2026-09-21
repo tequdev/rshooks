@@ -60,7 +60,7 @@ pub(crate) fn generate(shape: &StructShape) -> TokenStream {
 
     let src = format!(
         "{from_bytes}{fixed_read}",
-        from_bytes = from_bytes_impl(name, &total_len_expr, &offset_consts, &read_body),
+        from_bytes = from_bytes_impl(name, &total_len_expr, &offset_consts, &read_body, ""),
         fixed_read = fixed_read_impl(name, &total_len_expr),
     );
     crate::shape::finish(src, shape.name_span, "ParamValue")

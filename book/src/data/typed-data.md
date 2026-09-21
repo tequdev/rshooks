@@ -21,6 +21,7 @@ pub trait ToBytes {
 
 pub trait FromBytes: Sized {
     fn read(buf: &[u8]) -> Result<Self>;
+    fn with_read_buf<R>(f: impl FnOnce(&mut [u8]) -> R) -> R;
 }
 ```
 
@@ -31,6 +32,16 @@ write. `FromBytes::read` decodes `Self` from `buf`, failing with
 this crate cares about implements both: `u8`/`u16`/`u32`/`u64`/`i64`,
 `XFL`, `[u8; N]` for any `N`, and every `rshooks::types` newtype
 (`AccountId`, `Hash`, `CurrencyCode`, ...).
+
+`FromBytes::with_read_buf` has a default and picks the read-side scratch
+buffer width [Hook State](state.md)'s `state`/`state_foreign` calls write
+into before `FromBytes::read` ever runs. Every type in the list above, and
+a `#[derive(HookData)]` struct, overrides it to its own exact encoded
+width — so a stored entry longer than that width fails
+`HookError::TooSmall` rather than being decoded from its leading prefix. A
+hand-written `FromBytes` impl that never overrides it reads through the
+default, wider scratch buffer instead, decoding an oversized entry's
+prefix leniently.
 
 A third trait, `FixedRead`, backs the `*_exact` family covered in [Reading
 the Originating Transaction](otxn.md) and [Hook State](state.md) — it reads

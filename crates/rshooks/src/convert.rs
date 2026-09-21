@@ -112,11 +112,11 @@ pub trait FromBytes: Sized {
     /// `src/xrpld/app/hook/detail/applyHook.cpp`) fails the whole call with
     /// [`HookError::TooSmall`](crate::error::HookError::TooSmall) — never a
     /// truncated write — when the stored entry is longer than the
-    /// destination. So the default (unoverridden) 32-byte buffer keeps
-    /// today's lenient behavior (an oversized entry decodes its own
-    /// leading prefix), while an override right-sizes the destination and
-    /// makes a too-long entry fail instead — see `crate::state`'s module
-    /// doc comment for which of this crate's own reads take which path.
+    /// destination. So the default (unoverridden) 32-byte buffer decodes an
+    /// oversized entry's leading prefix leniently, while an override
+    /// right-sizes the destination and makes a too-long entry fail instead
+    /// — see `crate::state`'s module doc comment for which of this crate's
+    /// own reads take which path.
     ///
     /// `f` must only read the buffer over the range a call it makes
     /// through `f` actually wrote — the same convention
@@ -261,8 +261,27 @@ impl<const N: usize> FromBytes for [u8; N] {
 
     /// Right-sizes the read scratch to `N` bytes — see
     /// [`FromBytes::with_read_buf`]'s doc comment for what this changes.
+    ///
+    /// Bounded to [`DEFAULT_SCRATCH_LEN`] (32), mirroring
+    /// `crate::state::with_encoded_value`'s write-side bound: beyond it,
+    /// rustc's zero-init codegen for a local buffer this size stops being a
+    /// handful of inlined stores (see `crate::state`'s `MAX_TYPED_STATE_LEN`
+    /// doc comment) — an unbounded `N` here would hand the host an
+    /// uninitialized stack scratch of arbitrary size instead. `N == 0` is
+    /// in range but always fails: the host requires a nonzero destination
+    /// length for a non-as-int64 read (`write_len < 1` is `TOO_SMALL`,
+    /// `include/xrpl/hook/Macro.h`'s `state`/`state_foreign` argument
+    /// check).
     #[inline(always)]
     fn with_read_buf<R>(f: impl FnOnce(&mut [u8]) -> R) -> R {
+        const {
+            assert!(
+                N <= DEFAULT_SCRATCH_LEN,
+                "rshooks::convert: a [u8; N] read scratch exceeds the \
+                 typed-storage buffer — use api::state's raw functions \
+                 directly for larger values"
+            );
+        }
         let mut storage = core::mem::MaybeUninit::<Scratch<N>>::uninit();
         // SAFETY: see `FromBytes::with_read_buf`'s doc comment.
         let buf = unsafe { uninit_slice_mut(&mut storage) };
@@ -336,8 +355,16 @@ impl<const N: usize> FixedRead for [u8; N] {
 /// of such a buffer an `align=1` access LLVM splits into a fragmented
 /// load/store chain on `wasm32v1-none`; aligning the storage lets the
 /// same copy lower to whole `i64`/`i32` operations.
+///
+/// `#[doc(hidden)] pub`, not `pub(crate)`: code a derive macro (e.g.
+/// `#[derive(HookData)]`) generates expands in the *invoking* crate, which
+/// needs to name this type via `::rshooks::convert::Scratch` — the same
+/// reason [`crate::padded_bytes`]/[`crate::padded_bytes_left`] are
+/// `#[doc(hidden)] pub` rather than `pub(crate)`. Not part of this crate's
+/// public API surface for a hook author to use directly.
 #[repr(C, align(8))]
-pub(crate) struct Scratch<const N: usize>(pub(crate) [u8; N]);
+#[doc(hidden)]
+pub struct Scratch<const N: usize>(pub [u8; N]);
 
 /// Views `N` bytes of uninitialized scratch as a `&mut [u8]` for a
 /// caller-buffer Hook API wrapper (`otxn_field`, `state`, `slot`, ...) to
@@ -362,8 +389,14 @@ pub(crate) struct Scratch<const N: usize>(pub(crate) [u8; N]);
 /// storage — only reading through it before it is written would be unsound,
 /// a pattern this crate relies on throughout rather than one the language
 /// unconditionally guarantees.
+///
+/// `#[doc(hidden)] pub`, not `pub(crate)` — see [`Scratch`]'s doc comment:
+/// `#[derive(HookData)]`'s generated `with_read_buf` override calls this
+/// from the invoking crate, carrying the same safety obligation onward
+/// (only ever handing the buffer to a caller-buffer host-call funnel).
 #[inline(always)]
-pub(crate) unsafe fn uninit_slice_mut<const N: usize>(
+#[doc(hidden)]
+pub unsafe fn uninit_slice_mut<const N: usize>(
     buf: &mut core::mem::MaybeUninit<Scratch<N>>,
 ) -> &mut [u8] {
     // SAFETY: `buf` is at least `N` bytes of live, 8-byte-aligned storage

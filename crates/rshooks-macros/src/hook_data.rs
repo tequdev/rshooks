@@ -83,6 +83,35 @@ const WITH_BYTES: &str = "
     }
 ";
 
+/// `HookData`'s `FromBytes::with_read_buf` override — the read-side twin of
+/// [`WITH_BYTES`], spliced into [`crate::shape::from_bytes_impl`]'s `extra`
+/// slot. Right-sizes the read scratch to this struct's own
+/// [`MAX_LEN`](::rshooks::convert::ToBytes::MAX_LEN) instead of
+/// [`FromBytes::with_read_buf`](::rshooks::convert::FromBytes::with_read_buf)'s
+/// generic-default scratch size — see that method's doc comment for why
+/// only a concrete, non-generic impl (this one) can do so, and for what a
+/// right-sized read buffer changes (an entry longer than `Self::MAX_LEN`
+/// fails [`HookError::TooSmall`](::rshooks::error::HookError::TooSmall)
+/// instead of decoding a leading prefix of it). Uses the same
+/// `MaybeUninit`-scratch shape as `convert.rs`'s own primitive/`[u8; N]`
+/// overrides, via the `#[doc(hidden)] pub`
+/// `::rshooks::convert::Scratch`/`::rshooks::convert::uninit_slice_mut`
+/// pair those overrides use directly — the same "hidden but public, for
+/// generated code expanding in the invoking crate" convention as
+/// `::rshooks::padded_bytes`.
+const WITH_READ_BUF: &str = "
+    #[inline(always)]
+    fn with_read_buf<__R>(f: impl FnOnce(&mut [u8]) -> __R) -> __R {
+        let mut __storage = ::core::mem::MaybeUninit::<
+            ::rshooks::convert::Scratch<{ <Self as ::rshooks::convert::ToBytes>::MAX_LEN }>,
+        >::uninit();
+        // SAFETY: see `::rshooks::convert::FromBytes::with_read_buf`'s doc
+        // comment; `f` is only ever a caller-buffer host-call funnel.
+        let __buf = unsafe { ::rshooks::convert::uninit_slice_mut(&mut __storage) };
+        f(__buf)
+    }
+";
+
 /// Generates the `ToBytes`/`FromBytes`/`FixedRead` impls plus the inherent
 /// `LEN` const, for an already-validated [`StructShape`].
 pub(crate) fn generate(shape: &StructShape) -> TokenStream {
@@ -109,7 +138,7 @@ impl {name} {{
             &format!("{offset_consts}\n{write_body}"),
             WITH_BYTES,
         ),
-        from_bytes = from_bytes_impl(name, len_expr, &offset_consts, &read_body),
+        from_bytes = from_bytes_impl(name, len_expr, &offset_consts, &read_body, WITH_READ_BUF),
         fixed_read = fixed_read_impl(name, len_expr),
     );
     crate::shape::finish(src, shape.name_span, "HookData")
