@@ -39,7 +39,7 @@
 //! generation differs.
 
 use crate::shape::{
-    StructShape, max_len_expr, offset_consts, parse_struct, to_bytes_impl, write_body,
+    StructShape, WITH_BYTES, max_len_expr, offset_consts, parse_struct, to_bytes_impl, write_body,
 };
 use proc_macro::TokenStream;
 
@@ -68,7 +68,7 @@ pub(crate) fn generate(shape: &StructShape) -> TokenStream {
             name,
             &max_len_expr,
             &format!("{offset_consts}\n{write_body}"),
-            "",
+            WITH_BYTES,
         ),
         length_assert = param_name_length_assert(name),
     );

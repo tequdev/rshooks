@@ -910,9 +910,7 @@ pub mod codec {
             return Err(HookError::InvalidArgument);
         }
         let dst = out.get_mut(0..8).ok_or(HookError::InvalidArgument)?;
-        let mut value = drops.to_be_bytes();
-        value[0] |= 0x40;
-        dst.copy_from_slice(&value);
+        dst.copy_from_slice(&(drops | 0x4000_0000_0000_0000).to_be_bytes());
         Ok(())
     }
 

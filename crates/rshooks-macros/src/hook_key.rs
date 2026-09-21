@@ -39,7 +39,7 @@
 //! shared via [`crate::shape`]; only the generated impl set differs.
 
 use crate::shape::{
-    StructShape, max_len_expr, offset_consts, parse_struct, to_bytes_impl, write_body,
+    StructShape, WITH_BYTES, max_len_expr, offset_consts, parse_struct, to_bytes_impl, write_body,
 };
 use proc_macro::TokenStream;
 
@@ -68,7 +68,7 @@ pub(crate) fn generate(shape: &StructShape) -> TokenStream {
             name,
             &max_len_expr,
             &format!("{offset_consts}\n{write_body}"),
-            "",
+            WITH_BYTES,
         ),
         state_key_encode = state_key_encode_impl(name),
     );
@@ -95,6 +95,12 @@ pub(crate) fn generate(shape: &StructShape) -> TokenStream {
 /// no `EncodedStateKey` built at all. Carries its own copy of `encode`'s
 /// compile-time length assert, since an override replaces the default body
 /// (assert included).
+///
+/// Distinct from [`crate::shape::WITH_BYTES`]'s `ToBytes::with_bytes`
+/// override on this same derive's `ToBytes` impl: that one right-sizes the
+/// buffer for any caller that treats the struct as an ordinary `ToBytes`
+/// value, while `with_key_bytes` here right-sizes it specifically for
+/// `StateKeyEncode` callers.
 pub(crate) fn state_key_encode_impl(name: &str) -> String {
     format!(
         "
