@@ -194,23 +194,18 @@ one of failing `try_cast`s, proving the same for cast failures.
 
 `examples/08_slot-ledger` rewrote a raw numbered-slot walk
 (`otxn_slot` → `slot_subfield` → `slot_exact`) into the typed
-equivalent and built both at this workspace's `opt-level = 3`:
+equivalent and built both at this workspace's `opt-level = 3`, with and
+without clearing the slots afterwards.
 
-| version | worst-case instructions | wasm size |
-|---|---|---|
-| raw, numbered slots, no clears | 197 | 925 bytes |
-| typed, no clears | 197 | 925 bytes |
-| raw, numbered slots + 3 `slot_clear` | 209 | 965 bytes |
-| typed + 3 clears via `take_*` | 219 | 980 bytes |
-
-The first two rows — the apples-to-apples comparison, same host calls, same
-cleanup policy — are byte-identical: every typed wrapper is
+Without clears — the apples-to-apples comparison, same host calls, same
+cleanup policy — the two builds are byte-identical: every typed wrapper is
 `#[inline(always)]` over the same host call, so the type layer adds nothing.
-The bottom two rows aren't directly comparable to each other:  `take_*`
-clears on the failure path as well as success, while the raw code's
-`slot_clear` calls only run after a successful read, so the extra ten
+With clears the two aren't directly comparable: `take_*` clears on the
+failure path as well as success, while the raw code's `slot_clear` calls
+only run after a successful read, so the typed build's few extra
 instructions buy strictly stronger cleanup rather than being layer
-overhead.
+overhead. The committed build's numbers are in
+`examples/08_slot-ledger/metrics.json`.
 
 ## Why the raw numbered functions aren't in the prelude
 
