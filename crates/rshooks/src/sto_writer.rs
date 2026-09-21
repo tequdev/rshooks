@@ -441,7 +441,10 @@ impl<'a> StoWriter<'a> {
     /// `value`'s length should be a compile-time constant at the call site
     /// (e.g. a `&[u8; N]` array), for the reason [`Self::write_bytes`]'s
     /// doc comment gives: a genuinely runtime-length payload compiles to
-    /// an unguarded copy loop on `wasm32v1-none`.
+    /// an unguarded copy loop on `wasm32v1-none`. Prefer [`Self::vl_exact`]
+    /// at any call site that already has a fixed-length value (a
+    /// byte-string literal or `&[u8; N]` array) — it makes that constraint
+    /// a type error instead of a doc comment.
     ///
     /// # Errors
     ///
@@ -486,6 +489,22 @@ impl<'a> StoWriter<'a> {
             .ok_or(HookError::InvalidArgument)?
             .copy_from_slice(value);
         self.commit(start, total)
+    }
+
+    /// Compile-time-checked counterpart of [`Self::vl`]: `value`'s length
+    /// is part of its type (`&[u8; N]`), so a call site that only has a
+    /// runtime-length slice is a type error here instead of a doc comment
+    /// to honor. Delegates to [`Self::vl`] — same bytes, same errors —
+    /// with `N` a compile-time constant at every call site, so
+    /// [`codec::vl_length_prefix`]'s branch on `value.len()` folds to
+    /// literal bytes and the [`codec::MAX_VL_LEN`] check folds away.
+    ///
+    /// # Errors
+    ///
+    /// See [`Self::vl`].
+    #[inline(always)]
+    pub fn vl_exact<const N: usize>(&mut self, f: SField<Opaque>, value: &[u8; N]) -> Result<()> {
+        self.vl(f, value.as_slice())
     }
 
     /// Writes an `STI_AMOUNT` field encoded as a native (XRP/XAH) amount —
@@ -834,7 +853,7 @@ mod tests {
     fn vl_writes_one_byte_prefix_form() {
         let mut buf = [0u8; 16];
         let mut w = StoWriter::new(&mut buf);
-        w.vl(sfBlob, b"note").expect("fits");
+        w.vl_exact(sfBlob, b"note").expect("fits");
         // sfBlob (7,26): type 7 < 16, field 26 >= 16 -> 2-byte header
         // [0x70, 0x1A], then a single-byte VL prefix (4 <= 192), then the
         // 4-byte payload.
@@ -846,7 +865,7 @@ mod tests {
         let mut buf = [200u8; 300];
         let mut w = StoWriter::new(&mut buf);
         let value = [0x5Au8; 193];
-        w.vl(sfBlob, &value).expect("fits");
+        w.vl_exact(sfBlob, &value).expect("fits");
         let bytes = w.as_bytes();
         // 193 is the smallest length needing a two-byte prefix:
         // adj = 193 - 193 = 0, so [193, 0] (matches
