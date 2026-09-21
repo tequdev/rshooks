@@ -67,20 +67,10 @@ fn fail(msg: &[u8]) -> ! {
     rollback!(msg, -104);
 }
 
-/// Encodes drops as a native XAH amount.
+/// Encodes drops as a native XAH amount into `dst`.
 #[inline(always)]
 fn write_native_amount(dst: &mut [u8], drops: u64) {
-    let bytes = drops.to_be_bytes();
-    let out: [u8; 8] = [
-        0x40 | (bytes[0] & 0x3F),
-        bytes[1],
-        bytes[2],
-        bytes[3],
-        bytes[4],
-        bytes[5],
-        bytes[6],
-        bytes[7],
-    ];
+    let out = codec::encode_native_amount_bytes(drops);
     for (d, s) in dst.iter_mut().zip(out.iter()) {
         *d = *s;
     }
