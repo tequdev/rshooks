@@ -31,8 +31,9 @@ Non-goals:
   (Present-or-absent fields and a runtime-chosen-length `VL` within a fixed `MAX` are no
   longer out of scope for `txn_template!` as of `docs/NOP_PADDING_DESIGN.md`; only runtime
   element *counts* remain `StoWriter`'s job.)
-- Any change to `prepare_for_emit`/`Prepared`, to `StoWriter`, or to existing templates'
-  bytes (`examples/10_emit-txn` must stay byte-identical; `metrics.json` unchanged).
+- Any change to `prepare_for_emit`/`Prepared`, or to existing templates' bytes
+  (`examples/10_emit-txn` must stay byte-identical; `metrics.json` unchanged). `StoWriter`
+  gains an additional constructor (§7), but no existing method's shape or behavior changes.
 
 ## 2. Grammar
 
@@ -608,3 +609,91 @@ New:
 - Type-level guard that an `amount` field with the zero default is set before emit (a
   runtime "unset" sentinel would cost WCE on every emit; a typestate would change the
   template's public shape). Left to the host's own validation.
+
+## 7. Baked constant prefix for `StoWriter` / hand-rolled writers
+
+Status: implemented. `StoWriter` (`crates/rshooks/src/sto_writer.rs`) builds a runtime-sized
+transaction one field at a time — the right tool for a runtime element count (§1's own
+non-goal), but every real `StoWriter` caller also opens with the same fixed emit-plumbing
+prefix `txn_template!` already bakes for free: `TransactionType`, `Flags`, `Sequence = 0`,
+`FirstLedgerSequence`/`LastLedgerSequence`/`Fee` placeholders, `SigningPubKey`, `Account`.
+Writing that prefix through `StoWriter`'s ordinary field methods pays a runtime store per
+field even though every byte is compile-time-constant. A hand-rolled writer with the same
+shape (`examples/80_governance/src/mint_txn.rs`'s `MintTxn`) pays the same cost for the same
+reason, worse: its cursor is a field of a `static` (`static MINT_TXN: HookStatic<MintTxn> =
+HookStatic::new(MintTxn::new())`), so the compiler cannot even prove consecutive writes don't
+alias and fold their bounds checks the way it can for a function-local `StoWriter`.
+
+### 7.1 `StoWriter::resume`
+
+`StoWriter::resume(buf: &'a mut [u8], prefix_len: usize, plumbing: PlumbingOffsets) ->
+Result<Self>` is a second constructor, alongside `new()`. It assumes `buf[..prefix_len]`
+already holds a baked image of the prefix and only sets the cursor and the plumbing
+bookkeeping — no bytes move at construction time. `plumbing` records the offsets, within
+`buf`, of the fields `prepare_for_emit` patches (`FirstLedgerSequence`, `LastLedgerSequence`,
+`Fee`, `Account`); `resume` checks each offset's field fits within `prefix_len` before
+constructing the writer, a check that folds away entirely for a `const`-computed `plumbing`
+(the only realistic caller).
+
+The image and the offset table are built together, in **one `const` block**, over the same
+`codec` writers (`write_field_header`, `write_const_bytes`, `write_uint_be`,
+`encode_native_amount_const`) §3.1 already exposes and `txn_template!`'s own generated
+`new()` already calls. Building the image and the offsets in the same block, as the same
+local variables (`let fee_off = off;` right after `off` has advanced past that field's
+header — never at the header's own start), is what keeps the offset table from drifting out
+of step with the image or from naming a header byte instead of a value byte: nothing here
+re-derives one from the other by scanning bytes.
+
+`buf`'s first `prefix_len` bytes can come from anywhere, as long as they already hold the
+image before `resume` is called — typically a `static`'s own initializer, so the bytes land
+in a wasm data segment and cost nothing at runtime: every hook invocation runs in a freshly
+instantiated wasm instance (`crates/rshooks/src/static_cell.rs`'s module doc comment — the
+same guarantee `HookStatic::take`'s testenv path reproduces off-wasm by cloning the pristine
+value per invocation), so the data segment is the baked image again at the start of every
+call. A second emit from the same writer within one execution is fine too: `prepare_for_emit`
+rewrites every plumbing region it patches from scratch.
+
+### 7.2 `PlumbingOffsets`
+
+```rust,ignore
+pub struct PlumbingOffsets {
+    pub first_ledger_sequence_off: usize,
+    pub last_ledger_sequence_off: usize,
+    pub fee_off: usize,
+    pub account_off: usize,
+}
+```
+
+Offsets into the `resume`d writer's own `buf`, not into some separate image — there is no
+image once the bytes are already in place.
+
+### 7.3 Hand-rolled writers: the same technique, no shared type
+
+`StoWriter::resume` is a method on `StoWriter` specifically — a hand-rolled writer like
+`MintTxn` (`examples/80_governance/src/mint_txn.rs`) isn't one, and gains nothing from an API
+surface shaped around `StoWriter`'s own field bookkeeping (`sequence_seen`,
+`signing_pub_key_seen`, ...), which `MintTxn` doesn't have. The *mechanism*, not the type, is
+what transfers: `MintTxn::new()` bakes the same kind of image into its own `buf` field at
+construction (the `const fn` already builds `buf` as a local before returning `Self`, so
+writing the image into it costs nothing extra to express), and `MintTxn::start()` sets
+`self.len` and the `FirstLedgerSequence`/`LastLedgerSequence`/`Fee` offsets directly from the
+baked prefix, rather than writing each field through `push_*` calls.
+
+`examples/80_governance` is `crate-type = ["cdylib"]` with `[lib] test = false`, so it cannot
+run a `#[test]`. `MintTxn`'s `PREFIX` block ends with a compile-time check instead: for each
+patched offset, that the bytes immediately preceding it are exactly that field's own header
+— proof, at every build, that the offset names a value byte and not the byte the header
+itself starts at.
+
+### 7.4 Testing
+
+`crates/rshooks/src/sto_writer.rs`'s `tests` module pins the invariant that would break
+silently if the image and the offset table ever drifted apart: `resume`, given a buffer
+pre-seeded with the baked image (`baked_buf`), and an equivalent step-by-step sequence of
+individual field calls (`u16_field`, `u32_field`, `native_amount`, `empty_vl`, `account_id`)
+must produce identical bytes *and* identical recorded offsets, not just one or the other.
+Companion tests cover `resume`'s own validation: a `prefix_len` past the buffer's length, a
+plumbing offset whose field would land past `prefix_len`, and an individual plumbing-field
+write after `resume` — each rejected the same way the step-by-step writer's own construction
+would be. `testenv_tests` carries the same byte-for-byte comparison through
+`prepare_for_emit`'s full host-call lifecycle, not just construction.

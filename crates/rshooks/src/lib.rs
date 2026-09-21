@@ -909,7 +909,7 @@ pub mod prelude {
         state_update_loose, state_update_typed,
     };
     pub use crate::static_cell::HookStatic;
-    pub use crate::sto_writer::StoWriter;
+    pub use crate::sto_writer::{PlumbingOffsets, StoWriter};
     pub use crate::tx_type::TxType;
     pub use crate::types::*;
     pub use crate::views::ledger::LedgerEntryCommonFields;

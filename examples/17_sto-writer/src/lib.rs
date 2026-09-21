@@ -1,35 +1,112 @@
 #![cfg_attr(not(test), no_std)]
 
 use rshooks::prelude::*;
+use rshooks::txn::codec;
 use rshooks::*;
 
 /// Backing storage for the writer: the fixed emit-plumbing prefix, up to
 /// two `sfAmounts` entries (one native, one issued), and `EmitDetails`
 /// headroom — see the README's "Buffer sizing" section for the byte
-/// breakdown.
+/// breakdown. Its first [`PREFIX_LEN`] bytes are baked to [`PREFIX`]'s
+/// image at compile time (a wasm data segment), not zeroed and filled at
+/// runtime — see [`StoWriter::resume`]'s doc comment.
 const BUF_LEN: usize = 285;
-static BUF: HookStatic<[u8; BUF_LEN]> = HookStatic::new([0u8; BUF_LEN]);
+static BUF: HookStatic<[u8; BUF_LEN]> = HookStatic::new({
+    let mut buf = [0u8; BUF_LEN];
+    codec::write_const_bytes(&mut buf, 0, &PREFIX.0);
+    buf
+});
+
+/// Length of the fixed emit-plumbing prefix [`PREFIX`] bakes: `TransactionType`
+/// through `Account`.
+const PREFIX_LEN: usize = codec::transaction_type_field_size(sfTransactionType)
+    + codec::u32_field_size(sfFlags)
+    + codec::u32_field_size(sfSequence)
+    + codec::u32_field_size(sfFirstLedgerSequence)
+    + codec::u32_field_size(sfLastLedgerSequence)
+    + codec::native_amount_field_size(sfFee)
+    + codec::empty_vl_field_size(sfSigningPubKey)
+    + codec::account_id_field_size(sfAccount);
+
+/// The fixed emit-plumbing prefix (`TransactionType = ttREMIT`, `Flags =
+/// tfCANONICAL`, `Sequence = 0`, `FirstLedgerSequence`/`LastLedgerSequence`/
+/// `Fee` placeholders, empty `SigningPubKey`, zeroed `Account`) and the
+/// offsets `StoWriter::prepare_for_emit` patches, baked together in one
+/// `const` block over `codec`'s writers so the offsets cannot drift from the
+/// image — see `docs/TXN_TEMPLATE_FIELDS_DESIGN.md` §7.
+const PREFIX: ([u8; PREFIX_LEN], PlumbingOffsets) = {
+    let mut buf = [0u8; PREFIX_LEN];
+    let mut off = 0usize;
+
+    codec::write_field_header(&mut buf, off, sfTransactionType);
+    off = off.wrapping_add(codec::field_header(sfTransactionType).1);
+    codec::write_uint_be(&mut buf, off, 2, rshooks::raw::tts::ttREMIT as u64);
+    off = off.wrapping_add(2);
+
+    codec::write_field_header(&mut buf, off, sfFlags);
+    off = off.wrapping_add(codec::field_header(sfFlags).1);
+    codec::write_uint_be(&mut buf, off, 4, tfCANONICAL as u64);
+    off = off.wrapping_add(4);
+
+    codec::write_field_header(&mut buf, off, sfSequence);
+    off = off.wrapping_add(codec::field_header(sfSequence).1);
+    off = off.wrapping_add(4); // Sequence = 0
+
+    codec::write_field_header(&mut buf, off, sfFirstLedgerSequence);
+    off = off.wrapping_add(codec::field_header(sfFirstLedgerSequence).1);
+    let fls_off = off;
+    off = off.wrapping_add(4);
+
+    codec::write_field_header(&mut buf, off, sfLastLedgerSequence);
+    off = off.wrapping_add(codec::field_header(sfLastLedgerSequence).1);
+    let lls_off = off;
+    off = off.wrapping_add(4);
+
+    codec::write_field_header(&mut buf, off, sfFee);
+    off = off.wrapping_add(codec::field_header(sfFee).1);
+    let fee_off = off;
+    codec::write_const_bytes(&mut buf, off, &codec::encode_native_amount_const(0));
+    off = off.wrapping_add(8); // Fee = 0, patched by prepare_for_emit
+
+    codec::write_field_header(&mut buf, off, sfSigningPubKey);
+    off = off.wrapping_add(codec::field_header(sfSigningPubKey).1);
+    off = off.wrapping_add(1); // empty VL marker = 0
+
+    codec::write_field_header(&mut buf, off, sfAccount);
+    off = off.wrapping_add(codec::field_header(sfAccount).1);
+    codec::write_const_bytes(&mut buf, off, &[ACC_ID_LEN as u8]);
+    off = off.wrapping_add(1);
+    let account_off = off;
+    // 20-byte AccountId payload stays zeroed, patched by prepare_for_emit.
+    off = off.wrapping_add(ACC_ID_LEN);
+    assert!(
+        off == PREFIX_LEN,
+        "PREFIX builder under/over-ran PREFIX_LEN"
+    );
+
+    (
+        buf,
+        PlumbingOffsets {
+            first_ledger_sequence_off: fls_off,
+            last_ledger_sequence_off: lls_off,
+            fee_off,
+            account_off,
+        },
+    )
+};
 
 /// Builds a Remit transaction into `buf` with `StoWriter`: the fixed
-/// emit-plumbing fields, `destination`, one native-amount `sfAmounts`
-/// entry always, and a second issued-amount entry only when `issued` is
-/// `Some`. Field order here is chosen for readability, not because
-/// `StoWriter` requires it — see `rshooks::sto_writer`'s module doc
-/// comment.
+/// emit-plumbing prefix [`PREFIX`], `destination`, one native-amount
+/// `sfAmounts` entry always, and a second issued-amount entry only when
+/// `issued` is `Some`. Field order past the prefix is chosen for
+/// readability, not because `StoWriter` requires it — see
+/// `rshooks::sto_writer`'s module doc comment.
 fn build_remit<'a>(
     buf: &'a mut [u8; BUF_LEN],
     destination: &AccountId,
     issued: Option<&(CurrencyCode, AccountId)>,
 ) -> Result<StoWriter<'a>> {
-    let mut w = StoWriter::new(buf);
-    w.u16_field(sfTransactionType, rshooks::raw::tts::ttREMIT)?;
-    w.u32_field(sfFlags, tfCANONICAL)?;
-    w.u32_field(sfSequence, 0)?;
-    w.u32_field(sfFirstLedgerSequence, 0)?;
-    w.u32_field(sfLastLedgerSequence, 0)?;
-    w.native_amount(sfFee, 0)?;
-    w.empty_vl(sfSigningPubKey)?;
-    w.account_id(sfAccount, &AccountId::default())?;
+    let mut w = StoWriter::resume(buf, PREFIX_LEN, PREFIX.1)?;
     w.account_id(sfDestination, destination)?;
 
     w.begin_array(sfAmounts)?;
@@ -213,10 +290,20 @@ mod tests {
         }
     }
 
+    /// A `buf` local, seeded with [`super::PREFIX`]'s baked image the same
+    /// way `super::BUF`'s `static` initializer is — `build_remit` resumes
+    /// from it rather than writing it, so an all-zero local would silently
+    /// build a corrupt transaction no assertion here happens to catch.
+    fn seeded_buf() -> [u8; super::BUF_LEN] {
+        let mut buf = [0u8; super::BUF_LEN];
+        super::codec::write_const_bytes(&mut buf, 0, &super::PREFIX.0);
+        buf
+    }
+
     #[test]
     fn build_remit_prepares_successfully_native_only() {
         let _guard = rshooks::raw::backend::install(Rc::new(MockBackend));
-        let mut buf = [0u8; super::BUF_LEN];
+        let mut buf = seeded_buf();
         let dest = AccountId([9u8; 20]);
         let mut w = build_remit(&mut buf, &dest, None).expect("fits");
         let prepared = w
@@ -232,12 +319,12 @@ mod tests {
     #[test]
     fn build_remit_prepares_successfully_with_issued_amount() {
         let _guard = rshooks::raw::backend::install(Rc::new(MockBackend));
-        let mut buf = [0u8; super::BUF_LEN];
+        let mut buf = seeded_buf();
         let dest = AccountId([9u8; 20]);
         let issued = (CurrencyCode::default(), AccountId([7u8; 20]));
         let mut w = build_remit(&mut buf, &dest, Some(&issued)).expect("fits");
         let native_only_prepared_len = {
-            let mut probe_buf = [0u8; super::BUF_LEN];
+            let mut probe_buf = seeded_buf();
             let mut probe = build_remit(&mut probe_buf, &dest, None).expect("fits");
             probe
                 .prepare_for_emit()
@@ -260,7 +347,7 @@ mod tests {
         // Proves `build_remit` actually calls `iou_amount`: without a mock
         // backend installed, the host stub's deterministic
         // `NOT_IMPLEMENTED` surfaces from exactly that call.
-        let mut buf = [0u8; super::BUF_LEN];
+        let mut buf = seeded_buf();
         let dest = AccountId([9u8; 20]);
         let issued = (CurrencyCode::default(), AccountId([7u8; 20]));
         assert_eq!(

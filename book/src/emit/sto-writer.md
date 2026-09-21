@@ -89,15 +89,7 @@ fn build_remit<'a>(
     destination: &AccountId,
     issued: Option<&(CurrencyCode, AccountId)>,
 ) -> Result<StoWriter<'a>> {
-    let mut w = StoWriter::new(buf);
-    w.u16_field(sfTransactionType, rshooks::raw::tts::ttREMIT)?;
-    w.u32_field(sfFlags, tfCANONICAL)?;
-    w.u32_field(sfSequence, 0)?;
-    w.u32_field(sfFirstLedgerSequence, 0)?;
-    w.u32_field(sfLastLedgerSequence, 0)?;
-    w.native_amount(sfFee, 0)?;
-    w.empty_vl(sfSigningPubKey)?;
-    w.account_id(sfAccount, &AccountId::default())?;
+    let mut w = StoWriter::resume(buf, PREFIX_LEN, PREFIX.1)?;
     w.account_id(sfDestination, destination)?;
 
     w.begin_array(sfAmounts)?;
@@ -115,9 +107,27 @@ fn build_remit<'a>(
 }
 ```
 
-(from `examples/17_sto-writer`.) The field order here — `TransactionType`,
-`Flags`, `Sequence`, ..., `Amounts` — reads naturally top-to-bottom, but
-nothing about `StoWriter` requires it; see "Field order" above.
+(from `examples/17_sto-writer`.) `PREFIX`/`PREFIX_LEN` bake the fixed
+emit-plumbing prefix (`TransactionType` through `Account`) as a `const`
+image — see "Baking the fixed prefix" below — so `build_remit` never
+writes those fields itself; the field order past that point —
+`Destination`, then `Amounts` — reads naturally top-to-bottom, but nothing
+about `StoWriter` requires it; see "Field order" above.
+
+## Baking the fixed prefix
+
+Every real `StoWriter` caller opens with the same fixed emit-plumbing
+prefix `txn_template!` bakes for free — writing it through `u16_field`/
+`u32_field`/... pays a runtime store per field for bytes that are
+compile-time-constant. `StoWriter::resume(buf, prefix_len, plumbing)`
+positions the cursor past a prefix already baked into `buf` itself, at no
+runtime cost: `buf` is a `static` whose *initializer* bakes the image, so
+it is pristine at the start of every hook invocation. It takes a
+`PlumbingOffsets` — the offsets `prepare_for_emit` patches — built
+alongside the image in one `const` block so the two cannot drift apart.
+See `docs/TXN_TEMPLATE_FIELDS_DESIGN.md` §7 for the full mechanism and
+`examples/17_sto-writer/src/lib.rs`'s `PREFIX`/`PREFIX_LEN` for the worked
+example.
 
 ## Required fields and duplicate rejection
 
@@ -202,8 +212,16 @@ same pattern:
 
 ```rust,ignore
 const BUF_LEN: usize = 285;
-static BUF: HookStatic<[u8; BUF_LEN]> = HookStatic::new([0u8; BUF_LEN]);
+static BUF: HookStatic<[u8; BUF_LEN]> = HookStatic::new({
+    let mut buf = [0u8; BUF_LEN];
+    codec::write_const_bytes(&mut buf, 0, &PREFIX.0);
+    buf
+});
 ```
+
+(`BUF`'s initializer bakes `PREFIX`'s image into the buffer's own first
+bytes at compile time — see "Baking the fixed prefix" above — rather than
+starting all-zero and filling the prefix in with runtime stores.)
 
 ```rust,ignore
 let Some(buf) = BUF.take() else {

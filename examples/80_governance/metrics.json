@@ -16,9 +16,9 @@
       "artifact": "1.reward.wasm",
       "index": 1,
       "hook_fn": "reward",
-      "bytes": 5668,
+      "bytes": 5231,
       "wce": {
-        "hook": 11085,
+        "hook": 10865,
         "cbak": 0
       },
       "max_nesting": 21
