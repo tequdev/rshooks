@@ -128,11 +128,17 @@ pub fn emit_buf(tx_blob: &[u8]) -> Result<Hash> {
     let mut storage =
         core::mem::MaybeUninit::<crate::convert::Scratch<{ crate::types::HASH_LEN }>>::uninit();
     // SAFETY: only read via `assume_init` below, once `written == HASH_LEN`
-    // proves the host wrote every byte.
+    // holds. `emit`'s wasm wrapper (`applyHook.cpp:2683-2697`, Xahau/xahaud
+    // `release`) returns `TOO_SMALL` without writing if the buffer is
+    // shorter than the transaction ID, otherwise writes exactly that ID's
+    // length (always `HASH_LEN`) and returns the same count — a compliant
+    // host never returns a success value above `HASH_LEN` for `emit` to
+    // clamp down, so `written == HASH_LEN` still proves every byte was
+    // written.
     let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
     let written = emit(buf, tx_blob)?;
     if written == crate::types::HASH_LEN {
-        // SAFETY: `written == HASH_LEN` proves the host wrote every byte.
+        // SAFETY: see the host contract cited above.
         Ok(Hash(unsafe { storage.assume_init() }.0))
     } else {
         Err(HookError::TooSmall)
