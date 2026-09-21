@@ -133,9 +133,15 @@ match payment.destination_tag() {
     _ => rollback!(.., ViewError::MissingDestinationTag),
 }
 
+let mut me = AccountId::default();
+let Ok(()) = hook_account_into(&mut me) else { .. };
+
 // The line that gates *receipt* is this account's line to the issuer of
-// the currency being paid — which the payment's own Amount names.
-let keylet = keylet_line_for_asset(&me, &iou.asset())?;
+// the currency being paid — which the payment's own Amount names. `me` is
+// borrowed again below (hook_is_low_side), so this reaches for the
+// `_into` twin instead of the by-value form.
+let mut keylet = Keylet::default();
+keylet_line_for_asset_into(&mut keylet, &me, &iou.asset())?;
 let Ok(line) = ledger::RippleState::from_keylet(&keylet) else { .. };
 ```
 
@@ -161,11 +167,11 @@ match line.low_limit() {
 The obvious alternative — comparing `me < asset.issuer` directly, now that
 `AccountId` has a loop-free `Ord` — looks cheaper (three fewer host calls)
 and is measurably *not*: on this workspace's `opt-level = 3` profile,
-`low_limit()` + `buf_eq_20` costs 845 worst-case instructions against 980
-for `me < asset.issuer` (`buf_cmp_20`), because a host call is one
-instruction in the worst-case count while `buf_cmp_20` inlines a
-three-stage comparison ladder. "Fewer host calls" and "fewer instructions"
-are different objectives, and only the second is metered.
+`low_limit()` + `buf_eq_20` costs fewer worst-case instructions than
+`me < asset.issuer` (`buf_cmp_20`), because a host call is one instruction
+in the worst-case count while `buf_cmp_20` inlines a three-stage comparison
+ladder. "Fewer host calls" and "fewer instructions" are different
+objectives, and only the second is metered.
 
 ## Cost
 
@@ -193,18 +199,19 @@ issuer charging no fee — is 18 host calls when the issuer sets no
 | `Payment::otxn()` | 1 | `otxn_type` + one integer compare |
 | `amount()` | 1 | `otxn_field` |
 | `destination_tag()` | 1 | `otxn_field` |
-| `hook_account_buf()` | 1 | `hook_account` |
-| `keylet_line_for_asset()` | 1 | `util_keylet` |
+| `hook_account_into()` | 1 | `hook_account` |
+| `keylet_line_for_asset_into()` | 1 | `util_keylet` |
 | `RippleState::from_keylet()` | 4 | `slot_set`, then the `sfLedgerEntryType` check |
 | `line.flags()` | 3 | `slot_subfield` + read + clear |
-| `keylet_account()` | 1 | `util_keylet` |
+| `keylet_account_into()` | 1 | `util_keylet` |
 | `AccountRoot::from_keylet()` | 4 | `slot_set`, then the `sfLedgerEntryType` check |
 | `transfer_rate()` | 1 or 3 | absent: `slot_subfield` reports it missing. Present: + read + clear |
 
 Measured end to end (`rshooks build`/`check`, this workspace's
-`opt-level = 3` profile): **845** worst-case instructions, **2559** bytes,
-max nesting depth **3** for the `main` hook — recorded in
-`examples/18_typed-views/metrics.json`.
+`opt-level = 3` profile) and recorded in
+`examples/18_typed-views/metrics.json` — see that file for the current
+worst-case instruction count, wasm size, and max nesting depth for the
+`main` hook.
 
 ## Feature gates: which views exist
 

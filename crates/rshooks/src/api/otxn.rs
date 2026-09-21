@@ -24,6 +24,7 @@
 //! [`otxn_field_typed`] does this decoding itself for every field it
 //! models.
 
+use crate::api::fixed_buf_fn;
 use crate::convert::{FixedRead, TypedParamName};
 use crate::error::{HookError, Result, res};
 use crate::slot_obj::{self, AmountBytes, IssueData};
@@ -156,6 +157,23 @@ pub fn otxn_field_exact<T: FixedRead>(field_id: impl Into<u32>) -> Result<T> {
     T::read_exact(|buf| otxn_field(buf, field_id))
 }
 
+/// Out-param twin of [`otxn_field_exact`] — writes straight into
+/// caller-owned `out` instead of returning `T` by value. Reach for it when
+/// the result is about to be borrowed into another call right away: the
+/// by-value form's own local has its address taken by the host call, which
+/// stops the optimizer from eliding the copy into the caller's actual
+/// destination on return.
+///
+/// # Errors
+///
+/// Same [`HookError`] variants as [`otxn_field_exact`]; on `Err`, `out`'s
+/// contents are unspecified — see
+/// [`FixedRead::read_exact_into`](crate::convert::FixedRead::read_exact_into).
+#[inline(always)]
+pub fn otxn_field_exact_into<T: FixedRead>(out: &mut T, field_id: impl Into<u32>) -> Result<()> {
+    T::read_exact_into(out, |buf| otxn_field(buf, field_id))
+}
+
 /// Sealing module (same rationale as [`crate::slot_obj`]'s `private`
 /// module): without it, a downstream [`OtxnFieldValue`] impl could claim a
 /// wire-type/Rust-type pairing this crate never verified (e.g. reading a
@@ -193,6 +211,17 @@ pub trait OtxnFieldValue: private::Sealed + Sized {
     /// `pub(crate)` to keep code/type pairings unforgeable).
     #[doc(hidden)]
     fn read_otxn_field(field: SField<Self>) -> Result<Self::Output>;
+
+    /// Out-param twin of [`Self::read_otxn_field`]. Called by
+    /// [`otxn_field_typed_into`]. The default body delegates to
+    /// `read_otxn_field`; the `bytes_field!` macro's impls override it to
+    /// read straight into `out` instead (see [`otxn_field_exact_into`]).
+    #[doc(hidden)]
+    #[inline(always)]
+    fn read_otxn_field_into(out: &mut Self::Output, field: SField<Self>) -> Result<()> {
+        *out = Self::read_otxn_field(field)?;
+        Ok(())
+    }
 }
 
 /// Generates the [`OtxnFieldValue`] impl for a narrow integer type, read
@@ -244,6 +273,11 @@ macro_rules! bytes_field {
             #[inline(always)]
             fn read_otxn_field(field: SField<Self>) -> Result<Self::Output> {
                 otxn_field_exact::<Self>(field.code())
+            }
+
+            #[inline(always)]
+            fn read_otxn_field_into(out: &mut Self::Output, field: SField<Self>) -> Result<()> {
+                otxn_field_exact_into::<Self>(out, field.code())
             }
         }
     };
@@ -320,6 +354,19 @@ pub fn otxn_field_typed<T: OtxnFieldValue>(field: SField<T>) -> Result<T::Output
     T::read_otxn_field(field)
 }
 
+/// Out-param twin of [`otxn_field_typed`] — writes straight into
+/// caller-owned `out` instead of returning `T::Output` by value. See
+/// [`otxn_field_exact_into`]'s doc comment for when this is worth reaching
+/// for over the by-value form, and for the error/`out`-on-failure contract
+/// (identical here).
+#[inline(always)]
+pub fn otxn_field_typed_into<T: OtxnFieldValue>(
+    out: &mut T::Output,
+    field: SField<T>,
+) -> Result<()> {
+    T::read_otxn_field_into(out, field)
+}
+
 /// Generation of the originating transaction: `0` for a normal transaction,
 /// or the `sfEmitGeneration` value for an emitted transaction.
 #[inline(always)]
@@ -345,15 +392,14 @@ pub fn otxn_id<B: AsMut<[u8]> + ?Sized>(out: &mut B, flags: u32) -> Result<usize
         .map(|v| v as usize)
 }
 
-/// The ID (hash) of the originating transaction. `flags = 0` prefers the
-/// emit-failure transaction ID where applicable; other flag values are
-/// passed through verbatim (undocumented beyond that in the upstream Hook
-/// API reference, so exposed as a plain `u32` rather than an invented enum).
-#[inline(always)]
-pub fn otxn_id_buf(flags: u32) -> Result<Hash> {
-    let mut buf = Hash::default();
-    let _ = otxn_id(buf.as_mut(), flags)?;
-    Ok(buf)
+fixed_buf_fn! {
+    /// The ID (hash) of the originating transaction. `flags = 0` prefers
+    /// the emit-failure transaction ID where applicable; other flag values
+    /// are passed through verbatim (undocumented beyond that in the
+    /// upstream Hook API reference, so exposed as a plain `u32` rather than
+    /// an invented enum).
+    fn otxn_id_buf(flags: u32) -> Hash = otxn_id,
+    otxn_id_into
 }
 
 /// The [`TxType`] of the originating transaction.
@@ -547,6 +593,10 @@ mod tests {
         );
         assert_eq!(otxn_slot(0), Err(HookError::NotImplemented));
         assert_eq!(otxn_id_buf(0), Err(HookError::NotImplemented));
+        assert_eq!(
+            otxn_id_into(&mut Hash::default(), 0),
+            Err(HookError::NotImplemented)
+        );
         let mut buf = [0u8; 32];
         assert_eq!(otxn_id(&mut buf, 0), Err(HookError::NotImplemented));
         assert_eq!(otxn_field(&mut buf, 0u32), Err(HookError::NotImplemented));
@@ -556,11 +606,19 @@ mod tests {
             Err(HookError::NotImplemented)
         );
         assert_eq!(
+            otxn_field_exact_into::<[u8; 20]>(&mut [0u8; 20], 0u32),
+            Err(HookError::NotImplemented)
+        );
+        assert_eq!(
             otxn_field_typed(crate::sfield::sfSequence),
             Err(HookError::NotImplemented)
         );
         assert_eq!(
             otxn_field_typed(crate::sfield::sfAccount),
+            Err(HookError::NotImplemented)
+        );
+        assert_eq!(
+            otxn_field_typed_into(&mut AccountId::default(), crate::sfield::sfAccount),
             Err(HookError::NotImplemented)
         );
         assert_eq!(

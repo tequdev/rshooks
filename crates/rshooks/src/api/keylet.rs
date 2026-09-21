@@ -345,6 +345,17 @@ pub fn keylet_line_for_asset(account: &AccountId, asset: &IssuedAsset) -> Result
     keylet_line(account, &asset.issuer, &asset.currency)
 }
 
+/// Out-param twin of [`keylet_line_for_asset`] — see the module doc
+/// comment's `_into` twins section.
+#[inline(always)]
+pub fn keylet_line_for_asset_into(
+    out: &mut Keylet,
+    account: &AccountId,
+    asset: &IssuedAsset,
+) -> Result<()> {
+    keylet_line_into(out, account, &asset.issuer, &asset.currency)
+}
+
 keylet_fn! {
     /// `KEYLET_OFFER` (10): the keylet for `account`'s `Offer` ledger object
     /// created by the transaction at sequence `seq` (an `OfferCreate`'s own
@@ -480,20 +491,33 @@ mod tests {
 
     // One representative `keylet_fn!`-generated pair (`keylet_offer`
     // exercises both the `&$ty` and `u32` argument kinds) plus the
-    // hand-written `keylet_skip` covers this module's two families; every
-    // other helper shares the same macro expansion and host-call shape.
+    // hand-written `keylet_skip`/`keylet_line_for_asset` covers every
+    // family in this module; every other helper shares the same macro
+    // expansion and host-call shape.
     #[test]
     fn smoke_not_implemented_on_host() {
         let account = AccountId::zeroed();
+        let asset = IssuedAsset {
+            currency: CurrencyCode::zeroed(),
+            issuer: AccountId::zeroed(),
+        };
 
         assert_eq!(keylet_offer(&account, 1), Err(HookError::NotImplemented));
         assert_eq!(keylet_skip(None), Err(HookError::NotImplemented));
         assert_eq!(keylet_skip(Some(1)), Err(HookError::NotImplemented));
+        assert_eq!(
+            keylet_line_for_asset(&account, &asset),
+            Err(HookError::NotImplemented)
+        );
     }
 
     #[test]
     fn smoke_into_not_implemented_on_host() {
         let account = AccountId::zeroed();
+        let asset = IssuedAsset {
+            currency: CurrencyCode::zeroed(),
+            issuer: AccountId::zeroed(),
+        };
         let mut out = Keylet::zeroed();
 
         assert_eq!(
@@ -506,6 +530,10 @@ mod tests {
         );
         assert_eq!(
             keylet_skip_into(&mut out, Some(1)),
+            Err(HookError::NotImplemented)
+        );
+        assert_eq!(
+            keylet_line_for_asset_into(&mut out, &account, &asset),
             Err(HookError::NotImplemented)
         );
     }

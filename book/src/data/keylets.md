@@ -82,7 +82,8 @@ each call the host directly.
 `keylet_line` for when the currency/issuer pair is already an `IssuedAsset`
 (the type `IouAmount::asset()` produces — see [Slots and Ledger
 Objects](slots.md)) rather than two separate arguments: the trust line
-between `account` and `asset.issuer` in `asset.currency`.
+between `account` and `asset.issuer` in `asset.currency`. It has its own
+`keylet_line_for_asset_into` twin, same as the typed helpers above.
 
 Every function returns `Result<Keylet>`. `keylet_hook` addresses the
 *account's* installed hook chain; `keylet_hook_definition` addresses a
@@ -109,10 +110,12 @@ node confirms otherwise.
 every 34-byte result into hook state:
 
 ```rust,ignore
-let Ok(owner) = otxn_field_typed(sfAccount) else {
+let mut owner = AccountId::default();
+let Ok(()) = otxn_field_typed_into(&mut owner, sfAccount) else {
     rollback!(b"keylets: sfAccount missing from the originating transaction", ...)
 };
-let Ok(dest) = otxn_field_typed(sfDestination) else {
+let mut dest = AccountId::default();
+let Ok(()) = otxn_field_typed_into(&mut dest, sfDestination) else {
     rollback!(b"keylets: sfDestination missing from the originating transaction", ...)
 };
 
@@ -123,6 +126,11 @@ if state_set(keylet.as_ref(), &KeyletKey::Account.encode()).is_err() {
     rollback!(b"keylets: state_set failed", ...);
 }
 ```
+
+`owner`/`dest` go through `otxn_field_typed`'s `_into` twin rather than the
+by-value form because both are borrowed by every `keylet_xxx` call below —
+the same "result is about to be borrowed into another call" case this
+page's "Why typed helpers" section above describes for `keylet_xxx_into`.
 
 (condensed from `examples/13_keylets/src/lib.rs`, which repeats this shape
 once per keylet type using a small `compute`/`store` helper pair). Every
