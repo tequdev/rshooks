@@ -58,8 +58,10 @@ impl Backend {
 /// A deterministic, test-only stand-in for a real transaction hash — SHA-256
 /// of the emitted blob. Never meant to match a real ledger's hash algorithm
 /// (that is e2e-only territory); only used so distinct emitted blobs get
-/// distinct, reproducible hashes.
-fn deterministic_hash(blob: &[u8]) -> [u8; 32] {
+/// distinct, reproducible hashes. `pub(crate)`: also used by
+/// [`crate::otxn::emit_failure`] to derive the `ttEMIT_FAILURE`
+/// pseudo-transaction's own id.
+pub(crate) fn deterministic_hash(blob: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(blob);
     hasher.finalize().into()

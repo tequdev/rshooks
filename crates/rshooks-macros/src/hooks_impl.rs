@@ -240,6 +240,10 @@ struct CbakEntry {
     return_tokens: Vec<TokenTree>,
     /// See [`HookEntry::return_span`].
     return_span: Span,
+    /// Whether this `#[cbak(..)]` fn declares one argument after `&self` —
+    /// the callback outcome (`u32` or `::rshooks::exit::EmitOutcome`),
+    /// populated from the host's `cbak(u32)` argument.
+    takes_arg: bool,
 }
 
 struct HookAttrData {
@@ -289,8 +293,8 @@ const SIG_NAME_MSG: &str = "#[hooks]: a signature parameter name must be 1..=16 
 /// `unstable-param-sig-interface` feature is off — the interface's whole
 /// surface (this module's [`parse_sig_args`] and downstream codegen) stays
 /// compiled but unreachable in that configuration, so an extra argument is
-/// rejected here instead. A `#[cbak(..)]` extra argument never reaches this
-/// diagnostic: the callback-specific rejection above it is unconditional.
+/// rejected here instead. A `#[cbak(..)]`'s single argument is the callback
+/// outcome, not a signature parameter, so it never reaches this diagnostic.
 #[cfg(not(feature = "unstable-param-sig-interface"))]
 const SIG_FEATURE_GATE_MSG: &str = "#[hooks]: extra arguments after `&self` declare Hook \
                                      Parameter Signature Interface parameters (draft spec) — \
@@ -539,6 +543,7 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
             let qualifier_tokens = tokens.get(i..q.fn_index).unwrap_or_default().to_vec();
             let scanned = scan_fn_item(tokens, q.fn_index)?;
             i = scanned.next;
+            let mut cbak_takes_arg = false;
 
             if is_entry {
                 match scanned.receiver {
@@ -560,25 +565,34 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
                     ));
                 }
                 // Extra arguments after `&self` declare signature
-                // parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §1), but
-                // only on `#[hook(..)]`: a `#[cbak(..)]`'s originating
-                // transaction is the emitted transaction, not the
-                // invocation, so the interface doesn't apply there.
+                // parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §1) on a
+                // `#[hook(..)]` entry. A `#[cbak(..)]` entry instead accepts
+                // at most one argument — the callback outcome, populated
+                // from the host's `cbak(u32)` argument via `Into::into` (see
+                // `render_entry_body_and_wrappers`).
                 if !scanned.extra_args.is_empty() && cbak_attr.is_some() {
-                    let bad_span = scanned
-                        .extra_args
-                        .first()
-                        .map_or_else(|| scanned.args_group.span(), TokenTree::span);
-                    return Err(err(
-                        bad_span,
-                        "#[hooks]: #[cbak] entry functions must take no arguments other than \
-                         `&self` — a callback's originating transaction is the emitted \
-                         transaction, not the invocation, so the signature parameter interface \
-                         does not apply",
-                    ));
+                    let rest = match scanned.extra_args.first() {
+                        Some(tt) if is_punct(tt, ',') => {
+                            scanned.extra_args.get(1..).unwrap_or_default()
+                        }
+                        _ => scanned.extra_args.as_slice(),
+                    };
+                    let groups = split_top_level_commas(rest);
+                    if let Some(second) = groups.get(1) {
+                        let span = second
+                            .first()
+                            .map_or_else(|| scanned.args_group.span(), TokenTree::span);
+                        return Err(err(
+                            span,
+                            "#[hooks]: a #[cbak] entry function takes at most one argument \
+                             after `&self` — the callback outcome (`u32` or \
+                             `rshooks::exit::EmitOutcome`)",
+                        ));
+                    }
+                    cbak_takes_arg = !groups.is_empty();
                 }
                 #[cfg(not(feature = "unstable-param-sig-interface"))]
-                if !scanned.extra_args.is_empty() {
+                if !scanned.extra_args.is_empty() && hook_attr.is_some() {
                     let bad_span = scanned
                         .extra_args
                         .first()
@@ -631,6 +645,7 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
                     fn_name,
                     return_tokens: scanned.return_tokens.clone(),
                     return_span: scanned.return_span,
+                    takes_arg: cbak_takes_arg,
                 });
             }
 
@@ -1526,6 +1541,7 @@ fn generate(
                 index: h.index,
                 hook_fn: h.fn_name.as_str(),
                 cbak_fn: cbak.map(|c| c.fn_name.as_str()),
+                cbak_arg: cbak.is_some_and(|c| c.takes_arg),
                 hook: &h.attr,
                 sig_args: &h.sig_args,
             }
@@ -1652,6 +1668,9 @@ struct EntrySource<'a> {
     index: u8,
     hook_fn: &'a str,
     cbak_fn: Option<&'a str>,
+    /// Whether the paired `#[cbak(..)]` fn declares one argument after
+    /// `&self` — the callback outcome. `false` when there is no paired cbak.
+    cbak_arg: bool,
     hook: &'a HookAttrData,
     sig_args: &'a [SigArg],
 }
@@ -1678,6 +1697,7 @@ impl EntrySource<'_> {
             index: self.index,
             hook_fn: self.hook_fn.to_string(),
             cbak_fn: self.cbak_fn.map(str::to_string),
+            cbak_arg: self.cbak_arg,
             hook_name: self.hook.name.as_ref().map(|(n, _)| n.clone()),
             on_form: form,
             hook_on: list,
@@ -1713,6 +1733,9 @@ struct EntryJson {
     index: u8,
     hook_fn: String,
     cbak_fn: Option<String>,
+    /// See [`EntrySource::cbak_arg`]. Codegen-only — never serialized into
+    /// the carrier JSON ([`encode_entries_json`]).
+    cbak_arg: bool,
     hook_name: Option<String>,
     on_form: OnForm,
     hook_on: Option<Vec<String>>,
@@ -1848,9 +1871,12 @@ fn render_entries_module(
 /// built exactly once per body, and both the selected
 /// (`export_name = "hook"`/`"cbak"`) and discovery
 /// (`export_name = "__rshooks_hook_{i}"`/`"__rshooks_cbak_{i}"`) wrappers
-/// are one-line forwards to it. Operates on the Span-free [`EntryJson`]
-/// view (plain strings only), so unit tests can pin the exact generated
-/// text without a live macro invocation.
+/// are one-line forwards to it. When [`EntryJson::cbak_arg`] is set, the
+/// cbak call passes the wasm export's own `_reserved: u32` argument through
+/// `::core::convert::Into::into`, so a declared `u32` or
+/// `::rshooks::exit::EmitOutcome` parameter both work. Operates on the
+/// Span-free [`EntryJson`] view (plain strings only), so unit tests can pin
+/// the exact generated text without a live macro invocation.
 fn render_entry_body_and_wrappers(
     struct_name: &str,
     entry: &EntryJson,
@@ -1900,9 +1926,16 @@ fn render_entry_body_and_wrappers(
              __rshooks_entry_body_{i}(_reserved) }}\n"
     );
     if let Some(cbak_fn) = &entry.cbak_fn {
-        let cbak_call = format!(
-            "::rshooks::exit::EntryReturn::finish({struct_name}::{cbak_fn}(&{struct_name}))"
-        );
+        let cbak_call = if entry.cbak_arg {
+            format!(
+                "::rshooks::exit::EntryReturn::finish({struct_name}::{cbak_fn}(&{struct_name}, \
+                 ::core::convert::Into::into(_reserved)))"
+            )
+        } else {
+            format!(
+                "::rshooks::exit::EntryReturn::finish({struct_name}::{cbak_fn}(&{struct_name}))"
+            )
+        };
         out.push_str(&format!(
             "#[inline(always)]\n\
              #[doc(hidden)]\n\
@@ -2349,6 +2382,7 @@ mod tests {
             index: 0,
             hook_fn: "deposit".to_string(),
             cbak_fn: None,
+            cbak_arg: false,
             hook_name: Some("deposit".to_string()),
             on_form: OnForm::List,
             hook_on: Some(vec!["Payment".to_string()]),
@@ -2494,6 +2528,23 @@ mod tests {
         ));
         assert!(out.contains("#[unsafe(export_name = \"cbak\")]"));
         assert!(out.contains("#[unsafe(export_name = \"__rshooks_cbak_0\")]"));
+    }
+
+    #[test]
+    fn cbak_with_arg_forwards_reserved_through_into() {
+        let mut entry = sample();
+        entry.cbak_fn = Some("deposit_cbak".to_string());
+        entry.cbak_arg = true;
+        let out = render_entry_body_and_wrappers("Vault", &entry, &not_any_list());
+
+        assert_eq!(
+            out.matches(
+                "::rshooks::exit::EntryReturn::finish(Vault::deposit_cbak(&Vault, \
+                 ::core::convert::Into::into(_reserved)))"
+            )
+            .count(),
+            1
+        );
     }
 
     #[test]

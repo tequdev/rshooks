@@ -3,7 +3,8 @@
 ## What you'll learn
 
 Reserving an emission slot, building a `txn_template!`-declared Payment,
-`emit()`ing it, and reacting to the outcome in a paired `#[cbak]`. See
+`emit()`ing it, and reacting to the outcome in a paired `#[cbak]` — the
+callback gates on its declared `EmitOutcome` argument before accepting. See
 [Emitting Transactions](../../book/src/emit/emitting.md) — this exact hook
 is that page's worked example end to end, including the static-buffer
 idiom the `Payment` template uses and why.

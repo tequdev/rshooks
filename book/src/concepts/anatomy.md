@@ -147,7 +147,8 @@ and generic violations are a `compile_error!` at the offending token rather
 than a panic; a return type that does not implement the sealed
 `EntryReturn` trait is an ordinary `E0277` naming `EntryReturn`:
 
-- exactly one argument, a bare `&self` receiver (see above);
+- a bare `&self` receiver (see above), optionally followed by one further
+  argument;
 - a return type implementing the sealed `EntryReturn` trait (currently, only
   `rshooks::exit::HookResult`);
 - no `async`/`unsafe`/`const`/`extern` modifiers;
@@ -161,10 +162,14 @@ convention carried through every example in this book. What matters is the
 optionally have one, generating a `cbak` export instead of `hook`. The host
 invokes it when a transaction the hook previously emitted (via `emit`)
 later settles on ledger, so the hook can react to its own emission's
-outcome. See [Emitting Transactions](../emit/emitting.md) for a worked
-`#[cbak]` example. Both attributes take **one required argument** — the
-index — plus, for `#[hook]`, the optional named metadata arguments covered
-in [Per-Hook Attributes](../build/metadata.md).
+outcome. Its fn may declare one argument after `&self` — `EmitOutcome` (or
+a raw `u32`) — decoded from the host's own `cbak(u32)` argument; `#[hook]`
+instead accepts signature-parameter arguments there (see [Hook and
+Transaction Parameters](../data/parameters.md#signature-parameters-fn-arguments)).
+See [Emitting Transactions](../emit/emitting.md) for a worked `#[cbak]`
+example. Both attributes take **one required argument** — the index —
+plus, for `#[hook]`, the optional named metadata arguments covered in
+[Per-Hook Attributes](../build/metadata.md).
 
 ## Execution model
 

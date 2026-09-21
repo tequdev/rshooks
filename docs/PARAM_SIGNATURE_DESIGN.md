@@ -61,9 +61,10 @@ impl Increment {
   byte equals `<Ty as SigParamType>::TYPE_BYTE`, so a type alias or drift
   fails the build instead of silently mis-declaring.
 - At most 16 arguments (`0x00..=0x0F`); a 17th is a macro-time error.
-- `#[cbak(..)]` fns MUST NOT declare extra arguments (macro-time error):
-  the callback's originating transaction is the emitted txn, not the
-  invocation.
+- `#[cbak(..)]` fns declare no signature parameters: their single optional
+  argument is the callback outcome (`EmitOutcome`/`u32`), and a second
+  argument is a macro-time error — the callback's originating transaction
+  is the emitted txn, not the invocation.
 - Entry fns without extra arguments are completely unaffected (no sig, no
   declarations emitted, byte-identical wasm — verified by the parity
   probe).
@@ -270,9 +271,8 @@ a `#[hook(..)]` entry fn — is gated behind the `unstable-param-sig-interface`
 Cargo feature (default off): `crates/rshooks/Cargo.toml` forwards it to
 `crates/rshooks-macros/Cargo.toml`'s feature of the same name. Off, an
 extra argument on `#[hook(..)]` is a compile error naming the feature, and
-`rshooks::sig` doesn't exist; `#[cbak(..)]` extras still get their own
-unconditional rejection (§1's "MUST NOT declare extra arguments") in both
-configurations, since that restriction doesn't depend on the interface
-being available at all. `unstable-*` features are exempt from semver — the
-interface may change in a breaking way in a minor release while it stays a
-draft.
+`rshooks::sig` doesn't exist; a second argument on `#[cbak(..)]` gets its
+own unconditional rejection (§1) in both configurations, since that
+restriction doesn't depend on the interface being available at all.
+`unstable-*` features are exempt from semver — the interface may change in
+a breaking way in a minor release while it stays a draft.

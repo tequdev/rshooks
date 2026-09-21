@@ -553,7 +553,9 @@ the struct. Helpers (unattributed associated functions in the same impl)
 accept either no receiver or `&self`; the rejected forms above are errors
 there too. See
 [HOOKS_SELF_RECEIVER_DESIGN.md](./HOOKS_SELF_RECEIVER_DESIGN.md) for the
-receiver-classification table and diagnostic wording.
+receiver-classification table and diagnostic wording. A `cbak` entry may
+declare one argument after `&self`, receiving the host's callback `what`
+value via `Into<T> for u32` (`EmitOutcome` or `u32`).
 
 ## 6. Implementation-level technical considerations
 
