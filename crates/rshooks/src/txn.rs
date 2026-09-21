@@ -396,9 +396,13 @@ pub mod codec {
         }
     }
 
-    /// Largest `N` [`copy_fixed`]/[`fill_fixed`] accept. Raise it if a
-    /// declared field needs more.
-    pub const MAX_CHUNKED_LEN: usize = 512;
+    /// Largest `N` [`copy_fixed`]/[`fill_fixed`] accept. A single declared
+    /// field this large already eats a meaningful slice of the hook
+    /// binary's own 65,535-byte SetHook limit, which makes a larger one
+    /// impractical; a field that still needs more room should be declared
+    /// `vl(sfX, N, N)` instead, whose setter writes through a guarded loop
+    /// with no fixed-`N` cap.
+    pub const MAX_CHUNKED_LEN: usize = 4096;
 
     /// Emits one literal-indexed 64-byte group of [`copy_fixed`]'s or
     /// [`fill_fixed`]'s body per literal `$k`, for every group `N` fully
@@ -550,14 +554,26 @@ pub mod codec {
         const {
             assert!(
                 N <= MAX_CHUNKED_LEN,
-                "copy_fixed: N exceeds MAX_CHUNKED_LEN"
+                "copy_fixed: N exceeds MAX_CHUNKED_LEN; declare the field as vl(sfX, N, N) to use the guarded copy loop instead"
             )
         };
         if N <= 64 {
             dst[..N].copy_from_slice(src);
         } else {
             let z: u64 = ::core::hint::black_box(0u64);
-            chunked_groups!(copy, N, dst, src, z, [0, 1, 2, 3, 4, 5, 6, 7]);
+            chunked_groups!(
+                copy,
+                N,
+                dst,
+                src,
+                z,
+                [
+                    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+                    22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
+                    42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61,
+                    62, 63,
+                ]
+            );
             let zb: u8 = (z & 0xFF) as u8;
             group_tail!(copy, N, dst, src, zb);
         }
@@ -585,14 +601,26 @@ pub mod codec {
         const {
             assert!(
                 N <= MAX_CHUNKED_LEN,
-                "fill_fixed: N exceeds MAX_CHUNKED_LEN"
+                "fill_fixed: N exceeds MAX_CHUNKED_LEN; declare the field as vl(sfX, N, N) to use the guarded copy loop instead"
             )
         };
         if N <= 64 {
             dst[..N].fill(byte);
         } else {
             let w: u64 = ::core::hint::black_box(u64::from_ne_bytes([byte; 8]));
-            chunked_groups!(fill, N, dst, byte, w, [0, 1, 2, 3, 4, 5, 6, 7]);
+            chunked_groups!(
+                fill,
+                N,
+                dst,
+                byte,
+                w,
+                [
+                    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+                    22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
+                    42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61,
+                    62, 63,
+                ]
+            );
             group_tail!(fill, N, dst, byte);
         }
     }
@@ -1563,6 +1591,38 @@ pub mod codec {
         fn field_offset_or_resolves_or_falls_back() {
             assert_eq!(field_offset_or(SAMPLE_TABLE, 100, 0), 4);
             assert_eq!(field_offset_or(SAMPLE_TABLE, 999, 42), 42);
+        }
+
+        #[test]
+        fn copy_fixed_handles_the_full_max_chunked_len() {
+            let src = [0xABu8; MAX_CHUNKED_LEN];
+            let mut dst = [0u8; MAX_CHUNKED_LEN];
+            copy_fixed(&mut dst, &src);
+            assert_eq!(dst, src);
+        }
+
+        #[test]
+        fn copy_fixed_handles_one_byte_under_max_chunked_len() {
+            const N: usize = MAX_CHUNKED_LEN - 1;
+            let src = [0xCDu8; N];
+            let mut dst = [0u8; N];
+            copy_fixed(&mut dst, &src);
+            assert_eq!(dst, src);
+        }
+
+        #[test]
+        fn fill_fixed_handles_the_full_max_chunked_len() {
+            let mut dst = [0u8; MAX_CHUNKED_LEN];
+            fill_fixed::<MAX_CHUNKED_LEN>(&mut dst, 0x42);
+            assert_eq!(dst, [0x42u8; MAX_CHUNKED_LEN]);
+        }
+
+        #[test]
+        fn fill_fixed_handles_one_byte_under_max_chunked_len() {
+            const N: usize = MAX_CHUNKED_LEN - 1;
+            let mut dst = [0u8; N];
+            fill_fixed::<N>(&mut dst, 0x42);
+            assert_eq!(dst, [0x42u8; N]);
         }
     }
 }
