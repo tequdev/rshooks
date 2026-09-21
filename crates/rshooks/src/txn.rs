@@ -1736,7 +1736,7 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// | `optional <scalar_kind>(sfX $(, N)?)` | (of `<scalar_kind>`) | that kind's slot | all [`NOP`](crate::txn::codec::NOP) (absent) | `set_x(<same args as the kind>)` (argument-less for `optional empty_vl`/`optional native_issue`), `clear_x()` |
 /// | `any_amount(sfX)` | AMOUNT | 1 + 48 | issued zero (as `amount`) | `set_x_native(u64) -> Result<()>`, `set_x_iou(XFL, &CurrencyCode, &AccountId)` |
 /// | `optional any_amount(sfX)` | AMOUNT | 1 + 48 | all NOP (absent) | the two above, plus `clear_x()` |
-/// | `vl(sfX, MAX)` / `vl(sfX, MIN, MAX)` | VL | VL-prefix(MAX) + MAX | prefix(MIN) + MIN zeros + NOP tail | `set_x(&[u8]) -> Result<()>` |
+/// | `vl(sfX, MAX)` / `vl(sfX, MIN, MAX)` | VL | VL-prefix(MAX) + MAX | prefix(MIN) + MIN zeros + NOP tail | `set_x(&[u8]) -> Result<()>`, `reset_x()` |
 /// | `optional vl(sfX, MIN, MAX)` | VL | VL-prefix(MAX) + MAX | all NOP (absent) | `set_x(&[u8]) -> Result<()>`, `clear_x()` |
 /// | `optional object(sfX) { .. }` | OBJECT | inner + 1 (`0xE1`) | all NOP (absent) | inner setters, prefixed (any one makes it present); `enable_x()`, `clear_x()`, `is_x_present() -> bool` |
 /// | `optional array(sfX) [ .. ]` | ARRAY | inner + 1 (`0xF1`) | all NOP (absent) | same |
@@ -1898,7 +1898,19 @@ impl<'a, T: TemplateBytes> core::fmt::Debug for Prepared<'a, T> {
 /// order in one go (the same NOP fills, summed) for a caller that cannot
 /// track which fields it set, restoring every optional element to absent
 /// (scalars and `vl` payloads outside an `optional` keep their values) —
-/// useful for a `HookStatic<Self>` reused across emissions.
+/// useful for a `HookStatic<Self>` reused across emissions. `clear_optionals`
+/// is a reserved name at the top level: a field literally named `optionals`
+/// collides with it (see "Setter names" above).
+///
+/// A required `vl(sfX, MIN, MAX)` field is the same story: it keeps
+/// whatever payload its setter last wrote across every later emission —
+/// `prepare_for_emit()`/`emit()` never touch it either. Its generated
+/// `reset_x()` restores the slot to `new()`'s baked default (the declared
+/// `MIN`-byte zeroed payload, NOP-padded out to `MAX`) in one call, loop-free
+/// (`codec::fill_fixed`) so — unlike the setter, whose payload/NOP-tail
+/// write is one guard-budgeted loop callable at most once per hook
+/// execution for that field — calling `reset_x()` costs no guard budget
+/// and may be called any number of times.
 ///
 /// ## Required fields, and `prepare_for_emit()`
 ///
@@ -5657,6 +5669,33 @@ macro_rules! __txn_template_step {
                     }
                     ::core::result::Result::Ok(())
                 }
+
+                #[doc = concat!("Restores `", stringify!($field), "`'s slot to the bytes `new()` bakes in: header unchanged, a zeroed `", stringify!($min), "`-byte payload, then NOP-padding out to the reserved `", stringify!($max), "`-byte capacity. A required `vl` field keeps its last-set payload across every later emission of the same template instance -- `prepare_for_emit()`/`emit()` never reset it -- call this to restore the baked default between emissions of a reused `HookStatic<Self>`.")]
+                ///
+                /// # Guard budget
+                ///
+                /// Loop-free (`", stringify!($min), "` and the NOP tail are
+                /// each written through `codec::fill_fixed`'s chunked,
+                /// unrolled word writes, not a guarded loop), so unlike the
+                /// setter above, calling this more than once per execution
+                /// costs no guard budget.
+                #[inline(always)]
+                #[allow(clippy::indexing_slicing)] // in-bounds by construction, as above
+                #[allow(dead_code)] // not every txn_template! test fixture with a required vl field exercises reset_x(); real callers reach it via a `HookStatic<Self>`-backed template
+                $vis fn [<reset_ $($prefix)* $field>](&mut self) {
+                    const OFF: usize = $($prev)*;
+                    const HDR: ([u8; 3], usize) = $crate::txn::codec::field_header($sfcode);
+                    self.bytes[OFF..OFF.wrapping_add(HDR.1)].copy_from_slice(&HDR.0[..HDR.1]);
+                    const REGION_OFF: usize = OFF.wrapping_add(HDR.1);
+                    const PREFIX: ([u8; 3], usize) = $crate::txn::codec::vl_length_prefix($min);
+                    self.bytes[REGION_OFF..REGION_OFF.wrapping_add(PREFIX.1)].copy_from_slice(&PREFIX.0[..PREFIX.1]);
+                    const PAYLOAD_OFF: usize = REGION_OFF.wrapping_add(PREFIX.1);
+                    const PAYLOAD_LEN: usize = $min;
+                    $crate::txn::codec::fill_fixed::<PAYLOAD_LEN>(&mut self.bytes[PAYLOAD_OFF..PAYLOAD_OFF.wrapping_add(PAYLOAD_LEN)], 0u8);
+                    const TAIL_OFF: usize = PAYLOAD_OFF.wrapping_add(PAYLOAD_LEN);
+                    const TAIL_LEN: usize = ($crate::txn::codec::vl_slot_size($max)).saturating_sub($crate::txn::codec::vl_slot_size($min));
+                    $crate::txn::codec::fill_fixed::<TAIL_LEN>(&mut self.bytes[TAIL_OFF..TAIL_OFF.wrapping_add(TAIL_LEN)], $crate::txn::codec::NOP);
+                }
             ],
             emit_region = [$($emit_region)*],
             buf = [$($buf)*],
@@ -9223,6 +9262,14 @@ mod tests {
             tpl.set_memo_format(&[0u8; 7]),
             Err(HookError::InvalidArgument)
         );
+
+        // `reset_memo_format()` restores the slot to `new()`'s baked
+        // default, independent of `prepare_for_emit` -- loop-free, so
+        // unlike the setter it costs no guard budget and may be called
+        // any number of times.
+        assert_ne!(tpl.bytes(), VlFixture::new().bytes());
+        tpl.reset_memo_format();
+        assert_eq!(tpl.bytes(), VlFixture::new().bytes());
 
         tpl.set_sequence(0);
         tpl.set_first_ledger_sequence(0);
