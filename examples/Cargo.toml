@@ -30,10 +30,14 @@ members = [
 # inherits it via `version.workspace = true`); it tracks the root
 # workspace's `[workspace.package] version`, so a release bump touches this
 # one line here instead of every example manifest.
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 rust-version = "1.85"
 publish = false
+
+[workspace.dependencies]
+rshooks = { path = "../crates/rshooks" }
+rshooks-testenv = { path = "../crates/rshooks-testenv" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

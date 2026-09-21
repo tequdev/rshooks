@@ -244,12 +244,35 @@ pub trait FixedRead: Sized {
     /// "wrote more," which `read`'s exactly-sized buffer argument should
     /// already prevent at the host level, but isn't assumed here).
     fn read_exact(read: impl FnOnce(&mut [u8]) -> Result<usize>) -> Result<Self>;
+
+    /// Out-param twin of [`Self::read_exact`]: writes straight into
+    /// caller-owned `out` instead of returning `Self` by value. The default
+    /// body just delegates to `read_exact`, so this is safe to leave
+    /// unoverridden for a type with no dedicated storage to write into
+    /// directly; `[u8; N]` and every `rshooks::types` newtype
+    /// (`fixed_bytes_type!`) override it to skip `read_exact`'s own initial
+    /// scratch/zero-fill, since `out` already exists.
+    ///
+    /// # Errors
+    ///
+    /// Same [`HookError`] variants as [`Self::read_exact`]. On `Err`,
+    /// `out`'s contents are unspecified: an override may hand `out`
+    /// straight to `read`, so a failed read can leave it partially
+    /// overwritten rather than untouched.
+    #[inline(always)]
+    fn read_exact_into(
+        out: &mut Self,
+        read: impl FnOnce(&mut [u8]) -> Result<usize>,
+    ) -> Result<()> {
+        *out = Self::read_exact(read)?;
+        Ok(())
+    }
 }
 
 impl<const N: usize> FixedRead for [u8; N] {
     #[inline(always)]
     fn read_exact(read: impl FnOnce(&mut [u8]) -> Result<usize>) -> Result<Self> {
-        let mut out = core::mem::MaybeUninit::<[u8; N]>::uninit();
+        let mut out = core::mem::MaybeUninit::<crate::convert::Scratch<N>>::uninit();
         // SAFETY: `buf` is only read through `read`'s own caller-buffer
         // contract (write, don't read back); `out` is only read via
         // `assume_init` below, once `written == N` proves `read` wrote every
@@ -258,12 +281,33 @@ impl<const N: usize> FixedRead for [u8; N] {
         let written = read(buf)?;
         if written == N {
             // SAFETY: `written == N` proves `read` wrote every byte of `out`.
-            Ok(unsafe { out.assume_init() })
+            Ok(unsafe { out.assume_init() }.0)
+        } else {
+            Err(HookError::TooSmall)
+        }
+    }
+
+    #[inline(always)]
+    fn read_exact_into(
+        out: &mut Self,
+        read: impl FnOnce(&mut [u8]) -> Result<usize>,
+    ) -> Result<()> {
+        let written = read(out)?;
+        if written == N {
+            Ok(())
         } else {
             Err(HookError::TooSmall)
         }
     }
 }
+
+/// 8-byte-aligned fixed-size scratch storage for a caller-buffer host
+/// call. `[u8; N]` alone has alignment 1, which makes every wide copy out
+/// of such a buffer an `align=1` access LLVM splits into a fragmented
+/// load/store chain on `wasm32v1-none`; aligning the storage lets the
+/// same copy lower to whole `i64`/`i32` operations.
+#[repr(C, align(8))]
+pub(crate) struct Scratch<const N: usize>(pub(crate) [u8; N]);
 
 /// Views `N` bytes of uninitialized scratch as a `&mut [u8]` for a
 /// caller-buffer Hook API wrapper (`otxn_field`, `state`, `slot`, ...) to
@@ -290,10 +334,10 @@ impl<const N: usize> FixedRead for [u8; N] {
 /// unconditionally guarantees.
 #[inline(always)]
 pub(crate) unsafe fn uninit_slice_mut<const N: usize>(
-    buf: &mut core::mem::MaybeUninit<[u8; N]>,
+    buf: &mut core::mem::MaybeUninit<Scratch<N>>,
 ) -> &mut [u8] {
-    // SAFETY: `buf` is `N` bytes of live, properly aligned storage (a
-    // `MaybeUninit<[u8; N]>` has the same size and alignment as `[u8; N]`).
+    // SAFETY: `buf` is at least `N` bytes of live, 8-byte-aligned storage
+    // (`Scratch` is `repr(C)`, so its `[u8; N]` sits at offset 0).
     // `u8` has no invalid bit patterns and no padding, so a `&mut [u8]` over
     // that storage is well-formed the instant it is created, whether or not
     // the storage has been written to yet — only reading through it before

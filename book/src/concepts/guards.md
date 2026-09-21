@@ -5,9 +5,10 @@ cannot prove terminates. Every loop — every one, including loops the
 compiler generates that never appear as a `loop` keyword in your Rust
 source — must call the host's `_g` guard function at its top, declaring an
 upper bound on its iteration count. This page covers `guard!` and
-`guard_m!`, the compiler-generated-loop pitfall that catches most people
-off guard the first time, and the two source-level idioms `rshooks` hooks
-use to avoid it entirely.
+`guard_m!`, the loop-rotation pitfall that can move a correctly written
+guard away from the top of the compiled loop, the compiler-generated-loop
+pitfall that catches most people off guard the first time, and the
+source-level idioms `rshooks` hooks use to avoid all of it.
 
 ## Why every loop needs a guard
 
@@ -94,8 +95,114 @@ module. The real hazard is a **runtime** one: `_g` tracks each guard id's
 iteration count as the hook actually executes, so two unrelated loops
 sharing an id share one counter — whichever runs first pushes it toward
 the *other* loop's `maxiter`, risking a spurious on-ledger
-`GUARD_VIOLATION` that no build-time tool catches. That's the actual
-reason `$n` exists.
+`GUARD_VIOLATION` that no build-time tool catches; `rshooks-testenv`
+reports it at unit-test time instead, since its own `_g` enforces the
+same cumulative per-id budget. That's the actual reason `$n` exists.
+
+## wasm-opt block-wrapping and LLVM loop rotation
+
+A guard written correctly at a loop's top in Rust source can still end up
+somewhere other than the very first instruction after the compiled `loop`
+opcode. Distinct compiler behaviors cause this, at different stages of
+`rshooks build`'s pipeline: `rshooks build` compensates for one of them
+automatically; the other needs a source-level idiom.
+
+### 1. `wasm-opt -Oz` wraps the loop body in a `block`
+
+`rshooks build` runs Binaryen's `wasm-opt -Oz` size optimization first, on
+each entry's raw per-entry wasm, before cleaning (`optimizer.rs`). For a
+loop whose body contains an internal early-exit branch — a `continue`, or
+an `if`/`?` check on a `Result` a Hook API call returned — `wasm-opt` often
+restructures it into `loop { block { <guard>; .. } }`: the break/continue
+logic is wrapped in a `block` so a `br`/`br_if` can jump to its end, and
+that `block` lands first inside the `loop`, ahead of the guard call that
+was the loop body's first statement in source. The guard itself is
+untouched — still unconditional, still the first *real* instruction the
+loop runs every iteration — only its position relative to `loop` moved,
+which the checker's exact `loop; i32.const; i32.const; call $_g` prologue
+match doesn't tolerate on its own.
+
+`rshooks build` runs a guard-hoist pass (`crates/rshooks-build/src/
+guard_hoist.rs`) after unnesting and before the guard check specifically to
+undo this: it moves a guard prologue found just inside one or more leading
+empty `block`s back out to sit directly after `loop`, which is always
+semantically identical (the prologue is stack-neutral and no label inside
+the `block`s targets it). This runs automatically, for every `rshooks
+build`/`rshooks clean`, with no source change required — a hook author
+writing an ordinary `loop { guard!(N); if !cond { break } body }` or `while
+cond { guard!(N); body }` never needs to think about this case.
+
+### 2. LLVM loop rotation moves the guard to the loop's latch
+
+Separately, at `opt-level = 3`, LLVM's own loop-rotation pass can turn
+either guard-writing form shown above into a do-while: it duplicates
+the loop's header block (the condition check) into the preheader ahead of
+the loop, and moves the original header to the loop's latch, after the
+body, just before the branch back. Which source form stays "guard-first"
+after this depends on which block LLVM treats as the header — an LLVM
+decision the source doesn't control:
+
+- `loop { guard!(N); if !cond { break } body }`'s guard is the first
+  statement of the loop body, so it *is* the header. Rotation duplicates it
+  into the preheader and moves the original past `body`, into the latch —
+  the compiled `loop` opcode is then followed by `body`, not by the guard,
+  and the checker rejects it as missing a guard.
+- `while cond { guard!(N); body }`'s condition is the header, with the
+  guard as the body's first statement. Rotation moves the condition to the
+  latch, so the guard ends up leading the rotated loop — this passes.
+
+But rotation only fires when LLVM judges the header "small" (a cheap
+condition check); a large or expensive header (many arithmetic/memory
+operations) is left un-rotated, and then it's the `while` form that fails
+instead. Neither fixed source form is guard-first under both outcomes, and
+nothing in the source indicates which outcome a given loop will get — the
+guard-hoist pass above can't help here either, since there's no leading
+`block` to hoist out of: the guard is simply absent from the top of the
+compiled loop, moved to its latch.
+
+`rshooks::guarded_while!(maxiter, cond, { body })` sidesteps the question
+by placing a guard in both positions — the condition block and the top of
+the body — so whichever one rotation leaves leading the compiled loop, that
+block already starts with a guard call. The cost is one extra `_g` call per
+iteration. See its rustdoc (`crates/rshooks/src/macros.rs`) for the full
+mechanism and the guard-id convention it uses (`guard_m!` ids `1` and `2`
+on the macro's own invocation line). `continue` inside its body jumps back
+to the condition block, which is guarded, so it stays covered too.
+
+### Diagnosing which one you're looking at
+
+`rshooks build`'s unguarded-loop error names this shape directly when it
+recognizes it — a `_g` call inside the loop's body that isn't at its head.
+Since the build pipeline's guard-hoist pass already runs before this check,
+a report reaching you from `rshooks build` is case 2 (rotation): the block
+case was already fixed automatically. `rshooks check` on an already-built
+file calls the validator directly, with no hoist pass, so either cause is
+still possible there.
+
+To tell them apart by hand:
+
+- `rshooks build --no-optimize` skips `wasm-opt` entirely. If the same loop
+  now passes, the failure was case 1 (`wasm-opt` block-wrapping) — LLVM's
+  own output was already guard-first. If it still fails, it's case 2
+  (rotation).
+- `wasm-tools print <entry>.wasm` on the raw per-entry wasm (see below for
+  how to obtain it) shows the signature directly: a guard id (`i32.const
+  <id>`) appearing **twice** — once immediately before the `loop` opcode
+  (the duplicated preheader copy) and again partway through the loop's
+  body, at its latch — is rotation (case 2). A single `block` opener
+  immediately after `loop`, with the guard as the block's first
+  instruction, is the `wasm-opt` shape (case 1) — already fixed by the time
+  `rshooks build` reports anything, so this is only visible with
+  `--no-optimize` off and inspecting an intermediate stage, or by disabling
+  the hoist pass.
+
+The raw per-entry wasm isn't kept by default; rebuild it directly with the
+`cargo rustc` invocation `rshooks build` itself uses, e.g.
+`cargo rustc --cfg rshooks_entry="0" --check-cfg
+'cfg(rshooks_entry,values("0","1","2","3","4","5","6","7","8","9"))'
+--target wasm32v1-none --release -- -C link-arg=-zstack-size=<bytes>`
+(`crates/rshooks-build/src/chain_build.rs`'s `selected_rustc_args`/
+`cargo_args` print the exact, current flags).
 
 ## The compiler-generated-loop pitfall
 

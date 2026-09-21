@@ -28,7 +28,7 @@ use proc_macro::{Delimiter, Group, Ident, Punct, Spacing, Span, TokenStream, Tok
 use crate::hooks_shared::{
     AttrEntry, classify_fixed_sti_type_text, hex_lower, hex_upper, is_punct,
     is_valid_interface_name, parse_attr_entries, parse_balanced_angle, parse_string_value,
-    render_carrier_export, split_top_level_commas,
+    render_carrier_export, scan_attrs, scan_vis, split_top_level_commas,
 };
 use crate::shape::tokens_to_string;
 use crate::{err, sha256};
@@ -111,20 +111,8 @@ fn parse_impl_item(item: TokenStream) -> Result<ParsedImpl, TokenStream> {
     let tokens: Vec<TokenTree> = item.into_iter().collect();
     let mut i = 0usize;
 
-    let mut leading_attrs = Vec::new();
-    while let Some(tt) = tokens.get(i) {
-        if !is_punct(tt, '#') {
-            break;
-        }
-        leading_attrs.push(tt.clone());
-        match tokens.get(i.wrapping_add(1)) {
-            Some(g @ TokenTree::Group(group)) if group.delimiter() == Delimiter::Bracket => {
-                leading_attrs.push(g.clone());
-            }
-            _ => return Err(err(Span::call_site(), "malformed attribute before `impl`")),
-        }
-        i = i.wrapping_add(2);
-    }
+    let (leading_attrs, next) = scan_attrs(&tokens, i, "malformed attribute before `impl`")?;
+    i = next;
 
     let impl_kw = match tokens.get(i) {
         Some(tt @ TokenTree::Ident(id)) if id.to_string() == "impl" => tt.clone(),
@@ -252,6 +240,10 @@ struct CbakEntry {
     return_tokens: Vec<TokenTree>,
     /// See [`HookEntry::return_span`].
     return_span: Span,
+    /// Whether this `#[cbak(..)]` fn declares one argument after `&self` —
+    /// the callback outcome (`u32` or `::rshooks::exit::EmitOutcome`),
+    /// populated from the host's `cbak(u32)` argument.
+    takes_arg: bool,
 }
 
 struct HookAttrData {
@@ -301,8 +293,8 @@ const SIG_NAME_MSG: &str = "#[hooks]: a signature parameter name must be 1..=16 
 /// `unstable-param-sig-interface` feature is off — the interface's whole
 /// surface (this module's [`parse_sig_args`] and downstream codegen) stays
 /// compiled but unreachable in that configuration, so an extra argument is
-/// rejected here instead. A `#[cbak(..)]` extra argument never reaches this
-/// diagnostic: the callback-specific rejection above it is unconditional.
+/// rejected here instead. A `#[cbak(..)]`'s single argument is the callback
+/// outcome, not a signature parameter, so it never reaches this diagnostic.
 #[cfg(not(feature = "unstable-param-sig-interface"))]
 const SIG_FEATURE_GATE_MSG: &str = "#[hooks]: extra arguments after `&self` declare Hook \
                                      Parameter Signature Interface parameters (draft spec) — \
@@ -522,19 +514,8 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
             break;
         }
 
-        let mut vis: Vec<TokenTree> = Vec::new();
-        if let Some(tt @ TokenTree::Ident(id)) = tokens.get(i)
-            && id.to_string() == "pub"
-        {
-            vis.push(tt.clone());
-            i = i.wrapping_add(1);
-            if let Some(g @ TokenTree::Group(group)) = tokens.get(i)
-                && group.delimiter() == Delimiter::Parenthesis
-            {
-                vis.push(g.clone());
-                i = i.wrapping_add(1);
-            }
-        }
+        let (vis, next) = scan_vis(tokens, i);
+        i = next;
 
         let is_entry = hook_attr.is_some() || cbak_attr.is_some();
         if is_entry && cfg_span.is_some() {
@@ -562,6 +543,7 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
             let qualifier_tokens = tokens.get(i..q.fn_index).unwrap_or_default().to_vec();
             let scanned = scan_fn_item(tokens, q.fn_index)?;
             i = scanned.next;
+            let mut cbak_takes_arg = false;
 
             if is_entry {
                 match scanned.receiver {
@@ -583,25 +565,34 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
                     ));
                 }
                 // Extra arguments after `&self` declare signature
-                // parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §1), but
-                // only on `#[hook(..)]`: a `#[cbak(..)]`'s originating
-                // transaction is the emitted transaction, not the
-                // invocation, so the interface doesn't apply there.
+                // parameters (`docs/PARAM_SIGNATURE_DESIGN.md` §1) on a
+                // `#[hook(..)]` entry. A `#[cbak(..)]` entry instead accepts
+                // at most one argument — the callback outcome, populated
+                // from the host's `cbak(u32)` argument via `Into::into` (see
+                // `render_entry_body_and_wrappers`).
                 if !scanned.extra_args.is_empty() && cbak_attr.is_some() {
-                    let bad_span = scanned
-                        .extra_args
-                        .first()
-                        .map_or_else(|| scanned.args_group.span(), TokenTree::span);
-                    return Err(err(
-                        bad_span,
-                        "#[hooks]: #[cbak] entry functions must take no arguments other than \
-                         `&self` — a callback's originating transaction is the emitted \
-                         transaction, not the invocation, so the signature parameter interface \
-                         does not apply",
-                    ));
+                    let rest = match scanned.extra_args.first() {
+                        Some(tt) if is_punct(tt, ',') => {
+                            scanned.extra_args.get(1..).unwrap_or_default()
+                        }
+                        _ => scanned.extra_args.as_slice(),
+                    };
+                    let groups = split_top_level_commas(rest);
+                    if let Some(second) = groups.get(1) {
+                        let span = second
+                            .first()
+                            .map_or_else(|| scanned.args_group.span(), TokenTree::span);
+                        return Err(err(
+                            span,
+                            "#[hooks]: a #[cbak] entry function takes at most one argument \
+                             after `&self` — the callback outcome (`u32` or \
+                             `rshooks::exit::EmitOutcome`)",
+                        ));
+                    }
+                    cbak_takes_arg = !groups.is_empty();
                 }
                 #[cfg(not(feature = "unstable-param-sig-interface"))]
-                if !scanned.extra_args.is_empty() {
+                if !scanned.extra_args.is_empty() && hook_attr.is_some() {
                     let bad_span = scanned
                         .extra_args
                         .first()
@@ -654,6 +645,7 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
                     fn_name,
                     return_tokens: scanned.return_tokens.clone(),
                     return_span: scanned.return_span,
+                    takes_arg: cbak_takes_arg,
                 });
             }
 
@@ -671,7 +663,7 @@ fn parse_impl_body(tokens: &[TokenTree]) -> Result<ParsedBody, TokenStream> {
                              associated function",
                         ));
                     }
-                    let (const_tokens, next) = scan_const_item(tokens, i)?;
+                    let (const_tokens, next) = scan_const_item(tokens, i);
                     i = next;
                     output.extend(kept_attrs);
                     output.extend(vis);
@@ -1157,10 +1149,7 @@ fn detect_receiver(
 /// at `tokens[start]`, up through its top-level `;` — safe to scan flatly
 /// since every nested brace/paren/bracket in `expr` is already an atomic
 /// [`proc_macro::Group`], never a bare `;` `Punct`.
-fn scan_const_item(
-    tokens: &[TokenTree],
-    start: usize,
-) -> Result<(Vec<TokenTree>, usize), TokenStream> {
+fn scan_const_item(tokens: &[TokenTree], start: usize) -> (Vec<TokenTree>, usize) {
     let mut i = start;
     while let Some(tt) = tokens.get(i) {
         i = i.wrapping_add(1);
@@ -1168,7 +1157,7 @@ fn scan_const_item(
             break;
         }
     }
-    Ok((tokens.get(start..i).unwrap_or_default().to_vec(), i))
+    (tokens.get(start..i).unwrap_or_default().to_vec(), i)
 }
 
 // ---------------------------------------------------------------------
@@ -1552,6 +1541,7 @@ fn generate(
                 index: h.index,
                 hook_fn: h.fn_name.as_str(),
                 cbak_fn: cbak.map(|c| c.fn_name.as_str()),
+                cbak_arg: cbak.is_some_and(|c| c.takes_arg),
                 hook: &h.attr,
                 sig_args: &h.sig_args,
             }
@@ -1678,6 +1668,9 @@ struct EntrySource<'a> {
     index: u8,
     hook_fn: &'a str,
     cbak_fn: Option<&'a str>,
+    /// Whether the paired `#[cbak(..)]` fn declares one argument after
+    /// `&self` — the callback outcome. `false` when there is no paired cbak.
+    cbak_arg: bool,
     hook: &'a HookAttrData,
     sig_args: &'a [SigArg],
 }
@@ -1704,6 +1697,7 @@ impl EntrySource<'_> {
             index: self.index,
             hook_fn: self.hook_fn.to_string(),
             cbak_fn: self.cbak_fn.map(str::to_string),
+            cbak_arg: self.cbak_arg,
             hook_name: self.hook.name.as_ref().map(|(n, _)| n.clone()),
             on_form: form,
             hook_on: list,
@@ -1739,6 +1733,9 @@ struct EntryJson {
     index: u8,
     hook_fn: String,
     cbak_fn: Option<String>,
+    /// See [`EntrySource::cbak_arg`]. Codegen-only — never serialized into
+    /// the carrier JSON ([`encode_entries_json`]).
+    cbak_arg: bool,
     hook_name: Option<String>,
     on_form: OnForm,
     hook_on: Option<Vec<String>>,
@@ -1874,9 +1871,12 @@ fn render_entries_module(
 /// built exactly once per body, and both the selected
 /// (`export_name = "hook"`/`"cbak"`) and discovery
 /// (`export_name = "__rshooks_hook_{i}"`/`"__rshooks_cbak_{i}"`) wrappers
-/// are one-line forwards to it. Operates on the Span-free [`EntryJson`]
-/// view (plain strings only), so unit tests can pin the exact generated
-/// text without a live macro invocation.
+/// are one-line forwards to it. When [`EntryJson::cbak_arg`] is set, the
+/// cbak call passes the wasm export's own `_reserved: u32` argument through
+/// `::core::convert::Into::into`, so a declared `u32` or
+/// `::rshooks::exit::EmitOutcome` parameter both work. Operates on the
+/// Span-free [`EntryJson`] view (plain strings only), so unit tests can pin
+/// the exact generated text without a live macro invocation.
 fn render_entry_body_and_wrappers(
     struct_name: &str,
     entry: &EntryJson,
@@ -1926,9 +1926,16 @@ fn render_entry_body_and_wrappers(
              __rshooks_entry_body_{i}(_reserved) }}\n"
     );
     if let Some(cbak_fn) = &entry.cbak_fn {
-        let cbak_call = format!(
-            "::rshooks::exit::EntryReturn::finish({struct_name}::{cbak_fn}(&{struct_name}))"
-        );
+        let cbak_call = if entry.cbak_arg {
+            format!(
+                "::rshooks::exit::EntryReturn::finish({struct_name}::{cbak_fn}(&{struct_name}, \
+                 ::core::convert::Into::into(_reserved)))"
+            )
+        } else {
+            format!(
+                "::rshooks::exit::EntryReturn::finish({struct_name}::{cbak_fn}(&{struct_name}))"
+            )
+        };
         out.push_str(&format!(
             "#[inline(always)]\n\
              #[doc(hidden)]\n\
@@ -2055,44 +2062,24 @@ fn encode_entries_json(struct_name: &str, entries: &[EntryJson]) -> Result<Vec<u
     let mut arr = Vec::new();
     for e in entries {
         let mut obj = serde_json::Map::new();
-        obj.insert("index".into(), u64::from(e.index).into());
-        obj.insert("hook_fn".into(), e.hook_fn.clone().into());
+        obj.insert("index".to_string(), serde_json::json!(e.index));
+        obj.insert("hook_fn".to_string(), serde_json::json!(e.hook_fn));
+        obj.insert("cbak_fn".to_string(), serde_json::json!(e.cbak_fn));
+        obj.insert("HookName".to_string(), serde_json::json!(e.hook_name));
         obj.insert(
-            "cbak_fn".into(),
-            e.cbak_fn
-                .clone()
-                .map_or(serde_json::Value::Null, Into::into),
-        );
-        obj.insert(
-            "HookName".into(),
-            e.hook_name
-                .clone()
-                .map_or(serde_json::Value::Null, Into::into),
-        );
-
-        let mut on_obj = serde_json::Map::new();
-        on_obj.insert("form".into(), e.on_form.as_str().into());
-        on_obj.insert("HookOn".into(), names_or_null(e.hook_on.as_ref()));
-        on_obj.insert(
-            "HookOnIncoming".into(),
-            names_or_null(e.hook_on_incoming.as_ref()),
-        );
-        on_obj.insert(
-            "HookOnOutgoing".into(),
-            names_or_null(e.hook_on_outgoing.as_ref()),
-        );
-        obj.insert("on".into(), serde_json::Value::Object(on_obj));
-
-        obj.insert(
-            "HookCanEmit".into(),
-            names_or_null(e.hook_can_emit.as_ref()),
+            "on".to_string(),
+            serde_json::json!({
+                "form": e.on_form.as_str(),
+                "HookOn": e.hook_on,
+                "HookOnIncoming": e.hook_on_incoming,
+                "HookOnOutgoing": e.hook_on_outgoing,
+            }),
         );
         obj.insert(
-            "description".into(),
-            e.description
-                .clone()
-                .map_or(serde_json::Value::Null, Into::into),
+            "HookCanEmit".to_string(),
+            serde_json::json!(e.hook_can_emit),
         );
+        obj.insert("description".to_string(), serde_json::json!(e.description));
 
         // Only `field`/`type_byte`/`name_hex` are part of the wire carrier
         // (`docs/PARAM_SIGNATURE_DESIGN.md` §4) — `SigParamJson::type_text`
@@ -2106,30 +2093,27 @@ fn encode_entries_json(struct_name: &str, entries: &[EntryJson]) -> Result<Vec<u
                 .sig_params
                 .iter()
                 .map(|p| {
-                    let mut sp = serde_json::Map::new();
-                    sp.insert("field".into(), p.field.clone().into());
-                    sp.insert("type_byte".into(), u64::from(p.type_byte).into());
-                    sp.insert("name_hex".into(), p.name_hex.clone().into());
-                    serde_json::Value::Object(sp)
+                    serde_json::json!({
+                        "field": p.field,
+                        "type_byte": p.type_byte,
+                        "name_hex": p.name_hex,
+                    })
                 })
                 .collect();
-            obj.insert("sig_params".into(), sig_params.into());
+            obj.insert("sig_params".to_string(), sig_params.into());
         }
 
         arr.push(serde_json::Value::Object(obj));
     }
 
-    let mut object = serde_json::Map::new();
-    object.insert("schema".into(), "rshooks-hooks-v2".into());
-    object.insert("impl".into(), struct_name.into());
-    object.insert("entries".into(), arr.into());
+    let object = serde_json::json!({
+        "schema": "rshooks-hooks-v2",
+        "impl": struct_name,
+        "entries": arr,
+    });
 
-    serde_json::to_vec(&serde_json::Value::Object(object))
+    serde_json::to_vec(&object)
         .map_err(|e| format!("#[hooks]: failed to serialize entries carrier JSON: {e}"))
-}
-
-fn names_or_null(list: Option<&Vec<String>>) -> serde_json::Value {
-    list.map_or(serde_json::Value::Null, |l| l.to_vec().into())
 }
 
 #[cfg(test)]
@@ -2398,6 +2382,7 @@ mod tests {
             index: 0,
             hook_fn: "deposit".to_string(),
             cbak_fn: None,
+            cbak_arg: false,
             hook_name: Some("deposit".to_string()),
             on_form: OnForm::List,
             hook_on: Some(vec!["Payment".to_string()]),
@@ -2453,18 +2438,6 @@ mod tests {
         let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
         assert_eq!(value["entries"][0]["on"]["form"], "all");
         assert!(value["entries"][0]["on"]["HookOn"].is_null());
-    }
-
-    #[test]
-    fn not_any_list_covers_the_fixed_0_to_9_domain() {
-        let not_any_list: String = (0..=MAX_INDEX)
-            .map(|n| format!("rshooks_entry = \"{n}\""))
-            .collect::<Vec<_>>()
-            .join(", ");
-        for n in 0..=MAX_INDEX {
-            assert!(not_any_list.contains(&format!("rshooks_entry = \"{n}\"")));
-        }
-        assert_eq!(not_any_list.matches("rshooks_entry").count(), 10);
     }
 
     #[test]
@@ -2555,6 +2528,23 @@ mod tests {
         ));
         assert!(out.contains("#[unsafe(export_name = \"cbak\")]"));
         assert!(out.contains("#[unsafe(export_name = \"__rshooks_cbak_0\")]"));
+    }
+
+    #[test]
+    fn cbak_with_arg_forwards_reserved_through_into() {
+        let mut entry = sample();
+        entry.cbak_fn = Some("deposit_cbak".to_string());
+        entry.cbak_arg = true;
+        let out = render_entry_body_and_wrappers("Vault", &entry, &not_any_list());
+
+        assert_eq!(
+            out.matches(
+                "::rshooks::exit::EntryReturn::finish(Vault::deposit_cbak(&Vault, \
+                 ::core::convert::Into::into(_reserved)))"
+            )
+            .count(),
+            1
+        );
     }
 
     #[test]

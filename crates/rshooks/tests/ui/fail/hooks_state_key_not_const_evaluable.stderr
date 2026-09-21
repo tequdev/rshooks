@@ -1,0 +1,29 @@
+warning: unused import: `rshooks::decl::State`
+ --> tests/ui/fail/hooks_state_key_not_const_evaluable.rs:8:5
+  |
+8 | use rshooks::decl::State;
+  |     ^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+error[E0277]: the trait bound `Vault: HookChainImpl` is not satisfied
+  --> tests/ui/fail/hooks_state_key_not_const_evaluable.rs:16:1
+   |
+16 | #[hooks]
+   | ^^^^^^^^ the trait `HookChainImpl` is not implemented for `Vault`
+   |
+note: required by a bound in `assert`
+  --> tests/ui/fail/hooks_state_key_not_const_evaluable.rs:16:1
+   |
+16 | #[hooks]
+   | ^^^^^^^^ required by this bound in `assert`
+   = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0015]: cannot call non-const function `make_key` in constants
+  --> tests/ui/fail/hooks_state_key_not_const_evaluable.rs:16:1
+   |
+16 | #[hooks]
+   | ^^^^^^^^
+   |
+   = note: calls in constants are limited to constant functions, tuple structs and tuple variants
+   = note: this error originates in the attribute macro `hooks` (in Nightly builds, run with -Z macro-backtrace for more info)

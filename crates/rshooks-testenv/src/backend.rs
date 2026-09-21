@@ -58,8 +58,10 @@ impl Backend {
 /// A deterministic, test-only stand-in for a real transaction hash — SHA-256
 /// of the emitted blob. Never meant to match a real ledger's hash algorithm
 /// (that is e2e-only territory); only used so distinct emitted blobs get
-/// distinct, reproducible hashes.
-fn deterministic_hash(blob: &[u8]) -> [u8; 32] {
+/// distinct, reproducible hashes. `pub(crate)`: also used by
+/// [`crate::otxn::emit_failure`] to derive the `ttEMIT_FAILURE`
+/// pseudo-transaction's own id.
+pub(crate) fn deterministic_hash(blob: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(blob);
     hasher.finalize().into()
@@ -178,13 +180,13 @@ impl HostBackend for Backend {
     }
 
     fn otxn_field(&self, field_id: u32) -> Result<Vec<u8>, i64> {
-        self.world
-            .borrow()
+        let world = self.world.borrow();
+        let value = world
             .otxn
             .fields
             .get(&field_id)
-            .cloned()
-            .ok_or(rshooks_core::DOESNT_EXIST)
+            .ok_or(rshooks_core::DOESNT_EXIST)?;
+        Ok(crate::otxn::value_wire_bytes(field_id, value))
     }
 
     fn otxn_type(&self) -> i64 {
@@ -460,6 +462,22 @@ impl HostBackend for Backend {
         }
     }
 
+    // `_g(guard_id, maxiter)`: `guard_id`'s call count is cumulative for
+    // the whole invocation (`applyHook.cpp:3297-3331`); once it exceeds
+    // `maxiter`, the invocation terminates like `rollback!` with
+    // `GUARD_VIOLATION`.
+    #[allow(clippy::panic)] // documented API: mirrors xahaud's own guard-violation rollback (design §2.2's exit mechanism), not an error path
+    fn _g(&self, guard_id: u32, maxiter: u32) -> i32 {
+        if self.ctx.borrow_mut().guard_hit(guard_id, maxiter) {
+            std::panic::panic_any(HookExitSignal(HookExit {
+                exit: ExitType::Rollback,
+                code: rshooks_core::GUARD_VIOLATION,
+                msg: Vec::new(),
+            }));
+        }
+        1
+    }
+
     #[allow(clippy::panic)] // documented API: this is the accept! exit mechanism itself (design §2.2), not an error path
     fn accept(&self, msg: &[u8], code: i64) -> ! {
         std::panic::panic_any(HookExitSignal(HookExit {
@@ -584,7 +602,7 @@ impl HostBackend for Backend {
     // file's module doc comment.
 
     fn util_sha512h(&self, data: &[u8]) -> Result<[u8; 32], i64> {
-        Ok(crate::host::util::util_sha512h(data))
+        Ok(crate::host::util::sha512_half(data))
     }
 
     fn util_accid(&self, r_address: &[u8]) -> Result<Vec<u8>, i64> {

@@ -63,7 +63,7 @@ use crate::api::otxn::{otxn_param, otxn_param_raw_code};
 use crate::buf_eq::buf_eq_20;
 use crate::convert::FixedRead;
 use crate::error::{HookError, Result, res};
-use crate::interface_name::is_valid_name;
+use crate::interface_name::{is_valid_name, xas010d};
 use crate::slot_obj::{AmountBytes, ISSUE_MAX_READ_LEN, classify_amount};
 use crate::types::{ACC_ID_LEN, AccountId, CURRENCY_CODE_LEN, CurrencyCode, Hash, IssuedAsset};
 
@@ -245,20 +245,20 @@ pub trait SigParamType: Sized {
 /// Generates a big-endian-decoding [`SigParamType`] impl for a narrow
 /// unsigned integer, via `$ty::from_be_bytes`.
 macro_rules! be_int_sig {
-    ($ty:ty, $len:literal, $type_byte:literal) => {
+    ($ty:ty, $len:literal, $type_byte:expr) => {
         impl SigParamType for $ty {
             const TYPE_BYTE: u8 = $type_byte;
 
             #[inline(always)]
             fn read_sig(read: impl FnOnce(&mut [u8]) -> Result<usize>) -> Result<Self> {
-                let mut storage = core::mem::MaybeUninit::<[u8; $len]>::uninit();
+                let mut storage = core::mem::MaybeUninit::<crate::convert::Scratch<$len>>::uninit();
                 // SAFETY: only read via `assume_init` below, once
                 // `written == $len` proves `read` wrote every byte.
                 let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
                 let written = read(buf)?;
                 if written == $len {
                     // SAFETY: `written == $len` proves `read` wrote every byte.
-                    Ok(<$ty>::from_be_bytes(unsafe { storage.assume_init() }))
+                    Ok(<$ty>::from_be_bytes(unsafe { storage.assume_init() }.0))
                 } else {
                     Err(HookError::TooSmall)
                 }
@@ -267,17 +267,17 @@ macro_rules! be_int_sig {
     };
 }
 
-be_int_sig!(u8, 1, 0x10); // STI_UINT8
-be_int_sig!(u16, 2, 0x01); // STI_UINT16
-be_int_sig!(u32, 4, 0x02); // STI_UINT32
-be_int_sig!(u64, 8, 0x03); // STI_UINT64
+be_int_sig!(u8, 1, xas010d::UINT8);
+be_int_sig!(u16, 2, xas010d::UINT16);
+be_int_sig!(u32, 4, xas010d::UINT32);
+be_int_sig!(u64, 8, xas010d::UINT64);
 
 /// Generates a [`SigParamType`] impl for a type that already implements
 /// [`crate::convert::FixedRead`] with the exact same "exactly N bytes or
 /// `TooSmall`" contract [`SigParamType::read_sig`] needs, by reusing
 /// [`FixedRead::read_exact`] directly.
 macro_rules! fixed_read_sig {
-    ($ty:ty, $type_byte:literal) => {
+    ($ty:ty, $type_byte:expr) => {
         impl SigParamType for $ty {
             const TYPE_BYTE: u8 = $type_byte;
 
@@ -289,12 +289,12 @@ macro_rules! fixed_read_sig {
     };
 }
 
-fixed_read_sig!([u8; 16], 0x04); // STI_UINT128
-fixed_read_sig!([u8; 32], 0x05); // STI_UINT256
-fixed_read_sig!(Hash, 0x05); // STI_UINT256
-fixed_read_sig!(AccountId, 0x08); // STI_ACCOUNT
-fixed_read_sig!([u8; 20], 0x11); // STI_UINT160
-fixed_read_sig!(CurrencyCode, 0x1A); // STI_CURRENCY
+fixed_read_sig!([u8; 16], xas010d::UINT128);
+fixed_read_sig!([u8; 32], xas010d::UINT256);
+fixed_read_sig!(Hash, xas010d::UINT256);
+fixed_read_sig!(AccountId, xas010d::ACCOUNT);
+fixed_read_sig!([u8; 20], xas010d::UINT160);
+fixed_read_sig!(CurrencyCode, xas010d::CURRENCY);
 
 impl SigParamType for crate::xfl::XFL {
     /// XAS-010d `XFL` — big-endian raw `int64` bit pattern, no validity
@@ -304,18 +304,18 @@ impl SigParamType for crate::xfl::XFL {
     /// is this crate's own hook-private little-endian state convention, the
     /// wrong byte order for this protocol-facing boundary (see the module
     /// doc's "Why big-endian" section).
-    const TYPE_BYTE: u8 = 0x80;
+    const TYPE_BYTE: u8 = xas010d::XFL;
 
     #[inline(always)]
     fn read_sig(read: impl FnOnce(&mut [u8]) -> Result<usize>) -> Result<Self> {
-        let mut storage = core::mem::MaybeUninit::<[u8; 8]>::uninit();
+        let mut storage = core::mem::MaybeUninit::<crate::convert::Scratch<8>>::uninit();
         // SAFETY: only read via `assume_init` below, once `written == 8`
         // proves `read` wrote every byte.
         let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
         let written = read(buf)?;
         if written == 8 {
             // SAFETY: `written == 8` proves `read` wrote every byte.
-            let bytes: [u8; 8] = unsafe { storage.assume_init() };
+            let bytes: [u8; 8] = unsafe { storage.assume_init() }.0;
             Ok(crate::xfl::XFL::from_raw_bits(i64::from_be_bytes(bytes)))
         } else {
             Err(HookError::TooSmall)
@@ -334,7 +334,9 @@ impl SigParamType for AmountBytes {
     /// [`AmountBytes`]'s own doc comment).
     #[inline(always)]
     fn read_sig(read: impl FnOnce(&mut [u8]) -> Result<usize>) -> Result<Self> {
-        let mut storage = core::mem::MaybeUninit::<[u8; crate::types::IOU_AMOUNT_LEN]>::uninit();
+        let mut storage = core::mem::MaybeUninit::<
+            crate::convert::Scratch<{ crate::types::IOU_AMOUNT_LEN }>,
+        >::uninit();
         // SAFETY: only the `..written` prefix `read` reports writing is
         // ever read below.
         let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
@@ -457,7 +459,8 @@ impl SigParamType for IssueBytes {
         const IOU_LEN: usize = CURRENCY_CODE_LEN + ACC_ID_LEN;
         // Buffer is `ISSUE_MAX_READ_LEN` (44), not the 40 an IOU issue
         // needs — see the doc comment above.
-        let mut storage = core::mem::MaybeUninit::<[u8; ISSUE_MAX_READ_LEN]>::uninit();
+        let mut storage =
+            core::mem::MaybeUninit::<crate::convert::Scratch<ISSUE_MAX_READ_LEN>>::uninit();
         // SAFETY: only the `..written` prefix `read` reports writing is
         // ever read below.
         let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };

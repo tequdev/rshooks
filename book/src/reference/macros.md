@@ -13,19 +13,19 @@ the tutorial chapter that covers it, or the macro's own rustdoc in
 | `#[hooks(description = "...")]` on a struct | Declares this crate's Hook chain — a container for shared `#[state]`/`#[hook_param]`/`#[otxn_param]` fields, no runtime instance. Exactly one per crate. | `#[hooks] pub struct MyHook;` |
 | `#[hooks]` on an inherent `impl` | Declares this chain's entry points. Exactly one per `#[hooks]` struct, in the same module. | `#[hooks] impl MyHook { .. }` |
 | `#[hook(<index>, ...)]` | Inside a `#[hooks]` impl: declares one Hook entry at the given chain position (`0..=9`, required). The fn must return a type implementing the sealed `EntryReturn` trait — currently, only `HookResult` (paired with `?` — see [Accept, Rollback, and Errors](../concepts/errors.md#typed-entry-returns-hookresult)), with `accept!`/`rollback!` still usable in the body as an escape hatch (they diverge, coercing to `HookResult`). Any other return type is a compile error naming `EntryReturn`. Extra `ident: Type` arguments after `&self` declare Hook Parameter Signature Interface parameters, decoded before the body runs — requires the `unstable-param-sig-interface` feature — see [Hook and Transaction Parameters](../data/parameters.md#signature-parameters-fn-arguments). Named args: `name`, `on`/`on_incoming`+`on_outgoing`, `can_emit`, `description`. | `#[hook(0, name = "accept", on = [Invoke])] fn main(&self) -> HookResult { accept!() }` / `#[hook(0, on = [Invoke])] fn increment(&self, account: AccountId, count: u16) -> HookResult { .. }` |
-| `#[cbak(<index>)]` | Pairs with a `#[hook]` at the same index; exports `cbak` for that index — the optional callback invoked when a transaction this entry emitted later settles. Index only, no other arguments — a `#[cbak]` fn cannot declare signature-parameter arguments (a compile error): its originating transaction is the emitted transaction, not the invocation, so the interface doesn't apply. Same `EntryReturn`-bound return type as `#[hook]`. | `#[cbak(0)] fn my_cbak(&self) -> HookResult { accept!() }` |
+| `#[cbak(<index>)]` | Pairs with a `#[hook]` at the same index; exports `cbak` for that index — the optional callback invoked when a transaction this entry emitted later settles. Index only — a `#[cbak]` fn takes `&self` plus at most one further argument, the callback outcome (`EmitOutcome` or a raw `u32`, populated from the host's `cbak(u32)` argument); it cannot declare signature-parameter arguments (a compile error), since those apply to `#[hook]` only. Same `EntryReturn`-bound return type as `#[hook]`. | `#[cbak(0)] fn my_cbak(&self, outcome: EmitOutcome) -> HookResult { accept!() }` |
 
 An entry's return-type error (a return type that doesn't implement `EntryReturn`) is reported twice per bad entry: once on that entry fn's own `-> Ty` (or the fn name when the return type is omitted), and once on the `#[hooks]` attribute from the generated wrapper body. In a chain with several entries, each bad entry still gets its own pair.
 
 ### Receivers on `#[hook]`/`#[cbak]` entries and impl helpers
 
-A `#[cbak]` entry function requires exactly `&self` — no other arguments.
-A `#[hook]` entry function requires `&self`, optionally followed by
+A `#[cbak]` entry function requires `&self`, optionally followed by one
+argument — the callback outcome (`EmitOutcome` or a raw `u32`). A
+`#[hook]` entry function requires `&self`, optionally followed by
 signature-parameter arguments (`ident: Type`, decoded before the body
 runs, requires the `unstable-param-sig-interface` feature — see [Hook and
 Transaction
-Parameters](../data/parameters.md#signature-parameters-fn-arguments)); with
-no extra arguments it's the same "just `&self`" shape `#[cbak]` requires.
+Parameters](../data/parameters.md#signature-parameters-fn-arguments)).
 Either way, the entry always receives the chain declaration by shared
 reference, even for a unit-struct or field-less chain with nothing to read
 through it. A non-attributed helper declared inside the same `#[hooks]
@@ -103,7 +103,7 @@ See [Emitting Transactions](../emit/emitting.md).
 
 | macro | purpose | sketch |
 |---|---|---|
-| `slot_path!` | Walk a multi-hop `SlotObject` path, clearing each intermediate handle as soon as its child exists — no `?`-chain slot leaks. | `slot_path!(root[sfSigners][0][sfAccount])` |
+| `slot_path!` | Walk a multi-hop `SlotObject` path in one auto-assigned slot, rewritten in place per hop — no `?`-chain slot leaks. | `slot_path!(root[sfSigners][0][sfAccount])` |
 
 See [Slots and Ledger Objects](../data/slots.md).
 

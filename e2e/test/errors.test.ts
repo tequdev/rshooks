@@ -1,53 +1,20 @@
-import {
-  ExecutionUtility,
-  Xrpld,
-  clearAllHooks,
-  hexNamespace,
-  readHookBinaryHexFromNS,
-  serverUrl,
-  setHooks,
-  setupClient,
-  teardownClient,
-  type XrplIntegrationTestContext,
-  type iHook,
-} from '@xahau/hooks-toolkit'
-import { calculateHookOn, type TransactionMetadata } from 'xahau'
-import { HookFlags } from 'xahau/dist/npm/models/common/xahau'
+import { ExecutionUtility, Xrpld } from '@xahau/hooks-toolkit'
+import type { TransactionMetadata } from 'xahau'
+import { installHook } from './harness'
 
-const namespace = 'rshooks-e2e-errors'
 const WORST_CASE_INSTRUCTIONS = 200
 const BLOCKED_SOURCE_TAG = 13
 const MAX_DROPS = 100_000_000
 
 describe('errors', () => {
-  let testContext: XrplIntegrationTestContext
-
-  beforeAll(async () => {
-    testContext = await setupClient(serverUrl)
-
-    const hook: iHook = {
-      CreateCode: readHookBinaryHexFromNS('errors', 'wasm'),
-      Flags: HookFlags.hsfOverride,
-      HookOn: calculateHookOn(['Payment']),
-      HookNamespace: hexNamespace(namespace),
-      HookApiVersion: 0,
-    }
-    await setHooks({
-      client: testContext.client,
-      wallet: testContext.hook1,
-      hooks: [{ Hook: hook }],
-    })
-  })
-
-  afterAll(async () => {
-    await clearAllHooks({
-      client: testContext.client,
-      wallet: testContext.hook1,
-    })
-    await teardownClient(testContext)
+  const getContext = installHook({
+    wasmName: 'errors',
+    namespace: 'rshooks-e2e-errors',
+    hookOn: ['Payment'],
   })
 
   it('rejects a Payment with the blocked SourceTag (code -102)', async () => {
+    const testContext = getContext()
     const response = Xrpld.submit(testContext.client, {
       tx: {
         TransactionType: 'Payment',
@@ -62,6 +29,7 @@ describe('errors', () => {
   })
 
   it('rejects a Payment moving more than the policy limit (code -104)', async () => {
+    const testContext = getContext()
     const response = Xrpld.submit(testContext.client, {
       tx: {
         TransactionType: 'Payment',
@@ -75,6 +43,7 @@ describe('errors', () => {
   })
 
   it('accepts a Payment that passes every check', async () => {
+    const testContext = getContext()
     const response = await Xrpld.submit(testContext.client, {
       tx: {
         TransactionType: 'Payment',

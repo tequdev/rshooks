@@ -946,25 +946,16 @@ pub(crate) fn float_sto(
 }
 
 /// Writes the 0/1/2/3-byte STO field header for `(field, type)` — the exact
-/// byte layout `HookAPI::float_sto` inlines; factored out because
-/// [`crate::host::sto`] (a later stage) will need the identical logic.
+/// byte layout `HookAPI::float_sto` inlines. The native/"short" sentinels
+/// (no header at all) are unique to this call site; the general grammar
+/// otherwise is [`crate::otxn::write_field_header`]'s.
 fn write_field_header(out: &mut Vec<u8>, field: u16, ty: u16) {
     if field == 0 && ty == 0 {
         // native/XRP: no header
     } else if field == 0xFFFF && ty == 0xFFFF {
         // "short": no header
-    } else if field < 16 && ty < 16 {
-        out.push(((ty as u8) << 4) + field as u8);
-    } else if field >= 16 && ty < 16 {
-        out.push((ty as u8) << 4);
-        out.push(field as u8);
-    } else if field < 16 && ty >= 16 {
-        out.push((field as u8) << 4);
-        out.push(ty as u8);
     } else {
-        out.push(0);
-        out.push(ty as u8);
-        out.push(field as u8);
+        crate::otxn::write_field_header(out, u32::from(ty), u32::from(field));
     }
 }
 
@@ -1780,7 +1771,7 @@ mod tests {
         // field<16,type>=16 -> 2 bytes
         out.clear();
         write_field_header(&mut out, 1, 20);
-        assert_eq!(out, [0x10, 20]);
+        assert_eq!(out, [1, 20]);
         // field>=16,type>=16 -> 3 bytes
         out.clear();
         write_field_header(&mut out, 20, 20);

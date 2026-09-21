@@ -139,8 +139,10 @@ already knows the slot's contents from context the type system can't see.
 
 A chain of `.get(a)?.get(b)?.get(c)?` leaks every intermediate slot — each
 temporary handle is dropped without clearing, and nothing clears
-automatically on drop. `slot_path!` clears each intermediate as soon as its
-child exists, so a 10-hop path costs one live slot, not ten:
+automatically on drop. `slot_path!` auto-assigns a slot for the first hop,
+then rewrites that same slot number in place for every later hop — the host
+skips the storage copy when the requested slot equals the parent slot — so a
+10-hop path costs one slot, not ten, and clears nothing on the success path:
 
 ```rust,ignore
 use rshooks::slot_path;
@@ -150,8 +152,9 @@ let first: AccountId = slot_path!(signers[sfSignerEntries][0u32][sfAccount])?.va
 ```
 
 The root is borrowed and never cleared (it's the caller's handle, evaluated
-once); every intermediate is cleared unconditionally, before its result is
-inspected, so a hop that fails cannot leak the parent that produced it.
+once). A hop after the first that fails clears the ladder's one slot before
+returning the error, so a failed lookup cannot leak the parent that produced
+it either.
 
 ## Recycling with `take_*`
 
@@ -183,10 +186,10 @@ while i < LOOP_ITERATIONS {
 }
 ```
 
-`examples/15_slot-objects` proves this live: a 260-iteration loop of plain
+`examples/15_slot-objects` proves this live: a 256-iteration loop of plain
 `.get()` + `.value()` calls (over the 255-slot budget) would exhaust the
 budget partway through, but the same loop through `take_value()` completes
-all 260 iterations — including a separate 260-iteration loop of *failing*
+all 256 iterations — including a separate 256-iteration loop of *failing*
 `take_value()` calls, proving the clear happens on the failure path too, and
 one of failing `try_cast`s, proving the same for cast failures.
 
@@ -194,23 +197,18 @@ one of failing `try_cast`s, proving the same for cast failures.
 
 `examples/08_slot-ledger` rewrote a raw numbered-slot walk
 (`otxn_slot` → `slot_subfield` → `slot_exact`) into the typed
-equivalent and built both at this workspace's `opt-level = 3`:
+equivalent and built both at this workspace's `opt-level = 3`, with and
+without clearing the slots afterwards.
 
-| version | worst-case instructions | wasm size |
-|---|---|---|
-| raw, numbered slots, no clears | 197 | 925 bytes |
-| typed, no clears | 197 | 925 bytes |
-| raw, numbered slots + 3 `slot_clear` | 209 | 965 bytes |
-| typed + 3 clears via `take_*` | 219 | 980 bytes |
-
-The first two rows — the apples-to-apples comparison, same host calls, same
-cleanup policy — are byte-identical: every typed wrapper is
+Without clears — the apples-to-apples comparison, same host calls, same
+cleanup policy — the two builds are byte-identical: every typed wrapper is
 `#[inline(always)]` over the same host call, so the type layer adds nothing.
-The bottom two rows aren't directly comparable to each other:  `take_*`
-clears on the failure path as well as success, while the raw code's
-`slot_clear` calls only run after a successful read, so the extra ten
+With clears the two aren't directly comparable: `take_*` clears on the
+failure path as well as success, while the raw code's `slot_clear` calls
+only run after a successful read, so the typed build's few extra
 instructions buy strictly stronger cleanup rather than being layer
-overhead.
+overhead. The committed build's numbers are in
+`examples/08_slot-ledger/metrics.json`.
 
 ## Why the raw numbered functions aren't in the prelude
 

@@ -3,8 +3,10 @@
 //! `guard!`/`guard_m!` match the C `GUARD`/`GUARDM` macros from `macro.h`
 //! exactly, including the `+ 1` on `maxiter`:
 //! `GUARD(maxiter)` in C is `_g((1ULL << 31U) + __LINE__, (maxiter) + 1)`.
-//! The `unsafe` call to `_g` lives inside the macro expansion, so these are
-//! usable from safe code without an `unsafe` block at the call site.
+//! Both expand to a call to [`crate::api::control::guard_check`] (the `_g`
+//! host call, bridged through an installed testenv backend when one is
+//! present), which is itself safe, so these are usable from safe code
+//! without an `unsafe` block at the call site.
 //!
 //! `uninit_buf!` is deliberately NOT provided:
 //! `MaybeUninit::uninit().assume_init()` for a byte array is UB for this use
@@ -14,6 +16,17 @@
 /// static guard-check requirement (see DESIGN.md §2 C2). Matches the C
 /// `GUARD` macro's guard-id formula exactly, including the `+ 1` on
 /// `maxiter`.
+///
+/// The example below writes the guard as the first statement of a `loop`
+/// body, ahead of the break check — the natural translation of the C
+/// `GUARD`/`break` idiom. At `opt-level = 3`, LLVM's loop-rotation pass can
+/// turn this exact source shape into a do-while, moving the compiled guard
+/// call off the top of the loop (see [`guarded_while!`](crate::guarded_while)
+/// for the source-level idiom that stays guard-first either way, and
+/// `book/src/concepts/guards.md`'s "wasm-opt block-wrapping and LLVM loop
+/// rotation" section for the full mechanism — that section also covers a
+/// second case, `wasm-opt -Oz` wrapping the loop body in a `block`, which
+/// `rshooks build` corrects automatically and needs no source change).
 ///
 /// # Examples
 ///
@@ -35,7 +48,7 @@ macro_rules! guard {
     ($m:expr) => {{
         let __guard_id: u32 = (1u32 << 31).wrapping_add(line!());
         let __maxiter: u32 = (($m) as u32).wrapping_add(1);
-        unsafe { $crate::raw::_g(__guard_id, __maxiter) }
+        $crate::api::control::guard_check(__guard_id, __maxiter)
     }};
 }
 
@@ -49,8 +62,76 @@ macro_rules! guard_m {
             .wrapping_add(line!().wrapping_shl(16))
             .wrapping_add(($n) as u32);
         let __maxiter: u32 = (($m) as u32).wrapping_add(1);
-        unsafe { $crate::raw::_g(__guard_id, __maxiter) }
+        $crate::api::control::guard_check(__guard_id, __maxiter)
     }};
+}
+
+/// A `while` loop that stays guard-first whether or not LLVM's loop-rotation
+/// pass rotates it, by placing a guard in both the condition block and the
+/// top of the body.
+///
+/// # Why this exists
+///
+/// The Hook API's static guard checker requires the compiled `loop` opcode
+/// to be followed immediately by the guard prologue. Source written as
+/// `loop { guard!(maxiter); if !cond { break } body }` satisfies this in the
+/// source, but at `opt-level = 3` LLVM's loop-rotation pass can turn it into
+/// a do-while: the condition/guard block is duplicated into the preheader
+/// and the original moves to the loop's latch, so the compiled `loop`
+/// opcode is followed by `body`, not by the guard call, and the checker
+/// rejects it. The mirror-image source, `while cond { guard!(maxiter); body
+/// }`, passes when LLVM rotates it (the guard becomes the first instruction
+/// of the rotated body) but would fail the same way if LLVM did *not*
+/// rotate it (e.g. a large, expensive condition — LLVM's rotation heuristic
+/// only duplicates a "small" header). Which of the two source forms ends up
+/// guard-first after compilation is therefore an LLVM decision the hook
+/// author cannot see from the source alone.
+///
+/// `guarded_while!` sidesteps the question by guarding both positions: the
+/// condition block (evaluated before every iteration, including the first)
+/// and the top of the body (run only when the condition holds). Whichever
+/// of the two blocks LLVM leaves at the top of the compiled `loop` after
+/// rotation, that block already starts with a guard call. `continue` inside
+/// `$body` jumps back to the condition block, which begins with a guard, so
+/// it stays covered too.
+///
+/// The cost is one extra `_g` guard prologue per iteration — the full
+/// `i32.const; i32.const; call; drop` sequence, not just the call — since
+/// the checker's worst-case model takes a loop's `maxiter` from the guard
+/// at its head, and both guards here carry the same `maxiter`. Both are
+/// `_g` calls to an imported function, so LLVM can neither drop, merge, nor
+/// reorder them across each other. Composes with [`no_unroll`]:
+/// `guarded_while!(n, no_unroll(i) < n, { .. })`.
+///
+/// # Guard ids
+///
+/// Both guards live on the macro invocation's own source line, so they use
+/// [`guard_m!`] to disambiguate: `$n = 1` for the condition-block guard,
+/// `$n = 2` for the body-top guard. A `guard!`/`guard_m!` on that same
+/// source line using `$n = 1` or `$n = 2` would collide with one of these.
+///
+/// # Examples
+///
+/// ```
+/// use rshooks::guarded_while;
+///
+/// let mut i = 0;
+/// guarded_while!(10, i < 3, {
+///     i += 1;
+/// });
+/// assert_eq!(i, 3);
+/// ```
+#[macro_export]
+macro_rules! guarded_while {
+    ($maxiter:expr, $cond:expr, $body:block) => {
+        while {
+            $crate::guard_m!($maxiter, 1);
+            $cond
+        } {
+            $crate::guard_m!($maxiter, 2);
+            $body
+        }
+    };
 }
 
 /// Defeats full loop unrolling for a small, fixed-trip-count loop whose body
@@ -192,28 +273,36 @@ macro_rules! trace_float {
     };
 }
 
+/// Write loop shared by [`padded_bytes`]/[`padded_bytes_left`]: copies `src`
+/// into a zeroed `[u8; N]` starting at `offset` (`0` for a right pad, `N -
+/// src.len()` for a left pad). Both callers' own `assert!` already bounds
+/// `src.len() <= N`, so the indexing below is in-bounds and, since every
+/// caller runs this inside a `const { .. }` block, const-evaluated only.
+#[allow(clippy::indexing_slicing)]
+const fn padded_at<const N: usize>(src: &[u8], offset: usize) -> [u8; N] {
+    let mut output = [0u8; N];
+    let mut i = 0;
+
+    while i < src.len() {
+        output[offset.wrapping_add(i)] = src[i];
+        i = i.wrapping_add(1);
+    }
+
+    output
+}
+
 /// Compile-time zero-padding helper backing [`pad!`](crate::pad).
 ///
 /// Copies `src` into the start of a zeroed `[u8; N]`. The `pad!` macro wraps
-/// every call in an inline `const` block, so the `assert!` and the indexing
-/// below are compile-time checks — they can never become runtime panics.
+/// every call in an inline `const` block, so the `assert!` below is a
+/// compile-time check — it can never become a runtime panic.
 #[doc(hidden)]
-#[allow(clippy::indexing_slicing)] // in-bounds by the assert, const-evaluated only
 pub const fn padded_bytes<const N: usize>(src: &[u8]) -> [u8; N] {
     assert!(
         src.len() <= N,
         "pad!: source is larger than the destination"
     );
-
-    let mut output = [0u8; N];
-    let mut i = 0;
-
-    while i < src.len() {
-        output[i] = src[i];
-        i = i.wrapping_add(1);
-    }
-
-    output
+    padded_at(src, 0)
 }
 
 /// Zero-pad a constant byte string to a fixed-size array, at compile time.
@@ -250,7 +339,7 @@ pub const fn padded_bytes<const N: usize>(src: &[u8]) -> [u8; N] {
 /// let padded: [u8; 10] = pad!(b"hello");
 /// assert_eq!(padded, [b'h', b'e', b'l', b'l', b'o', 0, 0, 0, 0, 0]);
 ///
-/// // `StateKey` is a `#[repr(transparent)]` newtype over `[u8; 32]` (see
+/// // `StateKey` is a newtype over `[u8; 32]` (see
 /// // `types.rs`), so `pad!` (which returns a plain `[u8; N]`) is wrapped
 /// // explicitly via the newtype's public tuple field.
 /// const KEY: StateKey = StateKey(pad!(b"counter"));
@@ -272,27 +361,15 @@ macro_rules! pad {
 ///
 /// Copies `src` into the *end* of a zeroed `[u8; N]` — the mirror image of
 /// [`padded_bytes`], which copies `src` into the start. The `pad_left!`
-/// macro wraps every call in an inline `const` block, so the `assert!` and
-/// the indexing below are compile-time checks — they can never become
-/// runtime panics.
+/// macro wraps every call in an inline `const` block, so the `assert!` below
+/// is a compile-time check — it can never become a runtime panic.
 #[doc(hidden)]
-#[allow(clippy::indexing_slicing)] // in-bounds by the assert, const-evaluated only
 pub const fn padded_bytes_left<const N: usize>(src: &[u8]) -> [u8; N] {
     assert!(
         src.len() <= N,
         "pad_left!: source is larger than the destination"
     );
-
-    let mut output = [0u8; N];
-    let offset = N.wrapping_sub(src.len());
-    let mut i = 0;
-
-    while i < src.len() {
-        output[offset.wrapping_add(i)] = src[i];
-        i = i.wrapping_add(1);
-    }
-
-    output
+    padded_at(src, N.wrapping_sub(src.len()))
 }
 
 /// Zero-pad a constant byte string to a fixed-size array, at compile time —

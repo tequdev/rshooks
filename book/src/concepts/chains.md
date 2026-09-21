@@ -218,9 +218,10 @@ function ends up holding them, not which function that happens to be.
 
 `examples/80_governance` hit this directly: `govern`'s setup path, with
 roughly fifteen typed-accessor call sites across a few helper functions,
-compiled to a post-cleaning nesting depth of **63** — the limit is **32**.
-Reverting exactly those dense call sites to the underlying raw API (same
-section below) brought it down to **23**.
+compiled to a post-cleaning nesting depth of nearly twice the limit of
+**32**. Reverting exactly those dense call sites to the underlying raw API
+(same section below) brought it well under the limit; the committed depth
+is in `examples/80_governance/metrics.json`.
 
 Every other example in this book stays comfortably under budget — this
 shows up specifically at `governance`'s call-site density, in one
@@ -250,7 +251,7 @@ call-site choice about which API shape to go through, not a second,
 diverging declaration. See [Hook State](../data/state.md) and [Hook and
 Transaction Parameters](../data/parameters.md) for the raw
 `state`/`state_set`/`hook_param`/`otxn_param` layer this falls back to, and
-`examples/80_governance`'s own `README.md` for the full measured numbers
+`examples/80_governance/metrics.json` for the current measured numbers
 behind this section.
 
 ## Where to go next

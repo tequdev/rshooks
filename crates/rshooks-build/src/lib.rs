@@ -13,6 +13,7 @@ pub mod entry_sidecar;
 mod fee;
 mod flatten;
 mod guard;
+mod guard_hoist;
 mod guard_native;
 mod ir;
 pub mod metadata;
@@ -26,9 +27,8 @@ pub mod whitelist;
 pub use cleaner::clean;
 pub use fee::{FeeEstimate, estimate_fee};
 pub use flatten::{FlattenReport, flatten};
+pub use guard_hoist::{GuardHoistReport, hoist};
 pub use guard_native::{GuardVerdict, NativeGuardError, validate_guards_native};
-#[doc(hidden)]
-pub use optimizer::strip_custom_sections;
 pub use unnest::{UnnestReport, unnest};
 pub use validator::{ValidationError, ValidationReport, validate};
 
@@ -53,8 +53,13 @@ impl Default for Options {
 
 /// Runs the full transformation and validation pipeline.
 ///
-/// The module is flattened and unnested before guard checking. Returns the
-/// transformed bytes and their validation report.
+/// The module is flattened and unnested before guard checking, then
+/// guard-hoisted (see [`guard_hoist`]) to undo `wasm-opt -Oz`'s block
+/// wrapping of some loops' guard prologues — this last step only runs here,
+/// never in [`verify`] alone, so `rshooks check` (which calls `verify`
+/// directly on an already-built binary) reports a module's guards exactly as
+/// they are, with no rewrite. Returns the transformed bytes and their
+/// validation report.
 pub fn run_pipeline(wasm: &[u8], opts: &Options) -> anyhow::Result<(Vec<u8>, ValidationReport)> {
     // wasm-opt runs first, on the raw wasm, before cleaning: see
     // `optimizer` for why this ordering is load-bearing.
@@ -72,8 +77,12 @@ pub fn run_pipeline(wasm: &[u8], opts: &Options) -> anyhow::Result<(Vec<u8>, Val
     for note in &unnest_report.notes {
         eprintln!("note: {note}");
     }
-    let report = verify(&unnested, opts)?;
-    Ok((unnested, report))
+    let (hoisted, hoist_report) = guard_hoist::hoist(&unnested)?;
+    for note in &hoist_report.notes {
+        eprintln!("note: {note}");
+    }
+    let report = verify(&hoisted, opts)?;
+    Ok((hoisted, report))
 }
 
 /// Validates `wasm`.

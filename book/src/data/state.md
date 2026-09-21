@@ -98,6 +98,11 @@ was never intended, as long as `SomeOtherType: FromBytes` (true of nearly
 every fixed-size type this crate provides). That's exactly the gap Tier 3
 closes.
 
+For a value type over Tier 1/2's 32-byte cap, a `state_keys!` key still
+pays off against the raw `state`/`state_set` calls directly via
+`StateKeyEncode::with_key_bytes` — see [Keylets](keylets.md)'s worked
+example.
+
 ## Tier 3: `#[state(...)]` struct fields — a key permanently paired with its value type
 
 A field on a `#[hooks]` struct (see [Anatomy of a Hook](../concepts/anatomy.md))

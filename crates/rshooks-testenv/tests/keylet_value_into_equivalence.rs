@@ -1,7 +1,8 @@
-//! Equivalence check for `rshooks::api::keylet`'s `_into` twins: for every
-//! one of the 26 typed keylet helpers, the by-value `keylet_xxx(...)` form
-//! and its `keylet_xxx_into(&mut out, ...)` twin must compute the exact
-//! same `Result<Keylet>` for the same arguments, even though the two are
+//! Equivalence check for `rshooks::api::keylet`'s `_into` twins: for each of
+//! the 26 typed keylet helpers, plus the `keylet_line_for_asset` convenience
+//! wrapper over `keylet_line`, the by-value `keylet_xxx(...)` form and its
+//! `keylet_xxx_into(&mut out, ...)` twin must compute the exact same
+//! `Result<Keylet>` for the same arguments, even though the two are
 //! independent implementations that don't call each other (see
 //! `rshooks::api::keylet`'s module doc comment's "`_into` twins" section
 //! for why). Driven under an installed backend with **real** keylet
@@ -150,6 +151,13 @@ impl KeyletEquivalence {
         });
         check(27, keylet_cron(&owner, 1_700_000_000), |out| {
             keylet_cron_into(out, &owner, 1_700_000_000)
+        });
+        let asset = IssuedAsset {
+            currency: TEST_CURRENCY,
+            issuer: dest,
+        };
+        check(28, keylet_line_for_asset(&owner, &asset), |out| {
+            keylet_line_for_asset_into(out, &owner, &asset)
         });
 
         accept!(b"ok", 0)

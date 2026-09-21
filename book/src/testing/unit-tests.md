@@ -35,11 +35,11 @@ neither of them linked into its wasm artifact.
 crate-type = ["cdylib", "rlib"]   # rlib only needed for tests/ integration tests
 
 [dependencies]
-rshooks = { version = "0.2.1", features = ["host-panic-handler"] }
+rshooks = { version = "{{version}}", features = ["host-panic-handler"] }
 
 [dev-dependencies]
-rshooks = { version = "0.2.1", features = ["testenv"] }
-rshooks-testenv = "0.2.1"
+rshooks = { version = "{{version}}", features = ["testenv"] }
+rshooks-testenv = "{{version}}"
 ```
 
 Declaring `rshooks` twice — once in `[dependencies]`, once in
@@ -325,15 +325,22 @@ body directly, standing in for xahaud's own post-application callback
 dispatch — `outcome` is `CbakOutcome::Success(txn)` or
 `CbakOutcome::Failure(txn)` for one of `env.emitted()`'s transactions,
 mirroring the `0`/`1` the real wasm `cbak(u32)` argument carries for a
-successfully-applied vs. failed emission. For the duration of the call the
-otxn (`otxn_field`/`otxn_type`/`otxn_id`) is the emitted transaction itself,
-and `otxn_burden`/`otxn_generation` read straight off its own `EmitDetails`
-fields (not incremented, unlike `etxn_burden`/`etxn_generation`'s "next
-emission" derivation) — exactly what a real callback sees. The swap is
-undone as soon as the call returns: a later `invoke` on the same `TestEnv`
-sees the originally seeded otxn again. Everything else about the call
-(fresh `InvocationContext`, world snapshot, `accept!`/`rollback!`/`return`
-mapping) is identical to `invoke`.
+successfully-applied vs. failed emission; a `#[cbak]` fn that declares an
+`EmitOutcome` argument sees `EmitOutcome::Applied`/`EmitOutcome::EmitFailure`
+accordingly. `otxn_burden`/`otxn_generation` read straight off the emitted
+transaction's own `EmitDetails` fields in both cases (not incremented,
+unlike `etxn_burden`/`etxn_generation`'s "next emission" derivation).
+For the duration of the call, the otxn (`otxn_field`/`otxn_type`/`otxn_id`)
+differs by outcome — exactly what a real callback sees: `Success` presents
+the emitted transaction itself; `Failure` presents the `ttEMIT_FAILURE`
+pseudo-transaction the real host applies instead, carrying
+`sfLedgerSequence` (the env's own ledger sequence), `sfTransactionHash`
+(the emitted transaction's hash), and the emitted transaction's own
+`sfEmitDetails`, with its own `otxn_id` distinct from the emitted
+transaction's hash. The swap is undone as soon as the call returns: a
+later `invoke` on the same `TestEnv` sees the originally seeded otxn
+again. Everything else about the call (fresh `InvocationContext`, world
+snapshot, `accept!`/`rollback!`/`return` mapping) is identical to `invoke`.
 
 ```rust,ignore
 let exit = env.invoke::<EmitTxn>(0);

@@ -6,12 +6,17 @@ use std::vec::Vec;
 
 use rshooks::tx_type::TxType;
 use rshooks::txn::codec::encode_native_amount_const;
+use rshooks::txn::codec::sti::{STI_ACCOUNT, STI_VL};
 
 /// The originating transaction a [`crate::TestEnv`] seeds its invocations
 /// with — backs `otxn_field`/`otxn_type`/`otxn_id`/`otxn_param`. Every field
-/// is stored as its **raw value bytes** (what a real `otxn_field` call
-/// would write into a caller buffer — no STObject header, no VL length
-/// prefix), keyed by the field's `sfXxx` code.
+/// is stored as its **value-only** bytes — no STObject header, no VL length
+/// prefix — keyed by the field's `sfXxx` code; this is a storage
+/// convention, not what `otxn_field`/`slot()` hand back to the hook. Those
+/// write-outs serialize the value with a bare `add(s)` call and drop the
+/// leading VL byte only for `STI_ACCOUNT`(8) (`applyHook.cpp:1873-1878` for
+/// `otxn_field`, `:1912-1920` for `slot`); an `STI_VL`(7)/Blob field's VL
+/// prefix is added back at that point by [`value_wire_bytes`].
 #[derive(Debug, Clone)]
 pub struct Otxn {
     pub(crate) tx_type: TxType,
@@ -91,12 +96,6 @@ impl Otxn {
     }
 }
 
-/// The `STI_VL`/`STI_ACCOUNT` type codes — [`serialize`]'s VL length-prefix
-/// insertion cases, matching `crate::emit_walk::field_value_payload`'s own
-/// stripping rule in reverse.
-const STI_VL: u32 = 7;
-const STI_ACCOUNT: u32 = 8;
-
 /// Builds the canonical serialized field sequence [`crate::host::slots::otxn_slot`]
 /// loads into a root slot (P2-D, `.claude/design/TESTENV_PHASE2_DESIGN.md`
 /// §4 "slot family"): every seeded field in `otxn.fields`, plus a
@@ -122,29 +121,36 @@ pub(crate) fn serialize(otxn: &Otxn) -> Vec<u8> {
     out
 }
 
-/// Writes one field's header (mirrors `rshooks::txn::codec::field_header`'s
-/// 4-case grammar; duplicated here because that function needs a typed
-/// `SField<T>` and this serializer works from raw stored codes) plus its
-/// wire value. Also reused by `crate::backend::Backend::prepare` (P2-D) to
-/// build field bytes `crate::host::sto::sto_emplace` needs for `Sequence`/
-/// `SigningPubKey`/`Account`/`FirstLedgerSequence`/`LastLedgerSequence`/
-/// `Fee`.
-pub(crate) fn write_field(out: &mut Vec<u8>, code: u32, value: &[u8]) {
-    let ty = code >> 16;
-    let field = code & 0xFFFF;
+/// Writes the 1/2/3-byte STObject field header for `(type, field)`
+/// (mirrors `rshooks::txn::codec::field_header`'s 4-case grammar;
+/// duplicated here because that function needs a typed `SField<T>` and this
+/// serializer works from raw stored codes) — also the header-only case
+/// `crate::host::float::write_field_header` wraps for `HookAPI::float_sto`'s
+/// identical layout, adding only its native/"short" no-header sentinels.
+pub(crate) fn write_field_header(out: &mut Vec<u8>, ty: u32, field: u32) {
     if ty < 16 && field < 16 {
         out.push(((ty << 4) | field) as u8);
     } else if ty < 16 {
         out.push((ty << 4) as u8);
         out.push(field as u8);
     } else if field < 16 {
-        out.push((field << 4) as u8);
+        out.push(field as u8);
         out.push(ty as u8);
     } else {
         out.push(0);
         out.push(ty as u8);
         out.push(field as u8);
     }
+}
+
+/// Writes one field's header plus its wire value. Also reused by
+/// `crate::backend::Backend::prepare` (P2-D) to build field bytes
+/// `crate::host::sto::sto_emplace` needs for `Sequence`/`SigningPubKey`/
+/// `Account`/`FirstLedgerSequence`/`LastLedgerSequence`/`Fee`.
+pub(crate) fn write_field(out: &mut Vec<u8>, code: u32, value: &[u8]) {
+    let ty = code >> 16;
+    let field = code & 0xFFFF;
+    write_field_header(out, ty, field);
     if ty == STI_VL || ty == STI_ACCOUNT {
         write_vl_len(out, value.len());
     }
@@ -165,6 +171,54 @@ fn write_vl_len(out: &mut Vec<u8>, len: usize) {
         out.push(241usize.wrapping_add(adj / 65536) as u8);
         out.push(((adj / 256) % 256) as u8);
         out.push((adj % 256) as u8);
+    }
+}
+
+/// The wire bytes a `slot()`/`otxn_field` write-out returns for one field's
+/// stored value-only bytes (`Otxn::fields`' and a numbered slot's
+/// `SlotEntry::bytes` share this convention). Real xahaud's wrapper
+/// serializes the field's own value with a bare `add(s)` and then, only for
+/// `STI_ACCOUNT`(8), skips that call's leading VL byte before writing it out
+/// (`applyHook.cpp:1873-1878` for `otxn_field`, `:1915-1920` for `slot`, both
+/// driven by the same `WRITE_WASM_MEMORY_OR_RETURN_AS_INT64` macro's final
+/// `getSType() == STI_ACCOUNT` argument) — so an `STI_ACCOUNT` value's
+/// already-prefix-free stored bytes come back unchanged, while an
+/// `STI_VL`(7)/Blob value's `add(s)` keeps its length prefix
+/// (`STBlob::add`), which is added back here since the stored bytes are
+/// value-only. Every other type has no VL concept and is returned as-is.
+pub(crate) fn value_wire_bytes(field_code: u32, value: &[u8]) -> Vec<u8> {
+    if field_code >> 16 == STI_VL {
+        let mut out = Vec::with_capacity(value.len().wrapping_add(3));
+        write_vl_len(&mut out, value.len());
+        out.extend_from_slice(value);
+        out
+    } else {
+        value.to_vec()
+    }
+}
+
+/// The full `entry->add(s)` length `HookAPI::slot_size` reports for one
+/// field's stored value-only bytes (`HookAPI.cpp:2143-2156`): unlike
+/// [`value_wire_bytes`], this is never stripped for `STI_ACCOUNT`, since
+/// `slot_size` computes `add(s)`'s length directly and has no
+/// `STI_ACCOUNT`-skipping macro in its path — `value_len` plus a VL
+/// length-prefix's own byte count for both `STI_VL`(7) and `STI_ACCOUNT`(8)
+/// (both wire types are `addVL`-serialized), plain `value_len` for every
+/// other type.
+///
+/// Known parity gap this harness does not model: rippled's `STAccount`
+/// serializes a default (all-zero) account as an empty VL, so a real node
+/// reports `slot_size` 1 / `slot()` 0 bytes for one — this always sizes a
+/// stored 20-byte all-zero account as a normal 20-byte account (`slot_size`
+/// 21, `slot()` 20).
+pub(crate) fn wire_add_len(field_code: u32, value_len: usize) -> usize {
+    match field_code >> 16 {
+        ty if ty == STI_VL || ty == STI_ACCOUNT => {
+            let mut prefix = Vec::new();
+            write_vl_len(&mut prefix, value_len);
+            prefix.len().wrapping_add(value_len)
+        }
+        _ => value_len,
     }
 }
 
@@ -241,6 +295,10 @@ pub(crate) struct EmittedOtxn {
     /// `#[cbak]` body, so on-chain this transaction never triggers a
     /// callback at all.
     pub(crate) callback_account: Option<[u8; 20]>,
+    /// The emitted transaction's own `sfEmitDetails` value bytes, unparsed —
+    /// carried through verbatim into the `ttEMIT_FAILURE` pseudo-transaction
+    /// [`emit_failure`] builds when the emission expires unapplied.
+    pub(crate) emit_details: Vec<u8>,
 }
 
 pub(crate) fn from_emitted(blob: &[u8], hash: [u8; 32]) -> Option<EmittedOtxn> {
@@ -295,7 +353,28 @@ pub(crate) fn from_emitted(blob: &[u8], hash: [u8; 32]) -> Option<EmittedOtxn> {
         generation,
         hook_hash,
         callback_account,
+        emit_details: ed_bytes.clone(),
     })
+}
+
+/// Builds the `ttEMIT_FAILURE` pseudo-transaction xahaud applies when an
+/// emitted transaction expires unapplied (`Xahau/xahaud` `dev`,
+/// `src/xrpld/app/misc/detail/TxQ.cpp`, "Emission failure, adding cleanup
+/// pseudotxn"): `sfLedgerSequence`, `sfTransactionHash` (the emitted
+/// transaction's hash) and the emitted transaction's own `sfEmitDetails`,
+/// nothing else — no `sfAccount`. Its id is the SHA-256 of its serialized
+/// fields, distinct from `emitted_hash`, the same way [`crate::backend`]'s
+/// `deterministic_hash` derives an emitted transaction's stand-in hash.
+pub(crate) fn emit_failure(emitted: &EmittedOtxn, emitted_hash: [u8; 32], ledger_seq: u32) -> Otxn {
+    let otxn = Otxn::new(TxType::EmitFailure)
+        .field_raw(
+            rshooks::sfield::sfLedgerSequence.code(),
+            &ledger_seq.to_be_bytes(),
+        )
+        .field_raw(rshooks::sfield::sfTransactionHash.code(), &emitted_hash)
+        .field_raw(rshooks::sfield::sfEmitDetails.code(), &emitted.emit_details);
+    let hash = crate::backend::deterministic_hash(&serialize(&otxn));
+    otxn.id(hash)
 }
 
 #[cfg(test)]
@@ -466,5 +545,20 @@ mod tests {
         // NOP genuinely present in `bytes` did not survive into the map
         // `deserialize` returns.
         assert_eq!(nested_value, &vec![0x24, 0, 0, 0, 7, 0xE1]);
+    }
+
+    #[test]
+    fn write_field_header_round_trips_type_ge_16_field_lt_16() {
+        // sfCloseResolution (type 16, field 1): the `type >= 16 && field <
+        // 16` case, wire-encoded as `[field, type]` per rippled's
+        // `Serializer::encodeFieldID`.
+        let mut bytes = Vec::new();
+        write_field_header(&mut bytes, 16, 1);
+        assert_eq!(bytes, [0x01, 0x10]);
+
+        let mut pos = 0;
+        let decoded = crate::emit_walk::decode_header(&bytes, &mut pos).unwrap();
+        assert_eq!(decoded, (16, 1));
+        assert_eq!(pos, bytes.len());
     }
 }

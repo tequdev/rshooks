@@ -1,7 +1,23 @@
 //! Hook execution flow control: `accept`, `rollback`, `hook_again`,
-//! `hook_skip`, `hook_pos`.
+//! `hook_skip`, `hook_pos`, `guard_check`.
 
 use crate::error::{Result, res};
+
+/// Hook API `_g` (`extern.h`): the guard-check host call
+/// [`crate::guard!`]/[`crate::guard_m!`] expand to — not meant to be
+/// called directly. Under the `testenv` feature, routes to an installed
+/// backend's `HostBackend::_g` (see its doc comment: `rshooks-testenv`'s
+/// backend tracks xahaud's real per-id cumulative iteration budget and
+/// terminates the invocation like `rollback!` when a guard's `maxiter` is
+/// exceeded); a wasm build always makes the real host call.
+#[inline(always)]
+pub fn guard_check(guard_id: u32, maxiter: u32) -> i32 {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b._g(guard_id, maxiter)) {
+        return v;
+    }
+    unsafe { rshooks_core::_g(guard_id, maxiter) }
+}
 
 /// Terminate hook execution successfully, optionally carrying a UTF-8-ish
 /// message and an application-defined return code.

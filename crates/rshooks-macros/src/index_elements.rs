@@ -1,9 +1,9 @@
 //! Backs `rshooks::txn_template!`'s positional numbering of array
 //! elements — see [`expand`].
 
-use proc_macro::{Group, Literal, Punct, Spacing, TokenStream, TokenTree};
+use proc_macro::{Literal, Punct, Spacing, TokenStream, TokenTree};
 
-use crate::hooks_shared::is_punct;
+use crate::hooks_shared::{is_punct, map_tokens};
 
 /// `input` is `[ <element tokens> ] <rest tokens>`: a bracketed,
 /// comma-separated element list followed by arbitrary trailing tokens.
@@ -98,29 +98,9 @@ fn number_elements(input: TokenStream) -> Result<TokenStream, TokenStream> {
 /// Every other token — including any group, rebuilt with its own
 /// delimiter and span preserved — passes through unchanged.
 fn splice_marker(input: TokenStream, replacement: &TokenStream) -> TokenStream {
-    let tokens: Vec<TokenTree> = input.into_iter().collect();
-    let mut out = TokenStream::new();
-    let mut i = 0;
-    while let Some(tt) = tokens.get(i) {
-        let is_marker = is_punct(tt, '@')
-            && matches!(tokens.get(i.wrapping_add(1)), Some(TokenTree::Ident(id)) if id.to_string() == "ELEMS");
-        if is_marker {
-            out.extend(replacement.clone());
-            i = i.wrapping_add(2);
-            continue;
-        }
-        match tt {
-            TokenTree::Group(group) => {
-                let mut rewritten = Group::new(
-                    group.delimiter(),
-                    splice_marker(group.stream(), replacement),
-                );
-                rewritten.set_span(group.span());
-                out.extend([TokenTree::Group(rewritten)]);
-            }
-            other => out.extend([other.clone()]),
-        }
-        i = i.wrapping_add(1);
-    }
-    out
+    map_tokens(input, &|toks| {
+        let is_marker = matches!(toks.first(), Some(tt) if is_punct(tt, '@'))
+            && matches!(toks.get(1), Some(TokenTree::Ident(id)) if id.to_string() == "ELEMS");
+        is_marker.then(|| (replacement.clone(), 2))
+    })
 }

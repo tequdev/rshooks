@@ -85,10 +85,10 @@ let tag: Option<u32> = payment.destination_tag()?;  // soeOPTIONAL -> Result<Opt
 A required field missing from a well-formed object is
 `HookError::DoesntExist`; an optional or default-valued field reads as
 `Ok(None)` when absent — never confused with a read failure, and decided on
-the host's raw return code rather than on a decoded error variant (kept off
-the inlining-heavy `HookError::from` path the same way `otxn_field_typed`
-is — see [Reading the Originating Transaction](otxn.md)'s "Decoding a raw
-field" section for the general shape of that concern). `soeDEFAULT` fields
+the host's raw return code rather than on a constructed `HookError` (the
+same shape `otxn_field_typed` uses — see
+[Reading the Originating Transaction](otxn.md)'s "Decoding a raw field"
+section for the general shape of that concern). `soeDEFAULT` fields
 read the same way as `soeOPTIONAL`: the format only records that the field
 may be omitted, never what a hook should substitute, so supplying a default
 is left to the hook.
@@ -161,13 +161,11 @@ match line.low_limit() {
 The obvious alternative — comparing `me < asset.issuer` directly, now that
 `AccountId` has a loop-free `Ord` — looks cheaper (three fewer host calls)
 and is measurably *not*: on this workspace's `opt-level = 3` profile,
-`low_limit()` + `buf_eq_20` costs 845 worst-case instructions against 980
-for `me < asset.issuer` (`buf_cmp_20`), because a host call is one
-instruction in the worst-case count while `buf_cmp_20` inlines a
-three-stage comparison ladder. "Fewer host calls" and "fewer instructions"
-are different objectives, and only the second is metered — see the
-example's README ("Fewer host calls is not the same as fewer instructions")
-for the full measurement.
+`low_limit()` + `buf_eq_20` costs fewer worst-case instructions than
+`me < asset.issuer` (`buf_cmp_20`), because a host call is one instruction
+in the worst-case count while `buf_cmp_20` inlines a three-stage comparison
+ladder. "Fewer host calls" and "fewer instructions" are different
+objectives, and only the second is metered.
 
 ## Cost
 
@@ -204,9 +202,19 @@ issuer charging no fee — is 18 host calls when the issuer sets no
 | `transfer_rate()` | 1 or 3 | absent: `slot_subfield` reports it missing. Present: + read + clear |
 
 Measured end to end (`rshooks build`/`check`, this workspace's
-`opt-level = 3` profile): **845** worst-case instructions, **2559** bytes,
-max nesting depth **3** for the `main` hook — recorded in
-`examples/18_typed-views/metrics.json`.
+`opt-level = 3` profile) and recorded in
+`examples/18_typed-views/metrics.json` — see that file for the current
+worst-case instruction count, wasm size, and max nesting depth for the
+`main` hook.
+
+Every by-value fixed-size read above (`hook_account_buf`,
+`keylet_line_for_asset`, `keylet_account`) has an `_into(out: &mut T, ..)
+-> Result<()>` twin that writes straight into caller-owned storage. The
+by-value form is the idiom to write; the twin is an escape hatch for a
+result that is only ever borrowed into the next call, where it saves one
+copy of `T` per call site at the cost of a separate `let mut x =
+T::default();`. Measure with `rshooks check` before reaching for it — see
+the `rshooks::api` module docs.
 
 ## Feature gates: which views exist
 

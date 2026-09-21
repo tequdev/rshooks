@@ -22,60 +22,18 @@
     clippy::indexing_slicing
 )]
 
-use std::cell::RefCell;
-use std::rc::Rc;
+mod common;
 
-use wasmi::{Caller, Engine, Linker, Module, Store};
-
-/// Host state: the shared call-observation log.
-struct HostState {
-    log: Rc<RefCell<Vec<(i32, i32)>>>,
-}
-
-/// Instantiates `wasm` with the standard `env::obs` stub and calls the
-/// named export (`"hook"` or `"cbak"`) with `param`. Returns the call's i64
-/// result plus the full `(a, b)` call-observation log recorded during that
-/// single call.
+/// Instantiates `wasm` with the standard `env::obs` stub (and `env::_g`:
+/// flatten unconditionally ensures `_g` is imported in its output — R1,
+/// `docs/DESIGN.md` §6.2b — even though these fixtures never call it, so
+/// this one helper can instantiate both pre- and post-flatten bytes) and
+/// calls the named export (`"hook"` or `"cbak"`) with `param`. Returns the
+/// call's i64 result plus the full `(a, b)` call-observation log recorded
+/// during that single call.
 fn run(wasm: &[u8], export: &str, param: i32) -> (i64, Vec<(i32, i32)>) {
-    let engine = Engine::default();
-    let module = Module::new(&engine, wasm).expect("fixture is valid wasm");
-    let log = Rc::new(RefCell::new(Vec::new()));
-    let mut store = Store::new(&engine, HostState { log: log.clone() });
-    let mut linker = <Linker<HostState>>::new(&engine);
-    linker
-        .func_wrap(
-            "env",
-            "obs",
-            |caller: Caller<'_, HostState>, a: i32, b: i32| -> i32 {
-                caller.data().log.borrow_mut().push((a, b));
-                a.wrapping_mul(1000).wrapping_add(b)
-            },
-        )
-        .expect("define env::obs");
-    // Flatten unconditionally ensures `_g` is imported in its output (R1,
-    // `docs/DESIGN.md` §6.2b), even though these fixtures never call it —
-    // flatten only inserts the import, not guard calls (the separate, later
-    // guard pass does that). Defining `_g` here regardless is harmless and
-    // lets one `run()` helper instantiate both pre- and post-flatten bytes.
-    linker
-        .func_wrap(
-            "env",
-            "_g",
-            |_caller: Caller<'_, HostState>, _a: i32, _b: i32| -> i32 { 1 },
-        )
-        .expect("define env::_g");
-    let instance = linker
-        .instantiate(&mut store, &module)
-        .expect("all imports satisfied")
-        .start(&mut store)
-        .expect("no start function to run, or it succeeds");
-    let entry = instance
-        .get_typed_func::<i32, i64>(&store, export)
-        .unwrap_or_else(|_| panic!("`{export}` export with signature (i32) -> i64"));
-    let result = entry
-        .call(&mut store, param)
-        .unwrap_or_else(|e| panic!("`{export}({param})` should not trap: {e}"));
-    let calls = log.borrow().clone();
+    let (result, calls) = common::run(wasm, export, param, true);
+    let result = result.unwrap_or_else(|e| panic!("`{export}({param})` should not trap: {e}"));
     (result, calls)
 }
 

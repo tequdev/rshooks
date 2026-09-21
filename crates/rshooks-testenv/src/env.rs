@@ -30,14 +30,18 @@ use crate::world::{EmitAttempt, EmittedTxn, TraceLine, World, normalize_state_ke
 /// type (success), `1` when it was rewritten to `ttEMIT_FAILURE`.
 /// [`CbakOutcome::Success`]/[`CbakOutcome::Failure`] carry that same `0`/`1`
 /// distinction; `TestEnv::invoke_cbak` passes it as the callback's
-/// `fn(u32) -> i64` argument verbatim.
+/// `fn(u32) -> i64` argument verbatim. `Success` presents the emitted
+/// transaction itself as the callback's otxn; `Failure` presents the
+/// `ttEMIT_FAILURE` pseudo-transaction the real host applies instead (see
+/// `crate::otxn::emit_failure` for its fields).
 #[derive(Debug, Clone)]
 pub enum CbakOutcome {
     /// The emitted transaction applied successfully — the callback's wasm
-    /// argument is `0`.
+    /// argument is `0`, and its otxn is the emitted transaction itself.
     Success(EmittedTxn),
     /// The emitted transaction failed to apply (`ttEMIT_FAILURE`) — the
-    /// callback's wasm argument is `1`.
+    /// callback's wasm argument is `1`, and its otxn is the
+    /// `ttEMIT_FAILURE` pseudo-transaction built from this emission.
     Failure(EmittedTxn),
 }
 
@@ -426,16 +430,21 @@ impl TestEnv {
     /// fresh [`InvocationContext`] and world snapshot exactly like
     /// [`Self::invoke`], plus an otxn swap for the duration of the call —
     /// during a real callback, `otxn_field`/`otxn_type`/`otxn_id` all read
-    /// from the transaction *currently being applied*, i.e. the emitted
-    /// transaction itself (`HookAPI::otxn_field`/`otxn_type`/`otxn_id`,
+    /// from the transaction *currently being applied*
+    /// (`HookAPI::otxn_field`/`otxn_type`/`otxn_id`,
     /// `src/xrpld/app/hook/detail/HookAPI.cpp:1527-1562`, all read
-    /// `hookCtx.applyCtx.tx` directly), and `otxn_burden`/`otxn_generation`
+    /// `hookCtx.applyCtx.tx` directly): the emitted transaction itself for
+    /// [`CbakOutcome::Success`], or the `ttEMIT_FAILURE` pseudo-transaction
+    /// xahaud substitutes for [`CbakOutcome::Failure`] (built by
+    /// `crate::otxn::emit_failure`) — that pseudo-transaction's own
+    /// metadata reports `tesSUCCESS`, so a callback must gate on the wasm
+    /// argument before trusting `meta_slot`. `otxn_burden`/`otxn_generation`
     /// read the emitted transaction's own
-    /// `EmitDetails.EmitBurden`/`EmitGeneration` fields directly, not
-    /// `+1`-incremented the way `etxn_burden`/`etxn_generation` derive the
-    /// *next* emission's values (`HookAPI.cpp:1465-1520`). The otxn swap is
-    /// undone by an RAII guard as soon as this call returns, even if the
-    /// callback body panics with a non-exit payload (see
+    /// `EmitDetails.EmitBurden`/`EmitGeneration` fields directly in both
+    /// cases, not `+1`-incremented the way `etxn_burden`/`etxn_generation`
+    /// derive the *next* emission's values (`HookAPI.cpp:1465-1520`). The
+    /// otxn swap is undone by an RAII guard as soon as this call returns,
+    /// even if the callback body panics with a non-exit payload (see
     /// [`OtxnRestoreGuard`]'s doc comment) — "the ORIGINAL seeded otxn must
     /// be restored after the callback returns" (design §4 "cbak
     /// execution"). Every other world field (state, hook identity, ledger
@@ -498,9 +507,13 @@ impl TestEnv {
                      transaction (it was most likely emitted by an entry with no #[cbak] body)"
                 );
             };
-            let (hook_account, current_hash) = {
+            let (hook_account, current_hash, ledger_seq) = {
                 let w = self.world.borrow();
-                (w.hook_account, w.current_hook_hash().unwrap_or([0u8; 32]))
+                (
+                    w.hook_account,
+                    w.current_hook_hash().unwrap_or([0u8; 32]),
+                    w.ledger_seq,
+                )
             };
             assert!(
                 callback_account == hook_account && parsed.hook_hash == current_hash,
@@ -512,7 +525,15 @@ impl TestEnv {
                 parsed.hook_hash
             );
 
-            (parsed.otxn, parsed.burden, parsed.generation)
+            let (burden, generation) = (parsed.burden, parsed.generation);
+            let cbak_otxn = match &outcome {
+                CbakOutcome::Success(_) => parsed.otxn,
+                CbakOutcome::Failure(_) => {
+                    crate::otxn::emit_failure(&parsed, txn.hash(), ledger_seq)
+                }
+            };
+
+            (cbak_otxn, burden, generation)
         };
 
         let original = {
@@ -745,7 +766,6 @@ mod tests {
 
     use super::*;
     use rshooks::decl::NativeEntry;
-    use rshooks::tx_type::TxType;
 
     struct NoEntries;
     impl HookChainEntries for NoEntries {
@@ -872,12 +892,5 @@ mod tests {
         let exit = env.invoke::<OneEntry>(1);
         assert!(!exit.is_success());
         assert!(env.hook_again_requested());
-    }
-
-    #[test]
-    fn otxn_defaults_to_non_emitted() {
-        let env = TestEnv::new();
-        let _ = env.invoke::<OneEntry>(0); // exercise the path; otxn fields unread here
-        let _ = TxType::Payment; // silence unused import in case of future edits
     }
 }

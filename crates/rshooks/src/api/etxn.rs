@@ -6,7 +6,11 @@
 //! non-negative payload; safe because [`crate::error::res`] already
 //! rejected negative values), while calls with no error code
 //! (`etxn_generation`) return plain values.
+//!
+//! Every byte-count-returning call's returned length never exceeds the
+//! buffer capacity given to the host.
 
+use crate::api::fixed_buf_fn;
 use crate::error::{HookError, Result, res};
 use crate::types::{Hash, Nonce};
 
@@ -32,12 +36,13 @@ pub fn etxn_burden() -> Result<u64> {
 #[inline(always)]
 pub fn etxn_details<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
     let out = out.as_mut();
+    let cap = out.len();
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
     if let Some(r) = rshooks_core::backend::with_backend(|b| b.etxn_details()) {
         return crate::testenv_bridge::write_bytes(out, r);
     }
     res(unsafe { rshooks_core::etxn_details(out.as_mut_ptr() as u32, out.len() as u32) })
-        .map(|v| v as usize)
+        .map(|v| (v as usize).min(cap))
 }
 
 /// The base fee (in drops) required to emit `tx_blob`.
@@ -78,20 +83,19 @@ pub fn etxn_generation() -> u32 {
 #[inline(always)]
 pub fn etxn_nonce<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
     let out = out.as_mut();
+    let cap = out.len();
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
     if let Some(r) = rshooks_core::backend::with_backend(|b| b.etxn_nonce()) {
         return crate::testenv_bridge::write_array(out, r);
     }
     res(unsafe { rshooks_core::etxn_nonce(out.as_mut_ptr() as u32, out.len() as u32) })
-        .map(|v| v as usize)
+        .map(|v| (v as usize).min(cap))
 }
 
-/// A fresh nonce for use in an emitted transaction.
-#[inline(always)]
-pub fn etxn_nonce_buf() -> Result<Nonce> {
-    let mut buf = Nonce::default();
-    let _ = etxn_nonce(buf.as_mut())?;
-    Ok(buf)
+fixed_buf_fn! {
+    /// A fresh nonce for use in an emitted transaction.
+    fn etxn_nonce_buf() -> Nonce = etxn_nonce,
+    etxn_nonce_into
 }
 
 /// Emit `tx_blob` as a new transaction, writing the emitted transaction's
@@ -100,6 +104,7 @@ pub fn etxn_nonce_buf() -> Result<Nonce> {
 #[inline(always)]
 pub fn emit<B: AsMut<[u8]> + ?Sized>(out: &mut B, tx_blob: &[u8]) -> Result<usize> {
     let out = out.as_mut();
+    let cap = out.len();
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
     if let Some(r) = rshooks_core::backend::with_backend(|b| b.emit(tx_blob)) {
         return crate::testenv_bridge::write_array(out, r);
@@ -112,21 +117,28 @@ pub fn emit<B: AsMut<[u8]> + ?Sized>(out: &mut B, tx_blob: &[u8]) -> Result<usiz
             tx_blob.len() as u32,
         )
     })
-    .map(|v| v as usize)
+    .map(|v| (v as usize).min(cap))
 }
 
 /// Emit `tx_blob` as a new transaction. Requires a prior [`etxn_reserve`]
 /// call. Returns the emitted transaction's hash.
 #[inline(always)]
 pub fn emit_buf(tx_blob: &[u8]) -> Result<Hash> {
-    let mut storage = core::mem::MaybeUninit::<[u8; crate::types::HASH_LEN]>::uninit();
+    let mut storage =
+        core::mem::MaybeUninit::<crate::convert::Scratch<{ crate::types::HASH_LEN }>>::uninit();
     // SAFETY: only read via `assume_init` below, once `written == HASH_LEN`
-    // proves the host wrote every byte.
+    // holds. `emit`'s wasm wrapper (`applyHook.cpp:2683-2697`, Xahau/xahaud
+    // `release`) returns `TOO_SMALL` without writing if the buffer is
+    // shorter than the transaction ID, otherwise writes exactly that ID's
+    // length (always `HASH_LEN`) and returns the same count — a compliant
+    // host never returns a success value above `HASH_LEN` for `emit` to
+    // clamp down, so `written == HASH_LEN` still proves every byte was
+    // written.
     let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
     let written = emit(buf, tx_blob)?;
     if written == crate::types::HASH_LEN {
-        // SAFETY: `written == HASH_LEN` proves the host wrote every byte.
-        Ok(Hash(unsafe { storage.assume_init() }))
+        // SAFETY: see the host contract cited above.
+        Ok(Hash(unsafe { storage.assume_init() }.0))
     } else {
         Err(HookError::TooSmall)
     }
@@ -137,6 +149,7 @@ pub fn emit_buf(tx_blob: &[u8]) -> Result<Hash> {
 #[inline(always)]
 pub fn prepare<B: AsMut<[u8]> + ?Sized>(out: &mut B, template: &[u8]) -> Result<usize> {
     let out = out.as_mut();
+    let cap = out.len();
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
     if let Some(r) = rshooks_core::backend::with_backend(|b| b.prepare(template)) {
         return crate::testenv_bridge::write_bytes(out, r);
@@ -149,7 +162,7 @@ pub fn prepare<B: AsMut<[u8]> + ?Sized>(out: &mut B, template: &[u8]) -> Result<
             template.len() as u32,
         )
     })
-    .map(|v| v as usize)
+    .map(|v| (v as usize).min(cap))
 }
 
 #[cfg(test)]
@@ -167,6 +180,10 @@ mod tests {
         assert_eq!(etxn_reserve(1), Err(HookError::NotImplemented));
         assert_eq!(etxn_generation(), rshooks_core::NOT_IMPLEMENTED as u32);
         assert_eq!(etxn_nonce_buf(), Err(HookError::NotImplemented));
+        assert_eq!(
+            etxn_nonce_into(&mut Nonce::default()),
+            Err(HookError::NotImplemented)
+        );
         assert_eq!(emit_buf(&[0u8; 4]), Err(HookError::NotImplemented));
         let mut out = [0u8; 8];
         let mut nonce_out = [0u8; 32];

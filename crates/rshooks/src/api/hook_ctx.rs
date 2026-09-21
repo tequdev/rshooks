@@ -3,6 +3,7 @@
 
 use core::mem::MaybeUninit;
 
+use crate::api::fixed_buf_fn;
 use crate::convert::{FixedRead, TypedParamName, uninit_slice_mut};
 use crate::error::{Result, res};
 use crate::types::{AccountId, Hash};
@@ -28,12 +29,10 @@ pub fn hook_account<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
         .map(|v| v as usize)
 }
 
-/// The AccountID this hook is installed on.
-#[inline(always)]
-pub fn hook_account_buf() -> Result<AccountId> {
-    let mut buf = AccountId::default();
-    let _ = hook_account(buf.as_mut())?;
-    Ok(buf)
+fixed_buf_fn! {
+    /// The AccountID this hook is installed on.
+    fn hook_account_buf() -> AccountId = hook_account,
+    hook_account_into
 }
 
 /// The hash of the hook definition at chain position `hook_no`, written into
@@ -50,14 +49,12 @@ pub fn hook_hash<B: AsMut<[u8]> + ?Sized>(out: &mut B, hook_no: i32) -> Result<u
         .map(|v| v as usize)
 }
 
-/// The hash of the hook definition at chain position `hook_no` on this
-/// hook's account (negative indices address relative to the current hook,
-/// per Hook API convention).
-#[inline(always)]
-pub fn hook_hash_buf(hook_no: i32) -> Result<Hash> {
-    let mut buf = Hash::default();
-    let _ = hook_hash(buf.as_mut(), hook_no)?;
-    Ok(buf)
+fixed_buf_fn! {
+    /// The hash of the hook definition at chain position `hook_no` on this
+    /// hook's account (negative indices address relative to the current
+    /// hook, per Hook API convention).
+    fn hook_hash_buf(hook_no: i32) -> Hash = hook_hash,
+    hook_hash_into
 }
 
 /// Read this hook's own parameter `name` into `out`. Returns the number of
@@ -194,7 +191,7 @@ pub(crate) fn hook_param_raw_code(buf: &mut [u8], name: &[u8]) -> i64 {
 /// this crate already returns for an undersized destination.
 #[inline(always)]
 pub(crate) fn hook_param_checked_raw_code(out: &mut [u8], name: &[u8]) -> i64 {
-    let mut scratch = MaybeUninit::<[u8; HOOK_PARAM_VALUE_MAX_LEN]>::uninit();
+    let mut scratch = MaybeUninit::<crate::convert::Scratch<HOOK_PARAM_VALUE_MAX_LEN>>::uninit();
     // SAFETY: only read below, over the range `hook_param_raw_code`'s own
     // successful return proves it wrote.
     let buf = unsafe { uninit_slice_mut(&mut scratch) };
@@ -297,6 +294,14 @@ mod tests {
     fn smoke_not_implemented_on_host() {
         assert_eq!(hook_account_buf(), Err(HookError::NotImplemented));
         assert_eq!(hook_hash_buf(0), Err(HookError::NotImplemented));
+        assert_eq!(
+            hook_account_into(&mut AccountId::default()),
+            Err(HookError::NotImplemented)
+        );
+        assert_eq!(
+            hook_hash_into(&mut Hash::default(), 0),
+            Err(HookError::NotImplemented)
+        );
         let mut out = [0u8; 32];
         assert_eq!(hook_account(&mut out), Err(HookError::NotImplemented));
         assert_eq!(hook_hash(&mut out, 0), Err(HookError::NotImplemented));

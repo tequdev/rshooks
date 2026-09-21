@@ -93,8 +93,11 @@ impl EmitTxn {
     }
 
     #[cbak(0)]
-    fn cbak(&self) -> HookResult {
-        Ok(Accept::from_code(0))
+    fn cbak(&self, outcome: EmitOutcome) -> HookResult {
+        match outcome {
+            EmitOutcome::Applied => Ok(Accept::new(b"emit-txn: applied", 0)),
+            EmitOutcome::EmitFailure => Ok(Accept::new(b"emit-txn: emit failure", 1)),
+        }
     }
 }
 

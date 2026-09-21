@@ -38,7 +38,9 @@
 //! shared via [`crate::shape`]; only the `ToBytes`-only-plus-length-assert
 //! generation differs.
 
-use crate::shape::{StructShape, max_len_expr, offset_consts, parse_struct, write_body};
+use crate::shape::{
+    StructShape, WITH_BYTES, max_len_expr, offset_consts, parse_struct, to_bytes_impl, write_body,
+};
 use proc_macro::TokenStream;
 
 /// Entry point invoked by `#[proc_macro_derive(ParamName)]` in `lib.rs`.
@@ -61,31 +63,13 @@ pub(crate) fn generate(shape: &StructShape) -> TokenStream {
     let write_body = write_body(&shape.fields);
 
     let src = format!(
-        "
-#[automatically_derived]
-impl ::rshooks::convert::ToBytes for {name} {{
-    const MAX_LEN: usize = {max_len_expr};
-
-    #[inline(always)]
-    #[allow(clippy::indexing_slicing)] // fixed, compile-time field offsets (see __OFF_* below); `__dst` was already proven to have exactly `MAX_LEN` bytes by the `get_mut(..MAX_LEN)` check\n\
-    fn write(&self, buf: &mut [u8]) -> usize {{
-        match buf.get_mut(..<Self as ::rshooks::convert::ToBytes>::MAX_LEN) {{
-            ::core::option::Option::Some(__dst) => {{
-                {offset_consts}
-                {write_body}
-                <Self as ::rshooks::convert::ToBytes>::MAX_LEN
-            }}
-            ::core::option::Option::None => 0,
-        }}
-    }}
-}}
-
-{length_assert}
-",
-        name = name,
-        max_len_expr = max_len_expr,
-        offset_consts = offset_consts,
-        write_body = write_body,
+        "{to_bytes}\n{length_assert}",
+        to_bytes = to_bytes_impl(
+            name,
+            &max_len_expr,
+            &format!("{offset_consts}\n{write_body}"),
+            WITH_BYTES,
+        ),
         length_assert = param_name_length_assert(name),
     );
     crate::shape::finish(src, shape.name_span, "ParamName")

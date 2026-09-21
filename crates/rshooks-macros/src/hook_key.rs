@@ -38,7 +38,9 @@
 //! Identical rationale to [`crate::hook_data`] — struct-shape parsing is
 //! shared via [`crate::shape`]; only the generated impl set differs.
 
-use crate::shape::{StructShape, max_len_expr, offset_consts, parse_struct, write_body};
+use crate::shape::{
+    StructShape, WITH_BYTES, max_len_expr, offset_consts, parse_struct, to_bytes_impl, write_body,
+};
 use proc_macro::TokenStream;
 
 /// Entry point invoked by `#[proc_macro_derive(HookKey)]` in `lib.rs`.
@@ -61,31 +63,13 @@ pub(crate) fn generate(shape: &StructShape) -> TokenStream {
     let write_body = write_body(&shape.fields);
 
     let src = format!(
-        "
-#[automatically_derived]
-impl ::rshooks::convert::ToBytes for {name} {{
-    const MAX_LEN: usize = {max_len_expr};
-
-    #[inline(always)]
-    #[allow(clippy::indexing_slicing)] // fixed, compile-time field offsets (see __OFF_* below); `__dst` was already proven to have exactly `MAX_LEN` bytes by the `get_mut(..MAX_LEN)` check\n\
-    fn write(&self, buf: &mut [u8]) -> usize {{
-        match buf.get_mut(..<Self as ::rshooks::convert::ToBytes>::MAX_LEN) {{
-            ::core::option::Option::Some(__dst) => {{
-                {offset_consts}
-                {write_body}
-                <Self as ::rshooks::convert::ToBytes>::MAX_LEN
-            }}
-            ::core::option::Option::None => 0,
-        }}
-    }}
-}}
-
-{state_key_encode}
-",
-        name = name,
-        max_len_expr = max_len_expr,
-        offset_consts = offset_consts,
-        write_body = write_body,
+        "{to_bytes}\n{state_key_encode}",
+        to_bytes = to_bytes_impl(
+            name,
+            &max_len_expr,
+            &format!("{offset_consts}\n{write_body}"),
+            WITH_BYTES,
+        ),
         state_key_encode = state_key_encode_impl(name),
     );
     crate::shape::finish(src, shape.name_span, "HookKey")
@@ -98,6 +82,25 @@ impl ::rshooks::convert::ToBytes for {name} {{
 /// result in an [`EncodedStateKey`](::rshooks::state::EncodedStateKey) at
 /// its real length (never locally zero-padded — see `rshooks::state`'s
 /// module doc comment, "Key length and padding").
+///
+/// Also generates a `with_key_bytes` override (see
+/// [`StateKeyEncode::with_key_bytes`](::rshooks::state::StateKeyEncode::with_key_bytes)'s
+/// doc comment for why this exists): rather than routing through `encode`'s
+/// always-32-byte `EncodedStateKey` scratch buffer, it writes `self` into a
+/// buffer sized to exactly `<{name} as ToBytes>::MAX_LEN` bytes — a literal
+/// this concrete, non-generic `impl` block already knows at its own
+/// definition site (unlike a generic default trait method — see
+/// `FixedRead::read_exact`'s doc comment for the identical restriction) —
+/// and hands that right-sized slice straight to the caller's closure, with
+/// no `EncodedStateKey` built at all. Carries its own copy of `encode`'s
+/// compile-time length assert, since an override replaces the default body
+/// (assert included).
+///
+/// Distinct from [`crate::shape::WITH_BYTES`]'s `ToBytes::with_bytes`
+/// override on this same derive's `ToBytes` impl: that one right-sizes the
+/// buffer for any caller that treats the struct as an ordinary `ToBytes`
+/// value, while `with_key_bytes` here right-sizes it specifically for
+/// `StateKeyEncode` callers.
 pub(crate) fn state_key_encode_impl(name: &str) -> String {
     format!(
         "
@@ -121,6 +124,23 @@ impl ::rshooks::state::StateKeyEncode for {name} {{
             __raw,
             <{name} as ::rshooks::convert::ToBytes>::MAX_LEN,
         )
+    }}
+
+    #[inline(always)]
+    fn with_key_bytes<__R>(&self, f: impl ::core::ops::FnOnce(&[u8]) -> __R) -> __R {{
+        const {{
+            assert!(
+                <{name} as ::rshooks::convert::ToBytes>::MAX_LEN >= 1,
+                \"rshooks-macros: a hook-state key must encode to at least 1 byte (the Hook API's own key-length lower bound)\"
+            );
+            assert!(
+                <{name} as ::rshooks::convert::ToBytes>::MAX_LEN <= ::rshooks::types::STATE_KEY_LEN,
+                \"rshooks-macros: a hook-state key would need more than 32 bytes to encode (the state key space)\"
+            );
+        }}
+        let mut __raw = [0u8; <{name} as ::rshooks::convert::ToBytes>::MAX_LEN];
+        let _ = ::rshooks::convert::ToBytes::write(self, &mut __raw);
+        f(&__raw)
     }}
 }}
 ",

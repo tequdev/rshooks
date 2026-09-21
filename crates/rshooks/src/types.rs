@@ -96,19 +96,32 @@ pub const IOU_AMOUNT_LEN: usize = 48;
 /// and trust the returned length; do not assume it is always fully written.
 pub const EMIT_DETAILS_MAX_LEN: usize = 138;
 
-/// Defines one `#[repr(transparent)]` fixed-size buffer newtype, plus its
+/// Defines one fixed-size buffer newtype, plus its
 /// `Deref`/`DerefMut`/`AsRef`/`AsMut`/`From`/`Default`/`zeroed`/`ToBytes`/
 /// `FromBytes`/`FixedRead`/`PartialEq`/`Eq` impls. See the module doc
 /// comment for the rationale.
 ///
+/// `$repr` is `repr(transparent)` for a type whose length isn't a multiple
+/// of 8 (`AccountId`, `CurrencyCode`, `Keylet`, `PublicKey`) — for those,
+/// `#[repr(C, align(8))]` would pad `size_of` past the protocol length — and
+/// `repr(C, align(8))` for one that already is (`Hash`, `StateKey`,
+/// `NameSpace`, `Nonce`, `NativeAmount`, `IouAmount`): the array still sits
+/// at offset 0 in that case, so `size_of` is unchanged and the alignment is
+/// free extra structure for the optimizer.
+///
 /// `PartialEq` delegates to `$eq_fn` (one of the loop-free
 /// `crate::buf_eq::buf_eq_*` functions) rather than being derived — see the
 /// module doc comment for why, and for the `match`-pattern implication.
-/// `Eq` is still derived.
+/// `Eq` is still derived. Every copy of the inner array (`FromBytes::read`,
+/// the `From` conversions, `FixedRead::read_exact`) goes through `$copy_fn`
+/// (one of the loop-free `crate::buf_eq::buf_copy_*` functions) rather than
+/// a plain array move: a bare `[u8; N]` has alignment 1, and `wasm32v1-none`
+/// codegen scalarizes a plain move/`memcpy` of such a value byte by byte;
+/// `buf_copy_*` reads and writes it as word-sized chunks instead.
 macro_rules! fixed_bytes_type {
-    ($(#[$meta:meta])* $name:ident, $len:expr, $eq_fn:path) => {
+    ($(#[$meta:meta])* $name:ident, $len:expr, $eq_fn:path, $copy_fn:path, #[$repr:meta]) => {
         $(#[$meta])*
-        #[repr(transparent)]
+        #[$repr]
         #[derive(Clone, Copy, Debug, Eq)]
         pub struct $name(pub [u8; $len]);
 
@@ -169,14 +182,14 @@ macro_rules! fixed_bytes_type {
         impl From<[u8; $len]> for $name {
             #[inline(always)]
             fn from(value: [u8; $len]) -> Self {
-                $name(value)
+                $name($copy_fn(&value))
             }
         }
 
         impl From<$name> for [u8; $len] {
             #[inline(always)]
             fn from(value: $name) -> Self {
-                value.0
+                $copy_fn(&value.0)
             }
         }
 
@@ -199,17 +212,43 @@ macro_rules! fixed_bytes_type {
         impl FromBytes for $name {
             #[inline(always)]
             fn read(buf: &[u8]) -> Result<Self> {
-                <[u8; $len]>::read(buf).map($name)
+                <[u8; $len]>::read(buf).map(|arr| $name($copy_fn(&arr)))
             }
         }
 
         impl FixedRead for $name {
+            // Zero-initialized on purpose, writing straight into the
+            // returned value's own array (no separate scratch buffer to
+            // copy out of): an uninitialized `Scratch` viewed through a raw
+            // `&mut [u8]` makes LLVM treat the value as untyped bytes and
+            // scalarize it byte-wise on `wasm32v1-none`, which costs more
+            // instructions than the zeroing stores it would save (measured:
+            // +71% WCE on `05_firewall`'s sender compare) — and still more
+            // than the zero-copy write-in-place below once a `buf_copy_*`
+            // pass is added on top of the scratch's `assume_init`.
             #[inline(always)]
             fn read_exact(read: impl FnOnce(&mut [u8]) -> Result<usize>) -> Result<Self> {
                 let mut out = Self::zeroed();
                 let written = read(out.as_mut())?;
                 if written == $len {
                     Ok(out)
+                } else {
+                    Err(HookError::TooSmall)
+                }
+            }
+
+            // No zero-fill: `out` is already a live `Self`, supplied by the
+            // caller, so `read` can write straight into it — unlike
+            // `read_exact` above, which needs some initial value for its own
+            // local before `read` can run.
+            #[inline(always)]
+            fn read_exact_into(
+                out: &mut Self,
+                read: impl FnOnce(&mut [u8]) -> Result<usize>,
+            ) -> Result<()> {
+                let written = read(out.as_mut())?;
+                if written == $len {
+                    Ok(())
                 } else {
                     Err(HookError::TooSmall)
                 }
@@ -222,43 +261,57 @@ fixed_bytes_type!(
     /// A 20-byte AccountID.
     AccountId,
     ACC_ID_LEN,
-    crate::buf_eq::buf_eq_20
+    crate::buf_eq::buf_eq_20,
+    crate::buf_eq::buf_copy_20,
+    #[repr(transparent)]
 );
 fixed_bytes_type!(
     /// A 32-byte hash (transaction ID, ledger hash, ...).
     Hash,
     HASH_LEN,
-    crate::buf_eq::buf_eq_32
+    crate::buf_eq::buf_eq_32,
+    crate::buf_eq::buf_copy_32,
+    #[repr(C, align(8))]
 );
 fixed_bytes_type!(
     /// A 34-byte Keylet.
     Keylet,
     KEYLET_LEN,
-    crate::buf_eq::buf_eq_34
+    crate::buf_eq::buf_eq_34,
+    crate::buf_eq::buf_copy_34,
+    #[repr(transparent)]
 );
 fixed_bytes_type!(
     /// A 32-byte hook state key.
     StateKey,
     STATE_KEY_LEN,
-    crate::buf_eq::buf_eq_32
+    crate::buf_eq::buf_eq_32,
+    crate::buf_eq::buf_copy_32,
+    #[repr(C, align(8))]
 );
 fixed_bytes_type!(
     /// A 32-byte hook state namespace.
     NameSpace,
     NAMESPACE_LEN,
-    crate::buf_eq::buf_eq_32
+    crate::buf_eq::buf_eq_32,
+    crate::buf_eq::buf_copy_32,
+    #[repr(C, align(8))]
 );
 fixed_bytes_type!(
     /// A 32-byte nonce.
     Nonce,
     NONCE_LEN,
-    crate::buf_eq::buf_eq_32
+    crate::buf_eq::buf_eq_32,
+    crate::buf_eq::buf_copy_32,
+    #[repr(C, align(8))]
 );
 fixed_bytes_type!(
     /// A 33-byte public key.
     PublicKey,
     PUB_KEY_LEN,
-    crate::buf_eq::buf_eq_33
+    crate::buf_eq::buf_eq_33,
+    crate::buf_eq::buf_copy_33,
+    #[repr(transparent)]
 );
 fixed_bytes_type!(
     /// A 20-byte currency code.
@@ -279,7 +332,9 @@ fixed_bytes_type!(
     /// `from_iso(b"XRP")`.
     CurrencyCode,
     CURRENCY_CODE_LEN,
-    crate::buf_eq::buf_eq_20
+    crate::buf_eq::buf_eq_20,
+    crate::buf_eq::buf_copy_20,
+    #[repr(transparent)]
 );
 
 impl CurrencyCode {
@@ -327,14 +382,35 @@ fixed_bytes_type!(
     /// An 8-byte serialized native (XRP/XAH) amount.
     NativeAmount,
     NATIVE_AMOUNT_LEN,
-    crate::buf_eq::buf_eq_8
+    crate::buf_eq::buf_eq_8,
+    crate::buf_eq::buf_copy_8,
+    #[repr(C, align(8))]
 );
 fixed_bytes_type!(
     /// A 48-byte serialized IOU amount.
     IouAmount,
     IOU_AMOUNT_LEN,
-    crate::buf_eq::buf_eq_48
+    crate::buf_eq::buf_eq_48,
+    crate::buf_eq::buf_copy_48,
+    #[repr(C, align(8))]
 );
+
+// `repr(C, align(8))` on a length that is already a multiple of 8 adds no
+// padding; this holds every `fixed_bytes_type!` newtype (whichever `$repr`
+// it was given) to its exact protocol length, catching a future newtype
+// invocation whose length and `$repr` disagree.
+const _: () = {
+    assert!(core::mem::size_of::<AccountId>() == ACC_ID_LEN);
+    assert!(core::mem::size_of::<Hash>() == HASH_LEN);
+    assert!(core::mem::size_of::<Keylet>() == KEYLET_LEN);
+    assert!(core::mem::size_of::<StateKey>() == STATE_KEY_LEN);
+    assert!(core::mem::size_of::<NameSpace>() == NAMESPACE_LEN);
+    assert!(core::mem::size_of::<Nonce>() == NONCE_LEN);
+    assert!(core::mem::size_of::<PublicKey>() == PUB_KEY_LEN);
+    assert!(core::mem::size_of::<CurrencyCode>() == CURRENCY_CODE_LEN);
+    assert!(core::mem::size_of::<NativeAmount>() == NATIVE_AMOUNT_LEN);
+    assert!(core::mem::size_of::<IouAmount>() == IOU_AMOUNT_LEN);
+};
 
 // ---------------------------------------------------------------------------
 // IssuedAsset: the (currency, issuer) identity of a non-native amount
@@ -756,6 +832,12 @@ mod tests {
             core::mem::align_of::<AccountId>(),
             core::mem::align_of::<[u8; ACC_ID_LEN]>()
         );
+    }
+
+    #[test]
+    fn repr_align8_types_keep_the_protocol_length_and_gain_alignment() {
+        assert_eq!(core::mem::size_of::<Hash>(), HASH_LEN);
+        assert_eq!(core::mem::align_of::<Hash>(), 8);
     }
 
     /// Builds a 48-byte `IouAmount` with a distinctive 8-byte value

@@ -42,7 +42,7 @@ fn govern(&self) -> HookResult { /* ... */ }
 - **`description = "..."`** — optional, free-form text for this entry's
   sidecar (independent of the struct's own `description`).
 
-`#[cbak(<index>)]` takes **only** the index — no other arguments, since a
+`#[cbak(<index>)]` takes **only** the index — no other attribute arguments, since a
 callback doesn't get its own trigger or emit declaration; it settles for
 whatever its paired `#[hook]` at the same index emitted.
 
@@ -143,8 +143,11 @@ For `Governance`'s `govern` entry (index `0`, `on = [Invoke]`,
   "WCE": { "hook": 27751, "cbak": 0 },
   "builder": {
     "name": "rshooks-build",
-    "version": "0.2.1",
-    "rustc": "rustc 1.89.0 (29483883e 2025-08-04)"
+    "version": "{{version}}",
+    "rustc": "rustc 1.89.0 (29483883e 2025-08-04)",
+    "cargo_args": ["rustc", "--release", "--locked", "--target", "wasm32v1-none", "--crate-type", "cdylib"],
+    "rustc_args": ["--cfg", "rshooks_entry=\"0\"", "--check-cfg", "cfg(rshooks_entry,values(\"0\",\"1\",\"2\",\"3\",\"4\",\"5\",\"6\",\"7\",\"8\",\"9\"))", "-C", "link-arg=-zstack-size=131072"],
+    "wasm_opt": true
   },
   "human": {
     "HookOn": ["Invoke"],
@@ -192,6 +195,12 @@ Fields not covered already on this page:
   its type code (an XAS-010d type code), and the full declared
   `HookParameterName` as uppercase hex, the same value the generated
   `HookParameters` declaration entries below use verbatim.
+- **`builder.cargo_args`/`builder.rustc_args`/`builder.wasm_opt`** — the
+  reproducibility record: the machine-independent `cargo` arguments and the
+  verbatim `rustc` arguments (after `--`) this entry was built with, plus
+  whether the `wasm-opt -Oz` pipeline pass ran. The `-zstack-size` link
+  argument is the memory layout: a 2-page stack, with wasm-ld sizing linear
+  memory to what the stack plus data/bss need.
 - **`chain`** — this crate's **shared** schema, transcribed identically
   into every entry's sidecar (not filtered down to what this one entry
   actually uses — see [Hook Chains](../concepts/chains.md#the-shared-schema-why-this-is-the-models-biggest-win)
@@ -238,7 +247,7 @@ and `sethook.template.meta.json`:
 ```json
 {
   "crate": "governance",
-  "version": "0.2.1",
+  "version": "{{version}}",
   "generated_at": "2026-08-18T09:00:00Z",
   "hook_hashes": { "0": "…", "1": "…" },
   "positions": { "declared": [0, 1], "gaps": [], "untouched_beyond": 2 },

@@ -172,6 +172,18 @@ pub trait HostBackend {
         Err(NOT_IMPLEMENTED)
     }
 
+    /// `_g(guard_id, maxiter)` (`extern.h`): the guard-check host call
+    /// `rshooks::guard!`/`guard_m!` expand to. `guard_id`'s call count is
+    /// cumulative for the whole invocation; a violation (count exceeds
+    /// `maxiter`) terminates the invocation from inside this call itself
+    /// (`Xahau/xahaud` `applyHook.cpp`'s `_g` sets
+    /// `hookCtx.result.exitType`/`exitCode` and returns `RC_ROLLBACK`) —
+    /// never by a return value the `GUARD` C macro inspects. Default:
+    /// always reports success, never terminates.
+    fn _g(&self, _guard_id: u32, _maxiter: u32) -> i32 {
+        1
+    }
+
     /// Required: an implementor must define how hook execution terminates.
     fn accept(&self, msg: &[u8], code: i64) -> !;
 
