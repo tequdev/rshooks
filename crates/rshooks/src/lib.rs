@@ -881,9 +881,9 @@ pub mod prelude {
     // (rather than globbed-then-shadowed) so adding one upstream is a
     // deliberate act.
     pub use crate::api::otxn::{
-        OtxnFieldValue, otxn_burden, otxn_field, otxn_field_exact, otxn_field_typed,
-        otxn_field_u64, otxn_generation, otxn_id, otxn_id_buf, otxn_param, otxn_param_exact,
-        otxn_param_typed, otxn_type,
+        OtxnFieldValue, otxn_burden, otxn_field, otxn_field_exact, otxn_field_exact_into,
+        otxn_field_typed, otxn_field_typed_into, otxn_field_u64, otxn_generation, otxn_id,
+        otxn_id_buf, otxn_id_into, otxn_param, otxn_param_exact, otxn_param_typed, otxn_type,
     };
     pub use crate::api::state::*;
     pub use crate::api::sto::*;

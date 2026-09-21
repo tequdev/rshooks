@@ -10,6 +10,7 @@
 //! Every byte-count-returning call's returned length never exceeds the
 //! buffer capacity given to the host.
 
+use crate::api::fixed_buf_fn;
 use crate::error::{HookError, Result, res};
 use crate::types::{Hash, Nonce};
 
@@ -91,12 +92,10 @@ pub fn etxn_nonce<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
         .map(|v| (v as usize).min(cap))
 }
 
-/// A fresh nonce for use in an emitted transaction.
-#[inline(always)]
-pub fn etxn_nonce_buf() -> Result<Nonce> {
-    let mut buf = Nonce::default();
-    let _ = etxn_nonce(buf.as_mut())?;
-    Ok(buf)
+fixed_buf_fn! {
+    /// A fresh nonce for use in an emitted transaction.
+    fn etxn_nonce_buf() -> Nonce = etxn_nonce,
+    etxn_nonce_into
 }
 
 /// Emit `tx_blob` as a new transaction, writing the emitted transaction's
@@ -181,6 +180,10 @@ mod tests {
         assert_eq!(etxn_reserve(1), Err(HookError::NotImplemented));
         assert_eq!(etxn_generation(), rshooks_core::NOT_IMPLEMENTED as u32);
         assert_eq!(etxn_nonce_buf(), Err(HookError::NotImplemented));
+        assert_eq!(
+            etxn_nonce_into(&mut Nonce::default()),
+            Err(HookError::NotImplemented)
+        );
         assert_eq!(emit_buf(&[0u8; 4]), Err(HookError::NotImplemented));
         let mut out = [0u8; 8];
         let mut nonce_out = [0u8; 32];

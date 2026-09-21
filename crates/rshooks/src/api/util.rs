@@ -1,6 +1,7 @@
 //! Address conversion, hashing, signature verification, and keylet
 //! computation utilities.
 
+use crate::api::fixed_buf_fn;
 use crate::error::{HookError, Result, res};
 use crate::types::{AccountId, Hash, Keylet};
 
@@ -47,12 +48,10 @@ pub fn util_accid<B: AsMut<[u8]> + ?Sized>(out: &mut B, r_address: &[u8]) -> Res
     .map(|v| v as usize)
 }
 
-/// Convert a base58 r-address (`r_address`) to its AccountID form.
-#[inline(always)]
-pub fn util_accid_buf(r_address: &[u8]) -> Result<AccountId> {
-    let mut buf = AccountId::default();
-    let _ = util_accid(buf.as_mut(), r_address)?;
-    Ok(buf)
+fixed_buf_fn! {
+    /// Convert a base58 r-address (`r_address`) to its AccountID form.
+    fn util_accid_buf(r_address: &[u8]) -> AccountId = util_accid,
+    util_accid_into
 }
 
 /// Verify that `signature` over `data` was produced by the key `public_key`.
@@ -97,12 +96,10 @@ pub fn util_sha512h<B: AsMut<[u8]> + ?Sized>(out: &mut B, data: &[u8]) -> Result
     .map(|v| v as usize)
 }
 
-/// SHA-512-Half of `data`.
-#[inline(always)]
-pub fn util_sha512h_buf(data: &[u8]) -> Result<Hash> {
-    let mut buf = Hash::default();
-    let _ = util_sha512h(buf.as_mut(), data)?;
-    Ok(buf)
+fixed_buf_fn! {
+    /// SHA-512-Half of `data`.
+    fn util_sha512h_buf(data: &[u8]) -> Hash = util_sha512h,
+    util_sha512h_into
 }
 
 /// Compute a Keylet of `keylet_type` from up to six `u32` components
@@ -214,10 +211,18 @@ mod tests {
         );
         assert_eq!(util_accid_buf(b"raddress"), Err(HookError::NotImplemented));
         assert_eq!(
+            util_accid_into(&mut AccountId::default(), b"raddress"),
+            Err(HookError::NotImplemented)
+        );
+        assert_eq!(
             util_verify(b"data", b"sig", b"pubkey"),
             Err(HookError::NotImplemented)
         );
         assert_eq!(util_sha512h_buf(b"data"), Err(HookError::NotImplemented));
+        assert_eq!(
+            util_sha512h_into(&mut Hash::default(), b"data"),
+            Err(HookError::NotImplemented)
+        );
         assert_eq!(
             util_keylet_buf(1, 0, 0, 0, 0, 0, 0),
             Err(HookError::NotImplemented)

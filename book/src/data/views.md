@@ -161,11 +161,11 @@ match line.low_limit() {
 The obvious alternative — comparing `me < asset.issuer` directly, now that
 `AccountId` has a loop-free `Ord` — looks cheaper (three fewer host calls)
 and is measurably *not*: on this workspace's `opt-level = 3` profile,
-`low_limit()` + `buf_eq_20` costs 845 worst-case instructions against 980
-for `me < asset.issuer` (`buf_cmp_20`), because a host call is one
-instruction in the worst-case count while `buf_cmp_20` inlines a
-three-stage comparison ladder. "Fewer host calls" and "fewer instructions"
-are different objectives, and only the second is metered.
+`low_limit()` + `buf_eq_20` costs fewer worst-case instructions than
+`me < asset.issuer` (`buf_cmp_20`), because a host call is one instruction
+in the worst-case count while `buf_cmp_20` inlines a three-stage comparison
+ladder. "Fewer host calls" and "fewer instructions" are different
+objectives, and only the second is metered.
 
 ## Cost
 
@@ -202,9 +202,19 @@ issuer charging no fee — is 18 host calls when the issuer sets no
 | `transfer_rate()` | 1 or 3 | absent: `slot_subfield` reports it missing. Present: + read + clear |
 
 Measured end to end (`rshooks build`/`check`, this workspace's
-`opt-level = 3` profile): **845** worst-case instructions, **2559** bytes,
-max nesting depth **3** for the `main` hook — recorded in
-`examples/18_typed-views/metrics.json`.
+`opt-level = 3` profile) and recorded in
+`examples/18_typed-views/metrics.json` — see that file for the current
+worst-case instruction count, wasm size, and max nesting depth for the
+`main` hook.
+
+Every by-value fixed-size read above (`hook_account_buf`,
+`keylet_line_for_asset`, `keylet_account`) has an `_into(out: &mut T, ..)
+-> Result<()>` twin that writes straight into caller-owned storage. The
+by-value form is the idiom to write; the twin is an escape hatch for a
+result that is only ever borrowed into the next call, where it saves one
+copy of `T` per call site at the cost of a separate `let mut x =
+T::default();`. Measure with `rshooks check` before reaching for it — see
+the `rshooks::api` module docs.
 
 ## Feature gates: which views exist
 
