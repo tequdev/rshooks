@@ -766,6 +766,108 @@ pub mod codec {
         out
     }
 
+    /// Index of the first [`NOP`] byte in `slot`, scanning from the
+    /// front. `slot.len()` if no byte is NOP. Helper for
+    /// [`nop_head_tail_split`], which is what
+    /// [`crate::__txn_template_ensure!`] actually calls.
+    #[allow(clippy::indexing_slicing)] // in-bounds per the `i < N` guard
+    const fn nop_head_end<const N: usize>(slot: &[u8; N]) -> usize {
+        let mut i = 0;
+        while i < N {
+            if slot[i] == NOP {
+                return i;
+            }
+            i = i.wrapping_add(1);
+        }
+        N
+    }
+
+    /// Index just past the last [`NOP`] byte in `slot[head_end..]`,
+    /// scanning from the back. Clamped to `head_end` (an all-non-NOP
+    /// `slot`, `head_end == N`, reports an empty tail rather than the
+    /// single index the backward scan would otherwise never reach).
+    /// Caller must pass `head_end <= N` ([`nop_head_end`]'s own return
+    /// range always satisfies this). Helper for [`nop_head_tail_split`].
+    #[allow(clippy::indexing_slicing)] // in-bounds per the `i > head_end` guard
+    const fn nop_tail_start<const N: usize>(slot: &[u8; N], head_end: usize) -> usize {
+        let mut i = N;
+        while i > head_end {
+            if slot[i.wrapping_sub(1)] == NOP {
+                return i;
+            }
+            i = i.wrapping_sub(1);
+        }
+        head_end
+    }
+
+    /// Whether every byte of `slot[head_end..tail_start]` is [`NOP`].
+    /// Caller must pass `head_end <= tail_start <= N`
+    /// ([`nop_head_end`]/[`nop_tail_start`]'s own return values always
+    /// satisfy this). Helper for [`nop_head_tail_split`].
+    #[allow(clippy::indexing_slicing)] // in-bounds per the `i < tail_start <= N` guard
+    const fn nop_interior<const N: usize>(
+        slot: &[u8; N],
+        head_end: usize,
+        tail_start: usize,
+    ) -> bool {
+        let mut i = head_end;
+        while i < tail_start {
+            if slot[i] != NOP {
+                return false;
+            }
+            i = i.wrapping_add(1);
+        }
+        true
+    }
+
+    /// The head/tail split [`crate::__txn_template_ensure!`]'s presence
+    /// blit copies out of an `optional object`/`optional array`
+    /// container's baked "present" `slot`, at compile time: `(head_end,
+    /// tail_start)` such that only `slot[..head_end]` and
+    /// `slot[tail_start..]` need to move.
+    ///
+    /// Correctness rests on the *destination* span, not the source:
+    /// `__txn_template_ensure!` only runs its copy when
+    /// `self.bytes[offset]` is already [`NOP`], and that byte is NOP
+    /// only when the *whole* `offset..offset + slot.len()` span is NOP
+    /// -- absence is always established as a full-span fill, at
+    /// `new()` (`write_nops` over the container's whole reserved
+    /// region) and at `clear_<name>()` (`fill_fixed` with [`NOP`] over
+    /// the same span), never byte-by-byte. So any source byte that
+    /// happens to be NOP -- whether it is an optional/vl/any_amount
+    /// field's own NOP-padding default, or (in principle) a required
+    /// field's default that simply contains the byte value `0x99`, e.g.
+    /// a `fixed_vl` length prefix for length 153 -- writes NOP over an
+    /// already-NOP destination byte, a harmless no-op either way.
+    ///
+    /// `nop_head_end`/`nop_tail_start` scan `slot`'s own bytes for a
+    /// leading and a trailing non-NOP run without knowing *why* any
+    /// given byte is or isn't NOP. When every byte strictly between
+    /// those two runs is also NOP ([`nop_interior`] confirms this),
+    /// skipping that whole middle span is exactly the same no-op as
+    /// skipping any other NOP source byte. When it isn't -- a
+    /// container that interleaves two separately NOP-padded fields
+    /// around a required one, e.g. `{ a: optional sfX, b: u32_field(sfY)
+    /// = 0, c: optional sfZ }`, where `b`'s real bytes fall between the
+    /// leading and trailing NOP runs `nop_head_end`/`nop_tail_start`
+    /// find -- this falls back to `(N, N)`: `head_end` covers the whole
+    /// slot, `tail_start` leaves nothing for the tail, reproducing the
+    /// original single full-slot copy. No field kind bakes that
+    /// interleaved shape today, but nothing prevents a future one from
+    /// doing so, and the fallback keeps that case correct (at the cost
+    /// of the full copy, not a compile error) rather than requiring
+    /// every future kind to prove the invariant by hand.
+    #[must_use]
+    pub const fn nop_head_tail_split<const N: usize>(slot: &[u8; N]) -> (usize, usize) {
+        let head_end = nop_head_end(slot);
+        let tail_start = nop_tail_start(slot, head_end);
+        if nop_interior(slot, head_end, tail_start) {
+            (head_end, tail_start)
+        } else {
+            (N, N)
+        }
+    }
+
     /// Whether `needle` equals any element of `haystack`, at compile time.
     /// Backs `txn_template!`'s "an emit-plumbing field can never be
     /// `optional`/`vl`/`any_amount`" check -- kept generic over the
@@ -2354,12 +2456,15 @@ macro_rules! __txn_template_check_not_plumbing {
 /// is still a NOP (that ancestor is absent), copies `slot_const`'s own
 /// baked "present" bytes -- header, every inner field's default, and the
 /// closing end marker, trimmed to exactly that container's own span (no
-/// leading padding) -- into `$bytes[offset..offset + slot_const.len()]`.
-/// Checking outermost-first means a field nested two `optional`
-/// containers deep first materializes the outer one (with the inner one
-/// still baked absent inside it, exactly matching the inner's own
-/// compile-time default) before the inner entry's own check runs against
-/// it.
+/// leading padding) -- into `$bytes[offset..offset + slot_const.len()]`,
+/// split into a leading and a trailing span
+/// ([`crate::txn::codec::nop_head_tail_split`] -- see its own doc for
+/// why skipping the middle span between them is always safe, and when
+/// that split degrades to one full-slot copy). Checking outermost-first
+/// means a field nested two `optional` containers deep first
+/// materializes the outer one (with the inner one still baked absent
+/// inside it, exactly matching the inner's own compile-time default)
+/// before the inner entry's own check runs against it.
 ///
 /// A `$mode` with no pairs (a template's own top-level fields, a
 /// homogeneous array's required element) expands to nothing -- the whole
@@ -2373,9 +2478,24 @@ macro_rules! __txn_template_ensure {
             {
                 const OFF: usize = $off;
                 const LEN: usize = ($slot).len();
-                const END: usize = OFF.wrapping_add(LEN);
+                const SPLIT: (usize, usize) = $crate::txn::codec::nop_head_tail_split(&($slot));
+                const HEAD_END: usize = SPLIT.0;
+                const TAIL_START: usize = SPLIT.1;
+                const HEAD: [u8; HEAD_END] = $crate::txn::codec::copy_range(&($slot), 0);
+                const TAIL_LEN: usize = LEN.wrapping_sub(TAIL_START);
+                const TAIL: [u8; TAIL_LEN] = $crate::txn::codec::copy_range(&($slot), TAIL_START);
                 if $bytes[OFF] == $crate::txn::codec::NOP {
-                    $crate::txn::codec::copy_fixed(&mut $bytes[OFF..END], &($slot));
+                    $crate::txn::codec::copy_fixed(
+                        &mut $bytes[OFF..OFF.wrapping_add(HEAD_END)],
+                        &HEAD,
+                    );
+                    // A zero-length copy (the fallback shape, where
+                    // TAIL_LEN is always 0) is already a no-op --
+                    // unguarded, like the head copy above.
+                    $crate::txn::codec::copy_fixed(
+                        &mut $bytes[OFF.wrapping_add(TAIL_START)..OFF.wrapping_add(LEN)],
+                        &TAIL,
+                    );
                 }
             }
         )*
@@ -9581,6 +9701,206 @@ mod tests {
         // container's entire reserved region.
         tpl.clear_optionals();
         assert!(!tpl.is_hook_grant_present());
+
+        // Exercise every remaining setter too (dead-code hygiene).
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_prepare_for_emit_not_implemented(tpl.prepare_for_emit());
+        plain.set_sequence(0);
+        plain.set_first_ledger_sequence(0);
+        plain.set_last_ledger_sequence(0);
+        plain.set_fee(0).expect("0 drops is in range");
+        plain.set_account(&AccountId::default());
+        let _ = plain.emit_details_region();
+        assert_prepare_for_emit_not_implemented(plain.prepare_for_emit());
+    }
+
+    crate::txn_template! {
+        /// A whole `optional` object (`sfHookGrant`) whose inner fields
+        /// sort as required, NOP-padded (`optional sfDestinationTag`),
+        /// required -- unlike `OptionalObjectFixture` (no NOP-padded
+        /// field, so nothing to skip) or `NestedOptionalFixture` (whose
+        /// trailing run is only the closing `0xE1`), this pins
+        /// `__txn_template_ensure!`'s head/tail blit when the trailing
+        /// run also carries a required field's own header and value
+        /// ahead of the end marker.
+        struct HeadTailBlitFixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            grant: optional sfHookGrant {
+                weight: u16_field(sfSignerWeight) = 0,
+                tag: optional sfDestinationTag,
+                total: native_amount(sfBalance) = 0,
+            },
+            emit_details: emit_details,
+        }
+    }
+
+    crate::txn_template! {
+        /// Plain (always-present) twin of `HeadTailBlitFixture`'s
+        /// `grant`, for a `bytes()`-equality check once it's present.
+        struct PlainHeadTailBlitTwin {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            grant: object(sfHookGrant) {
+                weight: u16_field(sfSignerWeight) = 0,
+                tag: optional sfDestinationTag,
+                total: native_amount(sfBalance) = 0,
+            },
+            emit_details: emit_details,
+        }
+    }
+
+    // `nop_head_tail_split`'s fallback row: two separately NOP-padded
+    // fields (`a`, `c`) around a required one (`b`) in between -- the
+    // middle span `nop_head_end`/`nop_tail_start` find isn't all-NOP, so
+    // the split degrades to `(N, N)` (one full-slot copy, same as
+    // before this optimization) instead of a compile-time assertion
+    // failure. No declared field kind bakes this shape today; this pins
+    // that a future one still round-trips correctly rather than only
+    // compiling.
+    crate::txn_template! {
+        struct HeadTailFallbackFixture {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            grant: optional sfHookGrant {
+                a: optional sfSignerWeight,
+                b: u32_field(sfSourceTag) = 0,
+                c: optional sfDestinationTag,
+            },
+            emit_details: emit_details,
+        }
+    }
+
+    crate::txn_template! {
+        struct PlainHeadTailFallbackTwin {
+            transaction_type = ttPAYMENT,
+            sequence: u32_field(sfSequence) = 0,
+            first_ledger_sequence: u32_field(sfFirstLedgerSequence) = 0,
+            last_ledger_sequence: u32_field(sfLastLedgerSequence) = 0,
+            fee: native_amount(sfFee) = 0,
+            signing_pub_key: empty_vl(sfSigningPubKey),
+            account: account_id(sfAccount),
+            grant: object(sfHookGrant) {
+                a: optional sfSignerWeight,
+                b: u32_field(sfSourceTag) = 0,
+                c: optional sfDestinationTag,
+            },
+            emit_details: emit_details,
+        }
+    }
+
+    #[test]
+    fn optional_container_head_tail_blit_falls_back_when_interior_isnt_all_nop() {
+        // Setting only `b` (between the two NOP-padded fields) must
+        // still materialize `a`'s and `c`'s absent-by-default NOP
+        // padding correctly -- the fallback path, not the split one.
+        let mut tpl = HeadTailFallbackFixture::new();
+        assert!(!tpl.is_grant_present());
+        tpl.set_grant_b(9);
+        assert!(tpl.is_grant_present());
+        let mut plain = PlainHeadTailFallbackTwin::new();
+        plain.set_grant_b(9);
+        assert_eq!(tpl.bytes(), plain.bytes());
+
+        tpl.clear_grant();
+        assert!(!tpl.is_grant_present());
+        tpl.enable_grant();
+        assert!(tpl.is_grant_present());
+        tpl.clear_optionals();
+        assert!(!tpl.is_grant_present());
+        tpl.set_grant_b(9);
+
+        // Exercise the remaining setters too (dead-code hygiene).
+        tpl.set_grant_a(2);
+        plain.set_grant_a(2);
+        assert_eq!(tpl.bytes(), plain.bytes());
+        tpl.clear_grant_a();
+        plain.clear_grant_a();
+        tpl.set_grant_c(5);
+        plain.set_grant_c(5);
+        assert_eq!(tpl.bytes(), plain.bytes());
+        tpl.clear_grant_c();
+        plain.clear_grant_c();
+        assert_eq!(tpl.bytes(), plain.bytes());
+
+        tpl.set_sequence(0);
+        tpl.set_first_ledger_sequence(0);
+        tpl.set_last_ledger_sequence(0);
+        tpl.set_fee(0).expect("0 drops is in range");
+        tpl.set_account(&AccountId::default());
+        let _ = tpl.emit_details_region();
+        assert_prepare_for_emit_not_implemented(tpl.prepare_for_emit());
+        plain.set_sequence(0);
+        plain.set_first_ledger_sequence(0);
+        plain.set_last_ledger_sequence(0);
+        plain.set_fee(0).expect("0 drops is in range");
+        plain.set_account(&AccountId::default());
+        let _ = plain.emit_details_region();
+        assert_prepare_for_emit_not_implemented(plain.prepare_for_emit());
+    }
+
+    #[test]
+    fn optional_container_head_tail_blit_covers_both_sides_of_interior_nop() {
+        // Setting only the trailing (`total`) field must still
+        // materialize the leading run (`weight`'s baked default) and the
+        // interior NOP-padded `tag`.
+        let mut tpl = HeadTailBlitFixture::new();
+        assert!(!tpl.is_grant_present());
+        tpl.set_grant_total(7).expect("7 drops is in range");
+        assert!(tpl.is_grant_present());
+
+        let mut plain = PlainHeadTailBlitTwin::new();
+        plain.set_grant_total(7).expect("7 drops is in range");
+        assert_eq!(tpl.bytes(), plain.bytes());
+
+        tpl.clear_grant();
+        assert!(!tpl.is_grant_present());
+
+        // Setting only the leading (`weight`) field must still
+        // materialize the trailing run (`total`'s baked default plus the
+        // closing `0xE1`).
+        tpl.set_grant_weight(3);
+        assert!(tpl.is_grant_present());
+
+        let mut plain2 = PlainHeadTailBlitTwin::new();
+        plain2.set_grant_weight(3);
+        assert_eq!(tpl.bytes(), plain2.bytes());
+
+        // The interior NOP-padded field round-trips too.
+        let mut tpl3 = HeadTailBlitFixture::new();
+        tpl3.set_grant_tag(5);
+        let mut plain3 = PlainHeadTailBlitTwin::new();
+        plain3.set_grant_tag(5);
+        assert_eq!(tpl3.bytes(), plain3.bytes());
+        tpl3.clear_grant_tag();
+        plain3.clear_grant_tag();
+        assert_eq!(tpl3.bytes(), plain3.bytes());
+
+        tpl.enable_grant();
+        assert!(tpl.is_grant_present());
+
+        tpl.clear_optionals();
+        assert!(!tpl.is_grant_present());
 
         // Exercise every remaining setter too (dead-code hygiene).
         tpl.set_sequence(0);
