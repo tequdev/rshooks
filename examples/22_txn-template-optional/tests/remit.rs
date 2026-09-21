@@ -19,12 +19,22 @@ use rshooks_testenv::prelude::*;
 use txn_template_optional::TxnTemplateOptional;
 
 const DEST: [u8; 20] = [3u8; 20];
+const BLOB: [u8; 96] = {
+    let mut b = [0u8; 96];
+    let mut i = 0;
+    while i < 96 {
+        b[i] = i as u8;
+        i += 1;
+    }
+    b
+};
 
 fn env() -> TestEnv {
     TestEnv::new()
         .hook_account([1u8; 20])
         .otxn(Otxn::new(TxType::Invoke).account([2u8; 20]))
         .hook_param(b"DEST", &DEST)
+        .hook_param(b"BLOB", &BLOB)
 }
 
 #[test]
@@ -79,6 +89,29 @@ fn destination_tag_absent_by_default_present_when_supplied() {
         absent_len + hdr_len + 4,
         "the canonical blob must be exactly the field's own bytes longer with it present"
     );
+}
+
+/// `blob` (`fixed_vl(sfBlob, 96)`, required) is emitted with its exact
+/// header, VL length prefix, and 96 bytes unchanged from `BLOB`.
+#[test]
+fn blob_is_emitted_with_its_vl_prefix_and_exact_bytes() {
+    let env = env();
+    let exit = env.invoke::<TxnTemplateOptional>(0);
+    assert_eq!(exit.exit, ExitType::Accept, "{exit:?}");
+    let emitted = env.emitted();
+    let blob = emitted[0].blob();
+
+    let (hdr, hdr_len) = codec::field_header(sfBlob);
+    let (prefix, prefix_len) = codec::vl_length_prefix(BLOB.len());
+    let mut expected = Vec::new();
+    expected.extend_from_slice(&hdr[..hdr_len]);
+    expected.extend_from_slice(&prefix[..prefix_len]);
+    expected.extend_from_slice(&BLOB);
+    let occurrences = blob
+        .windows(expected.len())
+        .filter(|w| *w == expected.as_slice())
+        .count();
+    assert_eq!(occurrences, 1, "{blob:02x?}");
 }
 
 /// `amounts` (`sfAmounts [ sfAmountEntry { .. }, optional sfAmountEntry

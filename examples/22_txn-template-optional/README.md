@@ -2,7 +2,7 @@
 
 ## What you'll learn
 
-`txn_template!`'s NOP-padded `optional` field kinds, written entirely in
+`txn_template!`'s NOP-padded `optional` field kinds, written mostly in
 the inferred (bare-`sfX`) style: `optional sfX` (any inferable scalar
 kind), and `any_amount` via the `= AnyAmount()` default-shape marker (the
 one kind here that cannot infer from its serialized type alone). See
@@ -13,14 +13,22 @@ this crate's own `amounts` field as that section's worked example.
 ## Specific to this example
 
 The scenario: a Remit that sends one or two amounts, with an `optional`
-`DestinationTag` — every field legal for a Remit per
-`crates/rshooks-core/protocol_formats.json`. The other NOP-padded kinds
-`docs/NOP_PADDING_DESIGN.md` introduces — `vl`/`optional vl`,
+`DestinationTag` and a required `blob` — every field legal for a Remit
+per `crates/rshooks-core/protocol_formats.json`. The other NOP-padded
+kinds `docs/NOP_PADDING_DESIGN.md` introduces — `vl`/`optional vl`,
 whole-container `optional` views, and a homogeneous array of `optional`
 elements — don't fit this single, protocol-legal scenario alongside
 `amounts` without reaching for an unrelated `sfcode`; they're covered by
 `crates/rshooks/src/txn.rs`'s `mod tests` twinned fixtures and
 `crates/rshooks/tests/ui/{pass,fail}` instead.
+
+`blob` (`fixed_vl(sfBlob, 96)`, required, read from the `BLOB` hook
+parameter at runtime) is over 64 bytes on purpose: it exercises
+`rshooks::txn::codec::copy_fixed`'s chunked-copy path for a
+declared-length field that would otherwise lower to a rejected
+`compiler_builtins` `memcpy` call on `wasm32v1-none` (see `copy_fixed`'s
+own rustdoc for the mechanism). `BLOB` is read from a hook parameter,
+not a compile-time constant, so the copy can't be folded away.
 
 `Remit::amounts` is an array with one required and one `optional` element
 (both numbered by position, not the homogeneous indexed form) because a
