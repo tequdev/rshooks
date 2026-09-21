@@ -118,6 +118,13 @@ mod private {
     pub trait Resolve {
         /// Derives the child slot, auto-assigning its number.
         fn resolve(self, parent: u32) -> Result<u32>;
+
+        /// [`resolve`](Self::resolve) into an explicit slot number. `into ==
+        /// parent` rewrites the parent's slot in place: xahaud's
+        /// `slot_subfield` / `slot_subarray` skip the storage copy when
+        /// `new_slot == parent_slot` and leave the slot untouched on
+        /// `DOESNT_EXIST`.
+        fn resolve_into(self, parent: u32, into: u32) -> Result<u32>;
     }
 
     /// Which serialized type IDs a [`super::CastTarget`] accepts.
@@ -152,6 +159,11 @@ impl<T> private::Resolve for SField<T> {
         // `0` asks the host to auto-assign the child slot.
         api::slot::slot_subfield(parent, self.code(), 0)
     }
+
+    #[inline(always)]
+    fn resolve_into(self, parent: u32, into: u32) -> Result<u32> {
+        api::slot::slot_subfield(parent, self.code(), into)
+    }
 }
 
 impl<T> SlotKey<STObject> for SField<T> {
@@ -166,6 +178,11 @@ impl private::Resolve for u32 {
     #[inline(always)]
     fn resolve(self, parent: u32) -> Result<u32> {
         api::slot::slot_subarray(parent, self, 0)
+    }
+
+    #[inline(always)]
+    fn resolve_into(self, parent: u32, into: u32) -> Result<u32> {
+        api::slot::slot_subarray(parent, self, into)
     }
 }
 
@@ -371,6 +388,24 @@ impl<T> SlotObject<T> {
     #[inline(always)]
     pub fn get<K: SlotKey<T>>(&self, key: K) -> Result<SlotObject<K::Out>> {
         <K as private::Resolve>::resolve(key, self.no).map(SlotObject::wrap)
+    }
+
+    /// The handle's raw slot number. Exists only for [`slot_path!`] — public
+    /// because the macro is exported, hidden because it is not a hook-side
+    /// API.
+    #[doc(hidden)]
+    #[inline(always)]
+    pub fn slot_no(&self) -> u32 {
+        self.no
+    }
+
+    /// [`slot_path!`]'s in-place hop: navigates to a child and rewrites the
+    /// parent's slot with it, instead of auto-assigning a new one. Consumes
+    /// `self` — the parent handle's slot number now holds the child.
+    #[doc(hidden)]
+    #[inline(always)]
+    pub fn step<K: SlotKey<T>>(self, key: K) -> Result<SlotObject<K::Out>> {
+        <K as private::Resolve>::resolve_into(key, self.no, self.no).map(SlotObject::wrap)
     }
 
     /// [`get`](Self::get) for an optional field. Absence is checked on the
@@ -860,7 +895,7 @@ const _: () = {
     fn _assert_fixed_read_is_not_used_on_slots<T: FixedRead>() {}
 };
 
-/// Navigates a chain of slot hops, clearing every intermediate.
+/// Navigates a chain of slot hops in one auto-assigned slot.
 ///
 /// ```
 /// use rshooks::prelude::*;
@@ -876,18 +911,19 @@ const _: () = {
 ///
 /// # What it does that a chain of `?` cannot
 ///
-/// `root.get(a)?.get(b)?.get(c)?` leaks the two intermediate slots — nothing
-/// clears on drop. This macro clears each intermediate as soon as its child
-/// exists, so a 10-hop path costs 1 live slot, not 10.
+/// `root.get(a)?.get(b)?.get(c)?` auto-assigns a fresh slot per hop and
+/// leaks every intermediate one. This macro auto-assigns a slot for the
+/// first hop, then rewrites that same slot number in place for every later
+/// hop: xahaud's `slot_subfield` / `slot_subarray` skip the storage copy
+/// when the requested slot equals the parent slot (`HookAPI.cpp`), and
+/// leave the slot's content untouched if the child does not exist. A
+/// 10-hop path costs one slot, not ten, and clears nothing on the success
+/// path.
 ///
-/// Per hop: `let next = cur.get(k); let _ = cur.clear(); match next {..}` —
-/// the current handle is cleared **unconditionally**, before the result is
-/// inspected, so a failed hop cannot leak its parent. Clearing a parent
-/// after deriving a child is sound because the host copies the parent's
-/// storage into the child slot (pinned by a live e2e test, not assumed).
-///
-/// The root is *borrowed*, never cleared, and evaluated exactly once — it
-/// is the caller's handle, which may still be wanted for more children.
+/// A hop after the first that fails clears the ladder's one slot before
+/// returning the error, so a failed lookup leaks nothing either. The root
+/// is *borrowed*, never cleared, and evaluated exactly once — it is the
+/// caller's handle, which may still be wanted for more children.
 ///
 /// # Spelling the root
 ///
@@ -899,16 +935,12 @@ const _: () = {
 /// # Path length
 ///
 /// The expansion nests one `match` per hop, but `rshooks-build`'s unnest
-/// pass flattens them: measured block nesting after that pass is **1** at
-/// 1, 3, and 10 hops, with worst-case instructions growing linearly
-/// (46 / 94 / 255).
-///
-/// What *does* accumulate is the surrounding code: several multi-hop walks
-/// inlined into one function nest their own `if let`/`match` ladders, which
-/// is what reaches the guard checker's 32-level limit.
-/// `examples/15_slot-objects` hit 53 that way and came back to 4 by putting
-/// each walk in its own `#[inline(never)]` function — the same escape hatch
-/// `examples/80_governance`'s `govern` entry uses.
+/// pass flattens them. What *does* accumulate is the surrounding code:
+/// several multi-hop walks inlined into one function nest their own `if
+/// let`/`match` ladders, which is what reaches the guard checker's 32-level
+/// limit. `examples/15_slot-objects` hit that limit that way and came back
+/// down by putting each walk in its own `#[inline(never)]` function — the
+/// same escape hatch `examples/80_governance`'s `govern` entry uses.
 #[macro_export]
 macro_rules! slot_path {
     // Entry: bind the root once (by reference — never cleared), then
@@ -923,33 +955,35 @@ macro_rules! slot_path {
         $cur.get($key)
     };
 
-    // Intermediate hop: derive, clear the current handle unconditionally,
-    // then continue only if the child arrived.
+    // Intermediate hop: the first child is auto-assigned; every later hop
+    // rewrites that same slot in place. One clear, only when a later hop
+    // fails (the slot still holds the last parent then).
     (@hop $cur:ident [$key:expr] $([$rest:expr])+) => {
         match $cur.get($key) {
             ::core::result::Result::Ok(__next) => {
-                let __r = $crate::slot_path!(@owned __next $([$rest])+);
-                __r
+                let __no = __next.slot_no();
+                match $crate::slot_path!(@owned __next $([$rest])+) {
+                    ::core::result::Result::Ok(__leaf) => ::core::result::Result::Ok(__leaf),
+                    ::core::result::Result::Err(__e) => {
+                        let _ = $crate::api::slot::slot_clear(__no);
+                        ::core::result::Result::Err(__e)
+                    }
+                }
             }
             ::core::result::Result::Err(__e) => ::core::result::Result::Err(__e),
         }
     };
 
-    // An owned intermediate: derive, clear this one, then match.
-    (@owned $cur:ident [$key:expr]) => {{
-        let __next = $cur.get($key);
-        let _ = $cur.clear();
-        __next
-    }};
+    (@owned $cur:ident [$key:expr]) => {
+        $cur.step($key)
+    };
 
-    (@owned $cur:ident [$key:expr] $([$rest:expr])+) => {{
-        let __next = $cur.get($key);
-        let _ = $cur.clear();
-        match __next {
+    (@owned $cur:ident [$key:expr] $([$rest:expr])+) => {
+        match $cur.step($key) {
             ::core::result::Result::Ok(__child) => $crate::slot_path!(@owned __child $([$rest])+),
             ::core::result::Result::Err(__e) => ::core::result::Result::Err(__e),
         }
-    }};
+    };
 }
 
 #[cfg(test)]

@@ -139,8 +139,10 @@ already knows the slot's contents from context the type system can't see.
 
 A chain of `.get(a)?.get(b)?.get(c)?` leaks every intermediate slot — each
 temporary handle is dropped without clearing, and nothing clears
-automatically on drop. `slot_path!` clears each intermediate as soon as its
-child exists, so a 10-hop path costs one live slot, not ten:
+automatically on drop. `slot_path!` auto-assigns a slot for the first hop,
+then rewrites that same slot number in place for every later hop — the host
+skips the storage copy when the requested slot equals the parent slot — so a
+10-hop path costs one slot, not ten, and clears nothing on the success path:
 
 ```rust,ignore
 use rshooks::slot_path;
@@ -150,8 +152,9 @@ let first: AccountId = slot_path!(signers[sfSignerEntries][0u32][sfAccount])?.va
 ```
 
 The root is borrowed and never cleared (it's the caller's handle, evaluated
-once); every intermediate is cleared unconditionally, before its result is
-inspected, so a hop that fails cannot leak the parent that produced it.
+once). A hop after the first that fails clears the ladder's one slot before
+returning the error, so a failed lookup cannot leak the parent that produced
+it either.
 
 ## Recycling with `take_*`
 

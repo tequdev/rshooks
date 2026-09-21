@@ -5,7 +5,7 @@
       "artifact": "0.govern.wasm",
       "index": 0,
       "hook_fn": "govern",
-      "bytes": 11767,
+      "bytes": 11766,
       "wce": {
         "hook": 23607,
         "cbak": 0
