@@ -519,12 +519,13 @@ fn with_encoded_value<T: ToBytes, R>(value: &T, f: impl FnOnce(&[u8]) -> R) -> R
 
 /// Read this hook's own state entry for raw key bytes, decoded as `T`.
 ///
-/// Shared body behind [`state_get_encoded`] (an already-[`EncodedStateKey`]d
-/// key, handed its [`AsRef<[u8]>`](AsRef) view) and [`state_get`] (any
-/// [`StateKeyEncode`] key, via [`StateKeyEncode::with_key_bytes`]) — see
-/// [`decode_read`]'s doc comment for the `MaybeUninit` scratch buffer.
+/// Internal funnel behind [`state_get`] (any [`StateKeyEncode`] key, via
+/// [`StateKeyEncode::with_key_bytes`]) and `crate::decl`'s `State`/
+/// `StateEntry` accessors (an already-encoded key's
+/// [`AsRef<[u8]>`](AsRef) view) — see [`decode_read`]'s doc comment for the
+/// `MaybeUninit` scratch buffer.
 #[inline(always)]
-fn state_get_bytes<T: FromBytes>(kbytes: &[u8]) -> Result<Option<T>> {
+pub(crate) fn state_get_encoded<T: FromBytes>(kbytes: &[u8]) -> Result<Option<T>> {
     let mut storage =
         core::mem::MaybeUninit::<crate::convert::Scratch<MAX_TYPED_STATE_LEN>>::uninit();
     // SAFETY: see `uninit_slice_mut`'s doc comment; `state_raw_code` cannot
@@ -535,24 +536,12 @@ fn state_get_bytes<T: FromBytes>(kbytes: &[u8]) -> Result<Option<T>> {
     decode_read(code, buf)
 }
 
-/// Read this hook's own state entry for an already-[`EncodedStateKey`]d
-/// `key`, decoded as `T`.
-///
-/// Internal funnel behind [`state_get`]: a caller that already holds an
-/// `EncodedStateKey` (`crate::decl`'s `State`/`StateEntry` accessors) calls
-/// this directly, skipping the identity [`StateKeyEncode::encode`] copy
-/// [`state_get`] would otherwise perform.
-#[inline(always)]
-pub(crate) fn state_get_encoded<T: FromBytes>(key: &EncodedStateKey) -> Result<Option<T>> {
-    state_get_bytes(key.as_ref())
-}
-
 /// Read this hook's own state entry for `key`, decoded as `T`.
 ///
 /// `Ok(None)` means no entry exists for `key` — see the module doc comment.
 #[inline(always)]
 pub fn state_get<T: FromBytes>(key: &impl StateKeyEncode) -> Result<Option<T>> {
-    key.with_key_bytes(|kbytes| state_get_bytes::<T>(kbytes))
+    key.with_key_bytes(state_get_encoded::<T>)
 }
 
 /// Read this hook's own state entry for `key`, decoded as `key`'s own
@@ -565,27 +554,19 @@ pub fn state_get_typed<K: TypedStateKey>(key: &K) -> Result<Option<K::Value>> {
 }
 
 /// Write this hook's own state entry for raw key bytes, encoding `value` as
-/// `T`. Shared body behind [`state_set_encoded`] and [`state_set_loose`] —
-/// see [`state_get_bytes`]'s doc comment for why this split exists.
+/// `T`. Internal funnel behind [`state_set_loose`] (any [`StateKeyEncode`]
+/// key, via [`StateKeyEncode::with_key_bytes`]) and `crate::decl`'s `State`/
+/// `StateEntry` accessors.
 #[inline(always)]
-fn state_set_bytes<T: ToBytes>(value: &T, kbytes: &[u8]) -> Result<usize> {
+pub(crate) fn state_set_encoded<T: ToBytes>(kbytes: &[u8], value: &T) -> Result<usize> {
     with_encoded_value(value, |vbytes| crate::api::state::state_set(vbytes, kbytes))
-}
-
-/// Write this hook's own state entry for an already-[`EncodedStateKey`]d
-/// `key`, encoding `value` as `T`. Internal funnel behind
-/// [`state_set_loose`] — see [`state_get_encoded`]'s doc comment for why
-/// this exists.
-#[inline(always)]
-pub(crate) fn state_set_encoded<T: ToBytes>(key: &EncodedStateKey, value: &T) -> Result<usize> {
-    state_set_bytes(value, key.as_ref())
 }
 
 /// Write this hook's own state entry for `key`, encoding `value` as `T`.
 /// Returns the number of bytes written.
 #[inline(always)]
 pub fn state_set_loose<T: ToBytes>(key: &impl StateKeyEncode, value: &T) -> Result<usize> {
-    key.with_key_bytes(|kbytes| state_set_bytes(value, kbytes))
+    key.with_key_bytes(|kbytes| state_set_encoded(kbytes, value))
 }
 
 /// Write this hook's own state entry for `key`, encoding `value` as `key`'s
@@ -599,18 +580,18 @@ pub fn state_set_typed<K: TypedStateKey>(key: &K, value: &K::Value) -> Result<us
     state_set_loose(key, value)
 }
 
-/// Read-modify-write this hook's own state entry for an already-
-/// [`EncodedStateKey`]d `key`. Internal funnel behind [`state_update_loose`]
-/// — see [`state_get_encoded`]'s doc comment for why this exists.
+/// Read-modify-write this hook's own state entry for raw key bytes.
+/// Internal funnel behind [`state_update_loose`] and `crate::decl`'s
+/// `State`/`StateEntry` accessors.
 #[inline(always)]
-pub(crate) fn state_update_encoded<T, F>(key: &EncodedStateKey, f: F) -> Result<usize>
+pub(crate) fn state_update_encoded<T, F>(kbytes: &[u8], f: F) -> Result<usize>
 where
     T: FromBytes + ToBytes,
     F: FnOnce(Option<T>) -> T,
 {
-    let current = state_get_encoded::<T>(key)?;
+    let current = state_get_encoded::<T>(kbytes)?;
     let next = f(current);
-    state_set_encoded(key, &next)
+    state_set_encoded(kbytes, &next)
 }
 
 /// Read-modify-write this hook's own state entry for `key`: reads the
@@ -622,7 +603,7 @@ where
     T: FromBytes + ToBytes,
     F: FnOnce(Option<T>) -> T,
 {
-    state_update_encoded(&key.encode(), f)
+    key.with_key_bytes(|kbytes| state_update_encoded(kbytes, f))
 }
 
 /// Read-modify-write this hook's own state entry for `key`, using `key`'s
@@ -663,22 +644,15 @@ where
 /// [`state_get`]/[`state_get_typed`] if that distinction matters.
 #[inline(always)]
 pub fn state_delete(key: &impl StateKeyEncode) -> Result<()> {
-    key.with_key_bytes(state_delete_bytes)
+    key.with_key_bytes(state_delete_encoded)
 }
 
-/// Delete this hook's own state entry for raw key bytes. Shared body behind
-/// [`state_delete_encoded`] and [`state_delete`].
+/// Delete this hook's own state entry for raw key bytes. Internal funnel
+/// behind [`state_delete`] and `crate::decl`'s `State`/`StateEntry`
+/// accessors.
 #[inline(always)]
-fn state_delete_bytes(kbytes: &[u8]) -> Result<()> {
+pub(crate) fn state_delete_encoded(kbytes: &[u8]) -> Result<()> {
     crate::api::state::state_set(&[], kbytes).map(|_| ())
-}
-
-/// Delete this hook's own state entry for an already-[`EncodedStateKey`]d
-/// `key`. Internal funnel behind [`state_delete`] — see
-/// [`state_get_encoded`]'s doc comment for why this exists.
-#[inline(always)]
-pub(crate) fn state_delete_encoded(key: &EncodedStateKey) -> Result<()> {
-    state_delete_bytes(key.as_ref())
 }
 
 /// Read a state entry belonging to another namespace/account, decoded as
@@ -691,15 +665,14 @@ pub fn state_foreign_get<T: FromBytes>(
     namespace: Option<&[u8]>,
     account: Option<&[u8]>,
 ) -> Result<Option<T>> {
-    key.with_key_bytes(|kbytes| state_foreign_get_bytes::<T>(kbytes, namespace, account))
+    key.with_key_bytes(|kbytes| state_foreign_get_encoded::<T>(kbytes, namespace, account))
 }
 
 /// Read a state entry belonging to another namespace/account for raw key
-/// bytes, decoded as `T`. Shared body behind [`state_foreign_get_encoded`]
-/// and [`state_foreign_get`] — see [`state_get_bytes`]'s doc comment for why
-/// this split exists.
+/// bytes, decoded as `T`. Internal funnel behind [`state_foreign_get`] and
+/// `crate::decl`'s `State`/`StateEntry` accessors.
 #[inline(always)]
-fn state_foreign_get_bytes<T: FromBytes>(
+pub(crate) fn state_foreign_get_encoded<T: FromBytes>(
     kbytes: &[u8],
     namespace: Option<&[u8]>,
     account: Option<&[u8]>,
@@ -714,19 +687,6 @@ fn state_foreign_get_bytes<T: FromBytes>(
     decode_read(code, buf)
 }
 
-/// Read a state entry belonging to another namespace/account for an
-/// already-[`EncodedStateKey`]d `key`. Internal funnel behind
-/// [`state_foreign_get`] — see [`state_get_encoded`]'s doc comment for why
-/// this exists.
-#[inline(always)]
-pub(crate) fn state_foreign_get_encoded<T: FromBytes>(
-    key: &EncodedStateKey,
-    namespace: Option<&[u8]>,
-    account: Option<&[u8]>,
-) -> Result<Option<T>> {
-    state_foreign_get_bytes(key.as_ref(), namespace, account)
-}
-
 /// Write a state entry belonging to another namespace/account, encoding
 /// `value` as `T`. `namespace`/`account` follow
 /// [`crate::api::state::state_foreign`]'s `Option` convention. Returns the
@@ -738,37 +698,23 @@ pub fn state_foreign_set_loose<T: ToBytes>(
     namespace: Option<&[u8]>,
     account: Option<&[u8]>,
 ) -> Result<usize> {
-    key.with_key_bytes(|kbytes| state_foreign_set_bytes(value, kbytes, namespace, account))
+    key.with_key_bytes(|kbytes| state_foreign_set_encoded(kbytes, value, namespace, account))
 }
 
 /// Write a state entry belonging to another namespace/account for raw key
-/// bytes, encoding `value` as `T`. Shared body behind
-/// [`state_foreign_set_encoded`] and [`state_foreign_set_loose`] — see
-/// [`state_get_bytes`]'s doc comment for why this split exists.
+/// bytes, encoding `value` as `T`. Internal funnel behind
+/// [`state_foreign_set_loose`] and `crate::decl`'s `State`/`StateEntry`
+/// accessors.
 #[inline(always)]
-fn state_foreign_set_bytes<T: ToBytes>(
-    value: &T,
+pub(crate) fn state_foreign_set_encoded<T: ToBytes>(
     kbytes: &[u8],
+    value: &T,
     namespace: Option<&[u8]>,
     account: Option<&[u8]>,
 ) -> Result<usize> {
     with_encoded_value(value, |vbytes| {
         crate::api::state::state_foreign_set(vbytes, kbytes, namespace, account)
     })
-}
-
-/// Write a state entry belonging to another namespace/account for an
-/// already-[`EncodedStateKey`]d `key`. Internal funnel behind
-/// [`state_foreign_set_loose`] — see [`state_get_encoded`]'s doc comment for
-/// why this exists.
-#[inline(always)]
-pub(crate) fn state_foreign_set_encoded<T: ToBytes>(
-    key: &EncodedStateKey,
-    value: &T,
-    namespace: Option<&[u8]>,
-    account: Option<&[u8]>,
-) -> Result<usize> {
-    state_foreign_set_bytes(value, key.as_ref(), namespace, account)
 }
 
 /// Read-modify-write a state entry belonging to another namespace/account:
