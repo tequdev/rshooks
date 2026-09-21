@@ -236,6 +236,23 @@ macro_rules! fixed_bytes_type {
                     Err(HookError::TooSmall)
                 }
             }
+
+            // No zero-fill: `out` is already a live `Self`, supplied by the
+            // caller, so `read` can write straight into it — unlike
+            // `read_exact` above, which needs some initial value for its own
+            // local before `read` can run.
+            #[inline(always)]
+            fn read_exact_into(
+                out: &mut Self,
+                read: impl FnOnce(&mut [u8]) -> Result<usize>,
+            ) -> Result<()> {
+                let written = read(out.as_mut())?;
+                if written == $len {
+                    Ok(())
+                } else {
+                    Err(HookError::TooSmall)
+                }
+            }
         }
     };
 }

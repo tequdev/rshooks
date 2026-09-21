@@ -23,10 +23,9 @@ hook_errors! {
 
 /// Iterations used to exercise slot recycling beyond the slot limit. Must
 /// exceed 255, the per-execution slot budget; 256 is the minimum that does.
-/// This holds per loop, not per slot moved: a leak shows up as one slot per
-/// iteration in whichever clear mechanism that loop is testing, so the
-/// three-hop loops need 256 iterations exactly as much as the single-hop
-/// ones do, not a fraction of it for moving several slots per iteration.
+/// This holds per loop, not per hop count: every `slot_path!` walk, however
+/// many hops, occupies exactly one slot at a time, so a leak shows up as one
+/// slot per iteration in whichever clear mechanism that loop is testing.
 const LOOP_ITERATIONS: u32 = 256;
 
 /// Bit 0: the account-root walk read all three fields.
@@ -37,7 +36,7 @@ const BIT_DROPS_ROUNDTRIP: i64 = 2;
 const BIT_PARENT_CLEAR: i64 = 4;
 /// Bit 3: every `take_value()` in the success loop released its slot.
 const BIT_TAKE_LOOP: i64 = 8;
-/// Bit 4: failed `slot_path!` walks recycled intermediate slots.
+/// Bit 4: a failing `slot_path!` walk clears the ladder's one slot.
 const BIT_MIDHOP_LOOP: i64 = 16;
 /// Bit 5: successful deep walks recycled slots.
 const BIT_DEEP_LOOP: i64 = 32;
@@ -124,12 +123,12 @@ fn check_parent_clear(keylet: &Keylet) -> bool {
 /// 256 `slot_path!` walks over the sender's SignerList whose **third** hop
 /// fails, after the first two have succeeded.
 ///
-/// Hops 1 and 2 — `sfSignerEntries`, then element 0 — allocate two *owned*
-/// intermediates before hop 3 asks a SignerEntry for a `sfBalance` it does
-/// not have. The ladder clears each intermediate unconditionally, before
-/// inspecting the result, so 256 failures must leak nothing; with a leak
-/// the 255-slot budget runs out partway through and the tail fails for a
-/// different reason.
+/// Hop 1 — `sfSignerEntries` — auto-assigns the ladder's one slot; hop 2 —
+/// element 0 — rewrites that same slot in place. Hop 3 asks a SignerEntry
+/// for a `sfBalance` it does not have, which clears the ladder's one slot
+/// before the macro returns the error, so 256 failures must leak nothing;
+/// with a leak the 255-slot budget runs out partway through and the tail
+/// fails for a different reason.
 ///
 /// The root is loaded **once** and borrowed by every walk — `slot_path!`
 /// never clears its root.
@@ -154,11 +153,10 @@ fn check_midhop_loop(signers: &Keylet) -> bool {
 /// 256 *successful* three-hop walks, each reading its leaf with
 /// `take_value()`.
 ///
-/// This one loop proves both success-path contracts at once: each
-/// iteration derives three slots — two intermediates the ladder clears,
-/// plus a leaf `take_value()` releases — so 256 iterations move 768 slots
-/// through a 255-slot budget. A failure to recycle in *either* mechanism
-/// exhausts it well before the end.
+/// The ladder rewrites its one auto-assigned slot in place across all three
+/// hops, so the leaf `take_value()` call is the only clear the whole walk
+/// performs; a failure to recycle there exhausts the 255-slot budget well
+/// before the end.
 #[inline(never)]
 fn check_deep_loop(signers: &Keylet) -> bool {
     let Ok(root) = SlotObject::from_keylet(signers) else {

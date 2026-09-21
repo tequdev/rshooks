@@ -222,7 +222,7 @@ impl TxnBuf {
             Ok(f) => f,
             Err(_) => fail(b"govern: could not compute emitted txn fee"),
         };
-        let native = encode_native_amount(fee);
+        let native = codec::encode_native_amount_bytes(fee);
         let fee_end = fee_offset.wrapping_add(8); // range end; see `push`'s overflow comment
         let Some(fee_dst) = self.buf.get_mut(fee_offset..fee_end) else {
             fail(b"govern: txn buffer overflow");
@@ -256,27 +256,6 @@ fn take_txn_buf() -> &'static mut TxnBuf {
         fail(b"govern: txn buffer already taken");
     };
     txn
-}
-
-/// Encodes `drops` as an 8-byte native (XAH) amount — see
-/// `examples/80_governance/src/mint_txn.rs::write_native_amount`'s doc
-/// comment for why this is hand-written instead of calling
-/// `codec::encode_native_amount` directly (that function's own
-/// `copy_from_slice` keeps an unreachable-in-practice panic path linked
-/// in that this crate's nesting budget can't afford).
-#[inline(always)]
-fn encode_native_amount(drops: u64) -> [u8; 8] {
-    let bytes = drops.to_be_bytes();
-    [
-        0x40 | (bytes[0] & 0x3F),
-        bytes[1],
-        bytes[2],
-        bytes[3],
-        bytes[4],
-        bytes[5],
-        bytes[6],
-        bytes[7],
-    ]
 }
 
 /// Builds and emits an `Invoke` from this (L2) table to the L1 (genesis)

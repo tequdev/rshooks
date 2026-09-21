@@ -21,9 +21,9 @@ in `src/lib.rs` for the short form).
 |---|---|---|
 | 0 | **Account-root walk** — `from_keylet` on an account keylet, then typed reads of `sfSequence`/`sfAccount`/`sfBalance` | host stubs return `NotImplemented` for every call; nothing about a real object is observable |
 | 1 | **Drops round-trip** — `as_xfl()` on a native amount, scaled back with `to_int(6, false)`, equals the raw wire drops | `as_xfl` on a native amount yields **XAH units**, not drops (mantissa = drops, exponent −6, normalized) — an easy factor-of-10⁶ mistake this pins down |
-| 2 | **Parent-clear then child-read** — derive a child, clear the parent, *then* read the child | `slot_path!` clears each intermediate as soon as its child exists. That is only sound if the host **copies** the parent's storage into the child slot rather than aliasing it |
+| 2 | **Parent-clear then child-read** — derive a child, clear the parent, *then* read the child | `slot_path!`'s first hop auto-assigns a fresh slot for the child. That is only sound if the host **copies** the parent's storage into it rather than aliasing it |
 | 3 | **`take_*` past the slot budget** — repeated derive-read-release, well past the 255-slot budget | the same loop with a plain `value()` runs out with `NO_FREE_SLOTS`; this proves `take_value()` really frees |
-| 4 | **Failing mid-hop leaks nothing** — repeated `slot_path!` walks whose second hop always fails | the ladder clears the current handle *unconditionally*, before inspecting the result, so a later failing hop cannot leak the parent that produced it |
+| 4 | **Failing mid-hop leaks nothing** — repeated `slot_path!` walks whose second hop always fails | a hop after the first that fails clears the ladder's one slot before the macro returns, so repeated failures leak nothing |
 | 5 | **Repeated successful navigation** — three-hop walks, each leaf read with `take_value()` | the success path has to recycle too, well past the slot budget |
 | 6 | **Failure-path `take_*` cleanup** — repeated *failing* `take_value()` reads | the other half of the `take_*` contract: it clears on failure as well as success |
 | 7 | **Failed `try_cast` cleans up** — repeated casts that cannot hold | any `try_cast` failure consumes the handle and best-effort clears the slot |
@@ -37,8 +37,7 @@ The Hook API's guard checker rejects a module whose block nesting exceeds 32
 levels. All the checks' `if let` ladders inlined into one entry point blow
 past that. Splitting each into its own frame brings the hook comfortably
 back under the limit — the same `#[inline(never)]` escape hatch
-`examples/80_governance` uses against the same ceiling, and the reason
-`docs/DESIGN.md` §5.8 recommends keeping `slot_path!` chains short.
+`examples/80_governance` uses against the same ceiling.
 
 For the record, `slot_path!` itself is not the problem: measured on its
 own, its nesting after `rshooks-build`'s unnest pass stays flat regardless

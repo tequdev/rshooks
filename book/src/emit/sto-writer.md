@@ -42,8 +42,19 @@ has finalized the writer.
 ## Building a transaction
 
 `StoWriter::new(buf)` wraps caller-owned storage as a fresh writer, empty,
-at the top-level container. Scalar fields have one method per `STI_*`
-shape:
+at the top-level container. `StoWriter::resume(buf, prefix_len)` instead
+starts the cursor at `prefix_len`, trusting the caller that `buf[..prefix_len]`
+already holds a valid serialized prefix — typically one baked at compile
+time into a `static`, so it costs a wasm data segment instead of runtime
+instructions. A resumed writer carries no emit-plumbing bookkeeping for
+that prefix until `emit_plumbing(offsets)` supplies it: a `PlumbingOffsets`
+naming where the four patchable fields (`sfFirstLedgerSequence`,
+`sfLastLedgerSequence`, `sfFee`, `sfAccount`) live, standing in for the
+field-by-field calls that would otherwise have recorded those offsets
+themselves. `examples/17_sto-writer` uses this to bake its entire
+emit-plumbing prefix at compile time — see the updated `build_remit` below.
+
+Scalar fields have one method per `STI_*` shape:
 
 | method | writes |
 |---|---|
@@ -89,15 +100,8 @@ fn build_remit<'a>(
     destination: &AccountId,
     issued: Option<&(CurrencyCode, AccountId)>,
 ) -> Result<StoWriter<'a>> {
-    let mut w = StoWriter::new(buf);
-    w.u16_field(sfTransactionType, rshooks::raw::tts::ttREMIT)?;
-    w.u32_field(sfFlags, tfCANONICAL)?;
-    w.u32_field(sfSequence, 0)?;
-    w.u32_field(sfFirstLedgerSequence, 0)?;
-    w.u32_field(sfLastLedgerSequence, 0)?;
-    w.native_amount(sfFee, 0)?;
-    w.empty_vl(sfSigningPubKey)?;
-    w.account_id(sfAccount, &AccountId::default())?;
+    let mut w = StoWriter::resume(buf, PREFIX_LEN)?;
+    w.emit_plumbing(PREFIX.1)?;
     w.account_id(sfDestination, destination)?;
 
     w.begin_array(sfAmounts)?;
@@ -202,7 +206,11 @@ same pattern:
 
 ```rust,ignore
 const BUF_LEN: usize = 285;
-static BUF: HookStatic<[u8; BUF_LEN]> = HookStatic::new([0u8; BUF_LEN]);
+static BUF: HookStatic<[u8; BUF_LEN]> = HookStatic::new({
+    let mut buf = [0u8; BUF_LEN];
+    codec::write_const_bytes(&mut buf, 0, &PREFIX.0);
+    buf
+});
 ```
 
 ```rust,ignore
@@ -244,13 +252,12 @@ what that mock hooks into).
 
 ## Cost, here
 
-Measured (`rshooks build`/`check`, `examples/`'s `opt-level = 3` profile):
-`examples/17_sto-writer`'s `main` entry (index 0, `cbak` declared) comes to
-746 worst-case instructions, 2282 bytes, and a max nesting depth of 3 —
-comfortably inside the 65,535-instruction WCE ceiling and the 65,535-byte
-`SetHook` size limit, and higher than `10_emit-txn`'s fixed-template
-Payment (327 WCE, 1260 bytes), which is expected: this hook does strictly
-more work at runtime (two hook-parameter reads, a conditional
-issued-amount branch, and `StoWriter`'s own bounds/duplicate checks on
-every field, versus a `const fn`-baked template with none of that at
-runtime).
+`examples/17_sto-writer/metrics.json` records the `main` entry's worst-case
+instruction count, size, and max nesting depth as built by `rshooks
+build`/`check` (`examples/`'s `opt-level = 3` profile). It sits well inside
+the 65,535-instruction WCE ceiling and the 65,535-byte `SetHook` size limit,
+and above `10_emit-txn`'s fixed-template Payment, which is expected: this
+hook does strictly more work at runtime (two hook-parameter reads, a
+conditional issued-amount branch, and `StoWriter`'s own bounds/duplicate
+checks on every field, versus a `const fn`-baked template with none of that
+at runtime).

@@ -777,9 +777,9 @@ fn action_hook(hook_accid: &AccountId, n: u8, topic_data_zero: bool, topic_data:
     };
     // The already-installed hook's hash, if there is one: the hook
     // account's `Hooks` array, element `n`, its `HookHash`. `slot_path!`
-    // clears each intermediate as soon as its child exists, so this costs
-    // one live slot rather than three — and it flattens to a single `if
-    // let` here, which matters in a hook this close to the nesting
+    // resolves every hop after the first in place, so this costs one
+    // auto-assigned slot rather than three — and it flattens to a single
+    // `if let` here, which matters in a hook this close to the nesting
     // ceiling.
     //
     // Missing hook data skips the comparison.

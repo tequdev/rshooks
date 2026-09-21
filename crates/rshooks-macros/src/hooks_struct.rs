@@ -1419,27 +1419,50 @@ fn field_marker_and_impls(
 
     match &f.decl {
         FieldDecl::State { key } => {
-            let (key_args, encode_body, with_key_override) = match key {
+            let (key_args, encode_body, with_key_bytes_override) = match key {
                 KeySpec::Const { expr } => {
                     let expr_text = tokens_to_string(expr);
-                    // A byte-string-literal key (the common case) is
-                    // promoted to a compile-time `'static` `EncodedStateKey`
-                    // via `with_key` below instead of re-encoding at
-                    // runtime on every access; any other const expression
-                    // keeps the runtime `encode_key` path via `with_key`'s
-                    // default.
-                    let override_method = is_byte_string_literal(expr).then(|| {
+                    // A byte-string-literal key is already a `&[u8; N]`
+                    // expression — hand it straight to `f` inside a `const`
+                    // block, no `EncodedStateKey` built at all. Any other
+                    // const expression is an opaque token tree to this
+                    // macro (no type info to act on): `expr` must already
+                    // type as `&Self` for `encode_body` below to compile
+                    // (`StateKeyEncode::encode` takes `&self`), so
+                    // const-promoting `expr` itself (rather than trying to
+                    // name its type) and handing the promoted reference to
+                    // its own `StateKeyEncode::with_key_bytes` reaches the
+                    // exact same right-sized, no-pad override every other
+                    // caller of that key type gets — `[u8; N]`, `StateKey`,
+                    // `EncodedStateKey`, a `#[derive(HookKey)]` struct, a
+                    // `state_keys!` enum, or a hand-written impl that only
+                    // has the `encode`-based default. `with_key` (the
+                    // `EncodedStateKey`-returning method) keeps its own,
+                    // narrower literal-only override for a caller that
+                    // still goes through it directly; `with_key_bytes`
+                    // below is what every generated accessor actually
+                    // calls, so a literal key gets the same const-promoted
+                    // treatment through this one path too.
+                    let with_key_bytes = if is_byte_string_literal(expr) {
                         format!(
                             "#[inline(always)]\n\
-                             fn with_key<__R>(_args: &Self::KeyArgs, f: impl ::core::ops::FnOnce(&::rshooks::state::EncodedStateKey) -> __R) -> __R {{\n\
-                                 f(const {{ &::rshooks::state::EncodedStateKey::from_short({expr_text}) }})\n\
+                             fn with_key_bytes<__R>(_args: &Self::KeyArgs, f: impl ::core::ops::FnOnce(&[u8]) -> __R) -> __R {{\n\
+                                 f(const {{ {expr_text} }})\n\
                              }}\n"
                         )
-                    });
+                    } else {
+                        format!(
+                            "#[inline(always)]\n\
+                             fn with_key_bytes<__R>(_args: &Self::KeyArgs, f: impl ::core::ops::FnOnce(&[u8]) -> __R) -> __R {{\n\
+                                 let __key = const {{ {expr_text} }};\n\
+                                 ::rshooks::state::StateKeyEncode::with_key_bytes(__key, f)\n\
+                             }}\n"
+                        )
+                    };
                     (
                         "()".to_string(),
                         format!("::rshooks::state::StateKeyEncode::encode({expr_text})"),
-                        override_method,
+                        Some(with_key_bytes),
                     )
                 }
                 KeySpec::Keyed { ty } => {
@@ -1452,7 +1475,7 @@ fn field_marker_and_impls(
                 }
             };
             let args_pat = if key_args == "()" { "_args" } else { "args" };
-            let with_key_method = with_key_override.unwrap_or_default();
+            let with_key_bytes_method = with_key_bytes_override.unwrap_or_default();
             out.push_str(&format!(
                 "#[automatically_derived]\n\
                  impl ::rshooks::decl::StateSpec for {marker} {{\n\
@@ -1462,7 +1485,7 @@ fn field_marker_and_impls(
                      fn encode_key({args_pat}: &Self::KeyArgs) -> ::rshooks::state::EncodedStateKey {{\n\
                          {encode_body}\n\
                      }}\n\
-                     {with_key_method}\
+                     {with_key_bytes_method}\
                  }}\n"
             ));
         }
@@ -1666,15 +1689,19 @@ fn state_interface_field_codegen(
         }
     };
 
-    let with_key_method = if key_fields.is_empty() {
-        // 31 zero bytes: the 32-byte key minus the 1-byte State ID
-        // (`docs/STATE_INTERFACE_DESIGN.md` §1.6 — a singleton's key is
-        // `StateID || 31 zero bytes`).
+    // 31 zero bytes: the 32-byte key minus the 1-byte State ID
+    // (`docs/STATE_INTERFACE_DESIGN.md` §1.6 — a singleton's key is
+    // `StateID || 31 zero bytes`). Only `with_key_bytes` gets an override
+    // (not `with_key`, the `EncodedStateKey`-returning method): every
+    // generated accessor calls `with_key_bytes`, so an override on `with_key`
+    // would never be reached by this crate's own codegen — see the
+    // `KeySpec::Const` byte-literal case's identical reasoning above.
+    let with_key_bytes_method = if key_fields.is_empty() {
         let zeros = vec!["0u8"; 31].join(", ");
         format!(
             "#[inline(always)]\n\
-             fn with_key<__R>(_args: &Self::KeyArgs, f: impl ::core::ops::FnOnce(&::rshooks::state::EncodedStateKey) -> __R) -> __R {{\n\
-                 f(const {{ &::rshooks::state::EncodedStateKey::from_short(&[{id}u8, {zeros}]) }})\n\
+             fn with_key_bytes<__R>(_args: &Self::KeyArgs, f: impl ::core::ops::FnOnce(&[u8]) -> __R) -> __R {{\n\
+                 f(const {{ &[{id}u8, {zeros}] }})\n\
              }}\n"
         )
     } else {
@@ -1693,7 +1720,7 @@ fn state_interface_field_codegen(
                  {key_body}\
                  ::rshooks::state::EncodedStateKey::new(__buf, 32)\n\
              }}\n\
-             {with_key_method}\
+             {with_key_bytes_method}\
          }}\n"
     ));
 

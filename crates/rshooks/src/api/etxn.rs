@@ -10,6 +10,7 @@
 //! Every byte-count-returning call's returned length never exceeds the
 //! buffer capacity given to the host.
 
+use crate::api::fixed_buf_fn;
 use crate::error::{HookError, Result, res};
 use crate::types::{Hash, Nonce};
 
@@ -91,12 +92,10 @@ pub fn etxn_nonce<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
         .map(|v| (v as usize).min(cap))
 }
 
-/// A fresh nonce for use in an emitted transaction.
-#[inline(always)]
-pub fn etxn_nonce_buf() -> Result<Nonce> {
-    let mut buf = Nonce::default();
-    let _ = etxn_nonce(buf.as_mut())?;
-    Ok(buf)
+fixed_buf_fn! {
+    /// A fresh nonce for use in an emitted transaction.
+    fn etxn_nonce_buf() -> Nonce = etxn_nonce,
+    etxn_nonce_into
 }
 
 /// Emit `tx_blob` as a new transaction, writing the emitted transaction's
@@ -128,11 +127,17 @@ pub fn emit_buf(tx_blob: &[u8]) -> Result<Hash> {
     let mut storage =
         core::mem::MaybeUninit::<crate::convert::Scratch<{ crate::types::HASH_LEN }>>::uninit();
     // SAFETY: only read via `assume_init` below, once `written == HASH_LEN`
-    // proves the host wrote every byte.
+    // holds. `emit`'s wasm wrapper (`applyHook.cpp:2683-2697`, Xahau/xahaud
+    // `release`) returns `TOO_SMALL` without writing if the buffer is
+    // shorter than the transaction ID, otherwise writes exactly that ID's
+    // length (always `HASH_LEN`) and returns the same count — a compliant
+    // host never returns a success value above `HASH_LEN` for `emit` to
+    // clamp down, so `written == HASH_LEN` still proves every byte was
+    // written.
     let buf = unsafe { crate::convert::uninit_slice_mut(&mut storage) };
     let written = emit(buf, tx_blob)?;
     if written == crate::types::HASH_LEN {
-        // SAFETY: `written == HASH_LEN` proves the host wrote every byte.
+        // SAFETY: see the host contract cited above.
         Ok(Hash(unsafe { storage.assume_init() }.0))
     } else {
         Err(HookError::TooSmall)
@@ -175,6 +180,10 @@ mod tests {
         assert_eq!(etxn_reserve(1), Err(HookError::NotImplemented));
         assert_eq!(etxn_generation(), rshooks_core::NOT_IMPLEMENTED as u32);
         assert_eq!(etxn_nonce_buf(), Err(HookError::NotImplemented));
+        assert_eq!(
+            etxn_nonce_into(&mut Nonce::default()),
+            Err(HookError::NotImplemented)
+        );
         assert_eq!(emit_buf(&[0u8; 4]), Err(HookError::NotImplemented));
         let mut out = [0u8; 8];
         let mut nonce_out = [0u8; 32];

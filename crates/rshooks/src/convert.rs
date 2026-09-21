@@ -244,6 +244,29 @@ pub trait FixedRead: Sized {
     /// "wrote more," which `read`'s exactly-sized buffer argument should
     /// already prevent at the host level, but isn't assumed here).
     fn read_exact(read: impl FnOnce(&mut [u8]) -> Result<usize>) -> Result<Self>;
+
+    /// Out-param twin of [`Self::read_exact`]: writes straight into
+    /// caller-owned `out` instead of returning `Self` by value. The default
+    /// body just delegates to `read_exact`, so this is safe to leave
+    /// unoverridden for a type with no dedicated storage to write into
+    /// directly; `[u8; N]` and every `rshooks::types` newtype
+    /// (`fixed_bytes_type!`) override it to skip `read_exact`'s own initial
+    /// scratch/zero-fill, since `out` already exists.
+    ///
+    /// # Errors
+    ///
+    /// Same [`HookError`] variants as [`Self::read_exact`]. On `Err`,
+    /// `out`'s contents are unspecified: an override may hand `out`
+    /// straight to `read`, so a failed read can leave it partially
+    /// overwritten rather than untouched.
+    #[inline(always)]
+    fn read_exact_into(
+        out: &mut Self,
+        read: impl FnOnce(&mut [u8]) -> Result<usize>,
+    ) -> Result<()> {
+        *out = Self::read_exact(read)?;
+        Ok(())
+    }
 }
 
 impl<const N: usize> FixedRead for [u8; N] {
@@ -259,6 +282,19 @@ impl<const N: usize> FixedRead for [u8; N] {
         if written == N {
             // SAFETY: `written == N` proves `read` wrote every byte of `out`.
             Ok(unsafe { out.assume_init() }.0)
+        } else {
+            Err(HookError::TooSmall)
+        }
+    }
+
+    #[inline(always)]
+    fn read_exact_into(
+        out: &mut Self,
+        read: impl FnOnce(&mut [u8]) -> Result<usize>,
+    ) -> Result<()> {
+        let written = read(out)?;
+        if written == N {
+            Ok(())
         } else {
             Err(HookError::TooSmall)
         }

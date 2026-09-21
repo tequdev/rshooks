@@ -1228,15 +1228,19 @@ Slot numbers never appear in hook source. The decisions behind it:
   `STObject` accepts serialized type ID 14 *and* the 10001–10004 codes root
   slots report, every other target exactly its own ID; any `try_cast` failure
   consumes the handle and best-effort clears the slot.
-- **`slot_path!` clears intermediates.** `root.get(a)?.get(b)?.get(c)?` leaks
-  two slots. The macro emits a match ladder whose per-hop order is `let next
-  = cur.get(k); let _ = cur.clear(); match next {..}` — the current handle is
-  cleared *unconditionally*, so a later failing hop cannot leak it. The root
-  is borrowed and never cleared. Clearing a parent after deriving a child is
-  sound because the host copies the parent's storage into the child slot;
-  that is pinned by a live e2e test, not assumed. Measured nesting after
-  rshooks-build's unnest pass is **1** at 1, 3 and 10 hops — far under the
-  guard checker's 32 — and WCE grows linearly (46 / 94 / 255 instructions).
+- **`slot_path!` resolves in place.** `root.get(a)?.get(b)?.get(c)?`
+  auto-assigns a slot per hop and leaks every intermediate one. The macro
+  auto-assigns a slot for the first hop, then rewrites that same slot number
+  for every later hop via `SlotObject::step`, which calls `slot_subfield`/
+  `slot_subarray` with `new_slot == parent_slot`: xahaud skips the storage
+  copy in that case (`HookAPI.cpp`'s `slot_subfield`/`slot_subarray`, `if
+  (new_slot != parent_slot) { hookCtx.slot[new_slot] = hookCtx.slot[parent_slot]; }`)
+  and leaves the slot untouched on `DOESNT_EXIST`. A ladder costs one slot
+  and zero `slot_clear` calls on the success path; a hop after the first
+  that fails clears the ladder's one slot before returning the error. The
+  root is borrowed and never cleared. WCE still grows linearly with hop
+  count; nesting after rshooks-build's unnest pass stays far under the guard
+  checker's 32-level limit.
 - **MPT is out of scope** (a USER decision). MPT amounts need an amendment
   Xahau does not have. `AmountBytes`/`IssueData` classify by length and
   return `ParseError` for any unexpected size (33-byte MPT amounts and
