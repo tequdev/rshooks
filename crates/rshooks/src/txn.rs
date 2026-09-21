@@ -891,9 +891,21 @@ pub mod codec {
             drops < MAX_NATIVE_DROPS,
             "txn_template!: native_amount default does not fit in 62 bits"
         );
-        let mut value = drops.to_be_bytes();
-        value[0] |= 0x40;
-        value
+        encode_native_amount_bytes(drops)
+    }
+
+    /// Encodes `drops` as an 8-byte native amount, unconditionally: bits
+    /// 62-63 are cleared and the native bit (`0x40`) is OR'd in before the
+    /// big-endian byte swap, so this lowers to one AND, one OR, and one
+    /// store — no slice, no panic path, and no way to produce a field
+    /// that parses as an issued (non-native) amount. Total: a `drops`
+    /// `>=`[`MAX_NATIVE_DROPS`] silently discards bits above 62 rather
+    /// than erroring — callers that must reject an out-of-range `drops`
+    /// check that themselves.
+    #[must_use]
+    #[inline(always)]
+    pub const fn encode_native_amount_bytes(drops: u64) -> [u8; 8] {
+        ((drops & 0x3FFF_FFFF_FFFF_FFFF) | 0x4000_0000_0000_0000).to_be_bytes()
     }
 
     /// Runtime, `Result`-returning counterpart to
@@ -910,7 +922,7 @@ pub mod codec {
             return Err(HookError::InvalidArgument);
         }
         let dst = out.get_mut(0..8).ok_or(HookError::InvalidArgument)?;
-        dst.copy_from_slice(&(drops | 0x4000_0000_0000_0000).to_be_bytes());
+        dst.copy_from_slice(&encode_native_amount_bytes(drops));
         Ok(())
     }
 
@@ -1470,6 +1482,7 @@ pub mod codec {
         #[test]
         fn native_amount_one_drop() {
             assert_eq!(encode_native_amount_const(1), [0x40, 0, 0, 0, 0, 0, 0, 1]);
+            assert_eq!(encode_native_amount_bytes(1), [0x40, 0, 0, 0, 0, 0, 0, 1]);
             let mut out = [0u8; 8];
             encode_native_amount(&mut out, 1).expect("1 drop is in range");
             assert_eq!(out, [0x40, 0, 0, 0, 0, 0, 0, 1]);
@@ -1478,6 +1491,23 @@ pub mod codec {
         #[test]
         fn native_amount_zero_drops() {
             assert_eq!(encode_native_amount_const(0), [0x40, 0, 0, 0, 0, 0, 0, 0]);
+        }
+
+        #[test]
+        fn native_amount_bytes_boundary() {
+            // Every valid drops value (< MAX_NATIVE_DROPS) agrees with the
+            // compile-time encoder.
+            let max_valid = MAX_NATIVE_DROPS - 1;
+            assert_eq!(
+                encode_native_amount_bytes(max_valid),
+                encode_native_amount_const(max_valid)
+            );
+            // Bits above 62 are discarded, never leaked into the field's
+            // native/issued discriminant bit (63) or sign bit (62).
+            assert_eq!(
+                encode_native_amount_bytes(u64::MAX),
+                [0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+            );
         }
 
         #[test]
