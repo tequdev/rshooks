@@ -93,6 +93,44 @@ pub trait FromBytes: Sized {
     /// Returns [`HookError::TooSmall`] if `buf` is shorter than the
     /// encoding this type expects.
     fn read(buf: &[u8]) -> Result<Self>;
+
+    /// Allocates a read scratch buffer and hands it to `f`, returning
+    /// whatever `f` returns.
+    ///
+    /// Read-side mirror of [`ToBytes::with_bytes`] — see that method's doc
+    /// comment for why a generic default can't size the buffer to `Self`
+    /// (`generic_const_exprs` is unstable) and must fall back to a fixed
+    /// [`DEFAULT_SCRATCH_LEN`]-byte one instead, overridden by every
+    /// concrete, non-generic impl below to allocate exactly `Self`'s own
+    /// encoded width.
+    ///
+    /// Unlike the write side, the buffer width here is externally
+    /// observable: `crate::state`'s typed reads hand this buffer straight
+    /// to the host `state`/`state_foreign` call as the destination, and
+    /// xahaud's `WRITE_WASM_MEMORY_OR_RETURN_AS_INT64`
+    /// (`include/xrpl/hook/Macro.h`, used by `state`/`state_foreign` in
+    /// `src/xrpld/app/hook/detail/applyHook.cpp`) fails the whole call with
+    /// [`HookError::TooSmall`](crate::error::HookError::TooSmall) — never a
+    /// truncated write — when the stored entry is longer than the
+    /// destination. So the default (unoverridden) 32-byte buffer keeps
+    /// today's lenient behavior (an oversized entry decodes its own
+    /// leading prefix), while an override right-sizes the destination and
+    /// makes a too-long entry fail instead — see `crate::state`'s module
+    /// doc comment for which of this crate's own reads take which path.
+    ///
+    /// `f` must only read the buffer over the range a call it makes
+    /// through `f` actually wrote — the same convention
+    /// [`FixedRead::read_exact`]'s `read` closure argument relies on (its
+    /// existing impls already hand it uninitialized storage the same way).
+    #[inline(always)]
+    fn with_read_buf<R>(f: impl FnOnce(&mut [u8]) -> R) -> R {
+        let mut storage = core::mem::MaybeUninit::<Scratch<DEFAULT_SCRATCH_LEN>>::uninit();
+        // SAFETY: see this method's doc comment and `uninit_slice_mut`'s —
+        // `f` is only ever a caller-buffer host-call funnel that writes
+        // into the buffer before reading any of it.
+        let buf = unsafe { uninit_slice_mut(&mut storage) };
+        f(buf)
+    }
 }
 
 /// Implements [`ToBytes`]/[`FromBytes`] for a fixed-width little-endian
@@ -127,6 +165,17 @@ macro_rules! impl_int_bytes {
                 arr.copy_from_slice(src);
                 Ok(<$ty>::from_le_bytes(arr))
             }
+
+            /// Right-sizes the read scratch to this type's own `$len`-byte
+            /// width — see [`FromBytes::with_read_buf`]'s doc comment for
+            /// what this changes.
+            #[inline(always)]
+            fn with_read_buf<R>(f: impl FnOnce(&mut [u8]) -> R) -> R {
+                let mut storage = core::mem::MaybeUninit::<Scratch<$len>>::uninit();
+                // SAFETY: see `FromBytes::with_read_buf`'s doc comment.
+                let buf = unsafe { uninit_slice_mut(&mut storage) };
+                f(buf)
+            }
         }
     };
 }
@@ -157,6 +206,13 @@ impl FromBytes for crate::xfl::XFL {
     #[inline(always)]
     fn read(buf: &[u8]) -> Result<Self> {
         i64::read(buf).map(crate::xfl::XFL::from_raw_bits)
+    }
+
+    /// Delegates to `i64`'s override — an XFL is an opaque `i64` bit
+    /// pattern (see the [`ToBytes`] impl above), same width.
+    #[inline(always)]
+    fn with_read_buf<R>(f: impl FnOnce(&mut [u8]) -> R) -> R {
+        i64::with_read_buf(f)
     }
 }
 
@@ -201,6 +257,16 @@ impl<const N: usize> FromBytes for [u8; N] {
         let mut out = [0u8; N];
         out.copy_from_slice(src);
         Ok(out)
+    }
+
+    /// Right-sizes the read scratch to `N` bytes — see
+    /// [`FromBytes::with_read_buf`]'s doc comment for what this changes.
+    #[inline(always)]
+    fn with_read_buf<R>(f: impl FnOnce(&mut [u8]) -> R) -> R {
+        let mut storage = core::mem::MaybeUninit::<Scratch<N>>::uninit();
+        // SAFETY: see `FromBytes::with_read_buf`'s doc comment.
+        let buf = unsafe { uninit_slice_mut(&mut storage) };
+        f(buf)
     }
 }
 

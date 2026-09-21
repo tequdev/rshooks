@@ -14,16 +14,15 @@ Set an `ACCT` Hook parameter (20 raw bytes, the account to read from) when
 installing this Hook — see [Hook and Transaction
 Parameters](../../book/src/data/parameters.md) for the `required`-field
 pattern this uses. On the **target** account, this hook's namespace must
-have a state entry keyed by `pad!(b"enabled")` whose first byte is nonzero
-(e.g. set with `state-counter`'s `state_set` pattern, or any tooling that
-can write raw hook state — deployment/state-seeding tooling itself is out
-of scope for this repo, see `docs/DESIGN.md` §1 non-goals).
+have a state entry keyed by `pad!(b"enabled")` that is **exactly 1 byte**,
+nonzero (e.g. set with `state-counter`'s `state_set` pattern, or any tooling
+that can write raw hook state — deployment/state-seeding tooling itself is
+out of scope for this repo, see `docs/DESIGN.md` §1 non-goals).
 
-`enabled` is declared `State<[u8; 1]>`, and `[u8; N]`'s `FromBytes` reads
-only a `N`-byte *prefix* of whatever is actually stored, so an
-entry larger than 1 byte decodes fine (only its first byte is read) —
-`ReadFailed` is reserved for a genuinely undersized entry, not an
-oversized one.
+`enabled` is declared `State<[u8; 1]>`, and a typed read requires the
+stored entry to fit exactly — an entry longer than 1 byte fails the host
+call with `TOO_SMALL` rather than decoding its first byte, so it surfaces
+as `ReadFailed` here, the same as a genuinely undersized (empty) entry.
 
 ## Build
 
@@ -40,9 +39,11 @@ compiler-generated `bcmp`-style loop to guard.
 - `ACCT` not configured (or not 20 bytes) → rollback.
 - `ACCT` configured, but the target account has no `enabled` entry in this
   hook's namespace → rollback.
-- `ACCT` configured, `enabled` entry present but its first byte is `0` →
-  rollback.
-- `ACCT` configured, `enabled` entry present with a nonzero first byte →
+- `ACCT` configured, `enabled` entry present but not exactly 1 byte (empty,
+  or longer than 1 byte) → rollback (`ReadFailed`).
+- `ACCT` configured, `enabled` entry present, exactly 1 byte, value `0` →
+  rollback (`FlagOff`).
+- `ACCT` configured, `enabled` entry present, exactly 1 byte, nonzero →
   accept.
 
 Failure/rollback codes are declared on `StateForeignError` in `src/lib.rs`

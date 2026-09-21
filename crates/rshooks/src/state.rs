@@ -193,12 +193,15 @@
 //! [`crate::api::state::state_u64`] for the big-endian counterpart this
 //! module's typed layer deliberately does not use.
 
-use crate::convert::{FromBytes, ToBytes, uninit_slice_mut};
+use crate::convert::{FromBytes, ToBytes};
 use crate::error::{HookError, Result, res};
 use crate::types::{STATE_KEY_LEN, StateKey};
 
-/// Maximum byte length of any value [`state_get`]/[`state_set_loose`]/
-/// [`state_update_loose`] (and their `_foreign` twins) read or write.
+/// Maximum byte length [`state_set_loose`]/[`state_update_loose`] (and
+/// their `_foreign` twins) write, and the read-side scratch width a `T`
+/// that does not override [`FromBytes::with_read_buf`] falls back to (see
+/// that method's doc comment) — a `T` that does override it reads through
+/// its own, possibly narrower, width instead.
 ///
 /// 32, **not** picked to fit the largest type this crate provides
 /// ([`crate::types::IouAmount`] is 48 bytes and does not fit) — picked
@@ -471,20 +474,20 @@ pub trait TypedStateKey: StateKeyEncode {
 ///
 /// `raw` is only ever read over its `..n` prefix (`n = res(code)?`, the
 /// host's own reported write count) — so the bytes-level read helpers below
-/// pass a [`core::mem::MaybeUninit`] scratch buffer viewed through
-/// [`uninit_slice_mut`] here rather than a zero-initialized one: nothing
-/// beyond that prefix is ever touched, so zeroing the rest first would be
-/// dead work the guard checker still charges for.
+/// pass a [`core::mem::MaybeUninit`] scratch buffer (via
+/// [`FromBytes::with_read_buf`]) rather than a zero-initialized one:
+/// nothing beyond that prefix is ever touched, so zeroing the rest first
+/// would be dead work the guard checker still charges for.
 ///
-/// Deliberately still reads through a fixed [`MAX_TYPED_STATE_LEN`]-byte
-/// buffer rather than a `T`-sized one: unlike the write side
-/// ([`with_encoded_value`]), a right-sized read buffer would change
-/// observable behavior for an entry longer than `T`'s own encoding — the
-/// host call would fail with [`HookError::TooSmall`] instead of the
-/// current lenient prefix decode. `examples/09_state-foreign` relies on
-/// that prefix decode (its README documents reading a 32-byte foreign
-/// entry through a 1-byte `[u8; 1]` value type), so this crate keeps the
-/// read side at the fixed buffer width.
+/// `raw`'s own width is `T::with_read_buf`'s buffer, not always
+/// [`MAX_TYPED_STATE_LEN`] bytes: every concrete `T` this crate provides
+/// overrides [`FromBytes::with_read_buf`] to a `T`-sized buffer, so an
+/// entry longer than `T`'s own encoding fails [`HookError::TooSmall`]
+/// instead of decoding a leading prefix of it — see
+/// [`FromBytes::with_read_buf`]'s doc comment for the exact-capacity policy
+/// this implements and its host-call citation. A hand-written `FromBytes`
+/// impl that does not override `with_read_buf` keeps the old, lenient
+/// fixed-32-byte-buffer behavior (the trait method's default).
 #[inline(always)]
 fn decode_read<T: FromBytes>(code: i64, raw: &[u8]) -> Result<Option<T>> {
     if code == rshooks_core::DOESNT_EXIST {
@@ -522,17 +525,14 @@ fn with_encoded_value<T: ToBytes, R>(value: &T, f: impl FnOnce(&[u8]) -> R) -> R
 /// Shared body behind [`state_get_encoded`] (an already-[`EncodedStateKey`]d
 /// key, handed its [`AsRef<[u8]>`](AsRef) view) and [`state_get`] (any
 /// [`StateKeyEncode`] key, via [`StateKeyEncode::with_key_bytes`]) — see
-/// [`decode_read`]'s doc comment for the `MaybeUninit` scratch buffer.
+/// [`decode_read`]'s doc comment for the scratch buffer `T::with_read_buf`
+/// sizes.
 #[inline(always)]
 fn state_get_bytes<T: FromBytes>(kbytes: &[u8]) -> Result<Option<T>> {
-    let mut storage =
-        core::mem::MaybeUninit::<crate::convert::Scratch<MAX_TYPED_STATE_LEN>>::uninit();
-    // SAFETY: see `uninit_slice_mut`'s doc comment; `state_raw_code` cannot
-    // report writing more bytes than the buffer it was handed, and
-    // `decode_read` only ever reads the `..n` prefix that count reports.
-    let buf = unsafe { uninit_slice_mut(&mut storage) };
-    let code = crate::api::state::state_raw_code(buf, kbytes);
-    decode_read(code, buf)
+    T::with_read_buf(|buf| {
+        let code = crate::api::state::state_raw_code(buf, kbytes);
+        decode_read(code, buf)
+    })
 }
 
 /// Read this hook's own state entry for an already-[`EncodedStateKey`]d
@@ -704,14 +704,10 @@ fn state_foreign_get_bytes<T: FromBytes>(
     namespace: Option<&[u8]>,
     account: Option<&[u8]>,
 ) -> Result<Option<T>> {
-    let mut storage =
-        core::mem::MaybeUninit::<crate::convert::Scratch<MAX_TYPED_STATE_LEN>>::uninit();
-    // SAFETY: see `uninit_slice_mut`'s doc comment; `state_foreign_raw_code`
-    // cannot report writing more bytes than the buffer it was handed, and
-    // `decode_read` only ever reads the `..n` prefix that count reports.
-    let buf = unsafe { uninit_slice_mut(&mut storage) };
-    let code = crate::api::state::state_foreign_raw_code(buf, kbytes, namespace, account);
-    decode_read(code, buf)
+    T::with_read_buf(|buf| {
+        let code = crate::api::state::state_foreign_raw_code(buf, kbytes, namespace, account);
+        decode_read(code, buf)
+    })
 }
 
 /// Read a state entry belonging to another namespace/account for an
@@ -1341,5 +1337,93 @@ mod tests {
             state_foreign_update_typed(&TestKey::Counter, None, None, |_| 1u32),
             Err(HookError::NotImplemented)
         );
+    }
+}
+
+/// Proves [`FromBytes::with_read_buf`]'s right-sized override changes
+/// [`state_get`]/[`state_foreign_get`]'s observable behavior exactly the way
+/// this module's doc comment and [`decode_read`]'s doc comment describe: an
+/// overridden `T` (here `[u8; 1]`, matching `examples/09_state-foreign`'s
+/// value type) rejects a stored entry longer than its own encoding with
+/// [`HookError::TooSmall`] instead of decoding a leading prefix of it —
+/// never a truncated decode.
+#[cfg(all(test, feature = "testenv"))]
+mod read_scratch_sizing_tests {
+    #![allow(clippy::unwrap_used, clippy::panic)] // tests are exempt from panic-freedom lints, docs/DESIGN.md §8
+
+    extern crate std;
+
+    use std::rc::Rc;
+    use std::vec::Vec;
+
+    use super::*;
+    use rshooks_core::backend::{HostBackend, install};
+
+    /// Answers every `state`/`state_foreign` read with a fixed byte string.
+    struct FixedBytesBackend(&'static [u8]);
+
+    impl HostBackend for FixedBytesBackend {
+        fn state(&self, _key: &[u8]) -> core::result::Result<Vec<u8>, i64> {
+            Ok(self.0.to_vec())
+        }
+
+        fn state_foreign(
+            &self,
+            _key: &[u8],
+            _ns: Option<&[u8; 32]>,
+            _acc: Option<&[u8; 20]>,
+        ) -> core::result::Result<Vec<u8>, i64> {
+            Ok(self.0.to_vec())
+        }
+
+        fn accept(&self, _msg: &[u8], _code: i64) -> ! {
+            panic!("FixedBytesBackend::accept unexpectedly called")
+        }
+
+        fn rollback(&self, _msg: &[u8], _code: i64) -> ! {
+            panic!("FixedBytesBackend::rollback unexpectedly called")
+        }
+    }
+
+    #[test]
+    fn array_read_decodes_an_exact_length_entry() {
+        let _guard = install(Rc::new(FixedBytesBackend(&[7])));
+        let key = [0u8; STATE_KEY_LEN];
+        assert_eq!(state_get::<[u8; 1]>(&key), Ok(Some([7u8])));
+    }
+
+    #[test]
+    fn array_read_rejects_an_oversized_entry_instead_of_decoding_a_prefix() {
+        // Exactly `examples/09_state-foreign`'s scenario before this
+        // module's B6 change: a stored entry longer than `[u8; 1]`'s own
+        // 1-byte encoding. Previously this decoded byte 0 of the entry
+        // (`Ok(Some([1]))`); the right-sized read scratch now hands the
+        // host a 1-byte destination, so the host call itself fails
+        // `TOO_SMALL` — the same never-truncates contract
+        // `crate::api::state::state`'s own testenv tests cover for the raw
+        // layer.
+        let _guard = install(Rc::new(FixedBytesBackend(&[1, 2, 3, 4])));
+        let key = [0u8; STATE_KEY_LEN];
+        assert_eq!(state_get::<[u8; 1]>(&key), Err(HookError::TooSmall));
+    }
+
+    #[test]
+    fn foreign_array_read_rejects_an_oversized_entry_too() {
+        let _guard = install(Rc::new(FixedBytesBackend(&[1, 2, 3, 4])));
+        let key = [0u8; STATE_KEY_LEN];
+        assert_eq!(
+            state_foreign_get::<[u8; 1]>(&key, None, None),
+            Err(HookError::TooSmall)
+        );
+    }
+
+    #[test]
+    fn u64_read_rejects_an_oversized_entry_too() {
+        // Same policy for every overridden `FromBytes::with_read_buf` impl,
+        // not just `[u8; N]` — this is the sub-issue's own headline case
+        // (`state.rs:483`'s `state_get_encoded`).
+        let _guard = install(Rc::new(FixedBytesBackend(&[0u8; 32])));
+        let key = [0u8; STATE_KEY_LEN];
+        assert_eq!(state_get::<u64>(&key), Err(HookError::TooSmall));
     }
 }
