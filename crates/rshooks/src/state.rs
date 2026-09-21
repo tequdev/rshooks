@@ -926,6 +926,12 @@ macro_rules! state_keys {
             next = 0u8,
             enum_body = [],
             arms = [],
+            // `__f` (not the literal `f`) is a single `:ident` fragment
+            // threaded through every recursive step so every generated
+            // `with_key_bytes` call site shares one hygienic binding with
+            // the generated fn's own parameter — macro hygiene otherwise
+            // treats a same-spelled `f` written in a separate step's
+            // expansion as a distinct identifier.
             bytes_fn = __f,
             bytes_arms = [],
             discs = [],
@@ -985,18 +991,9 @@ macro_rules! __state_keys_step {
             }
 
             // Hands `f` this variant's real-length bytes directly, skipping
-            // the 32-byte `EncodedStateKey` buffer [`Self::encode`] builds —
-            // a unit variant's bytes are a compile-time constant (`const {
-            // &[..] }`, promoted to `'static`), a payload variant's are a
-            // buffer sized to its own real length (`1 +
-            // Payload::MAX_LEN`), not the fixed 32-byte pad. See
-            // [`StateKeyEncode::with_key_bytes`]'s doc comment for why this
-            // override exists. `$bytes_fn` (not the literal `f`) is a single
-            // `:ident` fragment threaded through every recursive step, so
-            // every generated call site shares one hygienic binding with
-            // this signature's parameter — macro hygiene otherwise treats a
-            // same-spelled `f` written in a separate step's expansion as a
-            // distinct identifier.
+            // the 32-byte `EncodedStateKey` buffer `Self::encode` builds —
+            // see the unit/tuple variant arms below for what those bytes
+            // are per shape.
             #[inline(always)]
             fn with_key_bytes<R>(&self, $bytes_fn: impl FnOnce(&[u8]) -> R) -> R {
                 match self {
@@ -1067,10 +1064,6 @@ macro_rules! __state_keys_step {
             bytes_fn = $bytes_fn,
             bytes_arms = [
                 $($bytes_arms)*
-                // A unit variant's real-length bytes are exactly its own
-                // discriminant, known at compile time — `const { &[..] }`
-                // promotes the one-element array to a `'static` slice, so
-                // there is no buffer to build or zero at the call site.
                 $Name::$variant => $bytes_fn(const { &[$next] }),
             ],
             discs = [ $($discs)* $next, ],
@@ -1129,10 +1122,6 @@ macro_rules! __state_keys_step {
             bytes_fn = $bytes_fn,
             bytes_arms = [
                 $($bytes_arms)*
-                // A tuple variant's real-length bytes are discriminant +
-                // payload — a buffer sized to that real length (`1 +
-                // Payload::MAX_LEN`), not the fixed 32-byte pad `encode`
-                // must build for `EncodedStateKey`.
                 $Name::$variant(__payload) => {
                     const __LEN: usize = 1usize.wrapping_add(
                         <$payload as $crate::convert::ToBytes>::MAX_LEN,
@@ -1295,6 +1284,10 @@ mod tests {
         assert_matches(&[0xABu8; STATE_KEY_LEN]);
         assert_matches(&StateKey::from([0xCDu8; STATE_KEY_LEN]));
         assert_matches(&b"RR".encode());
+        // `state_keys!`-generated variants: const bytes for a unit variant,
+        // a `MAX_LEN`-sized buffer for a payload variant.
+        assert_matches(&TestKey::Counter);
+        assert_matches(&TestKey::Balance(0x0102_0304));
     }
 
     #[test]
@@ -1365,18 +1358,6 @@ mod tests {
             TestKey::Counter.encode().as_ref(),
             TestKey::Balance(0).encode().as_ref()
         );
-    }
-
-    /// `state_keys!`'s `with_key_bytes` override (const bytes for a unit
-    /// variant, a `MAX_LEN`-sized buffer for a payload variant) must hand
-    /// `f` the exact same bytes `encode()` would.
-    #[test]
-    fn with_key_bytes_matches_encode_for_every_state_keys_variant() {
-        fn assert_matches(key: &TestKey) {
-            key.with_key_bytes(|bytes| assert_eq!(bytes, key.encode().as_ref()));
-        }
-        assert_matches(&TestKey::Counter);
-        assert_matches(&TestKey::Balance(0x0102_0304));
     }
 
     // `TypedStateKey`: a key type paired with exactly one value type, via
