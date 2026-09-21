@@ -231,10 +231,14 @@ pub trait StateSpec {
     /// accessors route through this method, not [`Self::with_key`], so a
     /// macro-generated marker can hand `f` a right-sized or fully
     /// `'static`-promoted key image with no [`EncodedStateKey`] built at
-    /// all — see [`crate::state::ConstKey`] for the non-literal-constant
-    /// case. The default forwards through [`Self::with_key`], so every
-    /// existing `StateSpec` impl (including one a hook crate wrote itself)
-    /// keeps working unchanged with no override required.
+    /// all — a byte-string-literal `#[state(key = b"...")]` field hands `f`
+    /// its own bytes directly inside a `const` block; any other constant
+    /// key expression const-promotes to the same `'static` reference and
+    /// hands it to that concrete type's own
+    /// [`crate::state::StateKeyEncode::with_key_bytes`] override. The
+    /// default forwards through [`Self::with_key`], so every existing
+    /// `StateSpec` impl (including one a hook crate wrote itself) keeps
+    /// working unchanged with no override required.
     #[inline(always)]
     fn with_key_bytes<R>(args: &Self::KeyArgs, f: impl FnOnce(&[u8]) -> R) -> R {
         Self::with_key(args, |key| f(key.as_ref()))
@@ -899,25 +903,39 @@ mod tests {
         );
     }
 
-    /// [`StateSpec::with_key_bytes`]'s default must hand `f` the exact same
-    /// bytes [`StateSpec::with_key`] would — the override a macro-generated
-    /// marker adds (a literal or [`crate::state::ConstKey`]-promoted
-    /// constant key, or a keyed-family delegation) only changes how those
-    /// bytes reach the caller, never what they are.
-    #[test]
-    fn with_key_bytes_matches_with_key_for_const_and_keyed_specs() {
-        MockConstState::with_key(&(), |via_with_key| {
-            MockConstState::with_key_bytes(&(), |via_with_key_bytes| {
-                assert_eq!(via_with_key_bytes, via_with_key.as_ref());
-            });
-        });
-        for args in [1u8, 7u8, 42u8] {
-            MockKeyedState::with_key(&args, |via_with_key| {
-                MockKeyedState::with_key_bytes(&args, |via_with_key_bytes| {
-                    assert_eq!(via_with_key_bytes, via_with_key.as_ref());
-                });
-            });
+    /// A spec overriding [`StateSpec::with_key_bytes`] directly, bypassing
+    /// [`StateSpec::with_key`]/[`StateSpec::encode_key`] entirely — mirrors
+    /// what the `#[hooks]` macro emits for a promoted constant key.
+    /// [`Self::encode_key`] deliberately returns *different* bytes (`"EK"`)
+    /// than the override (`"OV"`), so a test asserting on `"OV"` proves
+    /// [`State`]'s accessors actually call the override, not silently fall
+    /// through to the `with_key`-based default.
+    struct MockOverriddenState;
+
+    impl StateSpec for MockOverriddenState {
+        type Value = u32;
+        type KeyArgs = ();
+
+        #[inline(always)]
+        fn encode_key(_args: &()) -> EncodedStateKey {
+            b"EK".encode()
         }
+
+        #[inline(always)]
+        fn with_key_bytes<R>(_args: &(), f: impl FnOnce(&[u8]) -> R) -> R {
+            f(b"OV")
+        }
+    }
+
+    #[test]
+    fn with_key_bytes_override_is_used_instead_of_the_with_key_default() {
+        MockOverriddenState::with_key_bytes(&(), |bytes| assert_eq!(bytes, b"OV"));
+        assert_ne!(
+            MockOverriddenState::encode_key(&()).as_ref(),
+            b"OV",
+            "the mock's encode_key/with_key path must disagree with the \
+             override, or this test cannot tell them apart"
+        );
     }
 }
 
