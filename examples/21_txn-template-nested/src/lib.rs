@@ -517,8 +517,8 @@ mod tests {
             .expect("fits");
         w.begin_array(sfMemos).expect("fits");
         w.begin_object(sfMemo).expect("fits");
-        w.vl_exact(sfMemoType, b"note").expect("fits");
-        w.vl_exact(sfMemoData, b"rshooks!").expect("fits");
+        w.vl_fixed(sfMemoType, b"note").expect("fits");
+        w.vl_fixed(sfMemoData, b"rshooks!").expect("fits");
         w.end_object().expect("fits");
         w.end_array().expect("fits");
         w.begin_array(sfAmounts).expect("fits");
