@@ -184,7 +184,19 @@ rshooks/
     ├── 07_xfl-math/
     ├── 08_slot-ledger/
     ├── 09_state-foreign/
-    └── 10_emit-txn/
+    ├── 10_emit-txn/
+    ├── 12_typed-data/
+    ├── 13_keylets/
+    ├── 14_account-id-macro/
+    ├── 15_slot-objects/
+    ├── 16_typed-results/
+    ├── 17_sto-writer/
+    ├── 18_typed-views/
+    ├── 19_param-signature/
+    ├── 20_state-interface/
+    ├── 21_txn-template-nested/
+    ├── 22_txn-template-optional/
+    └── 80_governance/
 ```
 
 - Root workspace members: `crates/*` only. `examples/` is its own workspace:
