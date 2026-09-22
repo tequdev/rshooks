@@ -320,7 +320,7 @@ pub(crate) struct Scratch<const N: usize>(pub(crate) [u8; N]);
 /// impl and the `crate::api` funnels that need the same shape for a
 /// prefix-only or classified-length read (`otxn::Amount`/`Issue`'s
 /// [`OtxnFieldValue`](crate::api::otxn::OtxnFieldValue) impls,
-/// `state::state_raw_code_buf`).
+/// `util::util_keylet`/`etxn::emit`'s fixed-size scratch reads).
 ///
 /// # Safety
 ///

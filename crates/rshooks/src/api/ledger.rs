@@ -39,11 +39,12 @@ pub fn ledger_last_time() -> u64 {
     unsafe { rshooks_core::ledger_last_time() as u64 }
 }
 
-/// The hash of the previous (parent) ledger, written into `out`. Returns the
-/// number of bytes written. [`ledger_last_hash_buf`] is the fixed-size
-/// convenience twin.
+/// Read the hash of the previous (parent) ledger into `out`. Returns the
+/// number of bytes written. `pub(crate)`:
+/// [`ledger_last_hash`]/[`ledger_last_hash_into`] are the public forms —
+/// see the `api` module doc comment's "Naming" section.
 #[inline(always)]
-pub fn ledger_last_hash<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
+pub(crate) fn ledger_last_hash_raw<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
     let out = out.as_mut();
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
     if let Some(r) = rshooks_core::backend::with_backend(|b| b.ledger_last_hash()) {
@@ -55,14 +56,15 @@ pub fn ledger_last_hash<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
 
 fixed_buf_fn! {
     /// The hash of the previous (parent) ledger.
-    fn ledger_last_hash_buf() -> Hash = ledger_last_hash,
+    fn ledger_last_hash() -> Hash = ledger_last_hash_raw,
     ledger_last_hash_into
 }
 
-/// A ledger-derived nonce value, written into `out`. Returns the number of
-/// bytes written. [`ledger_nonce_buf`] is the fixed-size convenience twin.
+/// Read a ledger-derived nonce value into `out`. Returns the number of
+/// bytes written. `pub(crate)`: [`ledger_nonce`]/[`ledger_nonce_into`] are
+/// the public forms — see the `api` module doc comment's "Naming" section.
 #[inline(always)]
-pub fn ledger_nonce<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
+pub(crate) fn ledger_nonce_raw<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
     let out = out.as_mut();
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
     if let Some(r) = rshooks_core::backend::with_backend(|b| b.ledger_nonce()) {
@@ -75,15 +77,16 @@ pub fn ledger_nonce<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
 fixed_buf_fn! {
     /// A ledger-derived nonce value (distinct from
     /// [`crate::api::etxn::etxn_nonce`], which is per-emission).
-    fn ledger_nonce_buf() -> Nonce = ledger_nonce,
+    fn ledger_nonce() -> Nonce = ledger_nonce_raw,
     ledger_nonce_into
 }
 
 /// Compute a Keylet from a low/high bound pair, written into `out`. Returns
-/// the number of bytes written. [`ledger_keylet_buf`] is the fixed-size
-/// convenience twin.
+/// the number of bytes written. `pub(crate)`:
+/// [`ledger_keylet`]/[`ledger_keylet_into`] are the public forms — see the
+/// `api` module doc comment's "Naming" section.
 #[inline(always)]
-pub fn ledger_keylet<B: AsMut<[u8]> + ?Sized>(
+pub(crate) fn ledger_keylet_raw<B: AsMut<[u8]> + ?Sized>(
     out: &mut B,
     low: &[u8],
     high: &[u8],
@@ -109,7 +112,7 @@ pub fn ledger_keylet<B: AsMut<[u8]> + ?Sized>(
 fixed_buf_fn! {
     /// Compute a Keylet from a low/high bound pair (as used by range-style
     /// ledger entries).
-    fn ledger_keylet_buf(low: &[u8], high: &[u8]) -> Keylet = ledger_keylet,
+    fn ledger_keylet(low: &[u8], high: &[u8]) -> Keylet = ledger_keylet_raw,
     ledger_keylet_into
 }
 
@@ -123,18 +126,18 @@ mod tests {
         assert_eq!(fee_base(), rshooks_core::NOT_IMPLEMENTED as u64);
         assert_eq!(ledger_seq(), rshooks_core::NOT_IMPLEMENTED as u32);
         assert_eq!(ledger_last_time(), rshooks_core::NOT_IMPLEMENTED as u64);
-        assert_eq!(ledger_last_hash_buf(), Err(HookError::NotImplemented));
+        assert_eq!(ledger_last_hash(), Err(HookError::NotImplemented));
         assert_eq!(
             ledger_last_hash_into(&mut Hash::default()),
             Err(HookError::NotImplemented)
         );
-        assert_eq!(ledger_nonce_buf(), Err(HookError::NotImplemented));
+        assert_eq!(ledger_nonce(), Err(HookError::NotImplemented));
         assert_eq!(
             ledger_nonce_into(&mut Nonce::default()),
             Err(HookError::NotImplemented)
         );
         assert_eq!(
-            ledger_keylet_buf(&[0u8; 34], &[0u8; 34]),
+            ledger_keylet(&[0u8; 34], &[0u8; 34]),
             Err(HookError::NotImplemented)
         );
         assert_eq!(
@@ -142,10 +145,13 @@ mod tests {
             Err(HookError::NotImplemented)
         );
         let mut out = [0u8; 34];
-        assert_eq!(ledger_last_hash(&mut out), Err(HookError::NotImplemented));
-        assert_eq!(ledger_nonce(&mut out), Err(HookError::NotImplemented));
         assert_eq!(
-            ledger_keylet(&mut out, &[0u8; 34], &[0u8; 34]),
+            ledger_last_hash_into(&mut out),
+            Err(HookError::NotImplemented)
+        );
+        assert_eq!(ledger_nonce_into(&mut out), Err(HookError::NotImplemented));
+        assert_eq!(
+            ledger_keylet_into(&mut out, &[0u8; 34], &[0u8; 34]),
             Err(HookError::NotImplemented)
         );
     }

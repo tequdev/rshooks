@@ -1,5 +1,5 @@
 //! One typed helper per [`rshooks_core::consts`] `KEYLET_*` constant, built
-//! on top of [`crate::api::util::util_keylet_buf`] — the untyped,
+//! on top of [`crate::api::util::util_keylet`] — the untyped,
 //! one-function-for-every-type escape hatch that takes `keylet_type` and up
 //! to six raw `u32` components (`a`..`f`) and stays available for anything
 //! not covered below (or a future protocol keylet type this crate hasn't
@@ -8,7 +8,7 @@
 //!
 //! # Why typed helpers, and why one per type
 //!
-//! [`util_keylet`]/[`util_keylet_buf`] take
+//! [`util_keylet`]/[`util_keylet_into`] take
 //! `a`..`f` as bare `u32`s — some are raw values (a sequence number, a
 //! quality component), others are **pointers** into this hook's own linear
 //! memory (an account ID, a hash, a currency code), and which is which, how
@@ -25,7 +25,7 @@
 //! needs — [`keylet_account`] takes an `&AccountId` and nothing else,
 //! [`keylet_line`] takes two `&AccountId`s and a `&CurrencyCode`,
 //! [`keylet_offer`] takes an `&AccountId` and a `u32` sequence. Every one is
-//! a thin, `#[inline(always)]` pass-through to [`util_keylet_buf`]
+//! a thin, `#[inline(always)]` pass-through to [`util_keylet`]
 //! (computing each pointer/length pair via `.as_ptr()`/`.len()` on the
 //! newtype argument, `0` for every unused `a`..`f` slot), so none of this
 //! costs anything beyond the raw host call itself.
@@ -34,7 +34,7 @@
 //!
 //! Every function above has a `keylet_xxx_into(out: &mut Keylet, ...) ->
 //! Result<()>` twin below it that writes the computed `Keylet` straight
-//! into caller-supplied storage via [`util_keylet`] instead of returning
+//! into caller-supplied storage via [`util_keylet_into`] instead of returning
 //! one by value. Reach for it when the result is about to be borrowed into
 //! another buffer-taking call right away: the by-value form's own scratch
 //! buffer has its address taken by the host call, which stops the
@@ -58,7 +58,9 @@
 //! between them (pure interception-side bookkeeping, no wasm-side cost).
 //! [`keylet_fn`] is the macro that emits both bodies for every type below
 //! that doesn't need type-specific branching (`keylet_skip`'s `Option`
-//! handling is written out by hand instead).
+//! handling is written out by hand instead). The by-value bodies call
+//! [`util_keylet`], the `_into` bodies call [`util_keylet_into`] — two
+//! independent public entry points on `util.rs`'s side too.
 //!
 //! # Source of truth
 //!
@@ -68,7 +70,7 @@
 //! is named `keylet_xxx` for the constant `KEYLET_XXX` it wraps.
 //! [`keylet_emitted`] is the corresponding helper for `KEYLET_EMITTED`.
 
-use crate::api::util::{util_keylet, util_keylet_buf};
+use crate::api::util::{util_keylet, util_keylet_into};
 use crate::error::Result;
 use crate::types::{AccountId, CurrencyCode, Hash, IssuedAsset, Keylet, NameSpace, StateKey};
 use rshooks_core::consts::{
@@ -81,14 +83,14 @@ use rshooks_core::consts::{
 
 /// Emits a `keylet_xxx`/`keylet_xxx_into` pair from a bare argument list —
 /// the by-value form testenv-intercepts then falls through to
-/// [`util_keylet_buf`], the `_into` twin testenv-intercepts then falls
-/// through to [`util_keylet`] and writes through `out` (see the module doc
-/// comment's "`_into` twins" section for why the two bodies don't call each
-/// other). Each argument must be `$ident: &$ty` (a pointer/length component,
+/// [`util_keylet`], the `_into` twin testenv-intercepts then falls
+/// through to [`util_keylet_into`] and writes through `out` (see the module
+/// doc comment's "`_into` twins" section for why the two bodies don't call
+/// each other). Each argument must be `$ident: &$ty` (a pointer/length component,
 /// contributing `KeyletArg::Bytes`/two `u32` slots) or `$ident: u32` (a raw
 /// component, contributing `KeyletArg::Value`/one `u32` slot); the muncher
 /// below pads both the `[KeyletArg; 6]` array and the six-slot call to
-/// `util_keylet`/`util_keylet_buf` out to their fixed width, one recursion
+/// `util_keylet`/`util_keylet_into` out to their fixed width, one recursion
 /// step per real argument, then one step per padding slot.
 macro_rules! keylet_fn {
     (
@@ -193,7 +195,7 @@ macro_rules! keylet_fn {
                     return r;
                 }
             }
-            util_keylet_buf($konst, $($slot),*)
+            util_keylet($konst, $($slot),*)
         }
 
         #[doc = concat!(
@@ -210,8 +212,7 @@ macro_rules! keylet_fn {
                     return r.map(|k| *out = k);
                 }
             }
-            let _ = util_keylet(out, $konst, $($slot),*)?;
-            Ok(())
+            util_keylet_into(out, $konst, $($slot),*)
         }
     };
 }
@@ -290,7 +291,7 @@ pub fn keylet_skip(ledger_index: Option<u32>) -> Result<Keylet> {
             return r;
         }
     }
-    util_keylet_buf(KEYLET_SKIP, a, b, 0, 0, 0, 0)
+    util_keylet(KEYLET_SKIP, a, b, 0, 0, 0, 0)
 }
 
 /// Out-param twin of [`keylet_skip`] — see the module doc comment's `_into`
@@ -313,8 +314,7 @@ pub fn keylet_skip_into(out: &mut Keylet, ledger_index: Option<u32>) -> Result<(
             return r.map(|k| *out = k);
         }
     }
-    let _ = util_keylet(out, KEYLET_SKIP, a, b, 0, 0, 0, 0)?;
-    Ok(())
+    util_keylet_into(out, KEYLET_SKIP, a, b, 0, 0, 0, 0)
 }
 
 keylet_fn! {

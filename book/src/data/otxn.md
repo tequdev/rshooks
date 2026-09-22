@@ -146,14 +146,13 @@ models, so a field with a modeled type never needs the idiom at all.
 
 ## The transaction ID
 
-`otxn_id` writes the originating transaction's hash into a caller buffer;
-`otxn_id_buf` is the fixed-size convenience twin that returns a `Hash`
-directly:
+`otxn_id` returns the originating transaction's hash by value;
+`otxn_id_into` is the out-param twin that writes into caller-owned storage:
 
 ```rust
 use rshooks::prelude::*;
 
-let id: Hash = otxn_id_buf(0)?;
+let id: Hash = otxn_id(0)?;
 ```
 
 `flags = 0` prefers the emit-failure transaction ID where applicable; other

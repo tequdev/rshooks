@@ -48,7 +48,7 @@ fn emit_a_payment() -> HookResult {
     };
     let bytes = prepared.as_bytes().to_vec();
     let mut out = [0u8; 32];
-    if emit(&mut out, &bytes).is_err() {
+    if emit_into(&mut out, &bytes).is_err() {
         rollback!(b"emit", 3);
     }
     accept!(b"", 0)

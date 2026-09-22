@@ -46,7 +46,7 @@ impl AccountIdMacro {
     /// Accepts only when all conversion paths agree.
     #[hook(0, on = [Invoke])]
     fn main(&self) -> HookResult {
-        let Ok(installed_on) = hook_account_buf() else {
+        let Ok(installed_on) = hook_account() else {
             rollback!(
                 b"account-id-macro: hook_account failed",
                 AccountIdMacroError::HookAccountFailed
@@ -59,7 +59,7 @@ impl AccountIdMacro {
             );
         }
 
-        let Ok(runtime_accid) = util_accid_buf(OWNER_RADDR) else {
+        let Ok(runtime_accid) = util_accid(OWNER_RADDR) else {
             rollback!(
                 b"account-id-macro: util_accid failed",
                 AccountIdMacroError::UtilAccidFailed

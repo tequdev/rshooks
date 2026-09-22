@@ -378,11 +378,11 @@ pub fn otxn_generation() -> u32 {
     unsafe { rshooks_core::otxn_generation() as u32 }
 }
 
-/// The ID (hash) of the originating transaction, written into `out`.
-/// Returns the number of bytes written. [`otxn_id_buf`] is the fixed-size
-/// convenience twin.
+/// Read the ID (hash) of the originating transaction into `out`. Returns the
+/// number of bytes written. `pub(crate)`: [`otxn_id`]/[`otxn_id_into`] are
+/// the public forms — see the `api` module doc comment's "Naming" section.
 #[inline(always)]
-pub fn otxn_id<B: AsMut<[u8]> + ?Sized>(out: &mut B, flags: u32) -> Result<usize> {
+pub(crate) fn otxn_id_raw<B: AsMut<[u8]> + ?Sized>(out: &mut B, flags: u32) -> Result<usize> {
     let out = out.as_mut();
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
     if let Some(r) = rshooks_core::backend::with_backend(|b| b.otxn_id(flags)) {
@@ -398,7 +398,7 @@ fixed_buf_fn! {
     /// are passed through verbatim (undocumented beyond that in the
     /// upstream Hook API reference, so exposed as a plain `u32` rather than
     /// an invented enum).
-    fn otxn_id_buf(flags: u32) -> Hash = otxn_id,
+    fn otxn_id(flags: u32) -> Hash = otxn_id_raw,
     otxn_id_into
 }
 
@@ -592,13 +592,13 @@ mod tests {
             TxType::Unknown(rshooks_core::NOT_IMPLEMENTED as u16)
         );
         assert_eq!(otxn_slot(0), Err(HookError::NotImplemented));
-        assert_eq!(otxn_id_buf(0), Err(HookError::NotImplemented));
+        assert_eq!(otxn_id(0), Err(HookError::NotImplemented));
         assert_eq!(
             otxn_id_into(&mut Hash::default(), 0),
             Err(HookError::NotImplemented)
         );
         let mut buf = [0u8; 32];
-        assert_eq!(otxn_id(&mut buf, 0), Err(HookError::NotImplemented));
+        assert_eq!(otxn_id_into(&mut buf, 0), Err(HookError::NotImplemented));
         assert_eq!(otxn_field(&mut buf, 0u32), Err(HookError::NotImplemented));
         assert_eq!(otxn_field_u64(0u32), Err(HookError::NotImplemented));
         assert_eq!(

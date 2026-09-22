@@ -1815,7 +1815,7 @@ impl<'a, T: TemplateBytes> Prepared<'a, T> {
     /// full reserved buffer, sized to what `etxn_details` actually returned
     /// at `prepare_for_emit` time — never the full reserved capacity. Pass
     /// this directly to [`crate::api::etxn::emit`]/
-    /// [`crate::api::etxn::emit_buf`] (or just call [`Self::emit`]).
+    /// [`crate::api::etxn::emit_into`] (or just call [`Self::emit`]).
     #[inline(always)]
     #[must_use]
     #[allow(clippy::indexing_slicing)] // `len` came from prepare_for_emit's own bounds-checked computation
@@ -1824,15 +1824,15 @@ impl<'a, T: TemplateBytes> Prepared<'a, T> {
     }
 
     /// Emits [`Self::as_bytes`] as a new transaction, returning its hash.
-    /// Convenience wrapper over [`crate::api::etxn::emit_buf`] — see its
+    /// Convenience wrapper over [`crate::api::etxn::emit`] — see its
     /// docs for the `etxn_reserve` precondition.
     ///
     /// # Errors
     ///
-    /// Propagates [`crate::api::etxn::emit_buf`]'s errors.
+    /// Propagates [`crate::api::etxn::emit`]'s errors.
     #[inline(always)]
     pub fn emit(&self) -> crate::error::Result<crate::types::Hash> {
-        crate::api::etxn::emit_buf(self.as_bytes())
+        crate::api::etxn::emit(self.as_bytes())
     }
 }
 
@@ -7066,7 +7066,7 @@ macro_rules! __txn_template_step {
                         $crate::sfield::sfAccount.code(),
                         0usize,
                     );
-                    $crate::api::hook_ctx::hook_account(
+                    $crate::api::hook_ctx::hook_account_into(
                         &mut self.bytes[OFF..OFF.wrapping_add($crate::types::ACC_ID_LEN)],
                     )?;
                 }

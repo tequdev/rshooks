@@ -144,7 +144,7 @@ impl Payments {
 
     /// Like `remit`, but hand-splices NOP (`0x99`) bytes into the prepared
     /// bytes at two field-header positions before emitting them directly
-    /// via `emit_buf` — one run between two top-level fields (right before
+    /// via `emit` — one run between two top-level fields (right before
     /// `sfDestination`'s own header), one run inside the nested
     /// `sfAmountEntry` object of the native `sfAmounts` entry (right after
     /// its own `sfAmount` field, before that entry's own `0xE1`
@@ -227,7 +227,7 @@ impl Payments {
         if rshooks::api::state::state_set(&base, b"nop_test_plain_blob").is_err() {
             rollback!(b"state_set failed", 7);
         }
-        if rshooks::api::etxn::emit_buf(&spliced).is_err() {
+        if rshooks::api::etxn::emit(&spliced).is_err() {
             rollback!(b"emit failed", 4);
         }
         accept!(b"remitted with nops", 0)
@@ -344,7 +344,7 @@ fn remit_emits_one_remit_with_nested_amounts() {
 /// `Payments::remit_with_nops` hand-splices `0x99` NOP bytes into an
 /// otherwise-valid Remit blob (one run between two top-level fields, one
 /// run inside the nested native `sfAmountEntry` object) before emitting
-/// directly via `emit_buf` — see that entry's own doc comment for exactly
+/// directly via `emit` — see that entry's own doc comment for exactly
 /// where — and stashes the pre-splice bytes into state. Proves NOP
 /// canonicalization end to end: the NOP-padded blob is accepted
 /// (`crate::backend::Backend::emit`'s NOP-tolerant acceptance check), its

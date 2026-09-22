@@ -138,7 +138,7 @@ fn keylet(ty: u16, key: [u8; 32]) -> [u8; 34] {
 /// mirrors `applyHook.cpp`'s own `read_len != N -> INVALID_ARGUMENT` check.
 /// A `KeyletArg::Value`/`Unused` here means the typed wrapper never resolved
 /// real bytes for this slot, e.g. it arrived through the untyped
-/// `util_keylet`/`util_keylet_buf` path, which doesn't guarantee testenv
+/// `util_keylet`/`util_keylet_into` path, which doesn't guarantee testenv
 /// fidelity.
 fn bytes_exact<'a>(arg: &KeyletArg<'a>, len: usize) -> Result<&'a [u8], i64> {
     match *arg {

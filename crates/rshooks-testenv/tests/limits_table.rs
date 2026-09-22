@@ -71,7 +71,7 @@ impl Limits {
     #[hook(3, on = [Invoke], can_emit = [Payment])]
     fn emit_without_reserve(&self) -> HookResult {
         let mut out = [0u8; 32];
-        let code = match emit(&mut out, &[0u8; 4]) {
+        let code = match emit_into(&mut out, &[0u8; 4]) {
             Ok(_) => 0,
             Err(e) => e.code(),
         };
@@ -91,9 +91,9 @@ impl Limits {
         };
         let bytes = prepared.as_bytes().to_vec();
         let mut first_out = [0u8; 32];
-        let first = emit(&mut first_out, &bytes);
+        let first = emit_into(&mut first_out, &bytes);
         let mut second_out = [0u8; 32];
-        let second_code = match emit(&mut second_out, &bytes) {
+        let second_code = match emit_into(&mut second_out, &bytes) {
             Ok(_) => 0,
             Err(e) => e.code(),
         };
@@ -126,7 +126,7 @@ impl Limits {
 
     #[hook(7, on = [Invoke])]
     fn read_hook_hash(&self) -> HookResult {
-        match hook_hash_buf(0) {
+        match hook_hash(0) {
             Ok(h) => {
                 let n = u64::from(h[0]);
                 if self.state.scratch.set(&n).is_err() {

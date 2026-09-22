@@ -76,7 +76,7 @@ impl TypedViews {
             ),
         }
 
-        let Ok(me) = hook_account_buf() else {
+        let Ok(me) = hook_account() else {
             rollback!(b"typed-views: no hook account", ViewError::NoHookAccount)
         };
         let asset = iou.asset();

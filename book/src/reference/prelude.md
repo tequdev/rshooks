@@ -25,8 +25,8 @@ slot functions (see "Deliberate absences" below):
 | `api::hook_ctx` | This hook's own context: `hook_account`, `hook_param`, `hook_param_typed`, `hook_param_exact`, `hook_param_set`, and related. |
 | `api::keylet` | The 26 typed `keylet_xxx` helpers (one per `KEYLET_*` constant) plus their 26 `keylet_xxx_into` out-param twins. |
 | `api::ledger` | Ledger-wide queries: `ledger_seq`, `ledger_last_hash`, `ledger_last_time`, and related. |
-| `api::otxn` (partial) | `otxn_field`, `otxn_field_exact`, `otxn_field_typed`, `otxn_field_u64`, `otxn_param`, `otxn_param_exact`, `otxn_param_typed`, `otxn_type`, `otxn_id`, `otxn_id_buf`, `otxn_burden`, `otxn_generation`, `OtxnFieldValue` — listed by name rather than globbed, so a future addition upstream is a deliberate act. `otxn_slot` is excluded (a slot function). |
-| `api::state` | Typed single-value state helpers (`state_u32`, `state_xfl`, `state_update_u64`, ...) alongside the composite layer below. |
+| `api::otxn` (partial) | `otxn_field`, `otxn_field_exact`, `otxn_field_typed`, `otxn_field_u64`, `otxn_param`, `otxn_param_exact`, `otxn_param_typed`, `otxn_type`, `otxn_id`, `otxn_id_into`, `otxn_burden`, `otxn_generation`, `OtxnFieldValue` — listed by name rather than globbed, so a future addition upstream is a deliberate act. `otxn_slot` is excluded (a slot function). |
+| `api::state` | The raw `state`/`state_set`/`state_foreign(_set)` calls plus `state_u64`/`state_update_u64` (as-int64, big-endian), alongside the composite layer below. |
 | `api::sto` | STObject parsing helpers. |
 | `api::trace` | The support functions backing `trace!`/`trace_num!`/`trace_float!`. |
 | `api::util` | `util_keylet`, `util_accid`, `util_raddr`, `util_verify`, `util_sha512h`, and related. |
