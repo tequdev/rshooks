@@ -1820,7 +1820,7 @@ metadata! {
     HookName: "emit-tx",                     // optional, 2..=8 Unicode chars
 }
 
-// HookOnV2 alternative: both fields are required when either is present,
+// HookOnV2_1 alternative: both fields are required when either is present,
 // and HookOn is absent.
 metadata! {
     name: "directional",

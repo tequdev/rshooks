@@ -128,8 +128,11 @@ pub fn slot_count(slot_no: u32) -> Result<u32> {
     res(unsafe { rshooks_core::slot_count(slot_no) }).map(|v| v as u32)
 }
 
-/// Load an object identified by a Keylet or transaction hash (`data`) into
+/// Load the ledger object identified by a 34-byte Keylet (`data`) into
 /// `slot_into` (`0` auto-assigns). Returns the assigned slot number.
+///
+/// A 32-byte transaction hash is rejected with `InvalidArgument` under
+/// `fix20261005` (`HookAPI.cpp:2324-2327`).
 #[inline(always)]
 pub fn slot_set(data: &[u8], slot_into: u32) -> Result<u32> {
     #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]

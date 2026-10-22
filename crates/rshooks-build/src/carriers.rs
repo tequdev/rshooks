@@ -416,7 +416,17 @@ fn validate_on(entry: &EntryDecl) -> Result<()> {
             metadata::validate_transaction_types("HookOnIncoming", Some(incoming))
                 .with_context(context_label)?;
             metadata::validate_transaction_types("HookOnOutgoing", Some(outgoing))
-                .with_context(context_label)
+                .with_context(context_label)?;
+            // SetHook.cpp:279-287: under HookOnV2_1 the two masks must differ.
+            let masks = resolve_trigger_masks(on)?;
+            if masks.hook_on_incoming == masks.hook_on_outgoing {
+                bail!(
+                    "{}: `on_incoming` and `on_outgoing` resolve to the same mask; \
+                     SetHook rejects equal HookOnIncoming/HookOnOutgoing, use plain `on` instead",
+                    context_label()
+                );
+            }
+            Ok(())
         }
         other => bail!("{}: unknown trigger form `{other}`", context_label()),
     }
@@ -715,6 +725,21 @@ mod tests {
         assert!(resolved.hook_on.is_none());
         assert!(resolved.hook_on_incoming.is_some());
         assert!(resolved.hook_on_outgoing.is_some());
+    }
+
+    #[test]
+    fn directional_rejects_equal_incoming_and_outgoing() {
+        let hooks_with = |incoming: &str, outgoing: &str| {
+            let on = format!(
+                r#"{{"form":"directional","HookOn":null,"HookOnIncoming":{incoming},"HookOnOutgoing":{outgoing}}}"#
+            );
+            wasm_with_carriers(CHAIN_JSON, &entries_json(&on, "null"))
+        };
+        let same = hooks_with(r#"["Payment"]"#, r#"["Payment"]"#);
+        let err = extract_chain_carriers(&same, "vault").expect_err("equal masks are rejected");
+        assert!(format!("{err:#}").contains("same mask"), "{err:#}");
+        let differ = hooks_with(r#"["Payment"]"#, "[]");
+        assert!(extract_chain_carriers(&differ, "vault").is_ok());
     }
 
     // --- `sig_params` (docs/PARAM_SIGNATURE_DESIGN.md §1/§4) ---

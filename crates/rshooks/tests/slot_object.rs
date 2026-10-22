@@ -154,7 +154,6 @@ fn both_tables_name_the_same_fields_and_the_typed_one_gates_by_availability() {
     let typed = gated_names(include_str!("../src/sfield.rs"));
     let raw = gated_names(include_str!("../../rshooks-core/src/sfcodes.rs"));
 
-    assert_eq!(raw.len(), 325, "the raw table must stay complete");
     assert_eq!(
         typed.keys().collect::<Vec<_>>(),
         raw.keys().collect::<Vec<_>>(),

@@ -36,6 +36,7 @@ impl HookError {
     pub const InternalError: HookError = /* -2 */;
     /* … one associated const per code in hook/error.h, PascalCase … */
     pub const TooManyNamespaces: HookError = /* -45 */;
+    pub const TooLittleEntropy: HookError = /* -46 */;
 
     pub const fn code(self) -> i64;          // identity: the raw code
     pub fn kind(self) -> HookErrorKind;      // the one decode, on demand
@@ -47,8 +48,8 @@ impl From<i64> for HookError { /* the identity */ }
 #[repr(u8)]
 pub enum HookErrorKind {
     OutOfBounds, InternalError, /* … declaration order = table order … */,
-    TooManyNamespaces,
-    /// Any code without a named constant (positive, `-24`, below `-45`, …).
+    TooManyNamespaces, TooLittleEntropy,
+    /// Any code without a named constant (positive, `-24`, below `-46`, …).
     Unknown,
 }
 
@@ -126,7 +127,7 @@ No hook in this repository matched on a variant; the one doc example that did
 ## 5. Interaction with `Rollback`
 
 There is no `From<HookError> for Rollback`. The conversion is cheap, but a Hook
-API error code (`-1..=-45`, `-10024`) is not a hook's own `HookReturnCode`; `?` from a raw
+API error code (`-1..=-46`, `-10024`) is not a hook's own `HookReturnCode`; `?` from a raw
 `HookError` into a typed entry would publish the host's code as the hook's verdict. Map at
 the call site (`.map_err(|_| MyError::X)?`), as `examples/16_typed-results` does.
 

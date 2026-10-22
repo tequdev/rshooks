@@ -68,7 +68,7 @@ Each entry chooses one of four trigger forms:
 | omitted entirely | no trigger field at all | **No installation override.** For a brand-new `HookDefinition`, this means the protocol default: fires on every transaction type except `SetHook`, automatically tracking any type added to the protocol later. If this entry's wasm already has an existing `HookDefinition` on-ledger (an Update, not a fresh Install), the *existing* definition's trigger is inherited instead — so omission is not a portable guarantee of "fires on everything," only "don't say." |
 | `on = all` | an explicit all-zero `HookOn` mask (every ordinary bit clear, the `SetHook` bit set so it alone doesn't fire) | **Guaranteed catch-all**, tracking future transaction types the same way omission's *new-definition* case does, but without depending on whether this is an Install or an Update. |
 | `on = [Payment, Invoke, ...]` | a `HookOn` mask covering exactly the listed types | Fires only for the listed types. `on = []` is legal and means "never fires." |
-| `on_incoming = [..]` + `on_outgoing = [..]` | `HookOnIncoming` + `HookOnOutgoing` (mutually exclusive with `HookOn`) | Direction-sensitive triggering (`HookOnV2`). **Must be declared as a pair** — one without the other is a build error. If both sets would end up identical, the build rejects it and asks for plain `on` instead, since that's what it means. |
+| `on_incoming = [..]` + `on_outgoing = [..]` | `HookOnIncoming` + `HookOnOutgoing` (mutually exclusive with `HookOn`) | Direction-sensitive triggering (`HookOnV2_1`). **Must be declared as a pair** — one without the other is a build error. If both sets would end up identical, the build rejects it and asks for plain `on` instead, since that's what it means. |
 
 Pick `on = all` when you need a guaranteed, future-proof catch-all
 regardless of Install/Update history; pick omission only when "whatever
@@ -348,7 +348,7 @@ Generation rules, precisely:
   `positions` records which indices are declared, which are gaps within
   that range, and how far past the highest declared index the account's
   own chain is left untouched; `required_amendments` always includes
-  `Hooks` and adds `NamedHooks`/`HookOnV2`/`HookCanEmit` only when the
+  `Hooks` and adds `NamedHooks`/`HookOnV2_1`/`HookCanEmit` only when the
   template actually used the corresponding feature — it does **not**
   attempt to infer amendment requirements from what the wasm's own Hook
   API calls need.

@@ -152,6 +152,10 @@ impl KeyletEquivalence {
         check(27, keylet_cron(&owner, 1_700_000_000), |out| {
             keylet_cron_into(out, &owner, 1_700_000_000)
         });
+        let validator = PublicKey([0x02; 33]);
+        check(29, keylet_manifest(&validator), |out| {
+            keylet_manifest_into(out, &validator)
+        });
         let asset = IssuedAsset {
             currency: TEST_CURRENCY,
             issuer: dest,

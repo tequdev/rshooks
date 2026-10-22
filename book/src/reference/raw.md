@@ -16,9 +16,9 @@ covers instead.
 
 | module | contents |
 |---|---|
-| `raw::api` (via `raw::*`) | The 75 raw Hook API function declarations (`_g` plus 74 functions), `unsafe extern "C"`, imported from wasm import module `env` — one line per `extern.h` function, parameter names and types kept verbatim (`read_ptr: u32`, `i64` returns) so C hook source and this file can be compared line by line. |
-| `raw::host` | `HookHost`: the same 75 functions again, as trait methods with identical names/signatures — an indirection point for a future native test host. Not used by `rshooks` or the examples today; the flat free-function API above remains the public surface they call. |
-| `raw::sfcodes` | Every `sfXxx` serialized-field code (325 fields), each a `u32` packing `(type << 16) + index`, mirrored verbatim from `sfcodes.h`. |
+| `raw::api` (via `raw::*`) | The raw Hook API function declarations (`_g` plus every Hook API function), `unsafe extern "C"`, imported from wasm import module `env` — one line per `extern.h` function, parameter names and types kept verbatim (`read_ptr: u32`, `i64` returns) so C hook source and this file can be compared line by line. |
+| `raw::host` | `HookHost`: the same functions again, as trait methods with identical names/signatures — an indirection point for a future native test host. Not used by `rshooks` or the examples today; the flat free-function API above remains the public surface they call. |
+| `raw::sfcodes` | Every `sfXxx` serialized-field code, each a `u32` packing `(type << 16) + index`, mirrored verbatim from `sfcodes.h`. |
 | `raw::tts` | Every `ttXxx` transaction-type code (`ttPAYMENT`, `ttHOOK_SET`, ...), from `tts.h`. |
 | `raw::lets` | Every `ltXxx` ledger-entry-type code (`ltACCOUNT_ROOT`, `ltHOOK`, ...) — what `rshooks::ledger_entry_type::LedgerEntryType` decodes and `sfLedgerEntryType` carries — from the vendored `ledger_entries.macro`. |
 | `raw::consts` | `KEYLET_*` and `COMPARE_*` constants from `hookapi.h`, plus `tfCANONICAL`, the `atACCOUNT` family, and the `amAMOUNT` family from `macro.h`. |

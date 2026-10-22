@@ -38,7 +38,8 @@ Four constructors load a **root** slot:
   (only available inside `#[cbak]`)
 - `SlotObject::from_keylet(&keylet)` — the ledger object a keylet points at
   (see [Keylets](keylets.md))
-- `SlotObject::from_txn_hash(&hash)` — a transaction looked up by hash
+- `SlotObject::from_txn_hash(&hash)` — a transaction looked up by hash;
+  the host rejects it with `InvalidArgument` under `fix20261005`
 
 Once the loaded object's ledger-entry or transaction type is known,
 `rshooks::views::ledger`/`rshooks::views::tx` give named field accessors

@@ -47,8 +47,9 @@ use rshooks_core::consts::{
     KEYLET_ACCOUNT, KEYLET_AMENDMENTS, KEYLET_CHECK, KEYLET_CHILD, KEYLET_CRON,
     KEYLET_DEPOSIT_PREAUTH, KEYLET_EMITTED, KEYLET_EMITTED_DIR, KEYLET_ESCROW, KEYLET_FEES,
     KEYLET_HOOK, KEYLET_HOOK_DEFINITION, KEYLET_HOOK_STATE, KEYLET_HOOK_STATE_DIR, KEYLET_LINE,
-    KEYLET_NEGATIVE_UNL, KEYLET_NFT_OFFER, KEYLET_OFFER, KEYLET_OWNER_DIR, KEYLET_PAGE,
-    KEYLET_PAYCHAN, KEYLET_QUALITY, KEYLET_SIGNERS, KEYLET_SKIP, KEYLET_TICKET, KEYLET_UNCHECKED,
+    KEYLET_MANIFEST, KEYLET_NEGATIVE_UNL, KEYLET_NFT_OFFER, KEYLET_OFFER, KEYLET_OWNER_DIR,
+    KEYLET_PAGE, KEYLET_PAYCHAN, KEYLET_QUALITY, KEYLET_SIGNERS, KEYLET_SKIP, KEYLET_TICKET,
+    KEYLET_UNCHECKED,
 };
 
 use super::util::sha512_half;
@@ -81,6 +82,7 @@ mod space {
     pub(super) const EMITTED_DIR: u16 = b'F' as u16;
     pub(super) const NFTOKEN_OFFER: u16 = b'q' as u16;
     pub(super) const CRON: u16 = b'L' as u16;
+    pub(super) const MANIFEST: u16 = b'M' as u16;
 }
 
 // ---------------------------------------------------------------------
@@ -95,6 +97,7 @@ mod lt {
     pub(super) const HOOK_DEFINITION: u16 = 0x0044;
     pub(super) const EMITTED_TXN: u16 = 0x0045;
     pub(super) const HOOK: u16 = 0x0048;
+    pub(super) const MANIFEST: u16 = 0x004d;
     pub(super) const NEGATIVE_UNL: u16 = 0x004e;
     pub(super) const SIGNER_LIST: u16 = 0x0053;
     pub(super) const ACCOUNT_ROOT: u16 = 0x0061;
@@ -504,6 +507,18 @@ pub(crate) fn util_keylet(keylet_type: u32, args: [KeyletArg<'_>; 6]) -> Result<
             Ok(keylet(lt::CRON, key))
         }
 
+        // `keylet_manifest` (`applyHook.cpp:2266`): [Bytes(public_key:33), Unused x5].
+        // The key must pass `publicKeyType`: a 0x02/0x03 secp256k1 or 0xED
+        // ed25519 prefix. The `featureOnChainManifests` gate is not modeled.
+        KEYLET_MANIFEST => {
+            let pk = bytes_exact(&args[0], 33)?;
+            unused_from(&args, 1)?;
+            if !matches!(pk.first(), Some(0x02 | 0x03 | 0xED)) {
+                return Err(INVALID_ARGUMENT);
+            }
+            Ok(keylet(lt::MANIFEST, index_hash(space::MANIFEST, &[pk])))
+        }
+
         // Unknown/unhandled type — matches the real switch's fallthrough
         // (`return INVALID_ARGUMENT;` after the `try`/`catch`).
         _ => Err(INVALID_ARGUMENT),
@@ -792,6 +807,29 @@ mod tests {
             buf
         });
         assert_eq!(&got[14..34], &acc_hash[0..20]);
+    }
+
+    #[test]
+    fn manifest_layout_matches_indexes_cpp() {
+        let pk = [0x02u8; 33];
+        let args = |pk: &'static [u8]| {
+            [
+                KeyletArg::Bytes(pk),
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+                KeyletArg::Unused,
+            ]
+        };
+        let got = util_keylet(KEYLET_MANIFEST, args(&[0x02; 33])).unwrap();
+        let mut buf = (b'M' as u16).to_be_bytes().to_vec();
+        buf.extend_from_slice(&pk);
+        assert_eq!(got, expect(0x004d, sha512_half(&buf)));
+        assert_eq!(
+            util_keylet(KEYLET_MANIFEST, args(&[0x04; 33])),
+            Err(INVALID_ARGUMENT)
+        );
     }
 
     #[test]

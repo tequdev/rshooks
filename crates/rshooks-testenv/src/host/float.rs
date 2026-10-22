@@ -65,7 +65,8 @@
 use std::vec::Vec;
 
 use rshooks_core::{
-    CANT_RETURN_NEGATIVE, DIVISION_BY_ZERO, INVALID_ARGUMENT, INVALID_FLOAT, TOO_BIG, XFL_OVERFLOW,
+    CANT_RETURN_NEGATIVE, DIVISION_BY_ZERO, EXPONENT_OVERSIZED, EXPONENT_UNDERSIZED,
+    INVALID_ARGUMENT, INVALID_FLOAT, TOO_BIG, XFL_OVERFLOW,
 };
 
 // ---------------------------------------------------------------------
@@ -603,8 +604,10 @@ pub(crate) fn float_set(exponent: i32, mantissa: i64) -> i64 {
     // two approaches are observationally identical here.
     let mag = mantissa.unsigned_abs();
     match normalize_xfl(mag, exponent, neg) {
-        Normalized::Overflow => INVALID_FLOAT, // C++ remaps XFL_OVERFLOW -> INVALID_FLOAT here
-        Normalized::Value(0) => INVALID_FLOAT, // underflow must be reported as an error for float_set
+        // fix20261005 (`HookAPI.cpp:1040-1053`): overflow and underflow are
+        // reported as exponent errors, not `INVALID_FLOAT`.
+        Normalized::Overflow => EXPONENT_OVERSIZED,
+        Normalized::Value(0) => EXPONENT_UNDERSIZED,
         Normalized::Value(bits) => bits,
     }
 }
@@ -1371,16 +1374,16 @@ mod tests {
     }
 
     #[test]
-    fn float_set_underflow_is_invalid_float() {
+    fn float_set_underflow_is_exponent_undersized() {
         // A representable mantissa whose exponent underflows past -96
-        // reports INVALID_FLOAT (not canonical zero) -- `float_set`'s own
+        // reports EXPONENT_UNDERSIZED (not canonical zero) -- `float_set`'s own
         // explicit remap of `normalize_xfl`'s `Value(0)` underflow.
-        assert_eq!(float_set(-200, 1_000_000_000_000_000), INVALID_FLOAT);
+        assert_eq!(float_set(-200, 1_000_000_000_000_000), EXPONENT_UNDERSIZED);
     }
 
     #[test]
-    fn float_set_overflow_is_invalid_float_not_xfl_overflow() {
-        assert_eq!(float_set(200, 1_000_000_000_000_000), INVALID_FLOAT);
+    fn float_set_overflow_is_exponent_oversized_not_xfl_overflow() {
+        assert_eq!(float_set(200, 1_000_000_000_000_000), EXPONENT_OVERSIZED);
     }
 
     // -- is_valid / round-trip --

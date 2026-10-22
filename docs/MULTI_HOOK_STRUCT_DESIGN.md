@@ -398,7 +398,7 @@ an explicit catch-all):
 | fully omitted | no trigger field emitted | **Do not place an installation override.** For a new HookDefinition, the protocol default applies (fires on every type except SetHook, tracking future types automatically). **If a HookDefinition for the same wasm already exists, this is treated as an Install and inherits that definition's trigger**, so omission is not a catch-all guarantee |
 | `on = all` | `HookOn`'s all-zero mask (only the SetHook bit doesn't fire) | **A guaranteed catch-all.** Tracks future added types automatically (expressed as a mask, not an enumeration) |
 | `on = [..]` | `HookOn` (64-hex mask) | Fires only for the listed types. `on = []` means "fires for no type" |
-| `on_incoming` + `on_outgoing` | `HookOnIncoming` + `HookOnOutgoing` (each a 64-hex mask, mutually exclusive with `HookOn`) | HookOnV2's directional firing |
+| `on_incoming` + `on_outgoing` | `HookOnIncoming` + `HookOnOutgoing` (each a 64-hex mask, mutually exclusive with `HookOn`) | HookOnV2_1's directional firing |
 
 "Fires for every type" must never be reproduced by enumerating type names
 (it wouldn't track future type additions). The book will clearly document
@@ -417,7 +417,7 @@ Naming is snake_case (`on_incoming` / `can_emit`). `HookApiVersion` is fixed
 at 0, with no attribute argument (Gas Hook is out of scope).
 
 **Amendment dependencies**: `name` requires NamedHooks, directional triggers
-require HookOnV2, and a present `can_emit` requires HookCanEmit. How the
+require HookOnV2_1, and a present `can_emit` requires HookCanEmit. How the
 derived set is handled is covered in §9.2.
 
 ### 5.4 Struct field declaration form and handle representation
@@ -917,7 +917,7 @@ a valid transaction after placeholder substitution and validation):
   "generated_at": "2026-08-18T09:00:00Z",
   "hook_hashes": { "0": "<sha512half>", "1": "<sha512half>" },
   "positions": { "declared": [0, 1], "gaps": [], "untouched_beyond": 2 },
-  "required_amendments": ["Hooks", "NamedHooks", "HookOnV2", "HookCanEmit"]
+  "required_amendments": ["Hooks", "NamedHooks", "HookOnV2_1", "HookCanEmit"]
 }
 ```
 
@@ -968,7 +968,7 @@ existing implementation). **All generated hex is normalized to uppercase**
   the HookHash, position info (`declared` / `gaps` / `untouched_beyond`),
   and `required_amendments`.
 - `required_amendments` **unconditionally includes `Hooks`**, plus whatever
-  can be derived from the template's fields (NamedHooks / HookOnV2 /
+  can be derived from the template's fields (NamedHooks / HookOnV2_1 /
   HookCanEmit). **It does not cover amendment dependencies arising from
   Hook API usage inside the wasm** (this limitation is documented in the
   sidecar's docs; extending it via a feature→amendment registry is a future
@@ -1118,5 +1118,5 @@ rewritability as the acceptance criterion:
   validation of the three trigger forms and wire serialization of
   `HookOnIncoming`/`HookOnOutgoing`
 - [Xahau SetHook](https://xahau.network/docs/protocol-reference/transactions/transaction-types/sethook/) — the `Hooks` array's positional semantics, empty `Hook` objects, hsfOVERRIDE, field inheritance on Install
-- [Xahau HookOn](https://xahau.network/docs/hooks/concepts/hookon-field/) / HookOnV2 / NamedHooks / HookCanEmit amendments
+- [Xahau HookOn](https://xahau.network/docs/hooks/concepts/hookon-field/) / HookOnV2_1 / NamedHooks / HookCanEmit amendments
 - [Xahau Parameters](https://xahau.network/docs/hooks/concepts/parameters/) — inheritance, clearing, and explicit setting of HookParameters
