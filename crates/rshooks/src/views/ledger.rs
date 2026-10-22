@@ -691,6 +691,80 @@ impl LedgerEntryCommonFields for ImportVLSequence {
     }
 }
 
+/// View of the `AppLoader` ledger object (`ltAPP_LOADER`, type code 0x004c, RPC
+/// name `app_loader`).
+///
+/// Pending on Xahau mainnet; excluded by the `active-amendments` feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+pub struct AppLoader {
+    src: crate::views::source::SlotSource,
+}
+
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+impl AppLoader {
+    /// Loads and type-checks the ledger object identified by `keylet`.
+    #[inline(always)]
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
+    }
+
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltAPP_LOADER`.
+    /// A failed check best-effort clears the consumed slot.
+    #[inline(always)]
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfLedgerEntryType,
+            rshooks_core::ltAPP_LOADER,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Consumes the view and returns its slot.
+    #[inline(always)]
+    pub fn into_slot(self) -> SlotObject<STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfOwner` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn owner(&self) -> Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfOwner)
+    }
+
+    /// `sfAppLoader` — Blob, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn app_loader_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
+        self.src.read_raw(crate::sfield::sfAppLoader.code(), out)
+    }
+
+    /// `sfAppLoaderSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn app_loader_sequence(&self) -> Result<u32> {
+        self.src.read(crate::sfield::sfAppLoaderSequence)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
+        self.src.read(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
+        self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
+    }
+}
+
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+impl LedgerEntryCommonFields for AppLoader {
+    #[inline(always)]
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
+    }
+}
+
 /// View of the `NegativeUNL` ledger object (`ltNEGATIVE_UNL`, type code 0x004e, RPC
 /// name `nunl`).
 pub struct NegativeUNL {
@@ -935,6 +1009,99 @@ impl UNLReport {
 }
 
 impl LedgerEntryCommonFields for UNLReport {
+    #[inline(always)]
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
+    }
+}
+
+/// View of the `Random` ledger object (`ltRANDOM`, type code 0x526e, RPC
+/// name `random`).
+///
+/// Pending on Xahau mainnet; excluded by the `active-amendments` feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+pub struct Random {
+    src: crate::views::source::SlotSource,
+}
+
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+impl Random {
+    /// Loads and type-checks the ledger object identified by `keylet`.
+    #[inline(always)]
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
+    }
+
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltRANDOM`.
+    /// A failed check best-effort clears the consumed slot.
+    #[inline(always)]
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfLedgerEntryType,
+            rshooks_core::ltRANDOM,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Consumes the view and returns its slot.
+    #[inline(always)]
+    pub fn into_slot(self) -> SlotObject<STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfLedgerSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn ledger_sequence(&self) -> Result<u32> {
+        self.src.read(crate::sfield::sfLedgerSequence)
+    }
+
+    /// `sfRandomData` — Hash256, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn random_data(&self) -> Result<crate::types::Hash> {
+        self.src.read(crate::sfield::sfRandomData)
+    }
+
+    /// `sfEntropyCount` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn entropy_count(&self) -> Result<u16> {
+        self.src.read(crate::sfield::sfEntropyCount)
+    }
+
+    /// `sfEntropyDenominator` — UInt16, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn entropy_denominator(&self) -> Result<u16> {
+        self.src.read(crate::sfield::sfEntropyDenominator)
+    }
+
+    /// `sfRandomDigests` — STArray, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn random_digests_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfRandomDigests.code(), out)
+    }
+
+    /// `sfRandomDigests` — STArray, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn random_digests_slot(&self) -> Result<SlotObject<crate::types::STArray>> {
+        self.src.subobject(crate::sfield::sfRandomDigests)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
+        self.src.read(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
+        self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
+    }
+}
+
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+impl LedgerEntryCommonFields for Random {
     #[inline(always)]
     fn field_source(&self) -> &crate::views::source::SlotSource {
         &self.src
@@ -1424,6 +1591,24 @@ impl AccountRoot {
     #[inline(always)]
     pub fn amm_id(&self) -> Result<Option<crate::types::Hash>> {
         self.src.read_opt(crate::sfield::sfAMMID)
+    }
+
+    /// `sfAppLoaderSequence` — UInt32, `soeOPTIONAL`.
+    ///
+    /// Pending field; excluded by the `active-amendments` feature.
+    #[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+    #[inline(always)]
+    pub fn app_loader_sequence(&self) -> Result<Option<u32>> {
+        self.src.read_opt(crate::sfield::sfAppLoaderSequence)
+    }
+
+    /// `sfManifestID` — Hash256, `soeOPTIONAL`.
+    ///
+    /// Pending field; excluded by the `active-amendments` feature.
+    #[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+    #[inline(always)]
+    pub fn manifest_id(&self) -> Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfManifestID)
     }
 }
 
@@ -3442,6 +3627,128 @@ impl DID {
 
 #[cfg(feature = "all-amendments")]
 impl LedgerEntryCommonFields for DID {
+    #[inline(always)]
+    fn field_source(&self) -> &crate::views::source::SlotSource {
+        &self.src
+    }
+}
+
+/// View of the `Manifest` ledger object (`ltMANIFEST`, type code 0x004d, RPC
+/// name `manifest_entry`).
+///
+/// Pending on Xahau mainnet; excluded by the `active-amendments` feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+pub struct Manifest {
+    src: crate::views::source::SlotSource,
+}
+
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+impl Manifest {
+    /// Loads and type-checks the ledger object identified by `keylet`.
+    #[inline(always)]
+    pub fn from_keylet(keylet: &crate::types::Keylet) -> Result<Self> {
+        Self::from_slot(SlotObject::from_keylet(keylet)?)
+    }
+
+    /// Takes a ledger-entry slot after verifying `sfLedgerEntryType` is `ltMANIFEST`.
+    /// A failed check best-effort clears the consumed slot.
+    #[inline(always)]
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfLedgerEntryType,
+            rshooks_core::ltMANIFEST,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Consumes the view and returns its slot.
+    #[inline(always)]
+    pub fn into_slot(self) -> SlotObject<STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfAccount` — AccountID, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn account(&self) -> Result<crate::types::AccountId> {
+        self.src.read(crate::sfield::sfAccount)
+    }
+
+    /// `sfPublicKey` — Blob, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
+        self.src.read_raw(crate::sfield::sfPublicKey.code(), out)
+    }
+
+    /// `sfSigningPubKey` — Blob, `soeOPTIONAL`.
+    #[inline(always)]
+    pub fn signing_pub_key_into<B: AsMut<[u8]> + ?Sized>(
+        &self,
+        out: &mut B,
+    ) -> Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfSigningPubKey.code(), out)
+    }
+
+    /// `sfSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn sequence(&self) -> Result<u32> {
+        self.src.read(crate::sfield::sfSequence)
+    }
+
+    /// `sfVersion` — UInt16, `soeOPTIONAL`.
+    #[inline(always)]
+    pub fn version(&self) -> Result<Option<u16>> {
+        self.src.read_opt(crate::sfield::sfVersion)
+    }
+
+    /// `sfDomain` — Blob, `soeOPTIONAL`.
+    #[inline(always)]
+    pub fn domain_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
+        self.src.read_raw_opt(crate::sfield::sfDomain.code(), out)
+    }
+
+    /// `sfMasterSignature` — Blob, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn master_signature_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
+        self.src
+            .read_raw(crate::sfield::sfMasterSignature.code(), out)
+    }
+
+    /// `sfSignature` — Blob, `soeOPTIONAL`.
+    #[inline(always)]
+    pub fn signature_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfSignature.code(), out)
+    }
+
+    /// `sfManifestID` — Hash256, `soeOPTIONAL`.
+    #[inline(always)]
+    pub fn manifest_id(&self) -> Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfManifestID)
+    }
+
+    /// `sfOwnerNode` — UInt64, `soeOPTIONAL`.
+    #[inline(always)]
+    pub fn owner_node(&self) -> Result<Option<u64>> {
+        self.src.read_opt(crate::sfield::sfOwnerNode)
+    }
+
+    /// `sfPreviousTxnID` — Hash256, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn previous_txn_id(&self) -> Result<crate::types::Hash> {
+        self.src.read(crate::sfield::sfPreviousTxnID)
+    }
+
+    /// `sfPreviousTxnLgrSeq` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn previous_txn_lgr_seq(&self) -> Result<u32> {
+        self.src.read(crate::sfield::sfPreviousTxnLgrSeq)
+    }
+}
+
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+impl LedgerEntryCommonFields for Manifest {
     #[inline(always)]
     fn field_source(&self) -> &crate::views::source::SlotSource {
         &self.src

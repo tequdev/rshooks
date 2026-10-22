@@ -101,3 +101,5 @@ pub const MEM_OVERLAP: i64 = -43;
 pub const TOO_MANY_STATE_MODIFICATIONS: i64 = -44;
 /// C: `TOO_MANY_NAMESPACES` (error.h)
 pub const TOO_MANY_NAMESPACES: i64 = -45;
+/// C: `TOO_LITTLE_ENTROPY` (error.h)
+pub const TOO_LITTLE_ENTROPY: i64 = -46;

@@ -31,12 +31,16 @@ pub const ltEMITTED_TXN: u16 = 0x0045;
 pub const ltHOOK: u16 = 0x0048;
 /// C: `ltIMPORT_VLSEQ` (ledger_entries.macro) — the `ImportVLSequence` ledger entry.
 pub const ltIMPORT_VLSEQ: u16 = 0x0049;
+/// C: `ltAPP_LOADER` (ledger_entries.macro) — the `AppLoader` ledger entry.
+pub const ltAPP_LOADER: u16 = 0x004c;
 /// C: `ltNEGATIVE_UNL` (ledger_entries.macro) — the `NegativeUNL` ledger entry.
 pub const ltNEGATIVE_UNL: u16 = 0x004e;
 /// C: `ltNFTOKEN_PAGE` (ledger_entries.macro) — the `NFTokenPage` ledger entry.
 pub const ltNFTOKEN_PAGE: u16 = 0x0050;
 /// C: `ltUNL_REPORT` (ledger_entries.macro) — the `UNLReport` ledger entry.
 pub const ltUNL_REPORT: u16 = 0x0052;
+/// C: `ltRANDOM` (ledger_entries.macro) — the `Random` ledger entry.
+pub const ltRANDOM: u16 = 0x526e;
 /// C: `ltSIGNER_LIST` (ledger_entries.macro) — the `SignerList` ledger entry.
 pub const ltSIGNER_LIST: u16 = 0x0053;
 /// C: `ltTICKET` (ledger_entries.macro) — the `Ticket` ledger entry.
@@ -85,3 +89,5 @@ pub const ltCREDENTIAL: u16 = 0x0081;
 pub const ltPERMISSIONED_DOMAIN: u16 = 0x0082;
 /// C: `ltDID` (ledger_entries.macro) — the `DID` ledger entry.
 pub const ltDID: u16 = 0x008d;
+/// C: `ltMANIFEST` (ledger_entries.macro) — the `Manifest` ledger entry.
+pub const ltMANIFEST: u16 = 0x004d;

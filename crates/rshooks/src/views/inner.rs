@@ -696,6 +696,50 @@ impl ImportVLKey {
     }
 }
 
+/// View of the `sfRandomDigestEntry` inner object (STObject).
+///
+/// Pending on Xahau mainnet; excluded by the `active-amendments` feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+pub struct RandomDigestEntry {
+    src: crate::views::source::SlotSource,
+}
+
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+impl RandomDigestEntry {
+    /// Takes a child slot without type-checking it; inner objects have no type field.
+    #[inline(always)]
+    #[must_use]
+    pub fn from_slot(obj: SlotObject<STObject>) -> Self {
+        Self {
+            src: crate::views::source::SlotSource::new(obj),
+        }
+    }
+
+    /// Consumes the view and returns its slot.
+    #[inline(always)]
+    pub fn into_slot(self) -> SlotObject<STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfPublicKey` — Blob, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
+        self.src.read_raw(crate::sfield::sfPublicKey.code(), out)
+    }
+
+    /// `sfNextRandomDigest` — Hash256, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn next_random_digest(&self) -> Result<crate::types::Hash> {
+        self.src.read(crate::sfield::sfNextRandomDigest)
+    }
+
+    /// `sfLedgerSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn ledger_sequence(&self) -> Result<u32> {
+        self.src.read(crate::sfield::sfLedgerSequence)
+    }
+}
+
 /// View of the `sfAmountEntry` inner object (STObject).
 pub struct AmountEntry {
     src: crate::views::source::SlotSource,

@@ -589,6 +589,16 @@ impl<S: FieldSource> AccountSet<S> {
     pub fn hook_state_scale(&self) -> Result<Option<u16>> {
         self.src.read_opt(crate::sfield::sfHookStateScale)
     }
+
+    /// `sfAppLoader` — Blob, `soeOPTIONAL`.
+    ///
+    /// Pending field; excluded by the `active-amendments` feature.
+    #[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+    #[inline(always)]
+    pub fn app_loader_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<Option<usize>> {
+        self.src
+            .read_raw_opt(crate::sfield::sfAppLoader.code(), out)
+    }
 }
 
 impl<S: FieldSource> TransactionCommonFields for AccountSet<S> {
@@ -4578,6 +4588,144 @@ impl<S: FieldSource> PermissionedDomainDelete<S> {
 
 #[cfg(feature = "all-amendments")]
 impl<S: FieldSource> TransactionCommonFields for PermissionedDomainDelete<S> {
+    type Source = S;
+
+    #[inline(always)]
+    fn field_source(&self) -> &Self::Source {
+        &self.src
+    }
+}
+
+/// View of the `Entropy` transaction (`ttENTROPY`, type code 89).
+///
+/// Pending on Xahau mainnet; excluded by the `active-amendments` feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+pub struct Entropy<S: FieldSource> {
+    src: S,
+}
+
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+impl Entropy<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `Entropy`, checking its type.
+    #[inline(always)]
+    pub fn otxn() -> Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttENTROPY).map(|src| Self { src })
+    }
+}
+
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+impl Entropy<crate::views::source::SlotSource> {
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttENTROPY`.
+    /// A failed check best-effort clears the consumed slot.
+    #[inline(always)]
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttENTROPY,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Consumes the view and returns its slot.
+    #[inline(always)]
+    pub fn into_slot(self) -> SlotObject<STObject> {
+        self.src.into_slot()
+    }
+}
+
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+impl<S: FieldSource> Entropy<S> {
+    /// `sfLedgerSequence` — UInt32, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn ledger_sequence(&self) -> Result<u32> {
+        self.src.read(crate::sfield::sfLedgerSequence)
+    }
+
+    /// `sfPublicKey` — Blob, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn public_key_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
+        self.src.read_raw(crate::sfield::sfPublicKey.code(), out)
+    }
+
+    /// `sfNextRandomDigest` — Hash256, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn next_random_digest(&self) -> Result<crate::types::Hash> {
+        self.src.read(crate::sfield::sfNextRandomDigest)
+    }
+
+    /// `sfRandomData` — Hash256, `soeOPTIONAL`.
+    #[inline(always)]
+    pub fn random_data(&self) -> Result<Option<crate::types::Hash>> {
+        self.src.read_opt(crate::sfield::sfRandomData)
+    }
+}
+
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+impl<S: FieldSource> TransactionCommonFields for Entropy<S> {
+    type Source = S;
+
+    #[inline(always)]
+    fn field_source(&self) -> &Self::Source {
+        &self.src
+    }
+}
+
+/// View of the `SetManifest` transaction (`ttMANIFEST_SET`, type code 91).
+///
+/// Pending on Xahau mainnet; excluded by the `active-amendments` feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+pub struct SetManifest<S: FieldSource> {
+    src: S,
+}
+
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+impl SetManifest<crate::views::source::OtxnSource> {
+    /// Views the originating transaction as `SetManifest`, checking its type.
+    #[inline(always)]
+    pub fn otxn() -> Result<Self> {
+        crate::views::source::otxn_of_type(rshooks_core::ttMANIFEST_SET).map(|src| Self { src })
+    }
+}
+
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+impl SetManifest<crate::views::source::SlotSource> {
+    /// Takes a transaction slot after verifying `sfTransactionType` is `ttMANIFEST_SET`.
+    /// A failed check best-effort clears the consumed slot.
+    #[inline(always)]
+    pub fn from_slot(obj: SlotObject<STObject>) -> Result<Self> {
+        crate::views::source::slot_of_type(
+            obj,
+            crate::sfield::sfTransactionType,
+            rshooks_core::ttMANIFEST_SET,
+        )
+        .map(|src| Self { src })
+    }
+
+    /// Consumes the view and returns its slot.
+    #[inline(always)]
+    pub fn into_slot(self) -> SlotObject<STObject> {
+        self.src.into_slot()
+    }
+
+    /// `sfManifest` — STObject, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn manifest_slot(&self) -> Result<SlotObject<STObject>> {
+        self.src.subobject(crate::sfield::sfManifest)
+    }
+}
+
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+impl<S: FieldSource> SetManifest<S> {
+    /// `sfManifest` — STObject, `soeREQUIRED`.
+    #[inline(always)]
+    pub fn manifest_into<B: AsMut<[u8]> + ?Sized>(&self, out: &mut B) -> Result<usize> {
+        self.src.read_raw(crate::sfield::sfManifest.code(), out)
+    }
+}
+
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+impl<S: FieldSource> TransactionCommonFields for SetManifest<S> {
     type Source = S;
 
     #[inline(always)]

@@ -105,6 +105,9 @@ pub const sfTradingFee: SField<u16> = SField::new((1 << 16) + 5);
 #[cfg(feature = "all-amendments")]
 pub const sfDiscountedFee: SField<u16> = SField::new((1 << 16) + 6);
 /// C: `sfVersion` (sfcodes.h) — UInt16, read as [`u16`].
+///
+/// Pending amendment; excluded by the `active-amendments` feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 pub const sfVersion: SField<u16> = SField::new((1 << 16) + 16);
 /// C: `sfHookStateChangeCount` (sfcodes.h) — UInt16, read as [`u16`].
 pub const sfHookStateChangeCount: SField<u16> = SField::new((1 << 16) + 17);
@@ -121,6 +124,16 @@ pub const sfHookStateScale: SField<u16> = SField::new((1 << 16) + 21);
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfLedgerFixType: SField<u16> = SField::new((1 << 16) + 22);
+/// C: `sfEntropyCount` (sfcodes.h) — UInt16, read as [`u16`].
+///
+/// Pending amendment; excluded by the `active-amendments` feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+pub const sfEntropyCount: SField<u16> = SField::new((1 << 16) + 99);
+/// C: `sfEntropyDenominator` (sfcodes.h) — UInt16, read as [`u16`].
+///
+/// Pending amendment; excluded by the `active-amendments` feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+pub const sfEntropyDenominator: SField<u16> = SField::new((1 << 16) + 100);
 /// C: `sfNetworkID` (sfcodes.h) — UInt32, read as [`u32`].
 pub const sfNetworkID: SField<u32> = SField::new((2 << 16) + 1);
 /// C: `sfFlags` (sfcodes.h) — UInt32, read as [`u32`].
@@ -243,6 +256,11 @@ pub const sfRewardTime: SField<u32> = SField::new((2 << 16) + 98);
 pub const sfRewardLgrFirst: SField<u32> = SField::new((2 << 16) + 99);
 /// C: `sfRewardLgrLast` (sfcodes.h) — UInt32, read as [`u32`].
 pub const sfRewardLgrLast: SField<u32> = SField::new((2 << 16) + 100);
+/// C: `sfAppLoaderSequence` (sfcodes.h) — UInt32, read as [`u32`].
+///
+/// Pending amendment; excluded by the `active-amendments` feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+pub const sfAppLoaderSequence: SField<u32> = SField::new((2 << 16) + 101);
 /// C: `sfIndexNext` (sfcodes.h) — UInt64, read as [`u64`].
 pub const sfIndexNext: SField<u64> = SField::new((3 << 16) + 1);
 /// C: `sfIndexPrevious` (sfcodes.h) — UInt64, read as [`u64`].
@@ -432,6 +450,21 @@ pub const sfURITokenID: SField<crate::types::Hash> = SField::new((5 << 16) + 36)
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfDomainID: SField<crate::types::Hash> = SField::new((5 << 16) + 37);
+/// C: `sfNextRandomDigest` (sfcodes.h) — Hash256, read as [`crate::types::Hash`].
+///
+/// Pending amendment; excluded by the `active-amendments` feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+pub const sfNextRandomDigest: SField<crate::types::Hash> = SField::new((5 << 16) + 89);
+/// C: `sfRandomData` (sfcodes.h) — Hash256, read as [`crate::types::Hash`].
+///
+/// Pending amendment; excluded by the `active-amendments` feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+pub const sfRandomData: SField<crate::types::Hash> = SField::new((5 << 16) + 90);
+/// C: `sfManifestID` (sfcodes.h) — Hash256, read as [`crate::types::Hash`].
+///
+/// Pending amendment; excluded by the `active-amendments` feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+pub const sfManifestID: SField<crate::types::Hash> = SField::new((5 << 16) + 91);
 /// C: `sfHookOnOutgoing` (sfcodes.h) — Hash256, read as [`crate::types::Hash`].
 pub const sfHookOnOutgoing: SField<crate::types::Hash> = SField::new((5 << 16) + 93);
 /// C: `sfHookOnIncoming` (sfcodes.h) — Hash256, read as [`crate::types::Hash`].
@@ -574,6 +607,9 @@ pub const sfFulfillment: SField<crate::types::Opaque> = SField::new((7 << 16) + 
 /// C: `sfCondition` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
 pub const sfCondition: SField<crate::types::Opaque> = SField::new((7 << 16) + 17);
 /// C: `sfMasterSignature` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
+///
+/// Pending amendment; excluded by the `active-amendments` feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
 pub const sfMasterSignature: SField<crate::types::Opaque> = SField::new((7 << 16) + 18);
 /// C: `sfUNLModifyValidator` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
 pub const sfUNLModifyValidator: SField<crate::types::Opaque> = SField::new((7 << 16) + 19);
@@ -615,6 +651,11 @@ pub const sfMPTokenMetadata: SField<crate::types::Opaque> = SField::new((7 << 16
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfCredentialType: SField<crate::types::Opaque> = SField::new((7 << 16) + 32);
+/// C: `sfAppLoader` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
+///
+/// Pending amendment; excluded by the `active-amendments` feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+pub const sfAppLoader: SField<crate::types::Opaque> = SField::new((7 << 16) + 96);
 /// C: `sfHookName` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
 pub const sfHookName: SField<crate::types::Opaque> = SField::new((7 << 16) + 97);
 /// C: `sfRemarkValue` (sfcodes.h) — Blob, read as [`crate::types::Opaque`].
@@ -815,6 +856,16 @@ pub const sfPriceData: SField<crate::types::STObject> = SField::new((14 << 16) +
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfCredential: SField<crate::types::STObject> = SField::new((14 << 16) + 33);
+/// C: `sfRandomDigestEntry` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
+///
+/// Pending amendment; excluded by the `active-amendments` feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+pub const sfRandomDigestEntry: SField<crate::types::STObject> = SField::new((14 << 16) + 88);
+/// C: `sfManifest` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
+///
+/// Pending amendment; excluded by the `active-amendments` feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+pub const sfManifest: SField<crate::types::STObject> = SField::new((14 << 16) + 90);
 /// C: `sfAmountEntry` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
 pub const sfAmountEntry: SField<crate::types::STObject> = SField::new((14 << 16) + 91);
 /// C: `sfMintURIToken` (sfcodes.h) — STObject, read as [`crate::types::STObject`].
@@ -896,6 +947,11 @@ pub const sfUnauthorizeCredentials: SField<crate::types::STArray> = SField::new(
 /// Dormant on Xahau mainnet; requires the `all-amendments` feature.
 #[cfg(feature = "all-amendments")]
 pub const sfAcceptedCredentials: SField<crate::types::STArray> = SField::new((15 << 16) + 28);
+/// C: `sfRandomDigests` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
+///
+/// Pending amendment; excluded by the `active-amendments` feature.
+#[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+pub const sfRandomDigests: SField<crate::types::STArray> = SField::new((15 << 16) + 91);
 /// C: `sfAmounts` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
 pub const sfAmounts: SField<crate::types::STArray> = SField::new((15 << 16) + 92);
 /// C: `sfHookEmissions` (sfcodes.h) — STArray, read as [`crate::types::STArray`].
@@ -995,6 +1051,7 @@ mod parity {
             ::rshooks_core::sfcodes::sfDiscountedFee,
             "sfDiscountedFee"
         );
+        #[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
         assert_eq!(
             super::sfVersion.code(),
             ::rshooks_core::sfcodes::sfVersion,
@@ -1030,6 +1087,18 @@ mod parity {
             super::sfLedgerFixType.code(),
             ::rshooks_core::sfcodes::sfLedgerFixType,
             "sfLedgerFixType"
+        );
+        #[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+        assert_eq!(
+            super::sfEntropyCount.code(),
+            ::rshooks_core::sfcodes::sfEntropyCount,
+            "sfEntropyCount"
+        );
+        #[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+        assert_eq!(
+            super::sfEntropyDenominator.code(),
+            ::rshooks_core::sfcodes::sfEntropyDenominator,
+            "sfEntropyDenominator"
         );
         assert_eq!(
             super::sfNetworkID.code(),
@@ -1322,6 +1391,12 @@ mod parity {
             super::sfRewardLgrLast.code(),
             ::rshooks_core::sfcodes::sfRewardLgrLast,
             "sfRewardLgrLast"
+        );
+        #[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+        assert_eq!(
+            super::sfAppLoaderSequence.code(),
+            ::rshooks_core::sfcodes::sfAppLoaderSequence,
+            "sfAppLoaderSequence"
         );
         assert_eq!(
             super::sfIndexNext.code(),
@@ -1698,6 +1773,24 @@ mod parity {
             ::rshooks_core::sfcodes::sfDomainID,
             "sfDomainID"
         );
+        #[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+        assert_eq!(
+            super::sfNextRandomDigest.code(),
+            ::rshooks_core::sfcodes::sfNextRandomDigest,
+            "sfNextRandomDigest"
+        );
+        #[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+        assert_eq!(
+            super::sfRandomData.code(),
+            ::rshooks_core::sfcodes::sfRandomData,
+            "sfRandomData"
+        );
+        #[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+        assert_eq!(
+            super::sfManifestID.code(),
+            ::rshooks_core::sfcodes::sfManifestID,
+            "sfManifestID"
+        );
         assert_eq!(
             super::sfHookOnOutgoing.code(),
             ::rshooks_core::sfcodes::sfHookOnOutgoing,
@@ -1971,6 +2064,7 @@ mod parity {
             ::rshooks_core::sfcodes::sfCondition,
             "sfCondition"
         );
+        #[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
         assert_eq!(
             super::sfMasterSignature.code(),
             ::rshooks_core::sfcodes::sfMasterSignature,
@@ -2049,6 +2143,12 @@ mod parity {
             super::sfCredentialType.code(),
             ::rshooks_core::sfcodes::sfCredentialType,
             "sfCredentialType"
+        );
+        #[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+        assert_eq!(
+            super::sfAppLoader.code(),
+            ::rshooks_core::sfcodes::sfAppLoader,
+            "sfAppLoader"
         );
         assert_eq!(
             super::sfHookName.code(),
@@ -2406,6 +2506,18 @@ mod parity {
             ::rshooks_core::sfcodes::sfCredential,
             "sfCredential"
         );
+        #[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+        assert_eq!(
+            super::sfRandomDigestEntry.code(),
+            ::rshooks_core::sfcodes::sfRandomDigestEntry,
+            "sfRandomDigestEntry"
+        );
+        #[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+        assert_eq!(
+            super::sfManifest.code(),
+            ::rshooks_core::sfcodes::sfManifest,
+            "sfManifest"
+        );
         assert_eq!(
             super::sfAmountEntry.code(),
             ::rshooks_core::sfcodes::sfAmountEntry,
@@ -2567,6 +2679,12 @@ mod parity {
             ::rshooks_core::sfcodes::sfAcceptedCredentials,
             "sfAcceptedCredentials"
         );
+        #[cfg(any(not(feature = "active-amendments"), feature = "all-amendments"))]
+        assert_eq!(
+            super::sfRandomDigests.code(),
+            ::rshooks_core::sfcodes::sfRandomDigests,
+            "sfRandomDigests"
+        );
         assert_eq!(
             super::sfAmounts.code(),
             ::rshooks_core::sfcodes::sfAmounts,
@@ -2597,6 +2715,6 @@ mod parity {
             ::rshooks_core::sfcodes::sfRemarks,
             "sfRemarks"
         );
-        assert_eq!(325, 325, "generated for 325 constants");
+        assert_eq!(335, 335, "generated for 335 constants");
     }
 }

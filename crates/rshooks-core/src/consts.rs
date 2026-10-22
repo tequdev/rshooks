@@ -64,6 +64,8 @@ pub const KEYLET_HOOK_DEFINITION: u32 = 24;
 pub const KEYLET_HOOK_STATE_DIR: u32 = 25;
 /// C: `KEYLET_CRON` (hookapi.h)
 pub const KEYLET_CRON: u32 = 26;
+/// C: `KEYLET_MANIFEST` (hookapi.h)
+pub const KEYLET_MANIFEST: u32 = 37;
 
 // --- hookapi.h: COMPARE_* ---
 

@@ -402,6 +402,16 @@ pub static WHITELIST: &[ApiFn] = &[
         params: &[I32, I32, I32, I32],
         result: I64,
     },
+    ApiFn {
+        name: "dice",
+        params: &[I32],
+        result: I64,
+    },
+    ApiFn {
+        name: "util_random",
+        params: &[I32, I32],
+        result: I64,
+    },
 ];
 
 /// Looks up a whitelist entry by name.

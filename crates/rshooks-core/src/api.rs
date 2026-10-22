@@ -326,6 +326,12 @@ unsafe extern "C" {
 
     /// C: `int64_t prepare(uint32_t write_ptr, uint32_t write_len, uint32_t read_ptr, uint32_t read_len)` (extern.h)
     pub fn prepare(write_ptr: u32, write_len: u32, read_ptr: u32, read_len: u32) -> i64;
+
+    /// C: `int64_t dice(uint32_t sides)` (extern.h)
+    pub fn dice(sides: u32) -> i64;
+
+    /// C: `int64_t util_random(uint32_t write_ptr, uint32_t write_len)` (extern.h)
+    pub fn util_random(write_ptr: u32, write_len: u32) -> i64;
 }
 
 /// Non-wasm host stubs mirroring the `extern.h` signatures exactly, so
@@ -803,6 +809,16 @@ mod host_stubs {
 
     /// C: `int64_t prepare(uint32_t write_ptr, uint32_t write_len, uint32_t read_ptr, uint32_t read_len)` (extern.h) — host stub
     pub unsafe fn prepare(write_ptr: u32, write_len: u32, read_ptr: u32, read_len: u32) -> i64 {
+        NOT_IMPLEMENTED
+    }
+
+    /// C: `int64_t dice(uint32_t sides)` (extern.h) — host stub
+    pub unsafe fn dice(sides: u32) -> i64 {
+        NOT_IMPLEMENTED
+    }
+
+    /// C: `int64_t util_random(uint32_t write_ptr, uint32_t write_len)` (extern.h) — host stub
+    pub unsafe fn util_random(write_ptr: u32, write_len: u32) -> i64 {
         NOT_IMPLEMENTED
     }
 }

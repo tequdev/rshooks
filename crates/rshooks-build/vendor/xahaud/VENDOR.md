@@ -11,7 +11,7 @@ Rust reimplementation. These files are never hand-edited.
 - Branch: `release`
 - Files: `Guard.h`, `Enum.h`, `hook_api.macro`, all from
   `include/xrpl/hook/` on that branch
-- Last synced: 2026-07-24
+- Last synced: 2026-10-22
 - Recorded hashes: [`SHA256SUMS`](SHA256SUMS) (single source of truth;
   regenerated only by the sync script)
 
