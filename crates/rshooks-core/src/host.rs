@@ -385,6 +385,12 @@ pub trait HookHost {
 
     /// C: `int64_t prepare(uint32_t write_ptr, uint32_t write_len, uint32_t read_ptr, uint32_t read_len)` (extern.h)
     unsafe fn prepare(&self, write_ptr: u32, write_len: u32, read_ptr: u32, read_len: u32) -> i64;
+
+    /// C: `int64_t dice(uint32_t sides)` (extern.h)
+    unsafe fn dice(&self, sides: u32) -> i64;
+
+    /// C: `int64_t util_random(uint32_t write_ptr, uint32_t write_len)` (extern.h)
+    unsafe fn util_random(&self, write_ptr: u32, write_len: u32) -> i64;
 }
 
 /// The real `HookHost` implementor: on `target_arch = "wasm32"` this forwards
@@ -940,5 +946,15 @@ impl HookHost for Guest {
     /// C: `int64_t prepare(uint32_t write_ptr, uint32_t write_len, uint32_t read_ptr, uint32_t read_len)` (extern.h)
     unsafe fn prepare(&self, write_ptr: u32, write_len: u32, read_ptr: u32, read_len: u32) -> i64 {
         unsafe { crate::api::prepare(write_ptr, write_len, read_ptr, read_len) }
+    }
+
+    /// C: `int64_t dice(uint32_t sides)` (extern.h)
+    unsafe fn dice(&self, sides: u32) -> i64 {
+        unsafe { crate::api::dice(sides) }
+    }
+
+    /// C: `int64_t util_random(uint32_t write_ptr, uint32_t write_len)` (extern.h)
+    unsafe fn util_random(&self, write_ptr: u32, write_len: u32) -> i64 {
+        unsafe { crate::api::util_random(write_ptr, write_len) }
     }
 }

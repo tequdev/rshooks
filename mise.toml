@@ -2,7 +2,7 @@
 rust = "1.89.0"
 
 [env]
-XAHAUD_VERSION = "2026.6.21-release+3350"
+XAHAUD_VERSION = "2026.10.13-release+4119"
 
 [env._]
 # Make the Rust proxy binaries available to mise tasks.

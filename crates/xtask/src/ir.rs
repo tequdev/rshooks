@@ -47,7 +47,7 @@ pub struct FunctionSpec {
 /// host function plus every constant family `rshooks-core` translates.
 #[derive(Debug, Clone)]
 pub struct HookApiSpec {
-    /// Every `extern.h` host function (`_g` plus the 74 Hook API functions),
+    /// Every `extern.h` host function (`_g` plus every Hook API function),
     /// in header order.
     pub functions: Vec<FunctionSpec>,
     /// `error.h` error codes.

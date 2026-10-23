@@ -382,7 +382,7 @@ pub fn required_amendments(entries: &[EntryDecl]) -> Vec<String> {
         amendments.push("NamedHooks".to_string());
     }
     if entries.iter().any(|e| e.on.form == "directional") {
-        amendments.push("HookOnV2".to_string());
+        amendments.push("HookOnV2_1".to_string());
     }
     if entries.iter().any(|e| e.hook_can_emit.is_some()) {
         amendments.push("HookCanEmit".to_string());
@@ -742,7 +742,7 @@ mod tests {
         );
         assert_eq!(
             required_amendments(&[directional]),
-            vec!["Hooks", "HookOnV2"]
+            vec!["Hooks", "HookOnV2_1"]
         );
 
         let mut can_emit = plain;
@@ -766,7 +766,7 @@ mod tests {
             &[0, 2],
             &[1],
             2,
-            &["Hooks".to_string(), "HookOnV2".to_string()],
+            &["Hooks".to_string(), "HookOnV2_1".to_string()],
         )
         .expect("meta builds");
         let value: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
@@ -780,7 +780,7 @@ mod tests {
         assert_eq!(value["positions"]["untouched_beyond"], 3);
         assert_eq!(
             value["required_amendments"],
-            serde_json::json!(["Hooks", "HookOnV2"])
+            serde_json::json!(["Hooks", "HookOnV2_1"])
         );
         assert!(
             value["generated_at"]

@@ -459,6 +459,16 @@ pub trait HostBackend {
         NOT_IMPLEMENTED
     }
 
+    /// Uniform draw in `[0, sides)` from the consensus RNG.
+    fn dice(&self, _sides: u32) -> i64 {
+        NOT_IMPLEMENTED
+    }
+
+    /// `len` random bytes from the consensus RNG.
+    fn util_random(&self, _len: u32) -> Result<Vec<u8>, i64> {
+        Err(NOT_IMPLEMENTED)
+    }
+
     /// Consulted by `HookStatic::take()` under `testenv` to decide whether a
     /// static cell at `cell_addr` may hand out a fresh per-invocation clone.
     /// Default `true`: a backend that does not model statics imposes no

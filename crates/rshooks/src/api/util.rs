@@ -102,6 +102,43 @@ fixed_buf_fn! {
     util_sha512h_into
 }
 
+// -- Consensus RNG (`featureRNG`): both calls draw from one budget of 256 per
+// hook execution (`HookAPI.cpp:1947`). The host returns `TooLittleEntropy`
+// until the amendment is enabled on the network (`HookAPI.cpp:1944`).
+
+/// Fills `out` with random bytes from the consensus RNG and returns the number
+/// of bytes written.
+///
+/// An empty `out` is `TooSmall` and more than 512 bytes is `TooBig`
+/// (`HookAPI.cpp:2030-2033`). `TooLittleEntropy` when `featureRNG` is off, the
+/// ledger has no seed, or under 80% of the validators contributed to it
+/// (`HookAPI.cpp:1944-1967`). More than 256 draws, counting [`dice`], in one
+/// execution is `TooManyNonces` (`HookAPI.cpp:1947`).
+#[inline(always)]
+pub fn util_random<B: AsMut<[u8]> + ?Sized>(out: &mut B) -> Result<usize> {
+    let out = out.as_mut();
+    let cap = out.len();
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(r) = rshooks_core::backend::with_backend(|b| b.util_random(cap as u32)) {
+        return crate::testenv_bridge::write_bytes(out, r);
+    }
+    res(unsafe { rshooks_core::util_random(out.as_mut_ptr() as u32, cap as u32) })
+        .map(|v| (v as usize).min(cap))
+}
+
+/// A uniform random number in `[0, sides)` from the consensus RNG.
+///
+/// `sides == 0` is `InvalidArgument` (`HookAPI.cpp:1997`). The entropy and
+/// draw-budget failures match [`util_random`].
+#[inline(always)]
+pub fn dice(sides: u32) -> Result<u64> {
+    #[cfg(all(feature = "testenv", not(target_arch = "wasm32")))]
+    if let Some(v) = rshooks_core::backend::with_backend(|b| b.dice(sides)) {
+        return res(v).map(|v| v as u64);
+    }
+    res(unsafe { rshooks_core::dice(sides) }).map(|v| v as u64)
+}
+
 /// Compute a Keylet of `keylet_type` from up to six `u32` components
 /// (`a`..`f`), written into `out`. Returns the number of bytes written.
 /// [`util_keylet_buf`] is the fixed-size convenience twin.

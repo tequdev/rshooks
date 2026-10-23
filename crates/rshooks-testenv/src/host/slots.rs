@@ -200,17 +200,16 @@ pub(crate) fn slot_float(ctx: &InvocationContext, slot_no: u32) -> i64 {
 }
 
 /// `HookAPI::slot_set` (`HookAPI.cpp:2080-2141`), restricted to this
-/// harness's seeded-ledger-object model (design §4: a 32-byte transaction
-/// hash is a documented Phase-2 model limit — upstream's historical
-/// transaction lookup, `getMasterTransaction().fetch`, is not ported; every
-/// 32-byte input reports `DOESNT_EXIST`).
+/// harness's seeded-ledger-object model. Only 34-byte keylets are accepted;
+/// a 32-byte transaction hash is `INVALID_ARGUMENT` under fix20261005
+/// (`HookAPI.cpp:2324-2327`).
 pub(crate) fn slot_set(
     ctx: &mut InvocationContext,
     world: &World,
     data: &[u8],
     slot_into: u32,
 ) -> i64 {
-    if data.len() != 34 && data.len() != 32 {
+    if data.len() != 34 {
         return INVALID_ARGUMENT;
     }
     if slot_into > 255 {
@@ -224,9 +223,6 @@ pub(crate) fn slot_set(
         && let Err(e) = ctx.resolve_slot(0)
     {
         return e;
-    }
-    if data.len() == 32 {
-        return DOESNT_EXIST;
     }
     let mut keylet = [0u8; 34];
     keylet.copy_from_slice(data);
@@ -564,10 +560,10 @@ mod tests {
     }
 
     #[test]
-    fn slot_set_32_byte_hash_is_doesnt_exist() {
+    fn slot_set_32_byte_hash_is_invalid_argument() {
         let mut ctx = fresh_ctx();
         let world = World::new();
-        assert_eq!(slot_set(&mut ctx, &world, &[0u8; 32], 0), DOESNT_EXIST);
+        assert_eq!(slot_set(&mut ctx, &world, &[0u8; 32], 0), INVALID_ARGUMENT);
     }
 
     #[test]
@@ -894,10 +890,7 @@ mod tests {
         let world = seeded_world(kl, &account_root_bytes(1, 0, [0u8; 20]));
         let root = slot_set(&mut ctx, &world, &kl, 0) as u32;
         let bal = slot_subfield(&mut ctx, root, SF_BALANCE, 0) as u32;
-        // `float_set(-6, 0)` would report `INVALID_FLOAT` (mantissa == 0
-        // is special-cased as an error there); `slot_float` instead returns
-        // plain `0`, matching upstream's own `EXPONENT_UNDERSIZED`/
-        // zero-mantissa remap.
+        // A zero-mantissa amount reads back as plain `0`.
         assert_eq!(slot_float(&ctx, bal), 0);
     }
 

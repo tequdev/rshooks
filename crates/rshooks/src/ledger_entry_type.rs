@@ -36,12 +36,16 @@ pub enum LedgerEntryType {
     Hook,
     /// `ltIMPORT_VLSEQ` (0x0049) — RPC name `import_vlseq`.
     ImportVLSequence,
+    /// `ltAPP_LOADER` (0x004c) — RPC name `app_loader`.
+    AppLoader,
     /// `ltNEGATIVE_UNL` (0x004e) — RPC name `nunl`.
     NegativeUNL,
     /// `ltNFTOKEN_PAGE` (0x0050) — RPC name `nft_page`.
     NFTokenPage,
     /// `ltUNL_REPORT` (0x0052) — RPC name `unl_report`.
     UNLReport,
+    /// `ltRANDOM` (0x526e) — RPC name `random`.
+    Random,
     /// `ltSIGNER_LIST` (0x0053) — RPC name `signer_list`.
     SignerList,
     /// `ltTICKET` (0x0054) — RPC name `ticket`.
@@ -90,6 +94,8 @@ pub enum LedgerEntryType {
     PermissionedDomain,
     /// `ltDID` (0x008d) — RPC name `did`.
     DID,
+    /// `ltMANIFEST` (0x004d) — RPC name `manifest_entry`.
+    Manifest,
 
     /// A code this version of rshooks does not recognize yet. Carries
     /// the raw code for forward-compatibility.
@@ -106,9 +112,11 @@ impl From<u16> for LedgerEntryType {
             rshooks_core::ltEMITTED_TXN => LedgerEntryType::EmittedTxn,
             rshooks_core::ltHOOK => LedgerEntryType::Hook,
             rshooks_core::ltIMPORT_VLSEQ => LedgerEntryType::ImportVLSequence,
+            rshooks_core::ltAPP_LOADER => LedgerEntryType::AppLoader,
             rshooks_core::ltNEGATIVE_UNL => LedgerEntryType::NegativeUNL,
             rshooks_core::ltNFTOKEN_PAGE => LedgerEntryType::NFTokenPage,
             rshooks_core::ltUNL_REPORT => LedgerEntryType::UNLReport,
+            rshooks_core::ltRANDOM => LedgerEntryType::Random,
             rshooks_core::ltSIGNER_LIST => LedgerEntryType::SignerList,
             rshooks_core::ltTICKET => LedgerEntryType::Ticket,
             rshooks_core::ltURI_TOKEN => LedgerEntryType::URIToken,
@@ -135,6 +143,7 @@ impl From<u16> for LedgerEntryType {
             rshooks_core::ltCREDENTIAL => LedgerEntryType::Credential,
             rshooks_core::ltPERMISSIONED_DOMAIN => LedgerEntryType::PermissionedDomain,
             rshooks_core::ltDID => LedgerEntryType::DID,
+            rshooks_core::ltMANIFEST => LedgerEntryType::Manifest,
             other => LedgerEntryType::Unknown(other),
         }
     }
@@ -156,9 +165,11 @@ impl LedgerEntryType {
             LedgerEntryType::EmittedTxn => rshooks_core::ltEMITTED_TXN,
             LedgerEntryType::Hook => rshooks_core::ltHOOK,
             LedgerEntryType::ImportVLSequence => rshooks_core::ltIMPORT_VLSEQ,
+            LedgerEntryType::AppLoader => rshooks_core::ltAPP_LOADER,
             LedgerEntryType::NegativeUNL => rshooks_core::ltNEGATIVE_UNL,
             LedgerEntryType::NFTokenPage => rshooks_core::ltNFTOKEN_PAGE,
             LedgerEntryType::UNLReport => rshooks_core::ltUNL_REPORT,
+            LedgerEntryType::Random => rshooks_core::ltRANDOM,
             LedgerEntryType::SignerList => rshooks_core::ltSIGNER_LIST,
             LedgerEntryType::Ticket => rshooks_core::ltTICKET,
             LedgerEntryType::URIToken => rshooks_core::ltURI_TOKEN,
@@ -185,6 +196,7 @@ impl LedgerEntryType {
             LedgerEntryType::Credential => rshooks_core::ltCREDENTIAL,
             LedgerEntryType::PermissionedDomain => rshooks_core::ltPERMISSIONED_DOMAIN,
             LedgerEntryType::DID => rshooks_core::ltDID,
+            LedgerEntryType::Manifest => rshooks_core::ltMANIFEST,
             LedgerEntryType::Unknown(code) => code,
         }
     }
@@ -198,10 +210,10 @@ mod tests {
     fn round_trips_known_codes() {
         const _: u16 = LedgerEntryType::Unknown(0).code();
         let known: &[u16] = &[
-            0x0037, 0x0041, 0x0043, 0x0044, 0x0045, 0x0048, 0x0049, 0x004e, 0x0050, 0x0052, 0x0053,
-            0x0054, 0x0055, 0x0061, 0x0064, 0x0066, 0x0068, 0x0069, 0x006f, 0x0070, 0x0071, 0x0072,
-            0x0073, 0x0074, 0x0075, 0x0076, 0x0078, 0x0079, 0x0080, 0x007e, 0x007f, 0x0081, 0x0082,
-            0x008d,
+            0x0037, 0x0041, 0x0043, 0x0044, 0x0045, 0x0048, 0x0049, 0x004c, 0x004e, 0x0050, 0x0052,
+            0x526e, 0x0053, 0x0054, 0x0055, 0x0061, 0x0064, 0x0066, 0x0068, 0x0069, 0x006f, 0x0070,
+            0x0071, 0x0072, 0x0073, 0x0074, 0x0075, 0x0076, 0x0078, 0x0079, 0x0080, 0x007e, 0x007f,
+            0x0081, 0x0082, 0x008d, 0x004d,
         ];
         for &code in known {
             assert_eq!(
@@ -210,7 +222,7 @@ mod tests {
                 "round-trip failed for {code}"
             );
         }
-        assert_eq!(known.len(), 34, "generated for 34 ledger entry types");
+        assert_eq!(known.len(), 37, "generated for 37 ledger entry types");
     }
 
     #[test]

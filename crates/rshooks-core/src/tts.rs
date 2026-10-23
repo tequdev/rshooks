@@ -126,6 +126,10 @@ pub const ttNFTOKEN_MODIFY: u16 = 70;
 pub const ttPERMISSIONED_DOMAIN_SET: u16 = 71;
 /// C: `ttPERMISSIONED_DOMAIN_DELETE` (tts.h)
 pub const ttPERMISSIONED_DOMAIN_DELETE: u16 = 72;
+/// C: `ttENTROPY` (tts.h)
+pub const ttENTROPY: u16 = 89;
+/// C: `ttMANIFEST_SET` (tts.h)
+pub const ttMANIFEST_SET: u16 = 91;
 /// C: `ttCRON` (tts.h)
 pub const ttCRON: u16 = 92;
 /// C: `ttCRON_SET` (tts.h)

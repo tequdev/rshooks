@@ -155,6 +155,8 @@ impl HookError {
     pub const TooManyStateModifications: HookError = of(rshooks_core::TOO_MANY_STATE_MODIFICATIONS);
     /// `TOO_MANY_NAMESPACES` (-45): namespace limit exceeded.
     pub const TooManyNamespaces: HookError = of(rshooks_core::TOO_MANY_NAMESPACES);
+    /// `TOO_LITTLE_ENTROPY` (-46): the consensus RNG has no usable seed for this ledger (`featureRNG`).
+    pub const TooLittleEntropy: HookError = of(rshooks_core::TOO_LITTLE_ENTROPY);
 }
 
 impl HookError {
@@ -188,7 +190,7 @@ impl HookError {
         // over this many wide `i64` constants into a deeply nested
         // block-per-arm decision tree, which alone can blow the Guard-type
         // nesting limit once inlined. A table lookup is nesting-depth 1.
-        const KINDS: [HookErrorKind; 45] = [
+        const KINDS: [HookErrorKind; 46] = [
             HookErrorKind::OutOfBounds,
             HookErrorKind::InternalError,
             HookErrorKind::TooBig,
@@ -234,6 +236,7 @@ impl HookError {
             HookErrorKind::MemOverlap,
             HookErrorKind::TooManyStateModifications,
             HookErrorKind::TooManyNamespaces,
+            HookErrorKind::TooLittleEntropy,
         ];
         let idx = code.wrapping_neg().wrapping_sub(1);
         // `.get` + `unwrap_or`, not `KINDS[..]`: this crate denies
@@ -267,7 +270,7 @@ impl core::fmt::Debug for HookError {
 
 /// The decoded kind of a [`HookError`]: one variant per named code in
 /// `hook/error.h`, plus [`HookErrorKind::Unknown`] for any code without a
-/// named constant (positive, the `-24` gap, or below `-45`).
+/// named constant (positive, the `-24` gap, or below `-46`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum HookErrorKind {
@@ -365,7 +368,9 @@ pub enum HookErrorKind {
     TooManyStateModifications,
     /// `TOO_MANY_NAMESPACES` (-45): namespace limit exceeded.
     TooManyNamespaces,
-    /// Any code without a named constant (positive, `-24`, below `-45`, …).
+    /// `TOO_LITTLE_ENTROPY` (-46): the consensus RNG has no usable seed for this ledger (`featureRNG`).
+    TooLittleEntropy,
+    /// Any code without a named constant (positive, `-24`, below `-46`, …).
     Unknown,
 }
 
@@ -615,6 +620,11 @@ mod tests {
             HookError::TooManyNamespaces,
             HookErrorKind::TooManyNamespaces,
         ),
+        (
+            rshooks_core::TOO_LITTLE_ENTROPY,
+            HookError::TooLittleEntropy,
+            HookErrorKind::TooLittleEntropy,
+        ),
     ];
 
     #[test]
@@ -654,7 +664,7 @@ mod tests {
 
     #[test]
     fn out_of_range_codes_round_trip_as_unknown() {
-        for code in [i64::MIN, -46, 0, 1, i64::MAX] {
+        for code in [i64::MIN, -47, 0, 1, i64::MAX] {
             let err = HookError::from(code);
             assert_eq!(err.code(), code);
             assert_eq!(err.kind(), HookErrorKind::Unknown);

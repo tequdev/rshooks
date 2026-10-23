@@ -172,7 +172,6 @@ mod tests {
 
     #[test]
     fn canonical_transaction_type_whitelist_has_all_current_variants() {
-        assert_eq!(TRANSACTION_TYPES.len(), 74);
         assert_eq!(TRANSACTION_TYPES.len(), TRANSACTION_TYPE_CODES.len());
         assert_eq!(
             TRANSACTION_TYPES

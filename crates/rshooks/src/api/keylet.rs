@@ -70,13 +70,16 @@
 
 use crate::api::util::{util_keylet, util_keylet_buf};
 use crate::error::Result;
-use crate::types::{AccountId, CurrencyCode, Hash, IssuedAsset, Keylet, NameSpace, StateKey};
+use crate::types::{
+    AccountId, CurrencyCode, Hash, IssuedAsset, Keylet, NameSpace, PublicKey, StateKey,
+};
 use rshooks_core::consts::{
     KEYLET_ACCOUNT, KEYLET_AMENDMENTS, KEYLET_CHECK, KEYLET_CHILD, KEYLET_CRON,
     KEYLET_DEPOSIT_PREAUTH, KEYLET_EMITTED, KEYLET_EMITTED_DIR, KEYLET_ESCROW, KEYLET_FEES,
     KEYLET_HOOK, KEYLET_HOOK_DEFINITION, KEYLET_HOOK_STATE, KEYLET_HOOK_STATE_DIR, KEYLET_LINE,
-    KEYLET_NEGATIVE_UNL, KEYLET_NFT_OFFER, KEYLET_OFFER, KEYLET_OWNER_DIR, KEYLET_PAGE,
-    KEYLET_PAYCHAN, KEYLET_QUALITY, KEYLET_SIGNERS, KEYLET_SKIP, KEYLET_TICKET, KEYLET_UNCHECKED,
+    KEYLET_MANIFEST, KEYLET_NEGATIVE_UNL, KEYLET_NFT_OFFER, KEYLET_OFFER, KEYLET_OWNER_DIR,
+    KEYLET_PAGE, KEYLET_PAYCHAN, KEYLET_QUALITY, KEYLET_SIGNERS, KEYLET_SKIP, KEYLET_TICKET,
+    KEYLET_UNCHECKED,
 };
 
 /// Emits a `keylet_xxx`/`keylet_xxx_into` pair from a bare argument list —
@@ -485,6 +488,13 @@ keylet_fn! {
     /// indexed by *when* it next fires, not by a per-account sequence
     /// counter, unlike every other `account`-keyed type above).
     fn keylet_cron(account: &AccountId, start_time: u32), keylet_cron_into => KEYLET_CRON,
+}
+
+keylet_fn! {
+    /// `KEYLET_MANIFEST` (37): the keylet for the on-ledger `Manifest` entry of
+    /// validator `public_key` (33-byte compressed key; `featureOnChainManifests`,
+    /// `applyHook.cpp:2266`).
+    fn keylet_manifest(public_key: &PublicKey), keylet_manifest_into => KEYLET_MANIFEST,
 }
 
 #[cfg(test)]

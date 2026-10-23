@@ -22,7 +22,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  XAHAUD_VERSION: 2026.6.21-release+3350
+  XAHAUD_VERSION: 2026.10.13-release+4119
 
 jobs:
   fmt:

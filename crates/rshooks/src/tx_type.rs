@@ -144,6 +144,10 @@ pub enum TxType {
     PermissionedDomainSet,
     /// `ttPERMISSIONED_DOMAIN_DELETE` (72).
     PermissionedDomainDelete,
+    /// `ttENTROPY` (89).
+    Entropy,
+    /// `ttMANIFEST_SET` (91).
+    ManifestSet,
     /// `ttCRON` (92).
     Cron,
     /// `ttCRON_SET` (93).
@@ -242,6 +246,8 @@ impl From<u16> for TxType {
             rshooks_core::ttNFTOKEN_MODIFY => TxType::NFTokenModify,
             rshooks_core::ttPERMISSIONED_DOMAIN_SET => TxType::PermissionedDomainSet,
             rshooks_core::ttPERMISSIONED_DOMAIN_DELETE => TxType::PermissionedDomainDelete,
+            rshooks_core::ttENTROPY => TxType::Entropy,
+            rshooks_core::ttMANIFEST_SET => TxType::ManifestSet,
             rshooks_core::ttCRON => TxType::Cron,
             rshooks_core::ttCRON_SET => TxType::CronSet,
             rshooks_core::ttREMARKS_SET => TxType::SetRemarks,
@@ -331,6 +337,8 @@ impl TxType {
             TxType::NFTokenModify => rshooks_core::ttNFTOKEN_MODIFY,
             TxType::PermissionedDomainSet => rshooks_core::ttPERMISSIONED_DOMAIN_SET,
             TxType::PermissionedDomainDelete => rshooks_core::ttPERMISSIONED_DOMAIN_DELETE,
+            TxType::Entropy => rshooks_core::ttENTROPY,
+            TxType::ManifestSet => rshooks_core::ttMANIFEST_SET,
             TxType::Cron => rshooks_core::ttCRON,
             TxType::CronSet => rshooks_core::ttCRON_SET,
             TxType::SetRemarks => rshooks_core::ttREMARKS_SET,
@@ -359,8 +367,8 @@ mod tests {
         let known: &[u16] = &[
             0, 1, 2, 3, 4, 5, 7, 8, 10, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 25, 26, 27, 28,
             29, 30, 31, 35, 36, 37, 38, 39, 40, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57,
-            58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 92, 93, 94, 95, 96, 97, 98,
-            99, 100, 101, 102, 103, 104,
+            58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 89, 91, 92, 93, 94, 95, 96,
+            97, 98, 99, 100, 101, 102, 103, 104,
         ];
         for &code in known {
             assert_eq!(

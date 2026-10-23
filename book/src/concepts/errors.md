@@ -131,7 +131,7 @@ throughout.
 ### The one hard rule: never `?` a raw `HookError` into `Rollback`
 
 There is **no** `From<HookError> for Rollback` impl, and none is planned. A
-Hook API error code (`-1..=-45`, `-10024`) is not the hook's own
+Hook API error code (`-1..=-46`, `-10024`) is not the hook's own
 `HookReturnCode` — the two are different code spaces that happen to share
 the `i64` representation — so an implicit `?`-propagated conversion from a
 raw `HookError` into `Rollback` would publish the host's code as the
@@ -309,7 +309,7 @@ placeholder value needed anywhere in the chain, and the final
 | `-104` | `AmountTooLarge` | `errors: amount exceeds policy limit` |
 
 This example deliberately chose codes in `-101..=-104` — well outside the
-Hook API's own `-1..=-45`/`-10024` range — so an application-defined
+Hook API's own `-1..=-46`/`-10024` range — so an application-defined
 `HookReturnCode` is unambiguous at a glance against a `HookError` that
 leaked through instead. That's not a hard requirement, just good hygiene:
 pick a range for your own codes and stay out of the Hook API's.

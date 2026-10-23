@@ -287,7 +287,9 @@ impl SlotObject<STObject> {
         api::slot::slot_set(keylet.as_ref(), 0).map(Self::wrap)
     }
 
-    /// Loads a transaction by its hash.
+    /// Loads a transaction by its 32-byte hash. The host rejects this with
+    /// `InvalidArgument` under `fix20261005` (`HookAPI.cpp:2324-2327`), which
+    /// is enabled on Xahau mainnet; use [`Self::from_keylet`] instead.
     #[inline(always)]
     pub fn from_txn_hash(hash: &Hash) -> Result<Self> {
         api::slot::slot_set(hash.as_ref(), 0).map(Self::wrap)

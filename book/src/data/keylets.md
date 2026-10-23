@@ -4,7 +4,7 @@ A **keylet** is a 34-byte locator for a ledger object: a type prefix plus
 the 32-byte hash-derived index the protocol uses to find that object in the
 ledger's state map. Almost every ledger read that isn't the originating
 transaction itself starts by computing a keylet, then loading the object it
-points at into a slot. This page covers `rshooks`'s 26 typed `keylet_xxx`
+points at into a slot. This page covers `rshooks`'s typed `keylet_xxx`
 helpers (each with a `keylet_xxx_into` out-param twin — see "Why typed
 helpers" below), a worked example that computes and stores them, and
 `account_id!`, the companion macro for building compile-time r-address
@@ -77,6 +77,7 @@ each call the host directly.
 | `keylet_hook_definition(hash)` | `KEYLET_HOOK_DEFINITION` (24) | the account-independent `HookDefinition` for wasm hash `hash` |
 | `keylet_hook_state_dir(account, namespace)` | `KEYLET_HOOK_STATE_DIR` (25) | the directory of `account`'s hook-state entries under `namespace` |
 | `keylet_cron(account, start_time)` | `KEYLET_CRON` (26) | `account`'s `Cron` entry firing at `start_time` |
+| `keylet_manifest(public_key)` | `KEYLET_MANIFEST` (37) | the on-ledger `Manifest` entry for a validator public key |
 
 `keylet_line_for_asset(account, &asset)` is a convenience wrapper over
 `keylet_line` for when the currency/issuer pair is already an `IssuedAsset`

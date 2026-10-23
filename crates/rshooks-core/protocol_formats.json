@@ -238,6 +238,24 @@
       "extras": []
     },
     {
+      "name": "sfEntropyCount",
+      "sti": "UINT16",
+      "sti_code": 1,
+      "field_code": 99,
+      "code": 65635,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfEntropyDenominator",
+      "sti": "UINT16",
+      "sti_code": 1,
+      "field_code": 100,
+      "code": 65636,
+      "typed": true,
+      "extras": []
+    },
+    {
       "name": "sfNetworkID",
       "sti": "UINT32",
       "sti_code": 2,
@@ -758,6 +776,15 @@
       "sti_code": 2,
       "field_code": 100,
       "code": 131172,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfAppLoaderSequence",
+      "sti": "UINT32",
+      "sti_code": 2,
+      "field_code": 101,
+      "code": 131173,
       "typed": true,
       "extras": []
     },
@@ -1420,6 +1447,35 @@
       "extras": []
     },
     {
+      "name": "sfNextRandomDigest",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 89,
+      "code": 327769,
+      "typed": true,
+      "extras": []
+    },
+    {
+      "name": "sfRandomData",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 90,
+      "code": 327770,
+      "typed": true,
+      "extras": [
+        "SField::sMD_Never"
+      ]
+    },
+    {
+      "name": "sfManifestID",
+      "sti": "UINT256",
+      "sti_code": 5,
+      "field_code": 91,
+      "code": 327771,
+      "typed": true,
+      "extras": []
+    },
+    {
       "name": "sfHookOnOutgoing",
       "sti": "UINT256",
       "sti_code": 5,
@@ -2050,6 +2106,15 @@
       "extras": []
     },
     {
+      "name": "sfAppLoader",
+      "sti": "VL",
+      "sti_code": 7,
+      "field_code": 96,
+      "code": 458848,
+      "typed": true,
+      "extras": []
+    },
+    {
       "name": "sfHookName",
       "sti": "VL",
       "sti_code": 7,
@@ -2655,6 +2720,24 @@
       "extras": []
     },
     {
+      "name": "sfRandomDigestEntry",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 88,
+      "code": 917592,
+      "typed": false,
+      "extras": []
+    },
+    {
+      "name": "sfManifest",
+      "sti": "OBJECT",
+      "sti_code": 14,
+      "field_code": 90,
+      "code": 917594,
+      "typed": false,
+      "extras": []
+    },
+    {
       "name": "sfAmountEntry",
       "sti": "OBJECT",
       "sti_code": 14,
@@ -2935,6 +3018,17 @@
       "code": 983068,
       "typed": false,
       "extras": []
+    },
+    {
+      "name": "sfRandomDigests",
+      "sti": "ARRAY",
+      "sti_code": 15,
+      "field_code": 91,
+      "code": 983131,
+      "typed": false,
+      "extras": [
+        "SField::sMD_Never"
+      ]
     },
     {
       "name": "sfAmounts",
@@ -3300,6 +3394,11 @@
         },
         {
           "sfield": "sfHookStateScale",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfAppLoader",
           "presence": "optional",
           "extras": []
         }
@@ -4651,6 +4750,45 @@
       ]
     },
     {
+      "tag": "ttENTROPY",
+      "value": 89,
+      "name": "Entropy",
+      "fields": [
+        {
+          "sfield": "sfLedgerSequence",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPublicKey",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfNextRandomDigest",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfRandomData",
+          "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ttMANIFEST_SET",
+      "value": 91,
+      "name": "SetManifest",
+      "fields": [
+        {
+          "sfield": "sfManifest",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
       "tag": "ttCRON",
       "value": 92,
       "name": "Cron",
@@ -5287,6 +5425,40 @@
       ]
     },
     {
+      "tag": "ltAPP_LOADER",
+      "value": 76,
+      "name": "AppLoader",
+      "rpc_name": "app_loader",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfOwner",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAppLoader",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfAppLoaderSequence",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
       "tag": "ltNEGATIVE_UNL",
       "value": 78,
       "name": "NegativeUNL",
@@ -5369,6 +5541,50 @@
         {
           "sfield": "sfActiveValidators",
           "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "tag": "ltRANDOM",
+      "value": 21102,
+      "name": "Random",
+      "rpc_name": "random",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfLedgerSequence",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfRandomData",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfEntropyCount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfEntropyDenominator",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfRandomDigests",
+          "presence": "required",
           "extras": []
         },
         {
@@ -5684,6 +5900,16 @@
         },
         {
           "sfield": "sfAMMID",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfAppLoaderSequence",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfManifestID",
           "presence": "optional",
           "extras": []
         }
@@ -6768,6 +6994,75 @@
           "extras": []
         }
       ]
+    },
+    {
+      "tag": "ltMANIFEST",
+      "value": 77,
+      "name": "Manifest",
+      "rpc_name": "manifest_entry",
+      "duplicate": false,
+      "fields": [
+        {
+          "sfield": "sfAccount",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPublicKey",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSigningPubKey",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfSequence",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfVersion",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfDomain",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfMasterSignature",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfSignature",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfManifestID",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfOwnerNode",
+          "presence": "optional",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnID",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfPreviousTxnLgrSeq",
+          "presence": "required",
+          "extras": []
+        }
+      ]
     }
   ],
   "inner_objects": [
@@ -7122,6 +7417,26 @@
         {
           "sfield": "sfAccount",
           "presence": "optional",
+          "extras": []
+        }
+      ]
+    },
+    {
+      "sfield": "sfRandomDigestEntry",
+      "fields": [
+        {
+          "sfield": "sfPublicKey",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfNextRandomDigest",
+          "presence": "required",
+          "extras": []
+        },
+        {
+          "sfield": "sfLedgerSequence",
+          "presence": "required",
           "extras": []
         }
       ]

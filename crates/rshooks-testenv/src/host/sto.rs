@@ -97,8 +97,10 @@ fn pack(offset: usize, length: usize) -> i64 {
 
 /// `HookAPI::sto_validate` — see this module's doc comment.
 pub(crate) fn sto_validate(sto: &[u8]) -> i64 {
+    // fix20261005: a buffer under 2 bytes is invalid (0), not `TOO_SMALL`
+    // (`HookAPI.cpp:73-81`).
     if sto.len() < 2 {
-        return TOO_SMALL;
+        return 0;
     }
     match emit_walk::walk_top_level_fields(sto, emit_walk::NopMode::Strict) {
         Ok(_) => 1,
@@ -269,9 +271,10 @@ mod tests {
     }
 
     #[test]
-    fn sto_validate_too_short_is_too_small() {
-        assert_eq!(sto_validate(&[0x01]), TOO_SMALL);
-        assert_eq!(sto_validate(&[]), TOO_SMALL);
+    fn sto_validate_too_short_is_invalid() {
+        assert_eq!(sto_validate(&[0x00]), 0);
+        assert_eq!(sto_validate(&[0x01]), 0);
+        assert_eq!(sto_validate(&[]), 0);
     }
 
     #[test]

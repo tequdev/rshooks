@@ -51,6 +51,10 @@ pub const sfHookApiVersion: u32 = (1 << 16) + 20;
 pub const sfHookStateScale: u32 = (1 << 16) + 21;
 /// C: `sfLedgerFixType` (sfcodes.h)
 pub const sfLedgerFixType: u32 = (1 << 16) + 22;
+/// C: `sfEntropyCount` (sfcodes.h)
+pub const sfEntropyCount: u32 = (1 << 16) + 99;
+/// C: `sfEntropyDenominator` (sfcodes.h)
+pub const sfEntropyDenominator: u32 = (1 << 16) + 100;
 /// C: `sfNetworkID` (sfcodes.h)
 pub const sfNetworkID: u32 = (2 << 16) + 1;
 /// C: `sfFlags` (sfcodes.h)
@@ -167,6 +171,8 @@ pub const sfRewardTime: u32 = (2 << 16) + 98;
 pub const sfRewardLgrFirst: u32 = (2 << 16) + 99;
 /// C: `sfRewardLgrLast` (sfcodes.h)
 pub const sfRewardLgrLast: u32 = (2 << 16) + 100;
+/// C: `sfAppLoaderSequence` (sfcodes.h)
+pub const sfAppLoaderSequence: u32 = (2 << 16) + 101;
 /// C: `sfIndexNext` (sfcodes.h)
 pub const sfIndexNext: u32 = (3 << 16) + 1;
 /// C: `sfIndexPrevious` (sfcodes.h)
@@ -311,6 +317,12 @@ pub const sfEscrowID: u32 = (5 << 16) + 35;
 pub const sfURITokenID: u32 = (5 << 16) + 36;
 /// C: `sfDomainID` (sfcodes.h)
 pub const sfDomainID: u32 = (5 << 16) + 37;
+/// C: `sfNextRandomDigest` (sfcodes.h)
+pub const sfNextRandomDigest: u32 = (5 << 16) + 89;
+/// C: `sfRandomData` (sfcodes.h)
+pub const sfRandomData: u32 = (5 << 16) + 90;
+/// C: `sfManifestID` (sfcodes.h)
+pub const sfManifestID: u32 = (5 << 16) + 91;
 /// C: `sfHookOnOutgoing` (sfcodes.h)
 pub const sfHookOnOutgoing: u32 = (5 << 16) + 93;
 /// C: `sfHookOnIncoming` (sfcodes.h)
@@ -449,6 +461,8 @@ pub const sfProvider: u32 = (7 << 16) + 30;
 pub const sfMPTokenMetadata: u32 = (7 << 16) + 31;
 /// C: `sfCredentialType` (sfcodes.h)
 pub const sfCredentialType: u32 = (7 << 16) + 32;
+/// C: `sfAppLoader` (sfcodes.h)
+pub const sfAppLoader: u32 = (7 << 16) + 96;
 /// C: `sfHookName` (sfcodes.h)
 pub const sfHookName: u32 = (7 << 16) + 97;
 /// C: `sfRemarkValue` (sfcodes.h)
@@ -583,6 +597,10 @@ pub const sfXChainCreateAccountAttestationCollectionElement: u32 = (14 << 16) + 
 pub const sfPriceData: u32 = (14 << 16) + 32;
 /// C: `sfCredential` (sfcodes.h)
 pub const sfCredential: u32 = (14 << 16) + 33;
+/// C: `sfRandomDigestEntry` (sfcodes.h)
+pub const sfRandomDigestEntry: u32 = (14 << 16) + 88;
+/// C: `sfManifest` (sfcodes.h)
+pub const sfManifest: u32 = (14 << 16) + 90;
 /// C: `sfAmountEntry` (sfcodes.h)
 pub const sfAmountEntry: u32 = (14 << 16) + 91;
 /// C: `sfMintURIToken` (sfcodes.h)
@@ -645,6 +663,8 @@ pub const sfAuthorizeCredentials: u32 = (15 << 16) + 26;
 pub const sfUnauthorizeCredentials: u32 = (15 << 16) + 27;
 /// C: `sfAcceptedCredentials` (sfcodes.h)
 pub const sfAcceptedCredentials: u32 = (15 << 16) + 28;
+/// C: `sfRandomDigests` (sfcodes.h)
+pub const sfRandomDigests: u32 = (15 << 16) + 91;
 /// C: `sfAmounts` (sfcodes.h)
 pub const sfAmounts: u32 = (15 << 16) + 92;
 /// C: `sfHookEmissions` (sfcodes.h)

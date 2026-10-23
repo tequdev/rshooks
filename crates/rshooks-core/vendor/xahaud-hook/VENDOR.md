@@ -12,7 +12,7 @@ in sync by hand. These files are never hand-edited.
 - Branch: `release`
 - Files: `error.h`, `extern.h`, `hookapi.h`, `ls_flags.h`, `macro.h`,
   `sfcodes.h`, `tts.h`, `tx_flags.h`, all from `hook/` on that branch
-- Last synced: 2026-07-24
+- Last synced: 2026-10-22
 - Recorded hashes: [`SHA256SUMS`](SHA256SUMS) (single source of truth,
   regenerated only by the sync script)
 
