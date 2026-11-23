@@ -25,6 +25,7 @@
 - [XFL: Decimal Floating Point](data/xfl.md)
 - [Slots and Ledger Objects](data/slots.md)
 - [Keylets](data/keylets.md)
+- [Consensus Randomness](data/random.md)
 - [Typed Views](data/views.md)
 
 # Emitting Transactions
