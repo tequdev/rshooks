@@ -284,6 +284,48 @@ impl TestEnv {
         self
     }
 
+    /// Creates the ledger's `Random` object with `state` as its entropy
+    /// (`sfRandomData`), seeded for the current ledger sequence, so
+    /// `dice`/`util_random` succeed unless [`Self::rng_contributions`] or
+    /// [`Self::rng_seeded_for`] say otherwise. Contribution defaults to 1 of
+    /// 1 validators. Without this call `dice`/`util_random` return
+    /// `TooLittleEntropy`. Every successful draw advances the state, and a
+    /// rollback does not undo it.
+    #[must_use]
+    pub fn rng_seed(self, state: [u8; 32]) -> Self {
+        self.world.borrow_mut().rng.state = Some(state);
+        self
+    }
+
+    /// Sets how many of `denominator` validators contributed to the seeded
+    /// entropy (`sfEntropyCount`/`sfEntropyDenominator`); draws need at
+    /// least 80% and at least one contributor.
+    #[must_use]
+    pub fn rng_contributions(self, count: u16, denominator: u16) -> Self {
+        let mut w = self.world.borrow_mut();
+        w.rng.count = count;
+        w.rng.denominator = denominator;
+        drop(w);
+        self
+    }
+
+    /// Marks the `Random` object as seeded for ledger sequence `seq`
+    /// (`sfLedgerSequence`); draws succeed only while it equals
+    /// [`Self::ledger_seq`]. Follows the current ledger sequence if never
+    /// called.
+    #[must_use]
+    pub fn rng_seeded_for(self, seq: u32) -> Self {
+        self.world.borrow_mut().rng.seeded_for = Some(seq);
+        self
+    }
+
+    /// The `Random` object's current entropy state (`sfRandomData`), or
+    /// `None` if [`Self::rng_seed`] was never called.
+    #[must_use]
+    pub fn rng_state(&self) -> Option<[u8; 32]> {
+        self.world.borrow().rng.state
+    }
+
     /// Marks the seeded otxn as itself an emitted transaction, seeding
     /// `otxn_burden`/`otxn_generation`. Absent, the otxn models an ordinary
     /// (non-emitted) transaction (`otxn_burden() == 1`,
@@ -419,7 +461,7 @@ impl TestEnv {
     #[allow(clippy::panic)] // documented API: an unknown entry index is a test-author error (design §2.4/§4)
     pub fn invoke<C: HookChainEntries>(&self, index: u32) -> HookExit {
         let entry = Self::find_entry::<C>(index, "invoke");
-        self.run_entry(entry, entry.hook, 0)
+        self.run_entry(entry, entry.hook, 0, false)
     }
 
     /// Runs the entry declared at `index` in `C::ENTRIES`'s `#[cbak(index)]`
@@ -548,7 +590,7 @@ impl TestEnv {
             original: Some(original),
         };
 
-        self.run_entry(entry, cbak_fn, outcome.wasm_arg())
+        self.run_entry(entry, cbak_fn, outcome.wasm_arg(), true)
     }
 
     /// Looks up `index` in `C::ENTRIES`, or panics naming `caller` (either
@@ -586,6 +628,7 @@ impl TestEnv {
         entry: &rshooks::decl::NativeEntry,
         hook_fn: fn(u32) -> i64,
         arg: u32,
+        is_callback: bool,
     ) -> HookExit {
         let invocation_id = {
             let mut w = self.world.borrow_mut();
@@ -594,7 +637,12 @@ impl TestEnv {
             id
         };
         let ctx = Rc::new(RefCell::new(InvocationContext::new(invocation_id)));
-        ctx.borrow_mut().has_callback = entry.cbak.is_some();
+        {
+            let mut c = ctx.borrow_mut();
+            c.has_callback = entry.cbak.is_some();
+            c.is_callback = is_callback;
+            c.wasm_param = arg;
+        }
         let snapshot = self.world.borrow().snapshot();
 
         install_panic_hook_filter();
