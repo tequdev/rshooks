@@ -39,6 +39,7 @@ WIRED_EXAMPLES = {
     "18_typed-views",
     "21_txn-template-nested",
     "22_txn-template-optional",
+    "23_rng",
 }
 
 
