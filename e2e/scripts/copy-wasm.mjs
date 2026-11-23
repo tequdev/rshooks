@@ -36,6 +36,7 @@ const exampleDirs = [
   '15_slot-objects',
   '19_param-signature',
   '20_state-interface',
+  '23_rng',
 ]
 
 // The consolidated multi-hook chain: two artifacts in one `out/current/`,

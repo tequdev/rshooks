@@ -71,6 +71,7 @@ Numbered in suggested reading order — see
 | 20 | [`state-interface`](examples/20_state-interface) | the Hook State Interface: `#[state_interface(id = .., key(..), value(..))]` chain-struct fields as a declared, typed, machine-readable state schema, with generated value structs and `sethook.template.json` declarations |
 | 21 | [`txn-template-nested`](examples/21_txn-template-nested) | `txn_template!`'s homogeneous indexed array form (`array(sfX) [ Elem: object(sfY) { .. } ; N ]`) and `fixed_vl(sfX, N)` (a compile-time-length-prefixed VL blob), with no `StoWriter` needed |
 | 22 | [`txn-template-optional`](examples/22_txn-template-optional) | `txn_template!`'s NOP-padded optional field kinds (`optional sfX`, `any_amount`, optional array elements): one Remit sending one or two amounts with an optional `DestinationTag`, budgets checked at compile time |
+| 23 | [`rng`](examples/23_rng) | `dice` and `util_random` from the consensus RNG: a die roll and an 8-byte random buffer stored per `Invoke`, with `TooLittleEntropy` as a defined rollback outcome |
 | 80 | [`governance`](examples/80_governance) | a two-entry `#[hooks]` **chain** (`govern` + `reward`) porting xahaud's genesis governance hooks, sharing one state schema |
 
 ```sh

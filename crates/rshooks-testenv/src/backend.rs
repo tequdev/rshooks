@@ -617,6 +617,22 @@ impl HostBackend for Backend {
         crate::host::util::util_verify(data, signature, public_key)
     }
 
+    fn dice(&self, sides: u32) -> i64 {
+        crate::host::rng::dice(
+            &mut self.world.borrow_mut(),
+            &mut self.ctx.borrow_mut(),
+            sides,
+        )
+    }
+
+    fn util_random(&self, len: u32) -> Result<Vec<u8>, i64> {
+        crate::host::rng::util_random(
+            &mut self.world.borrow_mut(),
+            &mut self.ctx.borrow_mut(),
+            len,
+        )
+    }
+
     fn util_keylet(
         &self,
         keylet_type: u32,

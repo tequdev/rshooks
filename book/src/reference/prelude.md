@@ -29,7 +29,7 @@ slot functions (see "Deliberate absences" below):
 | `api::state` | Typed single-value state helpers (`state_u32`, `state_xfl`, `state_update_u64`, ...) alongside the composite layer below. |
 | `api::sto` | STObject parsing helpers. |
 | `api::trace` | The support functions backing `trace!`/`trace_num!`/`trace_float!`. |
-| `api::util` | `util_keylet`, `util_accid`, `util_raddr`, `util_verify`, `util_sha512h`, and related. |
+| `api::util` | `util_keylet`, `util_accid`, `util_raddr`, `util_verify`, `util_sha512h`, `util_random`, `dice`, and related. |
 
 See [Reading the Originating Transaction](../data/otxn.md), [Hook
 State](../data/state.md), [Hook and Transaction

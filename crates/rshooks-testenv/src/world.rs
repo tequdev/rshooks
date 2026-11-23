@@ -186,6 +186,9 @@ pub(crate) struct World {
     /// verbatim ... no chain model"). Read by `TestEnv::skip_directives()`
     /// (P2-E).
     pub(crate) skip_directives: Vec<([u8; 32], u32)>,
+    /// The `Random` ledger object behind `dice`/`util_random`; never part of
+    /// [`WorldSnapshot`], so a rollback keeps the draws it consumed.
+    pub(crate) rng: crate::host::rng::RngObject,
 }
 
 impl World {
@@ -216,6 +219,7 @@ impl World {
             hook_param_overrides: HashMap::new(),
             hook_again_requested: false,
             skip_directives: Vec::new(),
+            rng: crate::host::rng::RngObject::new(),
         }
     }
 

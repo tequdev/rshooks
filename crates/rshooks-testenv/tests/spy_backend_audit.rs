@@ -131,6 +131,8 @@ spy_backend_methods! {
     fn util_raddr(&self, _accid: &[u8]) -> Result<Vec<u8>, i64> { Ok(Vec::new()) }
     fn util_verify(&self, _data: &[u8], _signature: &[u8], _public_key: &[u8]) -> i64 { 0 }
     fn util_keylet(&self, _keylet_type: u32, _args: [KeyletArg<'_>; 6]) -> Result<[u8; 34], i64> { Ok([0u8; 34]) }
+    fn dice(&self, _sides: u32) -> i64 { 0 }
+    fn util_random(&self, _len: u32) -> Result<Vec<u8>, i64> { Ok(vec![0u8; 1]) }
     fn ledger_keylet(&self, _low: &[u8], _high: &[u8]) -> Result<Vec<u8>, i64> { Ok(vec![0u8; 34]) }
     fn hook_again(&self) -> i64 { 0 }
     fn hook_skip(&self, _hash: &[u8], _flags: u32) -> i64 { 0 }
@@ -293,6 +295,8 @@ fn every_phase2_backend_method_is_reached() {
     let _ = rshooks::api::util::util_accid(&mut util_out, b"raddress");
     let _ = rshooks::api::util::util_verify(b"data", b"sig", b"pubkey");
     let _ = rshooks::api::util::util_sha512h(&mut util_out, b"data");
+    let _ = rshooks::api::util::util_random(&mut util_out);
+    let _ = rshooks::api::util::dice(6);
     let mut keylet_out = [0u8; 34];
     let _ = rshooks::api::util::util_keylet(&mut keylet_out, 1, 0, 0, 0, 0, 0, 0);
 
@@ -384,6 +388,8 @@ fn every_phase2_backend_method_is_reached() {
         "util_raddr",
         "util_verify",
         "util_keylet",
+        "dice",
+        "util_random",
         "ledger_keylet",
         "hook_again",
         "hook_skip",

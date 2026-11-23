@@ -45,6 +45,7 @@ and inspects transaction metadata and ledger state. Coverage includes:
 - Slot API and keylet access
 - Emitted transactions and callback execution
 - Typed data and account-ID macros
+- Consensus RNG draws (the `TooLittleEntropy` path: the node has no validator keys, so it builds no entropy transaction)
 - The reward and governance hooks
 
 The test client connects to the standalone node's admin WebSocket endpoint,

@@ -419,6 +419,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rng"
+version = "0.2.3"
+dependencies = [
+ "rshooks",
+ "rshooks-testenv",
+]
+
+[[package]]
 name = "rshooks"
 version = "0.2.3"
 dependencies = [

@@ -182,6 +182,13 @@ pub(crate) struct InvocationContext {
     /// reset between loop iterations or repeated calls to the same guarded
     /// function.
     guard_counts: HashMap<u32, u32>,
+    /// Successful `dice`/`util_random` draws this execution
+    /// (`hookCtx.rng_draws`), against `crate::host::rng::MAX_RNG_DRAWS`.
+    pub(crate) rng_draws: u32,
+    /// Whether this execution is a `cbak` (`hookCtx.result.isCallback`).
+    pub(crate) is_callback: bool,
+    /// The `u32` handed to `hook`/`cbak` (`hookCtx.result.wasmParam`).
+    pub(crate) wasm_param: u32,
 }
 
 impl InvocationContext {
@@ -206,6 +213,9 @@ impl InvocationContext {
             pending_param_overrides: HashMap::new(),
             param_override_count: 0,
             guard_counts: HashMap::new(),
+            rng_draws: 0,
+            is_callback: false,
+            wasm_param: 0,
         }
     }
 

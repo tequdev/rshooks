@@ -279,5 +279,8 @@ mod tests {
             util_keylet(&mut keylet_out, 1, 0, 0, 0, 0, 0, 0),
             Err(HookError::NotImplemented)
         );
+        let mut random_out = [0u8; 8];
+        assert_eq!(util_random(&mut random_out), Err(HookError::NotImplemented));
+        assert_eq!(dice(6), Err(HookError::NotImplemented));
     }
 }

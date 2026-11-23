@@ -12,6 +12,7 @@
 pub(crate) mod control;
 pub(crate) mod float;
 pub(crate) mod keylet;
+pub(crate) mod rng;
 pub(crate) mod slots;
 pub(crate) mod sto;
 pub(crate) mod util;
